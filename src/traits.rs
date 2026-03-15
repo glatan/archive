@@ -1,0 +1,106 @@
+//! Common traits for compression and archive operations.
+//!
+//! These traits provide a uniform interface across all formats.
+//! Existing free functions remain unchanged; these traits are an
+//! additional abstraction layer for generic programming.
+//!
+//! # Compression traits
+//!
+//! [`Decode`](crate::traits::Decode) and [`Encode`](crate::traits::Encode) abstract over compression codecs.
+//! Each format provides a zero-sized codec struct (e.g. `Bzip2Codec`)
+//! that implements these traits by delegating to the existing free functions.
+//!
+//! ```
+//! # #[cfg(feature = "bzip2")] {
+//! use archive::traits::{Decode, Encode};
+//! use archive::compress::bzip2::Bzip2Codec;
+//!
+//! let codec = Bzip2Codec;
+//! let data = b"hello world hello world hello world";
+//! let compressed = codec.encode(data, &()).unwrap();
+//! let decoded = codec.decode(&compressed, None).unwrap();
+//! assert_eq!(decoded, data);
+//! # }
+//! ```
+//!
+//! # Archive traits
+//!
+//! [`ArchiveEntry`](crate::traits::ArchiveEntry) provides uniform read access to entry name and data.
+//! [`ArchiveDecode`](crate::traits::ArchiveDecode) and [`ArchiveEncode`](crate::traits::ArchiveEncode) abstract over archive containers.
+//!
+//! # Decompression bomb protection
+//!
+//! [`Decode::decode`](crate::traits::Decode::decode) accepts an optional `max_output` parameter.
+//! When `Some(n)`, the decoder returns [`Error::OutputLimitExceeded`]
+//! if the decompressed output would exceed `n` bytes.
+//!
+//! [`Error::OutputLimitExceeded`]: crate::error::Error::OutputLimitExceeded
+
+use alloc::string::String;
+use alloc::vec::Vec;
+
+use crate::error::Error;
+
+/// Decode compressed data from a byte slice.
+///
+/// Every compression codec struct implements this trait.
+/// Pass `max_output: Some(n)` to enforce an output size limit
+/// (decompression bomb protection).
+pub trait Decode {
+    /// Decode `input`, optionally limiting output to `max_output` bytes.
+    fn decode(&self, input: &[u8], max_output: Option<usize>) -> Result<Vec<u8>, Error>;
+}
+
+/// Encode data into a compressed byte stream.
+///
+/// The associated `Options` type allows format-specific configuration.
+/// Formats with no options use `Options = ()`.
+pub trait Encode {
+    /// Format-specific encoding options. Use `()` for formats with no options.
+    type Options;
+
+    /// Encode `input` with the given options.
+    fn encode(&self, input: &[u8], options: &Self::Options) -> Result<Vec<u8>, Error>;
+}
+
+/// Read-only access to an archive entry's name and data.
+///
+/// Implemented by all archive entry types (`TarEntry`, `ZipEntry`, etc.).
+pub trait ArchiveEntry {
+    /// Entry name or path within the archive.
+    fn name(&self) -> &str;
+
+    /// Entry payload bytes.
+    fn data(&self) -> &[u8];
+}
+
+/// Decode an archive from bytes, yielding typed entries.
+pub trait ArchiveDecode {
+    /// The entry type produced by this decoder.
+    type Entry: ArchiveEntry;
+
+    /// Decode an archive, returning its entries.
+    fn decode(&self, input: &[u8]) -> Result<Vec<Self::Entry>, Error>;
+}
+
+/// Build and finalize an archive from file entries.
+pub trait ArchiveEncode {
+    /// Add a file entry to the archive being built.
+    fn add_file(&mut self, name: &str, data: &[u8]);
+
+    /// Finalize and return the archive bytes.
+    fn finish(self) -> Result<Vec<u8>, Error>;
+}
+
+/// Metadata accessor for archive entries that carry a filename as `String`.
+///
+/// This blanket-style helper is not a trait — each entry type implements
+/// `ArchiveEntry` directly. This module exists only for trait definitions.
+impl ArchiveEntry for (String, Vec<u8>) {
+    fn name(&self) -> &str {
+        &self.0
+    }
+    fn data(&self) -> &[u8] {
+        &self.1
+    }
+}

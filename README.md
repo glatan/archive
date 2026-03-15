@@ -1,93 +1,129 @@
 # archive
 
+純 Rust 実装のアーカイブ・圧縮ライブラリ。外部依存なし、`no_std` + `alloc` 対応。
 
+README は概要と導線だけを持ちます。仕様準拠、互換性メモ、intentional scope 制約、
+要件単位のテスト網羅は [`docs/spec/`](docs/spec/README.md) を正本とします。
 
-## Getting started
+## 対応フォーマット
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+| カテゴリ | フォーマット | デコード | エンコード |
+|---------|------------|---------|-----------|
+| 圧縮 | DEFLATE (RFC 1951) | ✅ | ✅ |
+| 圧縮 | gzip (RFC 1952) | ✅ | ✅ |
+| 圧縮 | zstd (RFC 8878) | ✅ | ✅ |
+| 圧縮 | bzip2 | ✅ | ✅ |
+| 圧縮 | lzip (LZMA) | ✅ | ✅ |
+| 圧縮 | xz (LZMA2) | ✅ | ✅ |
+| 圧縮 | LZW (Unix compress `.Z`) | ✅ | ✅ |
+| 圧縮 | LZ4 | ✅ | ✅ |
+| 圧縮 | LZO (lzop) | ✅ | ✅ |
+| 圧縮 | zlib (RFC 1950) | ✅ | ✅ |
+| 圧縮 | Brotli (RFC 7932) | ✅ | ✅ (非圧縮 metablock baseline) |
+| 圧縮 | ZPAQ (コンテキストミキシング) | ✅ | ✅ |
+| 圧縮 | lrzip (LZMA/bzip2/LZO/zlib/ZPAQ/none) | ✅ | ✅ |
+| 圧縮 | rzip (`.rz`) | ✅ | ✅ |
+| 圧縮 | Snappy | ✅ | ✅ |
+| アーカイブ | ZPAQ (複数エントリ + crate-local journaling) | ✅ | ✅ |
+| アーカイブ | tar (UStar/GNU/PAX) | ✅ | ✅ |
+| アーカイブ | cpio (`odc` / SVR4 `newc` / `newcrc`) | ✅ | ✅ |
+| アーカイブ | ar (GNU/BSD) | ✅ | ✅ |
+| アーカイブ | zip | ✅ | ✅ |
+| アーカイブ | 7z | ✅ | ✅ |
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+## 使い方
 
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
+```toml
+[dependencies]
+archive = "0.1"
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/glatan/archive.git
-git branch -M main
-git push -uf origin main
+
+```rust
+use archive::compress::gzip;
+use archive::archive::tar;
+
+// tar.gz を展開
+let gz_data = std::fs::read("archive.tar.gz").unwrap();
+let tar_data = gzip::decode::decode(&gz_data).unwrap();
+let entries = tar::decode::decode(&tar_data).unwrap();
+
+for entry in &entries {
+    println!("{}: {} bytes", entry.header.name, entry.data.len());
+}
 ```
 
-## Integrate with your tools
+## Trait ベース API
 
-* [Set up project integrations](https://gitlab.com/glatan/archive/-/settings/integrations)
+フォーマット横断の汎用コードには `traits` モジュールの共通インターフェースを利用できます。
 
-## Collaborate with your team
+```rust
+use archive::traits::{Decode, Encode};
+use archive::compress::bzip2::Bzip2Codec;
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+let codec = Bzip2Codec;
+let compressed = codec.encode(b"hello", &()).unwrap();
+let decoded = codec.decode(&compressed, None).unwrap();
 
-## Test and Deploy
+// デコンプレッションボム対策: 出力サイズ制限
+let err = codec.decode(&compressed, Some(3)).unwrap_err();
+```
 
-Use the built-in continuous integration in GitLab.
+アーカイブ形式には `ArchiveEntry` / `ArchiveDecode` / `ArchiveEncode` trait があります。
+詳細は `cargo doc --open` の [`traits`](https://docs.rs/archive/latest/archive/traits/) モジュールを参照してください。
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+## Workspace packages
 
-***
+### archive-cli
 
-# Editing this README
+`archive` コマンドとして library の全フォーマットをコマンドラインから操作できます。
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+```sh
+archive list sample.tar.gz --tree        # ツリー表示
+archive extract sample.zip --out /tmp    # 展開
+archive pack tar src/ -o backup.tar      # 新規 archive 作成
+archive compress gzip data -o data.gz    # 圧縮
+archive inspect sample.7z               # フォーマット検出
+archive test sample.bz2                  # 整合性検証
+```
 
-## Suggestions for a good README
+`list` コマンドは TTY 出力時に自動で pager (`$PAGER`, デフォルト `less -FRX`) を通します。
+暗号化 zip/7z は `--password` オプション対応。`--json` で機械可読出力。
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+詳細: [`archive-cli/README.md`](archive-cli/README.md)
 
-## Name
-Choose a self-explaining name for your project.
+### archive-fuzz
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+roundtrip / 外部ツール相互運用 / regression 検出の fuzz ハーネス。
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+```sh
+cargo run --release -p archive-fuzz                                         # 全アルゴリズム 60 秒
+cargo run --release -p archive-fuzz -- --algorithm gzip,zip --duration 30   # 指定のみ
+cargo run --release -p archive-fuzz -- --mode coverage-guided --jobs 2      # corpus-guided
+cargo run --release -p archive-fuzz -- --replay fuzz/failures/run-.../f.json  # 再現
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+3 種のテストパターン (`self` / `original-compress` / `original-decompress`) + special case matrix + resource oracle。
+failure は最小化・重複排除後に `.json` + `.bin` ペアとして保存され、リグレッションテストに変換可能。
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+詳細: [`fuzz/README.md`](fuzz/README.md)
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+## ドキュメント構成
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+| ドキュメント | 内容 |
+|------------|------|
+| `README.md` | フォーマット一覧・使い方・導線 |
+| `cargo doc --open` | API 概要・feature flag・使用例 |
+| [`docs/spec/`](docs/spec/README.md) | 仕様準拠・互換性メモ・テスト網羅・intentional scope の正本 |
+| `THIRD_PARTY_NOTICES` | 参照実装・bundled asset の provenance |
+| [`archive-cli/README.md`](archive-cli/README.md) | CLI コマンド詳細・オプション一覧 |
+| [`fuzz/README.md`](fuzz/README.md) | Fuzz ハーネスの使い方・artifact 構造 |
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+## 状態の読み方
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+- 既知の不具合: **現時点では open な一覧なし**
+- 形式ごとの current scope / intentional scope 制約: `src/lib.rs` と各 module doc comment
+- 仕様準拠、互換性メモ、テスト根拠: [`docs/spec/`](docs/spec/README.md)
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+## ライセンス
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+AGPL-3.0-only

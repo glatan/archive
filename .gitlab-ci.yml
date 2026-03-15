@@ -1,0 +1,194 @@
+stages:
+  - build
+  - test
+  - fuzz
+
+# MR オープン中はブランチパイプラインを抑制し、MR パイプラインだけを走らせる。
+# MR がない場合はブランチパイプラインとして通常実行。
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+variables:
+  CARGO_HOME: /root/.cargo
+  # sccache or registry cache is handled by Cargo's built-in caching
+  CARGO_INCREMENTAL: "0"
+  # Reduce CI noise
+  CARGO_TERM_COLOR: always
+
+# Containerfile の ENTRYPOINT は `make test` / `make fuzz` 用。
+# GitLab CI Docker executor はスクリプト実行時に ENTRYPOINT に引数を渡すため、
+# シェル以外の ENTRYPOINT を持つイメージでは entrypoint: [""] で上書きが必要。
+.test_image: &test_image
+  name: "${CI_REGISTRY_IMAGE}/test:${CI_COMMIT_SHORT_SHA}"
+  entrypoint: [""]
+
+.fuzz_image: &fuzz_image
+  name: "${CI_REGISTRY_IMAGE}/fuzz:${CI_COMMIT_SHORT_SHA}"
+  entrypoint: [""]
+
+# ---------------------------------------------------------------------------
+# Base image build (shared across jobs via Containerfile)
+# ---------------------------------------------------------------------------
+
+build-test-image:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  script:
+    - docker build --target test -t "${CI_REGISTRY_IMAGE}/test:${CI_COMMIT_SHORT_SHA}" -f Containerfile .
+    - docker build --target fuzz -t "${CI_REGISTRY_IMAGE}/fuzz:${CI_COMMIT_SHORT_SHA}" -f Containerfile .
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - docker push "${CI_REGISTRY_IMAGE}/test:${CI_COMMIT_SHORT_SHA}"
+    - docker push "${CI_REGISTRY_IMAGE}/fuzz:${CI_COMMIT_SHORT_SHA}"
+  rules:
+    - changes:
+        - src/**/*
+        - tests/**/*
+        - fuzz/**/*
+        - benches/**/*
+        - Cargo.toml
+        - Cargo.lock
+        - Containerfile
+        - .gitlab-ci.yml
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ---------------------------------------------------------------------------
+# Test jobs
+# ---------------------------------------------------------------------------
+
+test:
+  stage: test
+  image: *test_image
+  needs: [build-test-image]
+  script:
+    - cargo test --all-features
+  rules:
+    - changes:
+        - src/**/*
+        - tests/**/*
+        - Cargo.toml
+        - Cargo.lock
+        - Containerfile
+        - .gitlab-ci.yml
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+test-no-default-features:
+  stage: test
+  image: *test_image
+  needs: [build-test-image]
+  script:
+    - cargo test --no-default-features
+  rules:
+    - changes:
+        - src/**/*
+        - tests/**/*
+        - Cargo.toml
+        - Cargo.lock
+        - Containerfile
+        - .gitlab-ci.yml
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+clippy:
+  stage: test
+  image: *test_image
+  needs: [build-test-image]
+  script:
+    - rustup component add clippy
+    - cargo clippy --all-features --all-targets --workspace -- -D warnings
+  rules:
+    - changes:
+        - src/**/*
+        - tests/**/*
+        - benches/**/*
+        - archive-cli/**/*
+        - Cargo.toml
+        - Cargo.lock
+        - .gitlab-ci.yml
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+fmt:
+  stage: test
+  image: *test_image
+  needs: [build-test-image]
+  script:
+    - rustup component add rustfmt
+    - cargo fmt --all -- --check
+  rules:
+    - changes:
+        - src/**/*
+        - tests/**/*
+        - benches/**/*
+        - archive-cli/**/*
+        - Cargo.toml
+        - .gitlab-ci.yml
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+doc:
+  stage: test
+  image: *test_image
+  needs: [build-test-image]
+  script:
+    - cargo doc --all-features --workspace --no-deps 2>&1 | tee /tmp/doc.log
+    - "! grep -q '^warning' /tmp/doc.log"
+  rules:
+    - changes:
+        - src/**/*
+        - Cargo.toml
+        - .gitlab-ci.yml
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# ---------------------------------------------------------------------------
+# Fuzz smoke
+# ---------------------------------------------------------------------------
+
+fuzz-smoke:
+  stage: fuzz
+  image: *fuzz_image
+  needs: [test]
+  script:
+    - cargo test -p archive-fuzz
+    - >-
+      cargo run -q -p archive-fuzz --
+      --algorithm gzip,zip,7z,tar-pax,cpio,ar
+      --pattern self
+      --mode coverage-guided
+      --jobs 2
+      --duration 5
+      --output fuzz/failures
+      --corpus-dir fuzz/corpus
+    - |
+      latest_run=$(find fuzz/failures -maxdepth 1 -type d -name 'run-*' | sort | tail -n 1)
+      if [ -n "$latest_run" ]; then
+        first_json=$(find "$latest_run" -maxdepth 1 -name '*.json' ! -name 'manifest.json' ! -name 'summary.json' ! -name 'matrix.json' | sort | head -n 1)
+        if [ -n "$first_json" ]; then
+          cargo run -q -p archive-fuzz -- --replay "$first_json"
+        fi
+      fi
+  artifacts:
+    when: always
+    paths:
+      - fuzz/failures/
+    expire_in: 7 days
+  rules:
+    - changes:
+        - src/**/*
+        - fuzz/**/*
+        - Cargo.toml
+        - Cargo.lock
+        - Containerfile
+        - .gitlab-ci.yml
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH

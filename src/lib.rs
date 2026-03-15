@@ -1,0 +1,454 @@
+//! Pure Rust archive and compression library.
+//!
+//! `archive` exposes in-memory encode/decode APIs for compression formats under
+//! [`crate::compress`] and archive/container formats under [`crate::archive`].
+//! Core logic works in `no_std` + `alloc` environments.
+//!
+//! # Module layout
+//!
+//! - [`compress`] provides DEFLATE, gzip, zlib, zstd, bzip2, lzip, xz, LZW,
+//!   LZ4, LZO, Snappy, Brotli, ZPAQ, rzip, and lrzip support.
+//! - [`archive`] provides tar, cpio, ar, zpaq, zip, and 7z support.
+//! - [`traits`] defines common [`Decode`](traits::Decode) / [`Encode`](traits::Encode)
+//!   traits for compression codecs, and [`ArchiveEntry`](traits::ArchiveEntry) /
+//!   [`ArchiveDecode`](traits::ArchiveDecode) / [`ArchiveEncode`](traits::ArchiveEncode)
+//!   traits for archive formats.  Each format provides a zero-sized codec struct
+//!   (e.g. `Bzip2Codec`, `TarCodec`) implementing these traits.
+//! - [`traits_io`] (requires `std`) adds [`DecodeReader`](traits_io::DecodeReader)
+//!   and [`EncodeWriter`](traits_io::EncodeWriter) for `std::io` adapters.
+//!
+//! # Documentation map
+//!
+//! - `README.md`: quick start, supported-format overview, and package entry points
+//! - `docs/spec/`: canonical conformance, interoperability scope,
+//!   spec-to-test mapping, intentional unsupported features, and future candidates
+//! - `archive-cli`: terminal entry point for inspect/list/extract/pack/compress flows
+//! - `archive-fuzz`: auxiliary validation lane for roundtrip, interop, and regression export
+//!
+//! Quick status guide:
+//! - Known bugs: none are currently listed as open
+//! - Intentionally unsupported features: see `docs/spec/` section
+//!   "意図的に未実装の機能"
+//! - Future candidates: see `docs/spec/` section "将来候補"
+//!
+//! # Feature flags
+//!
+//! | Feature | Description |
+//! |---------|-------------|
+//! | `std` (default) | Enables `std::error::Error` and `std::io` adapters |
+//! | `deflate` | Raw DEFLATE stream support |
+//! | `gzip` (default) | gzip format (auto-enables `deflate`) |
+//! | `zstd` (default) | zstd format |
+//! | `bzip2` (default) | bzip2 format |
+//! | `lzip` (default) | lzip format (LZMA) |
+//! | `lzw` (default) | LZW / Unix compress (`.Z`) format |
+//! | `lz4` (default) | LZ4 frame format |
+//! | `lzo` (default) | LZO / lzop format |
+//! | `rzip` (default) | rzip long-range redundancy reduction |
+//! | `zlib` (default) | zlib format (auto-enables `deflate`) |
+//! | `brotli` | Brotli format |
+//! | `zpaq` (default) | ZPAQ context-mixing compression |
+//! | `lrzip` (default) | lrzip format (auto-enables `lzip`, `bzip2`, `lzo`, `zlib`, `zpaq`, `rzip`) |
+//! | `xz` (default) | xz format (auto-enables `lzip`) |
+//! | `snappy` (default) | Snappy raw/framed format |
+//! | `tar` (default) | tar archive format |
+//! | `cpio` (default) | cpio archive format |
+//! | `ar` (default) | GNU/BSD `ar` archive format |
+//! | `zip` | ZIP archive format |
+//! | `sevenz` | 7z archive format |
+//!
+//! For `no_std` environments, use `default-features = false` and enable only
+//! the features you need.
+//!
+//! Selected scope notes:
+//! - `rzip` decodes upstream `.rz` archives and exposes a crate-local encoder for
+//!   the documented container/token subset; current encode output is validated
+//!   for crate roundtrip plus direct text, binary, and level-1 multi-chunk
+//!   `system rzip -d` interoperability.
+//! - `lrzip` reuses the shared long-range match finder but encodes lrzip's
+//!   variable-width token stream inside a bounded `.lrz` container contract;
+//!   current coverage includes system-authored simple and match-rich LZMA decode
+//!   plus crate encode consumed by system `lrzip -d` across the supported
+//!   backend matrix.
+//! - `lzip`, `xz`, `lrzip`, and `sevenz` reuse the shared internal `compress::lzma` codec. `xz` and `sevenz` additionally use `compress::lzma2` for chunked LZMA2 paths. `xz` / `lrzip` decoders accept arbitrary valid `lc/lp/pb`; current encoders still emit the default `3/0/2` property tuple.
+//! - `brotli` decoder supports the full RFC 7932 stream format. The encoder currently emits uncompressed metablocks for baseline interoperability; LZ77 compressed metablock emission is not yet implemented.
+//! - `zip` supports baseline Store/Deflate read/write, ZIP64, Data Descriptor, CP437/UTF-8 metadata, traditional PKZIP encrypted entries, and WinZip AES-128/192/256 entry read/write.
+//! - `sevenz` supports plain/encoded headers, multi-folder decode for the current supported folder DAG subset, password-based 7zAES decode for those folders and encoded headers, x86 BCJ2 decode for supported DAG layouts, and bounded writing with one or two linear folders using LZMA2/LZMA/PPMdH/Copy plus x86 BCJ / Delta filters, including linear 7zAES file-content encryption and encoded-header write. Current direct `system 7z` interop coverage includes baseline one-folder archives, one-folder/two-folder PPMd including encoded-header and encrypted/encrypted+encoded-header PPMd, two-folder encrypted / encoded-header / encrypted+encoded-header variants, and one-folder / two-folder x86 BCJ / Delta writer combinations including encoded-header and encrypted filter variants. The decoder normalizes folder graphs to explicit input-source / output-owner / final-root metadata and executes them through a demand-driven cached evaluator. Upstream interface audit shows that the current method surface uses single-stream interfaces for `Copy`, `LZMA`, `LZMA2`, `PPMdH`, `Delta`, and `7zAES`, while `BCJ2` remains the only fixed 4-input multi-stream coder. Non-`BCJ2` multi-input or multi-output declarations are therefore rejected as nonstandard arity instead of being treated as pending feature work.
+//! - `xz` supports LZMA2 final filters, the standard BCJ / Delta prefilter set, and registry-backed custom filter IDs on encode/decode paths plus the reader adapters. `FilterRegistry::register_passthrough()` provides an identity codec for application-defined custom IDs, while unregistered custom filters are preserved at parse time but still fail explicitly when application is attempted.
+//! - ZPAQ is exposed as two layers: `compress::zpaq` for low-level single-payload blocks and `archive::zpaq` for multi-entry archives. The low-level encoder supports both the validated built-in level `1..=3` models and a validated `CustomModel` surface for arbitrary predictor/HCOMP authoring, while the archive layer now covers same-block append, crate-local journaling transactions, and a materializing `ZpaqArchiveEditor` that can import plain archives or the latest journal view, apply push/put/delete operations, and rewrite one simplified block. The decoder accepts arbitrary upstream level bytes if the parsed model/header is otherwise valid. The current bounded acceptance corpus includes upstream-style `CONS` / `CM` / `ICM` / `AVG` / `MATCH` / `MIX2` / `MIX` / `ISSE` / `SSE` fixtures, bounded component size sweeps, deeper predictor chains, mixed HCOMP register/jump/arithmetic/logical/memory/hash sequences, multi-segment archive metadata/truncation/corruption plus empty-payload boundaries, same-block append workflows that reuse an existing parsed header/model, and crate-local journaling transactions with committed latest-view / version-history helpers. The archive encoder rejects embedded NUL bytes in filename/comment metadata because those fields are stored as NUL-terminated strings.
+//!
+//! # Decompression bomb protection
+//!
+//! Every compression format provides a `decode_bounded` function that
+//! enforces a maximum output size.  The [`traits::Decode`] trait exposes
+//! this via the `max_output` parameter:
+//!
+//! ```
+//! # #[cfg(feature = "bzip2")] {
+//! use archive::traits::{Decode, Encode};
+//! use archive::compress::bzip2::Bzip2Codec;
+//!
+//! let codec = Bzip2Codec;
+//! let compressed = codec.encode(b"hello world", &()).unwrap();
+//!
+//! // Bounded decode — rejects output larger than 5 bytes
+//! let err = codec.decode(&compressed, Some(5)).unwrap_err();
+//! assert!(matches!(err, archive::error::Error::OutputLimitExceeded { .. }));
+//!
+//! // Unbounded decode — no limit
+//! let data = codec.decode(&compressed, None).unwrap();
+//! assert_eq!(data, b"hello world");
+//! # }
+//! ```
+//!
+//! # Examples
+//!
+//! ## DEFLATE compression
+//!
+//! ```
+//! # #[cfg(feature = "deflate")] {
+//! use archive::compress::deflate::{decode, encode};
+//!
+//! let data = b"Hello, World!";
+//! let compressed = encode::encode(data, encode::Level::Default);
+//! let decompressed = decode::decode(&compressed).unwrap();
+//! assert_eq!(decompressed, data);
+//! # }
+//! ```
+//!
+//! ## gzip compression
+//!
+//! ```
+//! # #[cfg(all(feature = "gzip", feature = "deflate"))] {
+//! use archive::compress::gzip::{decode, encode};
+//! use archive::compress::deflate::encode::Level;
+//!
+//! let data = b"Hello, World!";
+//! let gz = encode::encode(data, Level::Default);
+//! let decoded = decode::decode(&gz).unwrap();
+//! assert_eq!(decoded, data);
+//! # }
+//! ```
+//!
+//! ## bzip2 compression
+//!
+//! ```
+//! # #[cfg(feature = "bzip2")] {
+//! use archive::compress::bzip2::{decode, encode};
+//!
+//! let data = b"Hello, World!";
+//! let compressed = encode::encode(data);
+//! let decompressed = decode::decode(&compressed).unwrap();
+//! assert_eq!(decompressed, data);
+//! # }
+//! ```
+//!
+//! ## lzip compression
+//!
+//! ```
+//! # #[cfg(feature = "lzip")] {
+//! use archive::compress::lzip::{decode, encode};
+//!
+//! let data = b"Hello, World!";
+//! let compressed = encode::encode(data);
+//! let decompressed = decode::decode(&compressed).unwrap();
+//! assert_eq!(decompressed, data);
+//! # }
+//! ```
+//!
+//! ## LZ4 compression
+//!
+//! ```
+//! # #[cfg(feature = "lz4")] {
+//! use archive::compress::lz4::{decode, encode};
+//!
+//! let data = b"Hello, World!";
+//! let compressed = encode::encode(data);
+//! let decompressed = decode::decode(&compressed).unwrap();
+//! assert_eq!(decompressed, data);
+//! # }
+//! ```
+//!
+//! ## LZO compression
+//!
+//! ```
+//! # #[cfg(feature = "lzo")] {
+//! use archive::compress::lzo::{decode, encode};
+//!
+//! let data = b"Hello, World!";
+//! let compressed = encode::encode(data);
+//! let decompressed = decode::decode(&compressed).unwrap();
+//! assert_eq!(decompressed, data);
+//! # }
+//! ```
+//!
+//! ## zlib compression
+//!
+//! ```
+//! # #[cfg(feature = "zlib")] {
+//! use archive::compress::zlib::{decode, encode};
+//!
+//! let data = b"Hello, World!";
+//! let compressed = encode::encode(data);
+//! let decompressed = decode::decode(&compressed).unwrap();
+//! assert_eq!(decompressed, data);
+//! # }
+//! ```
+//!
+//! ## ZPAQ compression
+//!
+//! ```
+//! # #[cfg(feature = "zpaq")] {
+//! use archive::compress::zpaq::{decode, encode};
+//!
+//! let data = b"Hello, World!";
+//! let compressed = encode::encode(data, 1);
+//! let decompressed = decode::decode(&compressed).unwrap();
+//! assert_eq!(decompressed, data);
+//! # }
+//! ```
+//!
+//! ## lrzip compression
+//!
+//! ```
+//! # #[cfg(feature = "lrzip")] {
+//! use archive::compress::lrzip::{decode, encode};
+//!
+//! let data = b"Hello, World!";
+//! let compressed = encode::encode(data);
+//! let decompressed = decode::decode(&compressed).unwrap();
+//! assert_eq!(decompressed, data);
+//! # }
+//! ```
+//!
+//! ## lrzip with backend selection
+//!
+//! ```
+//! # #[cfg(feature = "lrzip")] {
+//! use archive::compress::lrzip::{decode, encode};
+//! use archive::compress::lrzip::encode::CompressionType;
+//!
+//! let data = b"Hello, World!";
+//! let compressed = encode::encode_with(data, CompressionType::Bzip2);
+//! let decompressed = decode::decode(&compressed).unwrap();
+//! assert_eq!(decompressed, data);
+//! # }
+//! ```
+//!
+//! ## xz compression
+//!
+//! ```
+//! # #[cfg(feature = "xz")] {
+//! use archive::compress::xz::{decode, encode};
+//!
+//! let data = b"Hello, World!";
+//! let compressed = encode::encode(data);
+//! let decompressed = decode::decode(&compressed).unwrap();
+//! assert_eq!(decompressed, data);
+//! # }
+//! ```
+//!
+//! ## Snappy compression
+//!
+//! ```
+//! # #[cfg(feature = "snappy")] {
+//! use archive::compress::snappy::{decode, encode};
+//!
+//! let data = b"Hello, Snappy!";
+//! let compressed = encode::encode(data);
+//! let decompressed = decode::decode(&compressed).unwrap();
+//! assert_eq!(decompressed, data);
+//! # }
+//! ```
+//!
+//! ## tar archive (GNU mode)
+//!
+//! ```
+//! # #[cfg(feature = "tar")] {
+//! use archive::archive::tar::{decode, encode};
+//!
+//! let mut enc = encode::TarEncoder::new();
+//! enc.add_file("hello.txt", b"Hello!");
+//! let tar_data = enc.finish();
+//! let entries = decode::decode(&tar_data).unwrap();
+//! assert_eq!(entries[0].header.name, "hello.txt");
+//! # }
+//! ```
+//!
+//! ## ar archive
+//!
+//! ```
+//! # #[cfg(feature = "ar")] {
+//! use archive::archive::ar::{decode, encode};
+//!
+//! let mut enc = encode::ArEncoder::new();
+//! enc.add_file("hello.txt", b"Hello!");
+//! let archive = enc.finish().unwrap();
+//! let entries = decode::decode(&archive).unwrap();
+//! assert_eq!(entries[0].name, "hello.txt");
+//! assert_eq!(entries[0].data, b"Hello!");
+//! # }
+//! ```
+//!
+//! ## ZIP archive
+//!
+//! ```
+//! # #[cfg(feature = "zip")] {
+//! use archive::archive::zip::{decode, encode};
+//!
+//! let mut encoder = encode::ZipEncoder::new();
+//! encoder.add_file("hello.txt", b"Hello ZIP!");
+//! let archive = encoder.finish().unwrap();
+//! let entries = decode::decode(&archive).unwrap();
+//! assert_eq!(entries[0].name, "hello.txt");
+//! assert_eq!(entries[0].data, b"Hello ZIP!");
+//! # }
+//! ```
+//!
+//! ```no_run
+//! # #[cfg(all(feature = "zip", feature = "std"))] {
+//! use std::fs::File;
+//! use archive::archive::zip::encode::{ZipEntryOptions, ZipStreamWriter};
+//!
+//! let file = File::create("streamed.zip").unwrap();
+//! let mut writer = ZipStreamWriter::new(file);
+//! writer
+//!     .write_file_from_reader("hello.txt", "Hello ZIP!".as_bytes(), &ZipEntryOptions::default())
+//!     .unwrap();
+//! let _file = writer.finish().unwrap();
+//! # }
+//! ```
+//!
+//! ## ZPAQ archive
+//!
+//! ```
+//! # #[cfg(feature = "zpaq")] {
+//! use archive::archive::zpaq::{decode, encode};
+//!
+//! let mut encoder = encode::ZpaqEncoder::new(2);
+//! encoder.add_file("hello.txt", b"Hello ZPAQ archive!");
+//! let archive = encoder.finish().unwrap();
+//! let entries = decode::decode(&archive).unwrap();
+//! assert_eq!(entries[0].filename_utf8(), Some("hello.txt"));
+//! assert_eq!(entries[0].data, b"Hello ZPAQ archive!");
+//! # }
+//! ```
+//!
+//! ## ZPAQ journal archive
+//!
+//! ```
+//! # #[cfg(feature = "zpaq")] {
+//! use archive::archive::zpaq::{decode, encode};
+//!
+//! let mut tx1 = encode::ZpaqJournalEncoder::new(1);
+//! tx1.put_file("hello.txt", b"one");
+//! let mut archive = tx1.finish().unwrap();
+//!
+//! let mut tx2 = encode::ZpaqJournalEncoder::new(1);
+//! tx2.put_file_with_comment("hello.txt", "v2", b"two");
+//! archive = tx2.append_transaction(&archive).unwrap();
+//!
+//! let latest = decode::decode_journal_latest(&archive).unwrap();
+//! assert_eq!(latest.len(), 1);
+//! assert_eq!(latest[0].comment_utf8(), Some("v2"));
+//! assert_eq!(latest[0].data, b"two");
+//! # }
+//! ```
+//!
+//! ## tar archive (PAX mode)
+//!
+//! ```
+//! # #[cfg(feature = "tar")] {
+//! use archive::archive::tar::{decode, encode};
+//!
+//! let mut enc = encode::TarEncoder::new_pax();
+//! enc.add_file("hello.txt", b"Hello!");
+//! let tar_data = enc.finish();
+//! let entries = decode::decode(&tar_data).unwrap();
+//! assert_eq!(entries[0].header.name, "hello.txt");
+//! # }
+//! ```
+//!
+//! ## Combined: tar.gz
+//!
+//! ```no_run
+//! # #[cfg(all(feature = "gzip", feature = "tar", feature = "std"))] {
+//! use archive::compress::gzip;
+//! use archive::archive::tar;
+//!
+//! let gz_data = std::fs::read("archive.tar.gz").unwrap();
+//! let tar_data = gzip::decode::decode(&gz_data).unwrap();
+//! let entries = tar::decode::decode(&tar_data).unwrap();
+//! for entry in &entries {
+//!     println!("{}: {} bytes", entry.header.name, entry.data.len());
+//! }
+//! # }
+//! ```
+//!
+//! ## `std::io` adapters
+//!
+//! With the `std` feature enabled, reader/writer adapters are available:
+//!
+//! ```no_run
+//! # #[cfg(all(feature = "std", feature = "gzip", feature = "zstd", feature = "deflate"))] {
+//! use archive::compress::gzip;
+//! use archive::compress::zstd;
+//! use archive::compress::deflate::encode::Level;
+//!
+//! // Decode from std::io::Read
+//! let reader = std::fs::File::open("data.gz").unwrap();
+//! let data = gzip::decode::decode_reader(reader).unwrap();
+//!
+//! // Encode to std::io::Write
+//! let mut output = Vec::new();
+//! gzip::encode::encode_writer(&data, Level::Default, &mut output).unwrap();
+//! # }
+//! ```
+
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+/// Unified error types for all formats.
+pub mod error;
+
+/// Common traits for compression and archive operations.
+pub mod traits;
+
+/// `std::io` adapter traits for compression codecs.
+#[cfg(feature = "std")]
+pub mod traits_io;
+
+/// Utility modules: CRC32, XXH64, bit reader.
+pub(crate) mod util;
+
+/// Compression formats and shared filters: DEFLATE, gzip, zlib, zstd, bzip2, lzip, LZW, LZ4, LZO, lrzip, xz, Snappy, Brotli, ZPAQ, plus BCJ/Delta helpers.
+#[cfg(any(
+    feature = "deflate",
+    feature = "gzip",
+    feature = "zstd",
+    feature = "bzip2",
+    feature = "lzip",
+    feature = "lzw",
+    feature = "lz4",
+    feature = "lzo",
+    feature = "lrzip",
+    feature = "xz",
+    feature = "rzip",
+    feature = "zlib",
+    feature = "zpaq",
+    feature = "snappy",
+    feature = "brotli"
+))]
+pub mod compress;
+
+/// Archive formats: tar, cpio, ar, zpaq, zip, and 7z.
+#[cfg(any(
+    feature = "tar",
+    feature = "cpio",
+    feature = "ar",
+    feature = "zpaq",
+    feature = "zip",
+    feature = "sevenz",
+))]
+pub mod archive;

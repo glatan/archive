@@ -1,0 +1,25 @@
+pkgname=rzip
+pkgver=2.1
+pkgrel=1
+pkgdesc="Compression program using long-range redundancy reduction"
+arch=('x86_64')
+url="https://rzip.samba.org/"
+license=('GPL2')
+depends=('bzip2')
+source=("https://rzip.samba.org/ftp/rzip/$pkgname-$pkgver.tar.gz")
+sha256sums=('4bb96f4d58ccf16749ed3f836957ce97dbcff3e3ee5fd50266229a48f89815b7')
+
+build() {
+    cd "$pkgname-$pkgver"
+    # rzip 2.1's configure script uses K&R-style main() without return type,
+    # which is an error in GCC 14+ (-Wimplicit-int)
+    CFLAGS+=" -Wno-error=implicit-int -Wno-error=implicit-function-declaration"
+    ./configure --prefix=/usr
+    make
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    install -Dm755 rzip "$pkgdir/usr/bin/rzip"
+    install -Dm644 rzip.1 "$pkgdir/usr/share/man/man1/rzip.1"
+}
