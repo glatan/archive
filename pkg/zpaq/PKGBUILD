@@ -1,0 +1,18 @@
+pkgname=zpaq
+pkgver=7.15
+pkgrel=1
+pkgdesc="Programmable file compressor based on the PAQ algorithm"
+arch=('x86_64')
+url="http://mattmahoney.net/dc/zpaq.html"
+license=('custom:public-domain')
+source=("http://mattmahoney.net/dc/zpaq715.zip")
+sha512sums=('4cddcc04dff5e9dceb7138cf9e82b718b696048368ff494339f877d93e4423ed7959c0cfb2e30ba7dcbcdd6bbd59fa1021ceaca6d51e3180d8034b7a3997c265')
+
+build() {
+    cd "$srcdir"
+    g++ $CXXFLAGS $LDFLAGS -O3 -pthread -Dunix -DNDEBUG zpaq.cpp libzpaq.cpp -o zpaq
+}
+
+package() {
+    install -Dm755 zpaq "$pkgdir/usr/bin/zpaq"
+}

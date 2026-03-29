@@ -1,0 +1,181 @@
+{
+  "_comment": "仕様書のバージョンピン留め。make fetch-spec-sources でダウンロード。",
+  "sources": [
+    {
+      "id": "rfc1950",
+      "format": "zlib",
+      "title": "ZLIB Compressed Data Format Specification version 3.3",
+      "version": "RFC 1950 (May 1996)",
+      "url": "https://www.rfc-editor.org/rfc/rfc1950.txt",
+      "filename": "rfc1950.txt"
+    },
+    {
+      "id": "rfc1951",
+      "format": "deflate",
+      "title": "DEFLATE Compressed Data Format Specification version 1.3",
+      "version": "RFC 1951 (May 1996)",
+      "url": "https://www.rfc-editor.org/rfc/rfc1951.txt",
+      "filename": "rfc1951.txt"
+    },
+    {
+      "id": "rfc1952",
+      "format": "gzip",
+      "title": "GZIP file format specification version 4.3",
+      "version": "RFC 1952 (May 1996)",
+      "url": "https://www.rfc-editor.org/rfc/rfc1952.txt",
+      "filename": "rfc1952.txt"
+    },
+    {
+      "id": "rfc7932",
+      "format": "brotli",
+      "title": "Brotli Compressed Data Format",
+      "version": "RFC 7932 (July 2016)",
+      "url": "https://www.rfc-editor.org/rfc/rfc7932.txt",
+      "filename": "rfc7932.txt"
+    },
+    {
+      "id": "rfc8878",
+      "format": "zstd",
+      "title": "Zstandard Compression and the 'application/zstd' Media Type",
+      "version": "RFC 8878 (February 2021)",
+      "url": "https://www.rfc-editor.org/rfc/rfc8878.txt",
+      "filename": "rfc8878.txt"
+    },
+    {
+      "id": "appnote",
+      "format": "zip",
+      "title": "APPNOTE.TXT - .ZIP File Format Specification",
+      "version": "6.3.10 (November 1, 2022)",
+      "url": "https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT",
+      "filename": "APPNOTE_6.3.10.txt"
+    },
+    {
+      "id": "xz-file-format",
+      "format": "xz",
+      "title": "The .xz File Format",
+      "version": "1.1.0 (2022-12-11)",
+      "url": "https://tukaani.org/xz/xz-file-format.txt",
+      "filename": "xz-file-format-1.1.0.txt"
+    },
+    {
+      "id": "lz4-frame-format",
+      "format": "lz4",
+      "title": "LZ4 Frame Format Description",
+      "version": "1.6.2 (2021-01-27)",
+      "url": "https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Frame_format.md",
+      "filename": "lz4_frame_format_1.6.2.md"
+    },
+    {
+      "id": "lz4-block-format",
+      "format": "lz4",
+      "title": "LZ4 Block Format Description",
+      "version": "1.3.1 (2015-03-26)",
+      "url": "https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md",
+      "filename": "lz4_block_format_1.3.1.md"
+    },
+    {
+      "id": "snappy-format",
+      "format": "snappy",
+      "title": "Snappy format description",
+      "version": "git main (pinned 2024-01)",
+      "url": "https://raw.githubusercontent.com/google/snappy/main/format_description.txt",
+      "filename": "snappy_format_description.txt"
+    },
+    {
+      "id": "snappy-framing",
+      "format": "snappy",
+      "title": "Snappy framing format",
+      "version": "git main (pinned 2024-01)",
+      "url": "https://raw.githubusercontent.com/google/snappy/main/framing_format.txt",
+      "filename": "snappy_framing_format.txt"
+    },
+    {
+      "id": "lzip-manual",
+      "format": "lzip",
+      "title": "Lzip Manual",
+      "version": "1.24.1",
+      "url": "https://www.nongnu.org/lzip/manual/lzip_manual.html",
+      "filename": "lzip_manual_1.24.1.html"
+    },
+    {
+      "id": "rfc1321",
+      "format": "util",
+      "title": "The MD5 Message-Digest Algorithm",
+      "version": "RFC 1321 (April 1992)",
+      "url": "https://www.rfc-editor.org/rfc/rfc1321.txt",
+      "filename": "rfc1321.txt"
+    }
+  ],
+  "no_url_available": [
+    {
+      "id": "bzip2-reference",
+      "format": "bzip2",
+      "title": "bzip2 reference implementation",
+      "version": "1.0.8",
+      "note": "正式な仕様書なし。リファレンス実装がデファクト仕様"
+    },
+    {
+      "id": "7z-format",
+      "format": "sevenz",
+      "title": "7zFormat.txt + Methods.txt",
+      "version": "LZMA SDK 26.00",
+      "note": "LZMA SDK アーカイブ内に同梱。DOC/7zFormat.txt, DOC/Methods.txt"
+    },
+    {
+      "id": "lzo-kernel",
+      "format": "lzo",
+      "title": "Linux kernel Documentation/lzo.txt + lzop format",
+      "version": "kernel 6.x",
+      "note": "LZO1X-1 バイトコード仕様。lzop ファイルフォーマットは lzop ソースコード参照"
+    },
+    {
+      "id": "lzw-ncompress",
+      "format": "lzw",
+      "title": "ncompress (compress42.c)",
+      "version": "4.2.4",
+      "note": "正式な仕様書なし。Unix compress .Z フォーマットのデファクト標準"
+    },
+    {
+      "id": "rzip-format",
+      "format": "rzip",
+      "title": "rzip .rz format",
+      "version": "rzip 2.1",
+      "note": "rzip.samba.org。ソースコードが仕様"
+    },
+    {
+      "id": "lrzip-format",
+      "format": "lrzip",
+      "title": "lrzip .lrz format",
+      "version": "lrzip 0.651",
+      "note": "ソースコードが仕様"
+    },
+    {
+      "id": "tar-posix",
+      "format": "tar",
+      "title": "POSIX.1-1988 UStar / GNU 拡張 / POSIX.1-2001 PAX",
+      "version": "IEEE Std 1003.1-2017",
+      "note": "有償仕様書。GNU tar / POSIX 仕様のドラフトから参照"
+    },
+    {
+      "id": "cpio-posix",
+      "format": "cpio",
+      "title": "POSIX odc / SVR4 newc / newcrc",
+      "version": "IEEE Std 1003.1-2017",
+      "note": "有償仕様書。man cpio(5) / SVR4 ソースから参照"
+    },
+    {
+      "id": "ar-posix",
+      "format": "ar",
+      "title": "IEEE Std 1003.1 / GNU ar / BSD ar",
+      "version": "IEEE Std 1003.1-2017",
+      "note": "有償仕様書。man ar(5) / binutils ソースから参照"
+    },
+    {
+      "id": "zpaq-format",
+      "format": "zpaq",
+      "title": "ZPAQ / ZPAQL",
+      "version": "upstream zpaq 7.15",
+      "note": "正式標準なし。bounded contract で管理"
+    }
+  ]
+}

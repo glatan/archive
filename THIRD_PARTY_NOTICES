@@ -1,0 +1,173 @@
+archive third-party notices and provenance
+=========================================
+
+This repository is licensed as AGPL-3.0-only. This file records the
+provenance of specifications, reference implementations, permissively licensed
+ports, and bundled assets that informed or are included in the current code
+base.
+
+This document is informational and does not replace the repository LICENSE
+file. It is intended to make maintenance and downstream auditing easier.
+
+
+1. Specification-driven implementations
+---------------------------------------
+
+The following implementations are intended to follow published format
+specifications or standards documents:
+
+- DEFLATE: RFC 1951
+- gzip: RFC 1952
+- zlib: RFC 1950
+- zstd: RFC 8878
+- Brotli stream format: RFC 7932
+- Snappy: Google snappy `format_description.txt` (raw block format) and
+  `framing_format.txt` (framed stream format)
+- xz: `xz-file-format.txt` from Tukaani
+- lzip container: GNU lzip manual
+- LZ4: LZ4 frame format specification
+  (https://github.com/lz4/lz4/blob/dev/doc/lz4_Frame_format.md)
+- tar: POSIX.1-2001 UStar / GNU tar extensions / POSIX PAX extensions
+- cpio: POSIX `odc` / SVR4 `newc` / `newcrc`
+- ar: IEEE Std 1003.1 (POSIX) ar format / GNU ar extensions / BSD ar extensions
+- zip: PKWARE APPNOTE.TXT 6.3.10
+- 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00)
+
+Where code or tests use constants/tables taken from these specifications, those
+values are treated as specification material rather than as third-party source
+code.
+
+
+2. Reference implementations and de facto format definitions
+-------------------------------------------------------------
+
+Some formats do not have a single RFC-grade specification and are implemented
+against de facto reference behavior:
+
+- bzip2
+  - Reference: bzip2 1.0.x reference implementation by Julian Seward
+  - Repository scope: Rust reimplementation of the format and algorithm
+    behavior; no upstream bzip2 source files are bundled in this repository
+
+- LZW / Unix compress `.Z`
+  - Reference: `ncompress` / `compress42.c`
+  - Repository scope: Rust implementation of the historical Unix `compress`
+    format behavior
+
+- LZO / lzop
+  - Reference: Linux kernel `Documentation/lzo.txt` (LZO1X bytecodes) and
+    lzop source (`lzop.h`, `p_lzo.c`) for the lzop file format
+  - Repository scope: Rust implementation of LZO1X-1 block compression and
+    the lzop framing format
+
+- rzip
+  - Reference: upstream `rzip.samba.org` `.rz` container and chunk semantics
+  - Repository scope: Rust implementation of the upstream container shape and
+    token/chunk behavior
+  - Provenance note: the long-range matching and chunk logic are implemented in
+    Rust for this repository and are not shipped as upstream C source files
+
+- lrzip
+  - Reference: lrzip framing plus the crate's upstream-faithful shared rzip
+    token/chunk layer
+  - Repository scope: Rust implementation of the crate's supported `.lrz`
+    subset and backend wiring
+
+- BCJ filters (x86, PowerPC, IA64, SPARC, ARM, ARM-Thumb, ARM64, RISC-V)
+  - Reference behavior: xz / 7-Zip / liblzma style branch/call/jump conversion
+  - Repository scope: Rust implementations validated against known vectors and
+    expected filter semantics for all supported architectures
+
+- Delta filter
+  - Reference behavior: xz / 7-Zip style byte-wise delta (distance 1..=256)
+  - Repository scope: Rust implementation validated against known vectors
+
+- ZIP Method 10 (PKWARE DCL Implode) (`src/archive/zip/dcl_implode.rs`)
+  - Reference: Mark Adler's `blast.c` from zlib contrib directory
+  - Reference license: zlib license (permissive, compatible with AGPL-3.0)
+  - Repository scope: Rust reimplementation of the blast.c decompression algorithm;
+    no upstream C source files are bundled
+  - Provenance note: Huffman code tables (LITLEN_REP, LENLEN_REP, DISTLEN_REP) and
+    algorithm structure are derived from blast.c's static arrays and decode logic
+
+
+3. Public-domain or permissively licensed upstream material
+-----------------------------------------------------------
+
+- PPMd7 / PPMdH shared codec (`src/compress/ppmd/**`)
+  - Original reference: the PPMd implementation shipped within the 7-Zip
+    project, as documented in files such as `Ppmd.h`, `Ppmd7.c`,
+    `Ppmd7Dec.c`, and `Ppmd7Enc.c`
+  - Rust-side basis: `ppmd-rust` crate (https://crates.io/crates/ppmd-rust)
+  - Upstream port license: CC0-1.0 OR MIT-0
+  - Repository scope: adaptation of that upstream PPMd7 model to this crate's
+    `no_std + alloc` style and 7z method integration
+
+- ZPAQ (`src/compress/zpaq/**`, `src/archive/zpaq/**`)
+  - Reference: Matt Mahoney's ZPAQ format, context-mixing model, and ZPAQL VM
+  - Licensing note: upstream materials are commonly presented as public-domain
+    or similarly permissive source material; confirm exact upstream notice when
+    refreshing references or importing assets
+  - Repository scope: Rust implementation of a low-level single-payload codec
+    plus a multi-entry archive layer with crate-local journaling
+
+
+4. Bundled tables and static assets
+-----------------------------------
+
+- Brotli dictionary-related tables (`src/compress/brotli/dictionary.rs`)
+  - Scope: static dictionary lookup tables, transforms, and affix data used by
+    the Brotli decoder
+  - Intended provenance: RFC 7932 Brotli static dictionary semantics together
+    with the corresponding upstream Brotli dictionary structure used to realize
+    those semantics in code and data
+  - Maintenance note: if these tables are ever regenerated or replaced, keep
+    their provenance documented alongside the source update
+
+- Cryptographic and checksum primitives (`src/util/`)
+  - CRC-32 (IEEE, `crc32.rs`): clean-room Rust, polynomial from ISO 3309
+  - CRC-32C (Castagnoli, `crc32c.rs`): clean-room Rust, polynomial 0x1EDC6F41
+  - CRC-64/XZ (`crc64.rs`): clean-room Rust
+  - SHA-1 (`sha1.rs`): clean-room Rust implementation of FIPS 180-4
+  - SHA-256 (`sha256.rs`): clean-room Rust implementation of FIPS 180-4
+  - AES-128/192/256 (`aes256.rs`): clean-room Rust implementation of FIPS 197;
+    includes CBC and CTR modes for ZIP and 7z encryption
+  - MD5 (`md5.rs`): clean-room Rust implementation of RFC 1321
+  - DES / 3DES (`des.rs`): clean-room Rust implementation of FIPS 46-3;
+    includes CBC mode for ZIP Strong Encryption
+  - RC2 (`rc2.rs`): clean-room Rust implementation of RFC 2268;
+    includes CBC mode for ZIP Strong Encryption
+  - RC4 (`rc4.rs`): clean-room Rust implementation;
+    stream cipher for ZIP Strong Encryption
+  - Adler-32 (`adler32.rs`): clean-room Rust
+  - XXH32/XXH64 (`xxhash.rs`): clean-room Rust implementation of xxHash
+  - BitReader (`bitreader.rs`): clean-room Rust LSB-first bit reader
+  - Range coder (`range_coder.rs`): clean-room Rust range coder for LZMA/PPMd
+  - Scope: all are self-contained implementations with no upstream C/C++ source
+    bundled. Validated against published test vectors or reference outputs.
+
+- Format constants and lookup tables elsewhere in the repository
+  - Scope: Huffman/FSE/checksum tables and other codec constants
+  - Intended provenance: published specifications, de facto format documents,
+    or clean-room Rust derivations validated by tests
+
+
+5. Current non-goals and exclusions
+-----------------------------------
+
+- This file does not claim that every implementation is a direct code port.
+  In many cases the crate implements published behavior in Rust without
+  bundling upstream source files.
+
+
+6. Maintenance guidance
+-----------------------
+
+When adding or substantially rewriting a format implementation:
+
+1. Record whether it is spec-driven, informed by reference behavior, or adapted
+   from permissively licensed/public-domain upstream code.
+2. If static assets, generated tables, or ported logic are introduced, update
+   this file in the same change.
+3. Keep `docs/spec/` focused on conformance and tests, and keep this file
+   focused on provenance and third-party notices.
