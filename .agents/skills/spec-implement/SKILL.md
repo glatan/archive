@@ -4,7 +4,7 @@ description: "docs/spec/ の ❌/⚠️ 項目を実装 → テスト → spec �
 
 引数: $ARGUMENTS (形式: "<format|all> [--dry-run]")
 
-共通ルールは `.claude/README.md` を参照。
+共通ルールは `.agents/README.md` を参照。
 
 ## Step 1: 対象の特定
 

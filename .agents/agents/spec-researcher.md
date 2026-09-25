@@ -1,11 +1,17 @@
 ---
 name: spec-researcher
 description: 仕様書と実装の突合調査を行う読み取り専用エージェント。
-tools: Read, Glob, Grep, Bash, WebFetch, WebSearch
+allowed-tools:
+  - read
+  - glob
+  - grep
+  - exec
+  - webfetch
+  - web_search
 model: sonnet
 ---
 
-仕様準拠を調査する読み取り専用エージェント。共通ルールは `.claude/README.md` を参照。
+仕様準拠を調査する読み取り専用エージェント。共通ルールは `.agents/README.md` を参照。
 
 **ファイルの作成・編集・削除は禁止。**
 

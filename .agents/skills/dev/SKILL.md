@@ -4,7 +4,7 @@ description: "開発タスクの分類 → 適切な skill/agent の選択・実
 
 引数: $ARGUMENTS (自由記述のタスク説明、または下記のタスク種別キーワード)
 
-共通ルールは `.claude/README.md` を参照。
+共通ルールは `.agents/README.md` を参照。
 
 ## 概要
 

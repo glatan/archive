@@ -4,7 +4,7 @@ description: "アルゴリズム・実装の権利関係とライセンス互換
 
 引数: $ARGUMENTS (形式: "<format|all|deps>")
 
-共通ルールは `.claude/README.md` を参照。
+共通ルールは `.agents/README.md` を参照。
 
 ## 引数
 
