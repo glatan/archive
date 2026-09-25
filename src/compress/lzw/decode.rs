@@ -98,7 +98,9 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
         suffix[i as usize] = i as u8;
     }
 
-    let mut next_code: u16 = if block_mode { FIRST_CODE } else { 256 };
+    // u32: next_code must reach max_code + 1 (65536 at max_bits=16) without
+    // wrapping — a full dictionary is signaled by next_code > max_code.
+    let mut next_code: u32 = if block_mode { FIRST_CODE as u32 } else { 256 };
     let mut code_bits: u32 = 9;
     let mut bit_pos: usize = 0;
     let mut output = Vec::new();
@@ -122,7 +124,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
             let old_code_bits = code_bits;
 
             // Reset dictionary
-            next_code = FIRST_CODE;
+            next_code = FIRST_CODE as u32;
             code_bits = 9;
 
             // Skip to next old_code_bits-aligned boundary.
@@ -153,10 +155,10 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 
         // Decode the string for this code
         let first_byte;
-        if code16 < next_code {
+        if code < next_code {
             // Known code — decode the chain
             first_byte = decode_chain(&prefix, &suffix, code16, &mut decode_stack)?;
-        } else if code16 == next_code {
+        } else if code == next_code {
             // Special case: code not yet in dictionary (KwKwK)
             // The string is string(prev_code) + first_byte_of(string(prev_code))
             first_byte = decode_chain(&prefix, &suffix, prev_code as u16, &mut decode_stack)?;
@@ -173,14 +175,14 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
         }
 
         // Add new dictionary entry: prev_code + first_byte
-        if (next_code as u32) <= max_code {
+        if next_code <= max_code {
             prefix[next_code as usize] = prev_code as u16;
             suffix[next_code as usize] = first_byte;
             next_code += 1;
 
             // The decoder reconstructs dictionary entries one step behind the
             // encoder, so it widens one boundary earlier than the encoder.
-            if should_bump_decode_code_width(next_code as u32, code_bits, max_bits) {
+            if should_bump_decode_code_width(next_code, code_bits, max_bits) {
                 code_bits += 1;
             }
         }
@@ -685,5 +687,17 @@ mod tests {
         let compressed = super::super::encode::encode(b"");
         let decoded = decode_bounded(&compressed, 0).unwrap();
         assert!(decoded.is_empty());
+    }
+
+    #[test]
+    fn test_fuzz_regression_dict_full_wraparound() {
+        // Fuzz-found regression (run-1790257066): with max_bits=16 the
+        // dictionary fills completely and next_code reaches 65536. A u16
+        // next_code wrapped to 0, so the encoder kept inserting from code 0
+        // and the decoder reported "code out of range".
+        let input = include_bytes!("../../../tests/fixtures/fuzz/lzw_dict_full_wraparound.bin");
+        let encoded = super::super::encode::encode(input);
+        let decoded = decode(&encoded).unwrap();
+        assert_eq!(&decoded[..], &input[..]);
     }
 }

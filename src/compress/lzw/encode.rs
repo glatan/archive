@@ -92,7 +92,9 @@ pub fn encode_with_options(input: &[u8], max_bits: u8) -> Vec<u8> {
     let mut hash_suffix = vec![0u8; table_size as usize];
     let mut hash_code = vec![0u16; table_size as usize];
 
-    let mut next_code: u16 = FIRST_CODE;
+    // u32: next_code must reach max_code + 1 (65536 at max_bits=16) without
+    // wrapping — a full dictionary is signaled by next_code > max_code.
+    let mut next_code: u32 = FIRST_CODE as u32;
     let mut code_bits: u32 = 9;
     let mut bit_buf: u64 = 0;
     let mut bit_count: u32 = 0;
@@ -189,11 +191,11 @@ pub fn encode_with_options(input: &[u8], max_bits: u8) -> Vec<u8> {
             );
 
             // Add w+byte to dictionary
-            if (next_code as u32) <= max_code {
+            if next_code <= max_code {
                 insert(
                     w,
                     byte,
-                    next_code,
+                    next_code as u16,
                     &mut hash_prefix,
                     &mut hash_suffix,
                     &mut hash_code,
@@ -203,7 +205,7 @@ pub fn encode_with_options(input: &[u8], max_bits: u8) -> Vec<u8> {
 
                 // The encoder widens after the newly allocated code would no
                 // longer fit in the current width.
-                if should_bump_encode_code_width(next_code as u32, code_bits, max_bits as u32) {
+                if should_bump_encode_code_width(next_code, code_bits, max_bits as u32) {
                     code_bits += 1;
                 }
             } else {
@@ -236,7 +238,7 @@ pub fn encode_with_options(input: &[u8], max_bits: u8) -> Vec<u8> {
 
                 // Reset dictionary
                 clear_table(&mut hash_prefix);
-                next_code = FIRST_CODE;
+                next_code = FIRST_CODE as u32;
                 code_bits = 9;
             }
 
@@ -307,8 +309,9 @@ pub fn encode_with_full_options(input: &[u8], max_bits: u8, block_mode: bool) ->
     let mut hash_suffix = vec![0u8; table_size as usize];
     let mut hash_code = vec![0u16; table_size as usize];
 
-    // No clear code in non-block mode; codes start at 256
-    let mut next_code: u16 = 256;
+    // No clear code in non-block mode; codes start at 256.
+    // u32: next_code must reach max_code + 1 without wrapping.
+    let mut next_code: u32 = 256;
     let mut code_bits: u32 = 9;
     let mut bit_buf: u64 = 0;
     let mut bit_count: u32 = 0;
@@ -391,11 +394,11 @@ pub fn encode_with_full_options(input: &[u8], max_bits: u8, block_mode: bool) ->
             );
 
             // Add to dictionary only if not full
-            if (next_code as u32) <= max_code {
+            if next_code <= max_code {
                 insert(
                     w,
                     byte,
-                    next_code,
+                    next_code as u16,
                     &mut hash_prefix,
                     &mut hash_suffix,
                     &mut hash_code,
@@ -403,7 +406,7 @@ pub fn encode_with_full_options(input: &[u8], max_bits: u8, block_mode: bool) ->
                 );
                 next_code += 1;
 
-                if should_bump_encode_code_width(next_code as u32, code_bits, max_bits as u32) {
+                if should_bump_encode_code_width(next_code, code_bits, max_bits as u32) {
                     code_bits += 1;
                 }
             }
