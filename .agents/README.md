@@ -1,8 +1,9 @@
-# .claude/ ディレクトリ構成
+# .agents/ ディレクトリ構成
 
 ## 概要
 
-archive crate の開発を支援する agent と skill (command) の定義。
+archive crate の開発を支援する agent と skill の定義。
+`.agents/skills/` と `.agents/agents/` は agents.md 互換レイアウトで、Devin CLI / Desktop が読み取る。
 
 ## アーキテクチャ
 
@@ -31,11 +32,11 @@ archive crate の開発を支援する agent と skill (command) の定義。
 
 | Skill | 引数 | 説明 |
 |-------|------|------|
-| [/dev](commands/dev.md) | 自由記述 or キーワード | **統括** — タスク種別を判定し適切な skill を実行 |
-| [/spec-audit](commands/spec-audit.md) | `<format\|all>` | 仕様書→spec→コードの 3 層突合監査 |
-| [/spec-implement](commands/spec-implement.md) | `<format\|all> [--dry-run]` | spec の ❌/⚠️ 項目を実装 |
-| [/license-audit](commands/license-audit.md) | `<format\|all\|deps>` | ライセンス互換性の監査 |
-| [/fuzz](commands/fuzz.md) | `<algorithm\|all> <seconds>` | ファズテスト → 修正 |
+| [/dev](skills/dev/SKILL.md) | 自由記述 or キーワード | **統括** — タスク種別を判定し適切な skill を実行 |
+| [/spec-audit](skills/spec-audit/SKILL.md) | `<format\|all>` | 仕様書→spec→コードの 3 層突合監査 |
+| [/spec-implement](skills/spec-implement/SKILL.md) | `<format\|all> [--dry-run]` | spec の ❌/⚠️ 項目を実装 |
+| [/license-audit](skills/license-audit/SKILL.md) | `<format\|all\|deps>` | ライセンス互換性の監査 |
+| [/fuzz](skills/fuzz/SKILL.md) | `<algorithm\|all> <seconds>` | ファズテスト → 修正 |
 
 ## 共通ルール
 
@@ -68,4 +69,4 @@ archive crate の開発を支援する agent と skill (command) の定義。
 ### 禁止事項 (全 agent 共通)
 
 - `git commit` / `git push` / `git stash` の実行
-- `README.md` / `CLAUDE.md` / `Cargo.toml` の変更 (必要な場合は報告のみ)
+- `README.md` / `AGENTS.md` / `Cargo.toml` の変更 (必要な場合は報告のみ)

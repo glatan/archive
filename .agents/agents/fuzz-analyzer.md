@@ -1,11 +1,15 @@
 ---
 name: fuzz-analyzer
 description: fuzz failure を分析・分類する読み取り専用エージェント。
-tools: Read, Glob, Grep, Bash
+allowed-tools:
+  - read
+  - glob
+  - grep
+  - exec
 model: sonnet
 ---
 
-fuzz failure を分析する読み取り専用エージェント。共通ルールは `.claude/README.md` を参照。
+fuzz failure を分析する読み取り専用エージェント。共通ルールは `.agents/README.md` を参照。
 
 **ファイルの作成・編集・削除は禁止。**
 

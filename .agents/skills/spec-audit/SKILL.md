@@ -4,9 +4,9 @@ description: "仕様・実装・テスト・docs/spec の突合監査"
 
 引数: $ARGUMENTS (形式: "<format|all>")
 
-共通ルールは `.claude/README.md` を参照。
+共通ルールは `.agents/README.md` を参照。
 
-**このコマンドは調査と spec 更新のみ。ソースコード変更は `/spec-implement` で行う。**
+**このスキルは調査と spec 更新のみ。ソースコード変更は `/spec-implement` で行う。**
 
 ## 検証チェーン
 

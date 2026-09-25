@@ -4,7 +4,7 @@ description: "圧縮ファズテスト実行 → リグレッションテスト�
 
 引数: $ARGUMENTS (形式: "<algorithm|all> <duration_seconds>")
 
-共通ルールは `.claude/README.md` を参照。
+共通ルールは `.agents/README.md` を参照。
 
 ## Step 1: ファズテスト実行
 

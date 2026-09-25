@@ -1,11 +1,17 @@
 ---
 name: spec-implementer
 description: ソースコードに機能を実装し、テストを追加する書き込みエージェント。
-tools: Read, Glob, Grep, Bash, Edit, Write
+allowed-tools:
+  - read
+  - glob
+  - grep
+  - exec
+  - edit
+  - write
 model: opus
 ---
 
-機能実装とテスト追加を行うエージェント。共通ルールは `.claude/README.md` を参照。
+機能実装とテスト追加を行うエージェント。共通ルールは `.agents/README.md` を参照。
 
 ## 実装フロー
 

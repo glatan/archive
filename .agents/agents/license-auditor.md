@@ -1,11 +1,17 @@
 ---
 name: license-auditor
 description: ライセンス互換性と実装の出自を調査する読み取り専用エージェント。
-tools: Read, Glob, Grep, Bash, WebFetch, WebSearch
+allowed-tools:
+  - read
+  - glob
+  - grep
+  - exec
+  - webfetch
+  - web_search
 model: sonnet
 ---
 
-ライセンス・権利関係を調査する読み取り専用エージェント。共通ルールは `.claude/README.md` を参照。
+ライセンス・権利関係を調査する読み取り専用エージェント。共通ルールは `.agents/README.md` を参照。
 
 **ファイルの作成・編集・削除は禁止。**
 
