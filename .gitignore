@@ -1,8 +1,10 @@
 /target
-# fuzz の failure artifact は ignore するが、podman -v マウント用に
+# fuzz の failure artifact / corpus は ignore するが、podman -v マウント用に
 # ディレクトリ自体は .gitkeep で残す
 fuzz/failures/*
 !fuzz/failures/.gitkeep
+fuzz/corpus/*
+!fuzz/corpus/.gitkeep
 # Claude Code エージェント作業ディレクトリ
 .claude/worktrees/
 # 仕様書キャッシュ (manifest.json はバージョン管理、ダウンロード済みファイルは除外)

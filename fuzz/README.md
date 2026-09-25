@@ -44,6 +44,7 @@ cargo run --release -p archive-fuzz -- \
 ```
 
 novel observation は `fuzz/corpus/<algorithm>/` に harvest されます。
+`make fuzz` (コンテナ実行) でも `fuzz/corpus/` をマウントするため、harvest された corpus はホスト側に残ります。
 
 ## Special case matrix
 

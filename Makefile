@@ -14,6 +14,7 @@ test:
 fuzz:
 	podman run --rm \
 		-v ./fuzz/failures:/workspace/fuzz/failures \
+		-v ./fuzz/corpus:/workspace/fuzz/corpus \
 		$(FUZZ_IMAGE) \
 		--algorithm $(FUZZ_ALGORITHM) \
 		--duration $(FUZZ_DURATION) \
