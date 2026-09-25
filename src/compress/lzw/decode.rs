@@ -734,6 +734,51 @@ mod tests {
         assert_eq!(&stack[..], b"CBA");
     }
 
+    /// Deterministic byte stream that forces dictionary growth.
+    fn prng_bytes(n: usize) -> Vec<u8> {
+        let mut state = 0x9E3779B97F4A7C15u64;
+        (0..n)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                (state >> 33) as u8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_roundtrip_dict_full_boundary_all_max_bits() {
+        // Drive the dictionary past capacity at every max_bits so that
+        // next_code reaches max_code + 1 — the boundary where a u16
+        // next_code used to wrap to 0 — and a clear code is emitted.
+        for max_bits in 9..=16u8 {
+            let max_code = (1usize << max_bits) - 1;
+            // ~3x dictionary capacity guarantees the dictionary fills and the
+            // block-mode encoder emits at least one clear code.
+            let data = prng_bytes(max_code * 3);
+            let compressed = super::super::encode::encode_with_options(&data, max_bits);
+            let decoded = decode(&compressed)
+                .unwrap_or_else(|e| panic!("decode failed for max_bits={max_bits}: {e}"));
+            assert_eq!(
+                &decoded[..],
+                &data[..],
+                "roundtrip failed for max_bits={max_bits}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_non_block_dict_full() {
+        // Non-block mode at max_bits=16: the dictionary fills to 65535 and
+        // stays full — no clear code, but the stream must still decode.
+        // A wrapped next_code would have silently corrupted the dictionary.
+        let data = prng_bytes(65535 * 3);
+        let compressed = super::super::encode::encode_with_full_options(&data, 16, false);
+        let decoded = decode(&compressed).unwrap();
+        assert_eq!(&decoded[..], &data[..]);
+    }
+
     #[test]
     fn test_fuzz_regression_dict_full_wraparound() {
         // Fuzz-found regression (run-1790257066): with max_bits=16 the
