@@ -26,7 +26,7 @@
 | 16 | Dictionary 初期化: codes 0-255 = single byte, code 256 = clear code (block mode) | ncompress dictionary | ✅ | 実装済み |
 | 17 | First emitted code は raw byte (0-255) | ncompress code stream | ✅ | 実装済み |
 | 18 | Non-block-mode: dictionary が full になっても reset しない | ncompress block_mode=false | ✅ | `test_roundtrip_non_block_mode`, `test_non_block_mode_header_flag`, `test_non_block_mode_decode`, `encode_with_full_options()` |
-| 19 | Max dictionary size: 2^max_bits entries | ncompress dictionary growth | ✅ | 実装済み |
+| 19 | Max dictionary size: 2^max_bits entries | ncompress dictionary growth | ✅ | `test_fuzz_regression_dict_full_wraparound` (辞書フル境界: next_code=65536), `test_roundtrip_dict_full_boundary_all_max_bits`, `test_roundtrip_non_block_dict_full`, `test_decode_chain_code_65535`, `test_decode_chain_prefix_65535` |
 | 20 | Code width increase タイミング: ncompress 互換 (early change) | ncompress code stream | ✅ | item 6 で部分記載 |
 | 21 | EOF trailing partial code group: 不完全な最終 code group は無視 | ncompress EOF handling | ✅ | デコーダーで暗黙的に処理 |
 

@@ -98,7 +98,9 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
         suffix[i as usize] = i as u8;
     }
 
-    let mut next_code: u16 = if block_mode { FIRST_CODE } else { 256 };
+    // u32: next_code must reach max_code + 1 (65536 at max_bits=16) without
+    // wrapping — a full dictionary is signaled by next_code > max_code.
+    let mut next_code: u32 = if block_mode { FIRST_CODE as u32 } else { 256 };
     let mut code_bits: u32 = 9;
     let mut bit_pos: usize = 0;
     let mut output = Vec::new();
@@ -122,7 +124,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
             let old_code_bits = code_bits;
 
             // Reset dictionary
-            next_code = FIRST_CODE;
+            next_code = FIRST_CODE as u32;
             code_bits = 9;
 
             // Skip to next old_code_bits-aligned boundary.
@@ -153,10 +155,10 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 
         // Decode the string for this code
         let first_byte;
-        if code16 < next_code {
+        if code < next_code {
             // Known code — decode the chain
             first_byte = decode_chain(&prefix, &suffix, code16, &mut decode_stack)?;
-        } else if code16 == next_code {
+        } else if code == next_code {
             // Special case: code not yet in dictionary (KwKwK)
             // The string is string(prev_code) + first_byte_of(string(prev_code))
             first_byte = decode_chain(&prefix, &suffix, prev_code as u16, &mut decode_stack)?;
@@ -173,14 +175,14 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
         }
 
         // Add new dictionary entry: prev_code + first_byte
-        if (next_code as u32) <= max_code {
+        if next_code <= max_code {
             prefix[next_code as usize] = prev_code as u16;
             suffix[next_code as usize] = first_byte;
             next_code += 1;
 
             // The decoder reconstructs dictionary entries one step behind the
             // encoder, so it widens one boundary earlier than the encoder.
-            if should_bump_decode_code_width(next_code as u32, code_bits, max_bits) {
+            if should_bump_decode_code_width(next_code, code_bits, max_bits) {
                 code_bits += 1;
             }
         }
@@ -203,7 +205,10 @@ fn decode_chain(
     // Safety limit to prevent infinite loops on corrupt data
     let limit = prefix.len();
     let mut count = 0;
-    while code != u16::MAX {
+    // Walk dictionary entries (codes >= 256). At max_bits=16, code 65535 is a
+    // real code so u16::MAX cannot be used as a "no prefix" sentinel here —
+    // the chain ends at a literal (code <= 255) instead.
+    while code > 255 {
         if count >= limit {
             return Err(Error::InvalidData("lzw: dictionary chain too long"));
         }
@@ -211,7 +216,8 @@ fn decode_chain(
         code = prefix[code as usize];
         count += 1;
     }
-    // The last byte pushed is the first byte of the string
+    // Reached a literal entry (0-255): its byte is the first byte of the string.
+    stack.push(suffix[code as usize]);
     stack
         .last()
         .copied()
@@ -685,5 +691,103 @@ mod tests {
         let compressed = super::super::encode::encode(b"");
         let decoded = decode_bounded(&compressed, 0).unwrap();
         assert!(decoded.is_empty());
+    }
+
+    #[test]
+    fn test_decode_chain_code_65535() {
+        // At max_bits=16, code 65535 is a valid dictionary code. It must not be
+        // treated as a "no prefix" sentinel when walking the chain.
+        let mut prefix = vec![u16::MAX; 65536];
+        let mut suffix = vec![0u8; 65536];
+        for i in 0u16..256 {
+            suffix[i as usize] = i as u8;
+        }
+        // entry 65535 = literal 'A' (65) + 'B' → string "AB"
+        prefix[65535] = 65;
+        suffix[65535] = b'B';
+
+        let mut stack = Vec::new();
+        let first = decode_chain(&prefix, &suffix, 65535, &mut stack).unwrap();
+        assert_eq!(first, b'A');
+        assert_eq!(&stack[..], b"BA"); // stack is in reverse order
+    }
+
+    #[test]
+    fn test_decode_chain_prefix_65535() {
+        // An entry whose prefix is code 65535 must not truncate the chain at
+        // that node.
+        let mut prefix = vec![u16::MAX; 65536];
+        let mut suffix = vec![0u8; 65536];
+        for i in 0u16..256 {
+            suffix[i as usize] = i as u8;
+        }
+        // entry 65535 = 'A' + 'B' → "AB"
+        prefix[65535] = 65;
+        suffix[65535] = b'B';
+        // entry 600 = code 65535 + 'C' → "ABC"
+        prefix[600] = 65535;
+        suffix[600] = b'C';
+
+        let mut stack = Vec::new();
+        let first = decode_chain(&prefix, &suffix, 600, &mut stack).unwrap();
+        assert_eq!(first, b'A');
+        assert_eq!(&stack[..], b"CBA");
+    }
+
+    /// Deterministic byte stream that forces dictionary growth.
+    fn prng_bytes(n: usize) -> Vec<u8> {
+        let mut state = 0x9E3779B97F4A7C15u64;
+        (0..n)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                (state >> 33) as u8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_roundtrip_dict_full_boundary_all_max_bits() {
+        // Drive the dictionary past capacity at every max_bits so that
+        // next_code reaches max_code + 1 — the boundary where a u16
+        // next_code used to wrap to 0 — and a clear code is emitted.
+        for max_bits in 9..=16u8 {
+            let max_code = (1usize << max_bits) - 1;
+            // ~3x dictionary capacity guarantees the dictionary fills and the
+            // block-mode encoder emits at least one clear code.
+            let data = prng_bytes(max_code * 3);
+            let compressed = super::super::encode::encode_with_options(&data, max_bits);
+            let decoded = decode(&compressed)
+                .unwrap_or_else(|e| panic!("decode failed for max_bits={max_bits}: {e}"));
+            assert_eq!(
+                &decoded[..],
+                &data[..],
+                "roundtrip failed for max_bits={max_bits}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_non_block_dict_full() {
+        // Non-block mode at max_bits=16: the dictionary fills to 65535 and
+        // stays full — no clear code, but the stream must still decode.
+        // A wrapped next_code would have silently corrupted the dictionary.
+        let data = prng_bytes(65535 * 3);
+        let compressed = super::super::encode::encode_with_full_options(&data, 16, false);
+        let decoded = decode(&compressed).unwrap();
+        assert_eq!(&decoded[..], &data[..]);
+    }
+
+    #[test]
+    fn test_fuzz_regression_dict_full_wraparound() {
+        // Fuzz-found regression (run-1790257066): with max_bits=16 the
+        // dictionary fills completely and next_code reaches 65536. A u16
+        // next_code wrapped to 0, so the encoder kept inserting from code 0
+        // and the decoder reported "code out of range".
+        let input = include_bytes!("../../../tests/fixtures/fuzz/lzw_dict_full_wraparound.bin");
+        let encoded = super::super::encode::encode(input);
+        let decoded = decode(&encoded).unwrap();
+        assert_eq!(&decoded[..], &input[..]);
     }
 }
