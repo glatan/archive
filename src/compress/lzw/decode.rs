@@ -205,7 +205,10 @@ fn decode_chain(
     // Safety limit to prevent infinite loops on corrupt data
     let limit = prefix.len();
     let mut count = 0;
-    while code != u16::MAX {
+    // Walk dictionary entries (codes >= 256). At max_bits=16, code 65535 is a
+    // real code so u16::MAX cannot be used as a "no prefix" sentinel here —
+    // the chain ends at a literal (code <= 255) instead.
+    while code > 255 {
         if count >= limit {
             return Err(Error::InvalidData("lzw: dictionary chain too long"));
         }
@@ -213,7 +216,8 @@ fn decode_chain(
         code = prefix[code as usize];
         count += 1;
     }
-    // The last byte pushed is the first byte of the string
+    // Reached a literal entry (0-255): its byte is the first byte of the string.
+    stack.push(suffix[code as usize]);
     stack
         .last()
         .copied()
@@ -687,6 +691,47 @@ mod tests {
         let compressed = super::super::encode::encode(b"");
         let decoded = decode_bounded(&compressed, 0).unwrap();
         assert!(decoded.is_empty());
+    }
+
+    #[test]
+    fn test_decode_chain_code_65535() {
+        // At max_bits=16, code 65535 is a valid dictionary code. It must not be
+        // treated as a "no prefix" sentinel when walking the chain.
+        let mut prefix = vec![u16::MAX; 65536];
+        let mut suffix = vec![0u8; 65536];
+        for i in 0u16..256 {
+            suffix[i as usize] = i as u8;
+        }
+        // entry 65535 = literal 'A' (65) + 'B' → string "AB"
+        prefix[65535] = 65;
+        suffix[65535] = b'B';
+
+        let mut stack = Vec::new();
+        let first = decode_chain(&prefix, &suffix, 65535, &mut stack).unwrap();
+        assert_eq!(first, b'A');
+        assert_eq!(&stack[..], b"BA"); // stack is in reverse order
+    }
+
+    #[test]
+    fn test_decode_chain_prefix_65535() {
+        // An entry whose prefix is code 65535 must not truncate the chain at
+        // that node.
+        let mut prefix = vec![u16::MAX; 65536];
+        let mut suffix = vec![0u8; 65536];
+        for i in 0u16..256 {
+            suffix[i as usize] = i as u8;
+        }
+        // entry 65535 = 'A' + 'B' → "AB"
+        prefix[65535] = 65;
+        suffix[65535] = b'B';
+        // entry 600 = code 65535 + 'C' → "ABC"
+        prefix[600] = 65535;
+        suffix[600] = b'C';
+
+        let mut stack = Vec::new();
+        let first = decode_chain(&prefix, &suffix, 600, &mut stack).unwrap();
+        assert_eq!(first, b'A');
+        assert_eq!(&stack[..], b"CBA");
     }
 
     #[test]

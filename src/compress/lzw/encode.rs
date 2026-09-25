@@ -88,7 +88,9 @@ pub fn encode_with_options(input: &[u8], max_bits: u8) -> Vec<u8> {
     // Dictionary: hash table mapping (prefix_code, byte) → code
     // Use a simple hash table with open addressing.
     let table_size = 1 << (max_bits + 1); // power of 2 for fast modulo
-    let mut hash_prefix = vec![u16::MAX; table_size as usize];
+    // u32 + u32::MAX sentinel: at max_bits=16 the prefix 65535 is a real code
+    // and must not collide with the empty-slot marker.
+    let mut hash_prefix = vec![u32::MAX; table_size as usize];
     let mut hash_suffix = vec![0u8; table_size as usize];
     let mut hash_code = vec![0u16; table_size as usize];
 
@@ -120,9 +122,9 @@ pub fn encode_with_options(input: &[u8], max_bits: u8) -> Vec<u8> {
     };
 
     // Helper: clear the hash table
-    let clear_table = |hash_prefix: &mut [u16]| {
+    let clear_table = |hash_prefix: &mut [u32]| {
         for p in hash_prefix.iter_mut() {
-            *p = u16::MAX;
+            *p = u32::MAX;
         }
     };
 
@@ -135,17 +137,17 @@ pub fn encode_with_options(input: &[u8], max_bits: u8) -> Vec<u8> {
     // Helper: look up or insert into hash table
     let lookup = |prefix: u16,
                   byte: u8,
-                  hash_prefix: &[u16],
+                  hash_prefix: &[u32],
                   hash_suffix: &[u8],
                   hash_code: &[u16],
                   table_size: usize|
      -> Option<u16> {
         let mut idx = hash(prefix, byte, table_size);
         loop {
-            if hash_prefix[idx] == u16::MAX {
+            if hash_prefix[idx] == u32::MAX {
                 return None; // empty slot
             }
-            if hash_prefix[idx] == prefix && hash_suffix[idx] == byte {
+            if hash_prefix[idx] == prefix as u32 && hash_suffix[idx] == byte {
                 return Some(hash_code[idx]);
             }
             idx = (idx + 1) & (table_size - 1);
@@ -155,14 +157,14 @@ pub fn encode_with_options(input: &[u8], max_bits: u8) -> Vec<u8> {
     let insert = |prefix: u16,
                   byte: u8,
                   code: u16,
-                  hash_prefix: &mut [u16],
+                  hash_prefix: &mut [u32],
                   hash_suffix: &mut [u8],
                   hash_code: &mut [u16],
                   table_size: usize| {
         let mut idx = hash(prefix, byte, table_size);
         loop {
-            if hash_prefix[idx] == u16::MAX {
-                hash_prefix[idx] = prefix;
+            if hash_prefix[idx] == u32::MAX {
+                hash_prefix[idx] = prefix as u32;
                 hash_suffix[idx] = byte;
                 hash_code[idx] = code;
                 return;
@@ -305,7 +307,9 @@ pub fn encode_with_full_options(input: &[u8], max_bits: u8, block_mode: bool) ->
 
     // Dictionary: hash table mapping (prefix_code, byte) → code
     let table_size = 1 << (max_bits + 1);
-    let mut hash_prefix = vec![u16::MAX; table_size as usize];
+    // u32 + u32::MAX sentinel: at max_bits=16 the prefix 65535 is a real code
+    // and must not collide with the empty-slot marker.
+    let mut hash_prefix = vec![u32::MAX; table_size as usize];
     let mut hash_suffix = vec![0u8; table_size as usize];
     let mut hash_code = vec![0u16; table_size as usize];
 
@@ -341,17 +345,17 @@ pub fn encode_with_full_options(input: &[u8], max_bits: u8, block_mode: bool) ->
 
     let lookup = |prefix: u16,
                   byte: u8,
-                  hash_prefix: &[u16],
+                  hash_prefix: &[u32],
                   hash_suffix: &[u8],
                   hash_code: &[u16],
                   table_size: usize|
      -> Option<u16> {
         let mut idx = hash(prefix, byte, table_size);
         loop {
-            if hash_prefix[idx] == u16::MAX {
+            if hash_prefix[idx] == u32::MAX {
                 return None;
             }
-            if hash_prefix[idx] == prefix && hash_suffix[idx] == byte {
+            if hash_prefix[idx] == prefix as u32 && hash_suffix[idx] == byte {
                 return Some(hash_code[idx]);
             }
             idx = (idx + 1) & (table_size - 1);
@@ -361,14 +365,14 @@ pub fn encode_with_full_options(input: &[u8], max_bits: u8, block_mode: bool) ->
     let insert = |prefix: u16,
                   byte: u8,
                   code: u16,
-                  hash_prefix: &mut [u16],
+                  hash_prefix: &mut [u32],
                   hash_suffix: &mut [u8],
                   hash_code: &mut [u16],
                   table_size: usize| {
         let mut idx = hash(prefix, byte, table_size);
         loop {
-            if hash_prefix[idx] == u16::MAX {
-                hash_prefix[idx] = prefix;
+            if hash_prefix[idx] == u32::MAX {
+                hash_prefix[idx] = prefix as u32;
                 hash_suffix[idx] = byte;
                 hash_code[idx] = code;
                 return;
