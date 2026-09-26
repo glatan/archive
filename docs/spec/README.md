@@ -84,6 +84,36 @@
 | `lzw` / `lzw-bits9` — `ncompress` による空入力拒否 | **intentional scope** | `ncompress` (`compress`/`uncompress`) は空入力に対して exit status 2 で終了する外部ツール固有の動作。ライブラリ自体は空データを正常に処理する |
 | `lzw-bits9` — `compress -b 9` の非可逆 roundtrip | **intentional scope** | `ncompress -b 9` は一部の入力に対してロッシーな roundtrip を起こす外部ツール自身のバグ。ライブラリの encode/decode 実装には問題がない |
 
+## 実装対象外フォーマット
+
+本 crate は **書面仕様・フォーマット文書のみを実装の情報源**とし、参照実装のソースコードは実装の情報源としない。以下は仕様不在・ライセンス制約などにより実装対象外とした形式である。アルゴリズム内部の書面仕様が後日公開された場合は再評価する。
+
+| フォーマット | 実装対象外の理由 |
+|---|---|
+| RAR | unRAR ライセンスの制約により厳密な実装が困難。展開のみでも source-derived 実装の配布リスクを避けるため対象外 |
+| ACE | Public UnAce Licence が non-free（圧縮側開発禁止の field-of-use 制限を含む）。ACE 2.x の参照実装も事実上 proprietary `unace.dll` のみ |
+| CAB LZX (1997 文書版) | 公式文書に既知の誤記が複数あり、正誤判別の情報源が参照実装のソースコードにのみ存在するため厳密実装が不能 |
+| CAB Quantum | 圧縮本体の書面仕様が存在しない |
+| WIM / LZMS | 公式仕様なし。WIM 固有の LZX 変種と LZMS ソリッド圧縮の書面仕様が存在しない |
+| ZIP method 96 (JPEG) | APPNOTE は ID 割り当てのみで、実態は WinZip 独自の JPEG 再圧縮。書面仕様が非公式文書にのみ存在する |
+| ZIP method 97 (WavPack) | 公開文書はコンテナ・ブロックヘッダ層のみで、可逆圧縮コアの bit-level 仕様が存在しない |
+| ZIP method 16 Entropy Encoding 拡張 (z14〜) | 特許状況が未確認の新規要素。クラシック辞書ベースの CMPSC は実装候補として残す |
+| ZIP method 7 (Tokenizing) | 仕様未公開 |
+| bzip3 | 公開文書はコンテナ層のみで、算術符号器・LZP・RLE の内部仕様が文書化されていない |
+| LZFSE / LZVN | 書面仕様が存在しない（BSD-3 参照実装が唯一の情報源） |
+| LZJB | 書面仕様が存在しない（CDDL 参照実装が唯一の情報源） |
+| Heatshrink | コア符号化の書面仕様が存在しない（コンテナ文書のみ存在） |
+| Unix `pack` (`.z`) / `squeeze` | bit-level の書面仕様が存在しない |
+| UCL / NRV2B | 書面仕様が存在しない（upstream がドキュメント欠如を自認。GPL 参照実装のみ） |
+| Exomizer | 書面仕様が存在しない（usage 文書と decruncher ソースのみ） |
+| OpenZL | ワイヤーフォーマットの安定した書面仕様が存在しない（公開済みは SDDL 記述言語のみ、unstable 明記）。安定仕様公開で再評価 |
+| LHA/LZH 圧縮メソッド (`-lh1-`〜`-lh7-`, `-lzs-`/`-lz4-`/`-lz5-`, `-pm0-`/`-pm2-`) | 圧縮内部の書面仕様が存在しない。コンテナと `-lh0-` (store) は実装候補として残す |
+| ARJ method 1-4 | method 1-3 は仕様不在、method 4 は二次文書のみ。コンテナと method 0 は実装候補として残す |
+| ARC method 5-9 (Crunch/Squash) | ARC 固有の圧縮内部仕様の書面文書が存在しない。コンテナと method 0-3 は実装候補として残す |
+| ZOO | コンテナ・圧縮ともに書面仕様が存在しない |
+
+---
+
 ## 次の library 実装候補
 
 | 候補 | 狙い | 前提 |
