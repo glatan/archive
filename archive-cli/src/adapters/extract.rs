@@ -135,6 +135,48 @@ pub fn extract_input(
             }
             requested.finish()
         }
+        Format::Lha => {
+            let entries = archive_formats::lha::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            let requested = RequestedPaths::new(selected_paths);
+            for entry in entries {
+                if entry.is_dir || !requested.matches(&entry.name) {
+                    continue;
+                }
+                let path = resolved_archive_path(&base_dir, &entry.name)?;
+                write_file(&path, &entry.data, overwrite)?;
+                requested.mark_matched(&entry.name);
+            }
+            requested.finish()
+        }
+        Format::Arj => {
+            let entries = archive_formats::arj::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            let requested = RequestedPaths::new(selected_paths);
+            for entry in entries {
+                if entry.is_dir || !requested.matches(&entry.name) {
+                    continue;
+                }
+                let path = resolved_archive_path(&base_dir, &entry.name)?;
+                write_file(&path, &entry.data, overwrite)?;
+                requested.mark_matched(&entry.name);
+            }
+            requested.finish()
+        }
+        Format::Arc => {
+            let entries = archive_formats::arc::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            let requested = RequestedPaths::new(selected_paths);
+            for entry in entries {
+                if !requested.matches(&entry.name) {
+                    continue;
+                }
+                let path = resolved_archive_path(&base_dir, &entry.name)?;
+                write_file(&path, &entry.data, overwrite)?;
+                requested.mark_matched(&entry.name);
+            }
+            requested.finish()
+        }
         Format::Zpaq => match archive_formats::zpaq::decode::decode(input) {
             Ok(entries) => {
                 let requested = RequestedPaths::new(selected_paths);

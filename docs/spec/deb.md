@@ -55,3 +55,7 @@
 | 21 | `.deb` の write (encoder) | — | ❌ | read-only scope (intentional)。生成は `ar`+`tar`+codec の組み合わせで代替可能 |
 | 22 | `debian-binary` 2 行目以降・`control` ファイルの deb822 セマンティクス | deb(5) / deb-control(5) | ❌ | コンテナレイヤの責務外 (intentional)。`control_entries()` で生ファイルは取得可能 |
 | 23 | `data.tar` 内の filesystem セマンティクス (conffiles, maintainer scripts) | deb(5) | ❌ | パッケージマネージャ層の責務 (intentional) |
+
+### 実装メモ
+
+- `ar` レイヤは thin archive (`!<thin>\n`) も受理するが、`deb` レイヤは `debian-binary` 先頭 member を要求するため thin archive は deb としては reject される。

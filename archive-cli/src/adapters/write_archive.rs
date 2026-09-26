@@ -23,6 +23,9 @@ pub fn pack_inputs(command: PackCommand) -> Result<(), CliError> {
         ArchiveFormat::Zpaq => pack_zpaq(&entries),
         ArchiveFormat::Zip => pack_zip(&entries, command.password.as_deref()),
         ArchiveFormat::SevenZ => pack_sevenz(&entries, command.password.as_deref()),
+        ArchiveFormat::Lha => pack_lha(&entries),
+        ArchiveFormat::Arj => pack_arj(&entries),
+        ArchiveFormat::Arc => pack_arc(&entries),
     }?;
     fs::write(&command.output, encoded)?;
     Ok(())
@@ -107,6 +110,51 @@ fn pack_zip(entries: &[PackedEntry], password: Option<&str>) -> Result<Vec<u8>, 
     encoder
         .finish()
         .map_err(|error| CliError::from_archive_error(error, password.is_some()))
+}
+
+fn pack_lha(entries: &[PackedEntry]) -> Result<Vec<u8>, CliError> {
+    let mut encoder = archive::lha::encode::LhaEncoder::new();
+    for entry in entries {
+        if entry.is_dir {
+            encoder
+                .add_dir(&entry.archive_path, 0)
+                .map_err(|error| CliError::from_archive_error(error, false))?;
+        } else {
+            encoder
+                .add_file(&entry.archive_path, entry_data(entry)?, 0)
+                .map_err(|error| CliError::from_archive_error(error, false))?;
+        }
+    }
+    Ok(encoder.finish())
+}
+
+fn pack_arj(entries: &[PackedEntry]) -> Result<Vec<u8>, CliError> {
+    let mut encoder = archive::arj::encode::ArjEncoder::new();
+    for entry in entries {
+        if entry.is_dir {
+            encoder
+                .add_dir(&entry.archive_path, 0)
+                .map_err(|error| CliError::from_archive_error(error, false))?;
+        } else {
+            encoder
+                .add_file(&entry.archive_path, entry_data(entry)?, 0)
+                .map_err(|error| CliError::from_archive_error(error, false))?;
+        }
+    }
+    Ok(encoder.finish())
+}
+
+fn pack_arc(entries: &[PackedEntry]) -> Result<Vec<u8>, CliError> {
+    let mut encoder = archive::arc::encode::ArcEncoder::new();
+    for entry in entries {
+        if entry.is_dir {
+            continue; // ARC has no directory entries.
+        }
+        encoder
+            .add_file(&entry.archive_path, entry_data(entry)?, 0, 0)
+            .map_err(|error| CliError::from_archive_error(error, false))?;
+    }
+    Ok(encoder.finish())
 }
 
 fn pack_sevenz(entries: &[PackedEntry], password: Option<&str>) -> Result<Vec<u8>, CliError> {

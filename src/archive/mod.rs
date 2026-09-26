@@ -55,3 +55,15 @@ pub mod mtree;
 /// WARC (Web ARChive, `.warc`) record read support.
 #[cfg(feature = "warc")]
 pub mod warc;
+
+/// LHA/LZH archive support (store methods only).
+#[cfg(feature = "lha")]
+pub mod lha;
+
+/// ARJ archive support (store method only).
+#[cfg(feature = "arj")]
+pub mod arj;
+
+/// SEA ARC archive support (store methods only).
+#[cfg(feature = "arc")]
+pub mod arc;

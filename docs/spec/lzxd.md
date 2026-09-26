@@ -36,10 +36,10 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 17 | チャンクサイズ 0・チャンクデータ切り詰め・奇数バイト残りのチャンクは拒否 | [MS-PATCH] 2.2.1 | ✅ | `rejects_empty` / `rejects_truncated` |
-| 18 | 非合法ブロック型・不完全/超過 Huffman 木は拒否 | [MS-PATCH] 2.3-2.5 | ✅ | `lzxd_rejects_invalid` (統合) / `huffman_decode` |
-| 19 | 出力済み+reference を超えるオフセット・32KiB 境界跨ぎマッチは拒否 | [MS-PATCH] 2.1.5 | ✅ | `lzxd_rejects_invalid` (統合) |
-| 20 | `decode` は期待出力サイズで厳密終端、`decode_all` はブロックの 24bit サイズで自己終端 (`max_output` 上限付き) | crate contract | ✅ | `lzxd_decode_all_matches_decode` (統合) |
+| 17 | チャンクサイズ 0・チャンクデータ切り詰め・奇数バイト残りのチャンクは拒否 | [MS-PATCH] 2.2.1 | ⚠️ | `rejects_empty` (切り詰め・奇数チャンクの専用テストなし) |
+| 18 | 非合法ブロック型・不完全/超過 Huffman 木は拒否 | [MS-PATCH] 2.3-2.5 | ⚠️ | `lzxd_rejects_invalid` (統合: 型 5 拒否のみ。不完全木 reject は実装済み・未テスト) |
+| 19 | 出力済み+reference を超えるオフセット・32KiB 境界跨ぎマッチは拒否 | [MS-PATCH] 2.1.5 | ⚠️ | `lzxd_rejects_invalid` (統合: offset 超過のみ。境界跨ぎ reject は実装済み・未テスト) |
+| 20 | `decode` は期待出力サイズで厳密終端、`decode_all` はブロックの 24bit サイズで自己終端 (`max_output` 上限付き)。uncompressed ブロックが 32KiB 境界を跨ぐ場合はエラー `uncompressed block must not cross 32KB boundary` を返す | crate contract | ✅ | `lzxd_decode_all_matches_decode` (統合) |
 
 ## エンコード範囲 / 既知の制約
 
@@ -53,6 +53,11 @@
 - 統合テスト内のテスト側エンコーダ (verbatim/aligned/uncompressed ブロック生成器) で作成した 8 種類のストリームを **libmspack の参照 LZXD デコーダ** (`lzxd_decompress` with `is_delta=1`、LGPL 2.1) で検証済み。libmspack 側に LZXD エンコーダ実装は存在しない (`oabc.c` はスタブ) ため、相互検証は「自作ストリームを両デコーダで一致確認」形式。
 - カバレッジ: リテラルのみ / 明示マッチ + R0-R2 / 拡長全帯域 / reference データ参照 / aligned オフセット / verbatim+uncompressed 混在 / チャンク跨ぎブロック / E8 反転。
 - [MS-PATCH] §3 の `"abc"` uncompressed ブロック既知解答例をユニットテストで検証 (`spec_example_abc`)。
+- 実装メモ (仕様書未記載の挙動):
+  - E8 反転は `chunk_base < 0x4000_0000` の場合のみ適用 (MS-PATCH/LZX 系の慣行ガード)。
+  - E8 反転はブロック中間の `block_produced` ではなく各 32KiB チャンク完了時に `chunk_done` で行う。
+  - `decode` は読み込み済み入力が尽きた時点でも終了可能 (入力残量を厳密には要求しない)。
+  - エンコーダの bit-packing は最初のチャンクと後続チャンクでスケジュールが異なる場合がある。
 
 ## ライセンス / 出自
 

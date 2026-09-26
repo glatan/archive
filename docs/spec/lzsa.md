@@ -14,7 +14,7 @@
 | 2 | Z bits != 0 は拒否。V は 0 (LZSA1) / 1 (LZSA2) のみ、他は拒否 | StreamFormat.md: traits byte | ✅ | `rejects_bad_signature` |
 | 3 | 各フレームは 3 バイトの圧縮ブロックサイズ DSZ (byte0-1 = bits0-15、byte2 bit0 = bit16) + DSZ バイトのブロックデータ | StreamFormat.md: frame | ✅ | `lzsa1_stream_reference_vector` (統合) |
 | 4 | DSZ byte2 の bit7 は uncompressed frame フラグ。設定時、ブロックデータをそのまま出力にコピー | StreamFormat.md: uncompressed flag | ✅ | `decode_stream_uncompressed_frame` |
-| 5 | DSZ byte2 の bits1-6 は reserved で非ゼロなら拒否 | StreamFormat.md | ✅ | `rejects_bad_signature` 経路で検証 |
+| 5 | DSZ byte2 の bits1-6 は reserved で非ゼロなら拒否 | StreamFormat.md | ⚠️ | 実装済み (`0x7e` マスク。専用テストなし) |
 | 6 | DSZ == 0 の 3 バイトが EOD フレーム (ストリーム終端) | StreamFormat.md: EOD | ✅ | 全ストリームベクタで検証 |
 | 7 | フレームは最大 64KiB に展開。マッチオフセットは先行フレームの出力を参照可能 (ブロック間履歴) | StreamFormat.md | ✅ | `multi_frame_roundtrip` (統合、90000B) |
 
@@ -48,7 +48,7 @@
 | 21 | magic 欠損・3 バイト未満・フレームヘッダ/ブロック切り詰めの拒否 | StreamFormat.md | ✅ | `rejects_bad_signature`、`rejects_truncated` |
 | 22 | オフセット 0 または出力済みバイト数超過のマッチは拒否 | LZ77 規約 | ✅ | `rejects_truncated` / デコーダガード |
 | 23 | `decode_bounded` で出力上限を強制 (圧縮ブロック・verbatim フレーム双方) | crate contract | ✅ | `decode_bounded_enforces_limit` (統合) |
-| 24 | 拡張長フィールドのマーカー byte (LZSA1: 238/239/249/250、LZSA2: 232/233/238/239) の曖昧な扱いを参照実装の読みに一致させる | 参照 expand_block_v1.c / expand_block_v2.c | ✅ | 参照ベクタで検証 |
+| 24 | 拡張長フィールドのマーカー byte (LZSA1: 238/239/249/250、LZSA2: 232/233/238/239) の曖昧な扱いを参照実装の読みに一致させる | 参照 expand_block_v1.c / expand_block_v2.c | ⚠️ | 防御的実装済み (参照ベクタは該当 byte 値を生成しないため未テスト) |
 
 ## エンコード範囲 / 既知の制約
 
@@ -56,7 +56,7 @@
 |---|------|----------|------|----------------|
 | 25 | `encode` は LZSA1 ストリーム、`encode_lzsa2` は LZSA2 ストリームを出力 (traits byte の V で選択) | StreamFormat.md | ✅ | `encode_roundtrips_and_redecodes` (統合) |
 | 26 | フレームは 64KiB 出力単位で分割。マッチは先行フレームの履歴を参照可能 | StreamFormat.md | ✅ | `multi_frame_roundtrip` (統合) |
-| 27 | 圧縮ブロックが入力以上に膨らむ場合、または 1 コマンドのリテラル長上限 (65535) を超えるリテラルランが発生した場合、verbatim フレームにフォールバック | StreamFormat.md: uncompressed flag | ✅ | 乱数入力の往復で検証 |
+| 27 | 圧縮ブロックが入力以上に膨らむ場合、または 1 コマンドのリテラル長上限 (65535) を超えるリテラルランが発生した場合、verbatim フレームにフォールバック | StreamFormat.md: uncompressed flag | ✅ | 乱数入力の往復で検証 (リテラルラン上限経路は未テスト) |
 | 28 | ストリームブロックは必ずリテラルのみの最終コマンド (L=0 可) で閉じる。raw ブロックは EOD コマンドで閉じる | BlockFormat_LZSA1/2.md | ✅ | `lzsa_tool` 出力との比較 (ローカル検証) |
 | 29 | LZSA2 エンコーダは距離に応じて 5bit (≤32) / 9bit (≤512) / 13bit (≤8704) / 16bit を選択し、直前距離と一致する場合は rep-match を出力 | BlockFormat_LZSA2.md | ✅ | `roundtrip_various` (tier テスト) |
 | 30 | エンコーダのマッチ探索は greedy 単一候補ハッシュ (LZSA1: 3B、LZSA2: 2B)。参照の optimal parse とのバイト一致は保証しない | 実装選択 | ✅ | roundtrip で検証 |
@@ -65,7 +65,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 31 | CLI は `lzsa` (v1) / `lzsa2` (v2) フォーマットで compress、ストリームの `7b 9e` magic で自動検出、raw ブロックは `--format` 必須 | crate CLI contract | ✅ | archive-cli 配線・detect テスト |
+| 31 | CLI は `lzsa` (v1) / `lzsa2` (v2) フォーマットで compress、ストリームの `7b 9e` magic で自動検出、raw ブロックは `--format` 必須 | crate CLI contract | ⚠️ | archive-cli 配線済み (lzsa 用 detect テストなし) |
 
 ## 出典 / 検証メモ
 

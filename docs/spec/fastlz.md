@@ -15,7 +15,7 @@
 | 3 | ctrl >= 32 はマッチ。`ctrl >> 5` in 1..=6 は短形、長さ = field + 2 (3..=8) | fastlz.c: `len = (ctrl >> 5) - 1`, `len + 3` copy | ✅ | `decode_short_match` |
 | 4 | `ctrl >> 5` == 7 は長形。level 1 は拡張バイト 1 個、長さ = ext + 9 | fastlz.c level-1 | ✅ | `decode_l1_long_match`、`fastlz_hand_built_segments` (統合) |
 | 5 | level 2 の長形拡張は 0xff 連鎖 + 終端バイト、長さ = 9 + 総和 | fastlz.c level-2: `do len += code while code == 255` | ✅ | `decode_l2_ext_chain`、`fastlz_reference_vector_l2_marker_and_chain` (統合) |
-| 6 | オフセット = ((ctrl & 0x1f) << 8 \| low)、距離 = offset + 1。level 1 最大 8192、level 2 短形最大 8191 | fastlz.c: `MAX_L1_DISTANCE 8192` / `MAX_L2_DISTANCE 8191` | ✅ | `fastlz_reference_vector_l1_run` (統合) |
+| 6 | オフセット = ((ctrl & 0x1f) << 8 \| low)、距離 = offset + 1。level 1 最大 8192、level 2 短形最大 8191 | fastlz.c: `MAX_L1_DISTANCE 8192` / `MAX_L2_DISTANCE 8191` | ✅ | `fastlz_reference_vector_l1_run` / `fastlz_reference_vector_l1_text` (統合) |
 | 7 | level 2 で `ctrl & 0x1f == 31` かつ offset-low == 0xff の場合、さらに u16be の距離拡張が続く。距離 = ext16 + 8192 (8192..=73727) | fastlz.c: `code == 255 && ofs == 31<<8` → `ref = op - ofs - MAX_L2_DISTANCE - 1` | ✅ | `decode_l2_far_match`、`fastlz_reference_vector_l2_far_match` (統合) |
 | 8 | 拡張長バイトは offset low バイトの前に来る (far match は offset-low の 0xff 後に u16) | fastlz.c | ✅ | `fastlz_reference_vector_l2_far_match` (統合) |
 | 9 | match コピーは 1 バイトずつ (重複コピー許容) | fastlz.c / LZ77 系規約 | ✅ | `roundtrip_various` (`[0u8; 1000]` 等) |

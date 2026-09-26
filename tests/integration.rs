@@ -177,6 +177,12 @@ fn xz_system_decode(input: &[u8]) -> Option<Vec<u8>> {
 
 #[path = "integration/ar.rs"]
 mod ar_tests;
+#[cfg(feature = "arc")]
+#[path = "integration/arc.rs"]
+mod arc_tests;
+#[cfg(feature = "arj")]
+#[path = "integration/arj.rs"]
+mod arj_tests;
 #[cfg(feature = "brotli")]
 #[path = "integration/brotli.rs"]
 mod brotli_tests;
@@ -194,6 +200,9 @@ mod deflate_tests;
 mod generated_tests;
 #[path = "integration/gzip.rs"]
 mod gzip_tests;
+#[cfg(feature = "lha")]
+#[path = "integration/lha.rs"]
+mod lha_tests;
 #[path = "integration/lrzip.rs"]
 mod lrzip_tests;
 #[path = "integration/lz4.rs"]

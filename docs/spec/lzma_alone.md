@@ -36,23 +36,24 @@
 | 15 | ストリーム終端後の trailing data 拒否 (サイズ不明) | 同上 | ✅ | `test_decode_rejects_trailing_data_unknown_size` |
 | 16 | ヘッダー宣言サイズと実デコードサイズの不一致拒否 | lzma-file-format.txt | ✅ | `test_decode_rejects_size_mismatch` |
 | 17 | `lc+lp > 4` の properties 拒否 (共有 LZMA コアと XZ Utils 同等の制限) | lzma-file-format.txt: properties | ✅ | `test_decode_rejects_unsupported_props_combo`。形式上有効な値だがサポート外として `InvalidData` |
+| 18 | `decode_bounded` は出力上限を `Error::OutputLimitExceeded` で強制 (既知・未知サイズの双方) | crate contract | ✅ | `decode_bounded` 実装・共通 bounded-decode 規約 |
 
 ### エンコード
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 18 | ヘッダー形式 (0x5D + dict u32 LE + size u64 LE) | lzma-file-format.txt: LZMA_Alone header | ✅ | `test_encode_header_format` |
-| 19 | エンコーダは既知サイズ + EoPM を出力 (`xz --format=lzma` と同構成) | lzma-file-format.txt | ✅ | `test_lzma_alone_encode_decoded_by_system` (統合) |
-| 20 | デフォルト辞書サイズ 8 MiB (`xz -6` 相当) | lzma-file-format.txt | ✅ | `test_encode_header_format` |
-| 21 | 辞書サイズ指定エンコード | lzma-file-format.txt | ✅ | `test_encode_with_dict_size` |
-| 22 | ラウンドトリップ: 空/hello/repeated/all_bytes/1kb | lzma-file-format.txt | ✅ | `test_encode_roundtrip_*` |
+| 19 | ヘッダー形式 (0x5D + dict u32 LE + size u64 LE) | lzma-file-format.txt: LZMA_Alone header | ✅ | `test_encode_header_format` |
+| 20 | エンコーダは既知サイズ + EoPM を出力 (`xz --format=lzma` と同構成) | lzma-file-format.txt | ✅ | `test_lzma_alone_encode_decoded_by_system` (統合) |
+| 21 | デフォルト辞書サイズ 8 MiB (`xz -6` 相当) | lzma-file-format.txt | ✅ | `test_encode_header_format` |
+| 22 | 辞書サイズ指定エンコード | lzma-file-format.txt | ✅ | `test_encode_with_dict_size` |
+| 23 | ラウンドトリップ: 空/hello/repeated/all_bytes/1kb | lzma-file-format.txt | ✅ | `test_encode_roundtrip_*` |
 
 ### システム互換 / その他
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 23 | system `xz --format=lzma` 生成物のデコード | lzma-file-format.txt / system xz | ✅ | `test_lzma_alone_decode_system_compressed` (統合) |
-| 24 | crate 生成物の system `xz --format=lzma -d` によるデコード | lzma-file-format.txt / system xz | ✅ | `test_lzma_alone_encode_decoded_by_system` (統合) |
+| 24 | system `xz --format=lzma` 生成物のデコード | lzma-file-format.txt / system xz | ✅ | `test_lzma_alone_decode_system_compressed` (統合) |
+| 25 | crate 生成物の system `xz --format=lzma -d` によるデコード | lzma-file-format.txt / system xz | ✅ | `test_lzma_alone_encode_decoded_by_system` (統合) |
 
 ---
 
@@ -60,8 +61,14 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 24 |
-| **合計** | **24** |
+| ✅ 実装+テスト済み | 25 |
+| **合計** | **25** |
+
+---
+
+## 出典メモ
+
+- system `xz` はローカルのテスト時 oracle のみ (crate へリンク・同梱しない)。
 
 
 ---
