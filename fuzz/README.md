@@ -127,12 +127,14 @@ external tool が必要な pattern は `#[ignore]` 付きの placeholder とし�
 | brotli | `brotli`, `brotli-fast`, `brotli-best` |
 | その他 | `snappy`, `rzip`, `zlib`, `zpaq`, `zpaq-level2`, `zpaq-level3` |
 
-### アーカイブ (18 variant)
+### アーカイブ (20 variant)
 
 | グループ | アルゴリズム名 |
 |---------|------------|
 | ar | `ar`, `ar-bsd` |
 | deb | `deb` |
+| rpm | `rpm` |
+| squashfs | `squashfs` |
 | zip | `zip`, `zip-store`, `zip-bzip2`, `zip-zstd` |
 | 7z | `7z`, `7z-copy`, `7z-lzma`, `7z-ppmd`, `7z-deflate`, `7z-bzip2` |
 | tar | `tar-gnu`, `tar-ustar`, `tar-pax` |

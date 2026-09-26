@@ -40,6 +40,8 @@
 | cpio | POSIX `odc` / SVR4 `newc` / `newcrc` | pathname/data 配置と簡易チェックサムまで実装 |
 | ar | IEEE Std 1003.1 / GNU ar / BSD ar | 共通: 8B マジック `!<arch>\n` + 60B 固定長ヘッダー (ar_name[16]/ar_date[12]/ar_uid[6]/ar_gid[6]/ar_mode[8]/ar_size[10]/ar_fmag[2])。GNU 拡張: `//` 文字列テーブル + `/offset` 参照。BSD 拡張: `#1/<len>` 名前埋め込み |
 | deb | deb(5) Debian binary package format (dpkg) | ar + 固定 member レイアウト (debian-binary / control.tar.* / data.tar.*)。member 圧縮: 無圧縮 / .gz / .xz / .zst / .bz2 / .lzma / .Z。read のみ (write は intentional scope 外) |
+| rpm | rpm.org Package Format (v4/v6) | 96B Lead + Signature/Header + payload。payload 圧縮: gzip / bzip2 / lzma / xz / zstd / none。payload 形式: cpio newc / stripped 07070X。read のみ (write・署名検証は intentional scope 外) |
+| squashfs | SquashFS 4.0 binary format (dr-emann.github.io/squashfs) | 96B superblock + metadata block (8KiB) 列 + fragment/ID/export table。compressor: gzip(zlib)/xz/lz4/zstd/lzo。lzma1 は非対応。read のみ |
 | zip | APPNOTE.TXT 6.3.10 (PKWARE, 2024) | §4.3.7 Local File Header / §4.3.8 Data Descriptor / §4.3.12 Central Directory / §4.3.16 EOCD / §4.3.20-22 ZIP64 / §4.4.1 General Purpose Bit Flag (bit 0,3,11) / Compression method 0,1,2-5,6,8,12,14,93,95,98 / §4.5.2 Traditional PKZIP Encryption / WinZip AES-128/192/256 (extra field 0x9901) |
 | 7z | 7zFormat.txt (LZMA SDK 26.00) / Methods.txt | SignatureHeader (`37 7A BC AF 27 1C`) / StartHeader CRC / UINT64 VLI / Header property IDs 0x00-0x19 / Folder DAG with BindPair / Methods: Copy (0x00), LZMA (0x03 0x01 0x01), LZMA2 (0x21), PPMdH (0x03 0x04 0x01), Deflate (0x04 0x01 0x08), Deflate64 (0x04 0x01 0x09), BZip2 (0x04 0x02 0x02), x86/PowerPC/ARM/ARM-Thumb/SPARC/ARM64/RISC-V BCJ, Delta (0x03), BCJ2 (0x03 0x03 0x01 0x1B), Brotli (0x04 0xF7 0x11 0x01), 7zAES (0x06 0xF1 0x07 0x01) / timestamp metadata (ctime/atime/mtime) |
 
@@ -127,6 +129,8 @@
 | cpio | [cpio.md](cpio.md) | 35 | 0 | 0 | 35 |
 | ar | [ar.md](ar.md) | 26 | 0 | 0 | 26 |
 | deb | [deb.md](deb.md) | 20 | 0 | 3 | 23 |
+| rpm | [rpm.md](rpm.md) | 24 | 0 | 3 | 27 |
+| squashfs | [squashfs.md](squashfs.md) | 26 | 1 | 4 | 31 |
 | ZIP | [zip.md](zip.md) | 150 | 0 | 3 | 153 |
 | 7z | [sevenz.md](sevenz.md) | 120 | 0 | 0 | 120 |
 

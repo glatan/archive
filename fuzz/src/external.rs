@@ -245,6 +245,8 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
         Algorithm::Zpaq | Algorithm::ZpaqLevel2 | Algorithm::ZpaqLevel3 => None,
         Algorithm::Ar | Algorithm::ArBsd => Some(ExternalSpec::Archive(ArchiveSpec::Ar)),
         Algorithm::Deb => None,
+        Algorithm::Rpm => None,
+        Algorithm::Squashfs => None,
         Algorithm::Zip => Some(ExternalSpec::Archive(ArchiveSpec::Zip {
             extra_compress_args: &["-q"],
         })),

@@ -57,6 +57,39 @@ pub fn extract_input(
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?;
             extract_tar_entries(&base_dir, entries, selected_paths, overwrite)
         }
+        Format::Rpm => {
+            let entries = archive_formats::rpm::decode::decode(input)
+                .and_then(|package| package.payload_entries())
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            let requested = RequestedPaths::new(selected_paths);
+            for entry in entries {
+                if !requested.matches(&entry.name) {
+                    continue;
+                }
+                let path = resolved_archive_path(&base_dir, &entry.name)?;
+                write_file(&path, &entry.data, overwrite)?;
+                requested.mark_matched(&entry.name);
+            }
+            requested.finish()
+        }
+        Format::Squashfs => {
+            let entries = archive_formats::squashfs::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?
+                .entries;
+            let requested = RequestedPaths::new(selected_paths);
+            for entry in entries {
+                if entry.kind != archive_formats::squashfs::decode::SquashfsKind::File {
+                    continue;
+                }
+                if !requested.matches(&entry.name) {
+                    continue;
+                }
+                let path = resolved_archive_path(&base_dir, &entry.name)?;
+                write_file(&path, &entry.data, overwrite)?;
+                requested.mark_matched(&entry.name);
+            }
+            requested.finish()
+        }
         Format::Zpaq => match archive_formats::zpaq::decode::decode(input) {
             Ok(entries) => {
                 let requested = RequestedPaths::new(selected_paths);

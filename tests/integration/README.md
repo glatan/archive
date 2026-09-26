@@ -81,6 +81,23 @@
 | system `ar`+`tar`+`gzip` interop | `test_deb_decode_system_built_package` |
 | `bsdtar` member extraction interop | `test_deb_crate_built_extracted_by_bsdtar` |
 
+### `rpm.rs`
+
+| カバー項目 | テスト |
+|---|---|
+| uncompressed cpio payload decode | `test_rpm_decode_uncompressed_payload` |
+| gzip payload decode | `test_rpm_decode_gzip_payload` |
+| xz / zstd payload decode | `test_rpm_decode_xz_and_zstd_payloads` |
+| v6 stripped payload (07070X) | `test_rpm_decode_stripped_payload` |
+| system cpio+gzip payload interop | `test_rpm_decode_system_compressed_payload` |
+| `bsdtar` payload extraction interop | `test_rpm_crate_built_read_by_bsdtar` |
+
+### `squashfs.rs`
+
+| カバー項目 | テスト |
+|---|---|
+| `mksquashfs` 生成 image (gzip/zstd/xz/lz4/lzo) の decode | `test_squashfs_decode_mksquashfs_image` |
+
 ### `brotli.rs`
 
 | Coverage | Test cases |

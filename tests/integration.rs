@@ -1,6 +1,8 @@
 #![cfg(all(
     feature = "ar",
     feature = "deb",
+    feature = "rpm",
+    feature = "squashfs",
     feature = "cpio",
     feature = "tar",
     feature = "bzip2",
@@ -22,8 +24,10 @@
 use archive::archive::ar;
 use archive::archive::cpio;
 use archive::archive::deb;
+use archive::archive::rpm;
 #[cfg(feature = "sevenz")]
 use archive::archive::sevenz;
+use archive::archive::squashfs;
 use archive::archive::tar;
 #[cfg(feature = "zip")]
 use archive::archive::zip;
@@ -184,6 +188,8 @@ mod lzma_alone_tests;
 mod lzo_tests;
 #[path = "integration/lzw.rs"]
 mod lzw_tests;
+#[path = "integration/rpm.rs"]
+mod rpm_tests;
 #[cfg(feature = "rzip")]
 #[path = "integration/rzip.rs"]
 mod rzip_tests;
@@ -192,6 +198,8 @@ mod rzip_tests;
 mod sevenz_tests;
 #[path = "integration/snappy.rs"]
 mod snappy_tests;
+#[path = "integration/squashfs.rs"]
+mod squashfs_tests;
 #[path = "integration/tar.rs"]
 mod tar_tests;
 #[path = "integration/xz.rs"]

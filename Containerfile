@@ -5,7 +5,7 @@ RUN pacman -Syu --noconfirm && \
     pacman -S --noconfirm \
       rustup \
       python brotli gzip zip unzip 7zip libarchive \
-      zstd bzip2 lzip xz ncompress lz4 lzop lrzip cpio && \
+      zstd bzip2 lzip xz ncompress lz4 lzop lrzip cpio squashfs-tools && \
     rustup default stable && \
     pacman -Scc --noconfirm
 
