@@ -47,3 +47,11 @@ pub mod mscab;
 /// ZIM (`.zim`) archive read support.
 #[cfg(feature = "zim")]
 pub mod zim;
+
+/// mtree(5) manifest read support.
+#[cfg(feature = "mtree")]
+pub mod mtree;
+
+/// WARC (Web ARChive, `.warc`) record read support.
+#[cfg(feature = "warc")]
+pub mod warc;

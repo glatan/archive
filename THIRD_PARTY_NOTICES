@@ -44,6 +44,10 @@ specifications or standards documents:
   https://learn.microsoft.com/openspecs/windows_protocols/ms-cab/)
 - zim: openZIM Wiki "ZIM file format" documentation
   (https://wiki.openzim.org/wiki/ZIM_file_format)
+- mtree: FreeBSD mtree(5) manual page
+  (https://man.freebsd.org/cgi/man.cgi?mtree(5))
+- warc: IIPC WARC 1.1 specification / ISO 28500:2009
+  (https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1/)
 - zip: PKWARE APPNOTE.TXT 6.3.10
 - 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00)
 

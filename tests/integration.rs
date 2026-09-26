@@ -5,6 +5,7 @@
     feature = "squashfs",
     feature = "mscab",
     feature = "zim",
+    feature = "mtree",
     feature = "cpio",
     feature = "tar",
     feature = "bzip2",
@@ -207,10 +208,17 @@ mod squashfs_tests;
 #[path = "integration/mscab.rs"]
 mod mscab_tests;
 
+#[cfg(feature = "mtree")]
+#[path = "integration/mtree.rs"]
+mod mtree_tests;
 #[path = "integration/tar.rs"]
 mod tar_tests;
 #[path = "integration/xz.rs"]
 mod xz_tests;
+
+#[cfg(feature = "warc")]
+#[path = "integration/warc.rs"]
+mod warc_tests;
 #[cfg(feature = "zim")]
 #[path = "integration/zim.rs"]
 mod zim_tests;

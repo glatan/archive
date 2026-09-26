@@ -327,6 +327,65 @@ fn decode_items(
                     .collect(),
             ))
         }
+        Format::Mtree => {
+            let entries = archive_formats::mtree::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            Ok((
+                ContentKind::Archive,
+                entries
+                    .into_iter()
+                    .map(|entry| {
+                        let mut extra = Vec::new();
+                        if let Some(mode) = entry.mode {
+                            extra.push(format!("mode={mode:o}"));
+                        }
+                        if let Some(link) = &entry.link {
+                            extra.push(format!("link={link}"));
+                        }
+                        DecodedItem {
+                            payload: None,
+                            summary: EntrySummary {
+                                path: entry.name,
+                                kind: format!("{:?}", entry.kind).to_lowercase(),
+                                size: entry.size,
+                                compressed_size: None,
+                                mtime: None,
+                                mode: entry.mode,
+                                extra,
+                            },
+                        }
+                    })
+                    .collect(),
+            ))
+        }
+        Format::Warc => {
+            let entries = archive_formats::warc::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            Ok((
+                ContentKind::Archive,
+                entries
+                    .into_iter()
+                    .map(|entry| {
+                        let mut extra = vec![format!("warc-type={}", entry.record_type)];
+                        if let Some(ct) = &entry.content_type {
+                            extra.push(format!("content-type={ct}"));
+                        }
+                        DecodedItem {
+                            payload: Some(entry.data.clone()),
+                            summary: EntrySummary {
+                                path: entry.name,
+                                kind: "file".to_owned(),
+                                size: Some(entry.data.len() as u64),
+                                compressed_size: None,
+                                mtime: None,
+                                mode: None,
+                                extra,
+                            },
+                        }
+                    })
+                    .collect(),
+            ))
+        }
         Format::Zpaq => match archive_formats::zpaq::decode::decode(input) {
             Ok(entries) => Ok((
                 ContentKind::Archive,

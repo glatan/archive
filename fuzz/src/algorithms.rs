@@ -8,7 +8,7 @@
 //! `&[u8] → Vec<u8>` interface as compression: a single file named
 //! `"fuzz_test"` is packed/unpacked as the archive payload.
 
-use archive::archive::{ar, cpio, deb, mscab, rpm, sevenz, squashfs, tar, zim, zip};
+use archive::archive::{ar, cpio, deb, mscab, mtree, rpm, sevenz, squashfs, tar, warc, zim, zip};
 use archive::compress::*;
 use archive::error::Error;
 use std::fmt;
@@ -66,6 +66,8 @@ pub enum Algorithm {
     Squashfs,
     Mscab,
     Zim,
+    Mtree,
+    Warc,
     Zip,
     ZipStore,
     ZipBzip2,
@@ -136,6 +138,8 @@ impl Algorithm {
         Algorithm::Squashfs,
         Algorithm::Mscab,
         Algorithm::Zim,
+        Algorithm::Mtree,
+        Algorithm::Warc,
         Algorithm::Zip,
         Algorithm::ZipStore,
         Algorithm::ZipBzip2,
@@ -206,6 +210,8 @@ impl Algorithm {
             Algorithm::Squashfs => "squashfs",
             Algorithm::Mscab => "mscab",
             Algorithm::Zim => "zim",
+            Algorithm::Mtree => "mtree",
+            Algorithm::Warc => "warc",
             Algorithm::Zip => "zip",
             Algorithm::ZipStore => "zip-store",
             Algorithm::ZipBzip2 => "zip-bzip2",
@@ -277,6 +283,8 @@ impl Algorithm {
             "squashfs" | "sqfs" => Some(Algorithm::Squashfs),
             "mscab" | "cab" => Some(Algorithm::Mscab),
             "zim" => Some(Algorithm::Zim),
+            "mtree" => Some(Algorithm::Mtree),
+            "warc" => Some(Algorithm::Warc),
             "zip" => Some(Algorithm::Zip),
             "zip-store" => Some(Algorithm::ZipStore),
             "zip-bzip2" => Some(Algorithm::ZipBzip2),
@@ -380,6 +388,8 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
         Algorithm::Squashfs => squashfs_fixture(data),
         Algorithm::Mscab => mscab_fixture(data),
         Algorithm::Zim => zim_fixture(data),
+        Algorithm::Mtree => mtree_fixture(data),
+        Algorithm::Warc => warc_fixture(data),
         Algorithm::Zip => {
             let mut enc = zip::encode::ZipEncoder::new();
             enc.add_file("fuzz_test", data);
@@ -553,6 +563,14 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
         }
         Algorithm::Zim => {
             let entries = zim::decode::decode(data)?;
+            Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::Mtree => {
+            let _ = mtree::decode::decode(data)?;
+            Ok(Vec::new())
+        }
+        Algorithm::Warc => {
+            let entries = warc::decode::decode(data)?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
         }
         Algorithm::Zip | Algorithm::ZipStore | Algorithm::ZipBzip2 | Algorithm::ZipZstd => {
@@ -907,6 +925,37 @@ fn rpm_fixture(data: &[u8]) -> Vec<u8> {
     rpm.extend_from_slice(&header);
     rpm.extend_from_slice(&payload.finish());
     rpm
+}
+
+/// Build a minimal `.warc` stream with one resource record whose
+/// block is the fuzzed bytes.
+fn warc_fixture(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(b"WARC/1.1\r\n");
+    out.extend_from_slice(b"WARC-Type: resource\r\n");
+    out.extend_from_slice(b"WARC-Record-ID: <urn:uuid:fuzz>\r\n");
+    out.extend_from_slice(b"WARC-Date: 2024-01-01T00:00:00Z\r\n");
+    out.extend_from_slice(b"WARC-Target-URI: fuzz_test\r\n");
+    out.extend_from_slice(b"Content-Type: application/octet-stream\r\n");
+    out.extend_from_slice(format!("Content-Length: {}\r\n", data.len()).as_bytes());
+    out.extend_from_slice(b"\r\n");
+    out.extend_from_slice(data);
+    out.extend_from_slice(b"\r\n\r\n");
+    out
+}
+
+/// Build a minimal mtree manifest referencing `fuzz_test`.
+/// The manifest has no payload; the fuzzed bytes are folded into the
+/// `size=` keyword so the decode result stays input-dependent.
+fn mtree_fixture(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    out.extend_from_slice(b"#mtree\n");
+    out.extend_from_slice(b"/set type=file uid=0 gid=0 mode=644\n");
+    out.extend_from_slice(b"./fuzz_test size=");
+    let size = data.len().min(u32::MAX as usize) as u32;
+    out.extend_from_slice(size.to_string().as_bytes());
+    out.extend_from_slice(b" time=0.000000000\n");
+    out
 }
 
 /// Build a minimal `.zim` archive with one stored cluster holding a
