@@ -1,0 +1,64 @@
+# mscab (Microsoft Cabinet)
+
+| 項目 | 内容 |
+|------|------|
+| 基準仕様 | [MS-CAB] Cabinet File Format (Microsoft Open Specifications) |
+| 形式概要 | CFHEADER + CFFOLDER 配列 + CFFILE 配列 + CFDATA ブロック列。フォルダ単位で圧縮 |
+| 実装範囲 | **read のみ** (write / Quantum / LZX / multi-cabinet set は intentional scope 外) |
+
+参照: <https://learn.microsoft.com/openspecs/windows_protocols/ms-cab/>
+
+### ヘッダ / エントリ構造
+
+| # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
+|---|------|----------|-----------|----------------|
+| 1 | CFHEADER: magic `MSCF`、reserved フィールド、cbCabinet、coffFiles、cFolders、cFiles、flags、setID、iCabinet (全て LE) | MS-CAB §2.1 | ✅ | `parses_stored_cabinet` |
+| 2 | version 1.x (major=1, minor<=3) を受理、それ以外は reject | MS-CAB §2.1 | ✅ | `rejects_bad_magic` 系 |
+| 3 | flags bit0/bit1 (prev/next cabinet) の ASCIIZ 文字列を skip して解釈 | MS-CAB §2.1 | ✅ | header_ext 処理 |
+| 4 | flags bit2 (RESERVE_PRESENT): cbCFHeader/cbCFFolder/cbCFData による reserved 領域 skip | MS-CAB §2.1 | ✅ | header_ext 処理 |
+| 5 | CFFOLDER: coffCabStart / cCFDATA / typeCompress (type は下位バイト) | MS-CAB §2.2 | ✅ | `Folder` |
+| 6 | CFFILE: cbFile / uoffFolderStart / iFolder / date / time / attribs / ASCIIZ 名 | MS-CAB §2.3 | ✅ | `FileRec` |
+| 7 | CFDATA: csum / cbData / cbUncomp + データ (cbCFData reserve 対応) | MS-CAB §2.4 | ✅ | `decompress_folder` |
+| 8 | csum 非ゼロ時は CFDATA チェックサム (LE u32 ワード XOR) を検証 | MS-CAB §2.4 | ✅ | `checksum` |
+
+### 圧縮フォルダ
+
+| # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
+|---|------|----------|-----------|----------------|
+| 9 | tcompTYPE_NONE (0): CFDATA は生データ | MS-CAB §3.1 | ✅ | `parses_stored_cabinet` |
+| 10 | tcompTYPE_MSZIP (1): 各 CFDATA は `CK` シグネチャ + raw DEFLATE stream | MS-CAB §3.1 | ✅ | `parses_mszip_cabinet` |
+| 11 | MSZIP の LZ77 window (32KiB) は同一フォルダ内の CFDATA ブロック間で継続 | MS-CAB §3.1 | ✅ | `mszip_history_spans_cfdata_blocks` |
+| 12 | cbUncomp と実出力サイズの不一致は reject | MS-CAB §2.4 | ✅ | `MSZIP block size mismatch` |
+
+### ファイル再構成
+
+| # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
+|---|------|----------|-----------|----------------|
+| 13 | ファイルデータは iFolder の uoffFolderStart から開始し cbFile バイト | MS-CAB §2.3 | ✅ | `parses_stored_cabinet` |
+| 14 | cbFile がフォルダ末尾を超える場合、後続フォルダの非圧縮データへ継続 | MS-CAB §2.3 | ✅ | `file_spans_two_folders` |
+| 15 | iFolder の特殊値 (0xFFFD-0xFFFF: cabinet 横断) は Unsupported | MS-CAB §2.3 | ✅ | `rejects_spanned_file` |
+| 16 | bounds 検査 (truncated header/data → エラー) | crate エラー規約 | ✅ | `rejects_truncated` |
+
+### システム相互運用
+
+| # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
+|---|------|----------|-----------|----------------|
+| 17 | crate で組み立てた MSZIP `.cab` を `bsdtar` (libarchive) が展開 | system interop | ✅ | `test_mscab_bsdtar_interop` |
+
+### CLI / fuzz 連携
+
+| # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
+|---|------|----------|-----------|----------------|
+| 18 | magic `MSCF` で `.cab` を自動検出 | CLI detection | ✅ | `detect_mscab` |
+| 19 | `archive extract` は entry を展開 | CLI semantics | ✅ | `extract.rs` の `Format::Mscab` アーム |
+| 20 | fuzz algorithm `mscab` (self-regression 含む) | fuzz harness | ✅ | `fuzz/src/algorithms.rs` |
+
+### Intentional scope (実装対象外)
+
+| # | 要件 | 仕様参照 | 状態 | 備考 |
+|---|------|----------|-----------|------|
+| 21 | write / encode | — | ❌ | read-only reader として設計 |
+| 22 | tcompTYPE_QUANTUM (2) | MS-CAB §3.1 | ❌ | Quantum codec の厳密仕様が MS-CAB 内に完結しない (cf. 対象外フォーマット一覧) |
+| 23 | tcompTYPE_LZX (3) | MS-CAB §3.1 | ❌ | CAB 用 LZX は公開文書の既知誤記を正誤判定できず厳密実装不能 (同上) |
+| 24 | multi-cabinet set (.set / disk spanning) | MS-CAB §2.1, §2.3 | ❌ | 他キャビネットのデータが必要なため単一ファイル reader では再構成不能 |
+| 25 | 属性 / 日時のファイルシステム復元 | MS-CAB §2.3 | ❌ | 展開時の metadata 適用は対象外 (アーカイブ抽出の範囲) |

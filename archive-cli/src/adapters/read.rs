@@ -283,6 +283,50 @@ fn decode_items(
                     .collect(),
             ))
         }
+        Format::Mscab => {
+            let entries = archive_formats::mscab::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            Ok((
+                ContentKind::Archive,
+                entries
+                    .into_iter()
+                    .map(|entry| DecodedItem {
+                        payload: Some(entry.data.clone()),
+                        summary: EntrySummary {
+                            path: entry.name,
+                            kind: "file".to_owned(),
+                            size: Some(entry.data.len() as u64),
+                            compressed_size: None,
+                            mtime: None,
+                            mode: None,
+                            extra: Vec::new(),
+                        },
+                    })
+                    .collect(),
+            ))
+        }
+        Format::Zim => {
+            let entries = archive_formats::zim::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            Ok((
+                ContentKind::Archive,
+                entries
+                    .into_iter()
+                    .map(|entry| DecodedItem {
+                        payload: Some(entry.data.clone()),
+                        summary: EntrySummary {
+                            path: entry.name,
+                            kind: "file".to_owned(),
+                            size: Some(entry.data.len() as u64),
+                            compressed_size: None,
+                            mtime: None,
+                            mode: None,
+                            extra: Vec::new(),
+                        },
+                    })
+                    .collect(),
+            ))
+        }
         Format::Zpaq => match archive_formats::zpaq::decode::decode(input) {
             Ok(entries) => Ok((
                 ContentKind::Archive,

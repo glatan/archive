@@ -39,6 +39,11 @@ specifications or standards documents:
   and rpm `lib/cpio.c` stripped payload behavior notes
 - squashfs: SquashFS binary format documentation
   (https://dr-emann.github.io/squashfs/squashfs.html, CC BY-SA 4.0)
+- mscab: [MS-CAB] Cabinet File Format documentation
+  (Microsoft Open Specifications,
+  https://learn.microsoft.com/openspecs/windows_protocols/ms-cab/)
+- zim: openZIM Wiki "ZIM file format" documentation
+  (https://wiki.openzim.org/wiki/ZIM_file_format)
 - zip: PKWARE APPNOTE.TXT 6.3.10
 - 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00)
 

@@ -39,3 +39,11 @@ pub mod rpm;
 /// SquashFS (`.squashfs`) image read support.
 #[cfg(feature = "squashfs")]
 pub mod squashfs;
+
+/// Microsoft Cabinet (`.cab`) archive read support.
+#[cfg(feature = "mscab")]
+pub mod mscab;
+
+/// ZIM (`.zim`) archive read support.
+#[cfg(feature = "zim")]
+pub mod zim;
