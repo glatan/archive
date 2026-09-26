@@ -151,7 +151,9 @@ const fn feature_gate_for(algo: Algorithm) -> Option<&'static str> {
         Algorithm::SevenZ
         | Algorithm::SevenZCopy
         | Algorithm::SevenZLzma
-        | Algorithm::SevenZPpmd => Some("sevenz"),
+        | Algorithm::SevenZPpmd
+        | Algorithm::SevenZDeflate
+        | Algorithm::SevenZBzip2 => Some("sevenz"),
         _ => None,
     }
 }
@@ -213,6 +215,10 @@ fn self_pattern_body(algo: Algorithm) -> String {
         Algorithm::Lz4 | Algorithm::Lz4Fast | Algorithm::Lz4Best => roundtrip_body(
             "archive::compress::lz4::encode::encode(input)",
             "archive::compress::lz4::decode::decode(&encoded).unwrap()",
+        ),
+        Algorithm::Lz4Block => roundtrip_body(
+            "archive::compress::lz4::encode::encode_block(input)",
+            "archive::compress::lz4::decode::decode_block(&encoded, input.len()).unwrap()",
         ),
         Algorithm::Lz4SmallBlock => roundtrip_body(
             "archive::compress::lz4::encode::encode_with_options(input, archive::compress::lz4::encode::BlockMaxSize::KB64, true)",
@@ -282,6 +288,21 @@ fn self_pattern_body(algo: Algorithm) -> String {
             "let mut enc = archive::archive::ar::encode::ArEncoder::new_bsd();",
             "let entries = archive::archive::ar::decode::decode(&encoded).unwrap();",
         ),
+        Algorithm::Deb => concat!(
+            "    let mut data_tar = archive::archive::tar::encode::TarEncoder::new();\n",
+            "    data_tar.add_file(\"fuzz_test\", input);\n",
+            "    let mut control_tar = archive::archive::tar::encode::TarEncoder::new();\n",
+            "    control_tar.add_file(\"./control\", b\"Package: fuzz\\n\");\n",
+            "    let mut enc = archive::archive::ar::encode::ArEncoder::new();\n",
+            "    enc.add_file(\"debian-binary\", b\"2.0\\n\");\n",
+            "    enc.add_file(\"control.tar\", &control_tar.finish());\n",
+            "    enc.add_file(\"data.tar\", &data_tar.finish());\n",
+            "    let encoded = enc.finish().unwrap();\n",
+            "    let package = archive::archive::deb::decode::decode(&encoded).unwrap();\n",
+            "    let entries = package.data_entries().unwrap();\n",
+            "    assert_eq!(entries[0].data, input);",
+        )
+        .to_string(),
         Algorithm::Zip => archive_roundtrip_body(
             "let mut enc = archive::archive::zip::encode::ZipEncoder::new();",
             "let entries = archive::archive::zip::decode::decode(&encoded).unwrap();",
@@ -303,6 +324,14 @@ fn self_pattern_body(algo: Algorithm) -> String {
         ),
         Algorithm::SevenZPpmd => archive_roundtrip_body(
             "let mut enc = archive::archive::sevenz::encode::SevenZEncoder::new();\n    enc.set_method(archive::archive::sevenz::encode::SevenZMethod::Ppmd { order: 6, mem_size: 1 << 20 });",
+            "let entries = archive::archive::sevenz::decode::decode(&encoded).unwrap();",
+        ),
+        Algorithm::SevenZDeflate => archive_roundtrip_body(
+            "let mut enc = archive::archive::sevenz::encode::SevenZEncoder::new();\n    enc.set_method(archive::archive::sevenz::encode::SevenZMethod::Deflate { level: archive::compress::deflate::encode::Level::Default });",
+            "let entries = archive::archive::sevenz::decode::decode(&encoded).unwrap();",
+        ),
+        Algorithm::SevenZBzip2 => archive_roundtrip_body(
+            "let mut enc = archive::archive::sevenz::encode::SevenZEncoder::new();\n    enc.set_method(archive::archive::sevenz::encode::SevenZMethod::Bzip2 { level: 9 });",
             "let entries = archive::archive::sevenz::decode::decode(&encoded).unwrap();",
         ),
         Algorithm::TarGnu => archive_roundtrip_body(

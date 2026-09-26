@@ -27,3 +27,7 @@ pub mod zip;
 /// 7z archive support.
 #[cfg(feature = "sevenz")]
 pub mod sevenz;
+
+/// Debian binary package (`.deb`) read support.
+#[cfg(feature = "deb")]
+pub mod deb;

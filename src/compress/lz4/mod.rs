@@ -2,7 +2,8 @@
 //!
 //! Implements the LZ4 frame format with support for independent/dependent
 //! blocks, content size, content checksum, block checksum, dictionary IDs,
-//! and block max sizes (64KB-4MB).
+//! and block max sizes (64KB-4MB). Raw single-block encode/decode
+//! (LZ4 block format without a frame) is also exposed.
 //!
 //! [LZ4 frame format]: https://github.com/lz4/lz4/blob/dev/doc/lz4_Frame_format.md
 //!

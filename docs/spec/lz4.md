@@ -47,6 +47,8 @@
 | 32 | 辞書 prefix 参照マッチ | LZ4 Block Format | ✅ | `test_decode_with_dict_roundtrip`, `test_encode_with_dict_roundtrip` |
 | 33 | Last-5-literals 制約 | LZ4 Block Format | ✅ | `LAST_LITERALS=5`、エンコーダーで適用 |
 | 34 | MF_LIMIT (12バイト) 制約 | LZ4 Block Format | ✅ | `MF_LIMIT=12`、エンコーダーで適用 |
+| 34a | Raw block decode API (frame なし、max_output 上限) | LZ4 Block Format | ✅ | `decode_block()` / `decode_block_with_dict()`、`test_decode_block_roundtrip`、`test_decode_block_limit_exceeded` |
+| 34b | Raw block encode API (frame なし、辞書 prefix 対応) | LZ4 Block Format | ✅ | `encode_block()` / `encode_block_with_dict()`、`test_decode_block_roundtrip_with_dict` |
 
 ### ブロックサイズ
 
@@ -96,8 +98,8 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 56 |
-| **合計** | **56** |
+| ✅ 実装+テスト済み | 58 |
+| **合計** | **58** |
 
 
 ---

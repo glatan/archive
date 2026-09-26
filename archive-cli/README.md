@@ -55,7 +55,10 @@ archive extract sample.tar.gz --out /tmp/dest           # 出力先を指定
 archive extract sample.zip --password secret            # 暗号化 zip
 archive extract sample.tar.gz dir/file.txt              # 特定 entry のみ
 archive extract sample.tar.gz --overwrite               # 既存ファイルを上書き
+archive extract sample.deb                              # data.tar ペイロードを展開
 ```
+
+`.deb` は `data.tar` の内容を展開します。生の member (`debian-binary` / `control.tar.*`) は `--format ar` で展開してください。
 
 ### `archive pack <format> <input...> -o <output>`
 
@@ -98,6 +101,7 @@ archive compress lrzip data.bin -o data.bin.lrz --backend bzip2
 ## フォーマット自動検出
 
 magic bytes からフォーマットを自動検出します。
+`.deb` は `!<arch>\n` の直後の member 名 `debian-binary` で識別され、汎用 `ar` より優先されます。
 検出できない場合 (raw deflate, brotli, snappy, lzma など) は `--format` で明示してください。
 
 ## ライセンス

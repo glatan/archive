@@ -71,6 +71,16 @@
 | reader / metadata bridge | `test_ar_decode_reader_roundtrip_integration`<br>`test_ar_add_entry_preserves_metadata` |
 | malformed input | `test_ar_decode_rejects_invalid_header_trailer` |
 
+### `deb.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| minimal package / member layout | `test_deb_decode_minimal` |
+| member compression variants | `test_deb_decode_compressed_members` |
+| invalid layout rejection | `test_deb_decode_rejects_invalid_layout` |
+| system `ar`+`tar`+`gzip` interop | `test_deb_decode_system_built_package` |
+| `bsdtar` member extraction interop | `test_deb_crate_built_extracted_by_bsdtar` |
+
 ### `brotli.rs`
 
 | Coverage | Test cases |

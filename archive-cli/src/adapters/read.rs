@@ -191,6 +191,39 @@ fn decode_items(
                     .collect(),
             ))
         }
+        Format::Deb => {
+            let package = archive_formats::deb::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            let version = package.version.clone();
+            Ok((
+                ContentKind::Archive,
+                package
+                    .members
+                    .into_iter()
+                    .map(|member| {
+                        let mut extra = vec![
+                            format!("deb-version={version}"),
+                            format!("deb-member={:?}", member.kind),
+                        ];
+                        if let Some(compression) = member.compression {
+                            extra.push(format!("compression={:?}", compression));
+                        }
+                        DecodedItem {
+                            payload: Some(member.data.clone()),
+                            summary: EntrySummary {
+                                path: member.name,
+                                kind: "file".to_owned(),
+                                size: Some(member.header.size),
+                                compressed_size: None,
+                                mtime: Some(member.header.mtime as i64),
+                                mode: Some(member.header.mode),
+                                extra,
+                            },
+                        }
+                    })
+                    .collect(),
+            ))
+        }
         Format::Zpaq => match archive_formats::zpaq::decode::decode(input) {
             Ok(entries) => Ok((
                 ContentKind::Archive,

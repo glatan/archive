@@ -8,6 +8,7 @@ pub enum Format {
     Tar,
     Cpio,
     Ar,
+    Deb,
     Zpaq,
     Zip,
     #[value(name = "7z")]
@@ -75,6 +76,7 @@ impl core::fmt::Display for Format {
             Self::Tar => "tar",
             Self::Cpio => "cpio",
             Self::Ar => "ar",
+            Self::Deb => "deb",
             Self::Zpaq => "zpaq",
             Self::Zip => "zip",
             Self::SevenZ => "7z",
@@ -191,6 +193,9 @@ pub fn detect_format(input: &[u8]) -> Option<Format> {
     if input.starts_with(&[0x1F, 0x9D]) {
         return Some(Format::Lzw);
     }
+    if input.starts_with(b"!<arch>\ndebian-binary") {
+        return Some(Format::Deb);
+    }
     if input.starts_with(b"!<arch>\n") {
         return Some(Format::Ar);
     }
@@ -233,6 +238,9 @@ pub fn scope_notes(format: Format) -> Vec<String> {
         Format::SevenZ => vec![
             "7z write support is intentionally limited to the current baseline one-folder subset".to_owned(),
         ],
+        Format::Deb => vec![
+            "deb extraction unpacks the data.tar payload; use --format ar for raw member access".to_owned(),
+        ],
         _ => Vec::new(),
     }
 }
@@ -243,6 +251,7 @@ pub const fn checksum_verified_by_default(format: Format) -> bool {
         Format::Tar
             | Format::Cpio
             | Format::Ar
+            | Format::Deb
             | Format::Zpaq
             | Format::Zip
             | Format::SevenZ
@@ -291,5 +300,21 @@ mod tests {
     #[test]
     fn detect_zlib() {
         assert_eq!(detect_format(&[0x78, 0x9C, 0, 0]), Some(Format::Zlib));
+    }
+
+    #[test]
+    fn detect_deb() {
+        assert_eq!(
+            detect_format(b"!<arch>\ndebian-binary/   rest"),
+            Some(Format::Deb)
+        );
+    }
+
+    #[test]
+    fn detect_plain_ar_not_deb() {
+        assert_eq!(
+            detect_format(b"!<arch>\nfile.o/         rest"),
+            Some(Format::Ar)
+        );
     }
 }

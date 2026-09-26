@@ -89,6 +89,35 @@ pub fn encode_with_dict(input: &[u8], dict: &Lz4Dict) -> Vec<u8> {
     encode_with_options_and_dict(input, BlockMaxSize::MB4, true, Some(dict))
 }
 
+/// Compress data into a single raw LZ4 block (LZ4 block format, no frame).
+///
+/// The block format does not record the decompressed size, so the
+/// decompression side must provide an output bound; see
+/// [`crate::compress::lz4::decode::decode_block`].
+///
+/// # Examples
+///
+/// ```
+/// use archive::compress::lz4::{decode, encode};
+///
+/// let data = b"Hello, block! Hello, block!";
+/// let block = encode::encode_block(data);
+/// let decoded = decode::decode_block(&block, data.len()).unwrap();
+/// assert_eq!(decoded, data);
+/// ```
+pub fn encode_block(input: &[u8]) -> Vec<u8> {
+    compress_block(input, &[])
+}
+
+/// Compress data into a single raw LZ4 block using a caller-provided
+/// dictionary as prefix history.
+///
+/// The matching decoder is
+/// [`crate::compress::lz4::decode::decode_block_with_dict`].
+pub fn encode_block_with_dict(input: &[u8], dict: &Lz4Dict) -> Vec<u8> {
+    compress_block(input, dict.tail())
+}
+
 /// Compress data using the LZ4 legacy frame format.
 ///
 /// Legacy frames use magic `0x184C2102` and have a simpler structure:

@@ -100,7 +100,7 @@ external tool が必要な pattern は `#[ignore]` 付きの placeholder とし�
 | `lrzip-*` (全 backend) | `original-compress` | 特定エラー (`unsupported compression type` / `unexpected end of input` / `match offset out of range`) は system lrzip 側の制限 |
 | `lzw`, `lzw-bits9` | `original-compress`, `original-decompress` | `ncompress` は空入力を exit status 2 で拒否する外部ツール固有の動作 |
 | `lzw-bits9` | `original-compress` | `compress -b 9` は一部入力でロッシーな roundtrip を起こす外部ツール自身のバグ |
-| `7z`, `7z-copy`, `7z-lzma`, `7z-ppmd` | `original-compress` | system `7z` は空入力を empty-stream エントリーとして格納するが、このエントリー種別は intentional exclusion |
+| `7z`, `7z-copy`, `7z-lzma`, `7z-ppmd`, `7z-deflate`, `7z-bzip2` | `original-compress` | system `7z` は空入力を empty-stream エントリーとして格納するが、このエントリー種別は intentional exclusion |
 
 ## Resource oracle の注意点
 
@@ -109,7 +109,7 @@ external tool が必要な pattern は `#[ignore]` 付きの placeholder とし�
 
 ## 対応アルゴリズム
 
-### 圧縮 (42 variant)
+### 圧縮 (43 variant)
 
 | グループ | アルゴリズム名 |
 |---------|------------|
@@ -121,19 +121,20 @@ external tool が必要な pattern は `#[ignore]` 付きの placeholder とし�
 | lzma | `lzma` |
 | xz | `xz`, `xz-fast`, `xz-best` |
 | lzw | `lzw`, `lzw-bits9` |
-| lz4 | `lz4`, `lz4-fast`, `lz4-best`, `lz4-small-block` |
+| lz4 | `lz4`, `lz4-fast`, `lz4-best`, `lz4-small-block`, `lz4-block` |
 | lzo | `lzo`, `lzo-fast`, `lzo-best` |
 | lrzip | `lrzip-lzma`, `lrzip-bzip2`, `lrzip-gzip`, `lrzip-lzo`, `lrzip-none`, `lrzip-zpaq` |
 | brotli | `brotli`, `brotli-fast`, `brotli-best` |
 | その他 | `snappy`, `rzip`, `zlib`, `zpaq`, `zpaq-level2`, `zpaq-level3` |
 
-### アーカイブ (15 variant)
+### アーカイブ (18 variant)
 
 | グループ | アルゴリズム名 |
 |---------|------------|
 | ar | `ar`, `ar-bsd` |
+| deb | `deb` |
 | zip | `zip`, `zip-store`, `zip-bzip2`, `zip-zstd` |
-| 7z | `7z`, `7z-copy`, `7z-lzma`, `7z-ppmd` |
+| 7z | `7z`, `7z-copy`, `7z-lzma`, `7z-ppmd`, `7z-deflate`, `7z-bzip2` |
 | tar | `tar-gnu`, `tar-ustar`, `tar-pax` |
 | cpio | `cpio`, `cpio-crc` |
 

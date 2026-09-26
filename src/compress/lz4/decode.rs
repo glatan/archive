@@ -98,6 +98,51 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
     decode_internal(input, None)
 }
 
+/// Decompress a single raw LZ4 block (LZ4 block format, no frame wrapper).
+///
+/// The block format does not record the decompressed size, so the caller
+/// must provide `max_output` as an upper bound.
+///
+/// # Errors
+///
+/// Returns `Error::OutputLimitExceeded` if the block would decompress
+/// beyond `max_output` bytes, or an error if the block is malformed.
+///
+/// # Examples
+///
+/// ```
+/// use archive::compress::lz4::{decode, encode};
+///
+/// let data = b"Hello, block!";
+/// let block = encode::encode_block(data);
+/// let decoded = decode::decode_block(&block, data.len()).unwrap();
+/// assert_eq!(decoded, data);
+/// ```
+pub fn decode_block(src: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
+    let mut dst = Vec::new();
+    decompress_block(src, &mut dst, &[], max_output)?;
+    Ok(dst)
+}
+
+/// Decompress a single raw LZ4 block using a caller-provided dictionary.
+///
+/// The dictionary content supplies prefix history, as in
+/// [`decode_with_dict`].
+///
+/// # Errors
+///
+/// Returns `Error::OutputLimitExceeded` if the block would decompress
+/// beyond `max_output` bytes, or an error if the block is malformed.
+pub fn decode_block_with_dict(
+    src: &[u8],
+    dict: &Lz4Dict,
+    max_output: usize,
+) -> Result<Vec<u8>, Error> {
+    let mut dst = Vec::new();
+    decompress_block(src, &mut dst, dict.tail(), max_output)?;
+    Ok(dst)
+}
+
 /// Decode LZ4 frame format data using a caller-provided dictionary.
 pub fn decode_with_dict(input: &[u8], dict: &Lz4Dict) -> Result<Vec<u8>, Error> {
     decode_internal(input, Some(dict))
@@ -249,7 +294,7 @@ fn decode_standard_frame(
                 history = dependent_history(dict, output);
                 history.as_slice()
             };
-            decompress_block(block_data, &mut block_output, prefix)?;
+            decompress_block(block_data, &mut block_output, prefix, usize::MAX)?;
             output.extend_from_slice(&block_output);
         }
 
@@ -324,7 +369,7 @@ fn decode_legacy_frame(input: &[u8], pos: &mut usize, output: &mut Vec<u8>) -> R
         *pos += block_size;
 
         let mut block_output = Vec::new();
-        decompress_block(block_data, &mut block_output, &[])?;
+        decompress_block(block_data, &mut block_output, &[], usize::MAX)?;
         output.extend_from_slice(&block_output);
     }
 
@@ -353,7 +398,16 @@ fn dependent_history(dict: Option<&Lz4Dict>, output: &[u8]) -> Vec<u8> {
 }
 
 /// Decompress a single LZ4 block into the output buffer.
-fn decompress_block(src: &[u8], dst: &mut Vec<u8>, dict: &[u8]) -> Result<(), Error> {
+///
+/// `max_dst_len` bounds the total bytes appended to `dst` beyond its
+/// current length; frame decoders pass `usize::MAX`.
+fn decompress_block(
+    src: &[u8],
+    dst: &mut Vec<u8>,
+    dict: &[u8],
+    max_block_output: usize,
+) -> Result<(), Error> {
+    let limit = dst.len().saturating_add(max_block_output);
     let mut sp = 0;
 
     while sp < src.len() {
@@ -380,6 +434,11 @@ fn decompress_block(src: &[u8], dst: &mut Vec<u8>, dict: &[u8]) -> Result<(), Er
         // Copy literals
         if sp + lit_len > src.len() {
             return Err(Error::UnexpectedEof);
+        }
+        if dst.len() + lit_len > limit {
+            return Err(Error::OutputLimitExceeded {
+                limit: max_block_output,
+            });
         }
         dst.extend_from_slice(&src[sp..sp + lit_len]);
         sp += lit_len;
@@ -419,6 +478,11 @@ fn decompress_block(src: &[u8], dst: &mut Vec<u8>, dict: &[u8]) -> Result<(), Er
             }
         }
         match_len += MIN_MATCH;
+        if dst.len() + match_len > limit {
+            return Err(Error::OutputLimitExceeded {
+                limit: max_block_output,
+            });
+        }
 
         // Copy match from dictionary prefix and/or current output.
         for _ in 0..match_len {
@@ -980,6 +1044,45 @@ mod tests {
         let compressed = super::super::encode::encode(data);
         let decoded = decode_bounded(&compressed, 1024).unwrap();
         assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn test_decode_block_roundtrip() {
+        let data = b"hello lz4 raw block test data hello lz4 raw block test data";
+        let block = super::super::encode::encode_block(data);
+        let decoded = decode_block(&block, data.len()).unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn test_decode_block_roundtrip_with_dict() {
+        let dict = Lz4Dict::new(b"shared dictionary prefix shared dictionary prefix");
+        let data = b"block payload referencing the dictionary prefix";
+        let block = super::super::encode::encode_block_with_dict(data, &dict);
+        let decoded = decode_block_with_dict(&block, &dict, data.len()).unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn test_decode_block_limit_exceeded() {
+        let data = b"hello lz4 raw block test data";
+        let block = super::super::encode::encode_block(data);
+        assert!(matches!(
+            decode_block(&block, data.len() - 1),
+            Err(Error::OutputLimitExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn test_decode_block_malformed() {
+        assert!(decode_block(&[0x50, 0x01], 64).is_err());
+        // Match offset pointing beyond available history.
+        assert!(decode_block(&[0x04, 0xFF, 0xFF], 64).is_err());
+    }
+
+    #[test]
+    fn test_decode_block_empty() {
+        assert_eq!(decode_block(&[], 64).unwrap(), Vec::<u8>::new());
     }
 
     #[test]

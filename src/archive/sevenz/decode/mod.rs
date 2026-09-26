@@ -65,6 +65,9 @@ const METHOD_7Z_AES: &[u8] = &[0x06, 0xF1, 0x07, 0x01];
 const METHOD_LZMA: &[u8] = &[0x03, 0x01, 0x01];
 const METHOD_LZMA2: &[u8] = &[0x21];
 const METHOD_PPMD: &[u8] = &[0x03, 0x04, 0x01];
+const METHOD_DEFLATE: &[u8] = &[0x04, 0x01, 0x08];
+const METHOD_DEFLATE64: &[u8] = &[0x04, 0x01, 0x09];
+const METHOD_BZIP2: &[u8] = &[0x04, 0x02, 0x02];
 const METHOD_BROTLI: &[u8] = &[0x04, 0xF7, 0x11, 0x01];
 
 /// A single decoded 7z entry.
@@ -942,6 +945,100 @@ mod tests {
         let folder = Folder {
             coders: vec![Coder {
                 method_id: METHOD_DELTA.to_vec(),
+                properties: Vec::new(),
+                num_in_streams: 2,
+                num_out_streams: 1,
+                input_index: 0,
+                output_index: 0,
+            }],
+            bind_pairs: Vec::new(),
+            packed_streams: vec![0, 1],
+            unpack_sizes: vec![5],
+            crc32: None,
+        };
+        let packed = [b"alpha".as_slice(), b"beta".as_slice()];
+        assert_eq!(
+            decode_folder(&folder, &packed, None),
+            Err(Error::Unsupported(
+                "7z: non-BCJ2 multi-input coder methods are not supported"
+            ))
+        );
+    }
+
+    #[test]
+    fn test_decode_folder_deflate_method() {
+        let payload = b"legacy deflate folder payload deflate deflate";
+        let compressed = crate::compress::deflate::encode::encode(
+            payload,
+            crate::compress::deflate::encode::Level::Default,
+        );
+        let folder = Folder {
+            coders: vec![Coder {
+                method_id: METHOD_DEFLATE.to_vec(),
+                properties: Vec::new(),
+                num_in_streams: 1,
+                num_out_streams: 1,
+                input_index: 0,
+                output_index: 0,
+            }],
+            bind_pairs: Vec::new(),
+            packed_streams: vec![0],
+            unpack_sizes: vec![payload.len() as u64],
+            crc32: None,
+        };
+        let packed = [compressed.as_slice()];
+        assert_eq!(decode_folder(&folder, &packed, None).unwrap(), payload);
+    }
+
+    #[test]
+    fn test_decode_folder_deflate64_method() {
+        // Deflate64 stored block: BFINAL=1, BTYPE=00, LEN=3, NLEN=!3, "abc".
+        let compressed = [0x01, 0x03, 0x00, 0xFC, 0xFF, b'a', b'b', b'c'];
+        let folder = Folder {
+            coders: vec![Coder {
+                method_id: METHOD_DEFLATE64.to_vec(),
+                properties: Vec::new(),
+                num_in_streams: 1,
+                num_out_streams: 1,
+                input_index: 0,
+                output_index: 0,
+            }],
+            bind_pairs: Vec::new(),
+            packed_streams: vec![0],
+            unpack_sizes: vec![3],
+            crc32: None,
+        };
+        let packed = [compressed.as_slice()];
+        assert_eq!(decode_folder(&folder, &packed, None).unwrap(), b"abc");
+    }
+
+    #[test]
+    fn test_decode_folder_bzip2_method() {
+        let payload = b"legacy bzip2 folder payload bzip2 bzip2";
+        let compressed = crate::compress::bzip2::encode::encode(payload);
+        let folder = Folder {
+            coders: vec![Coder {
+                method_id: METHOD_BZIP2.to_vec(),
+                properties: Vec::new(),
+                num_in_streams: 1,
+                num_out_streams: 1,
+                input_index: 0,
+                output_index: 0,
+            }],
+            bind_pairs: Vec::new(),
+            packed_streams: vec![0],
+            unpack_sizes: vec![payload.len() as u64],
+            crc32: None,
+        };
+        let packed = [compressed.as_slice()];
+        assert_eq!(decode_folder(&folder, &packed, None).unwrap(), payload);
+    }
+
+    #[test]
+    fn test_decode_folder_rejects_multi_input_deflate_coder() {
+        let folder = Folder {
+            coders: vec![Coder {
+                method_id: METHOD_DEFLATE.to_vec(),
                 properties: Vec::new(),
                 num_in_streams: 2,
                 num_out_streams: 1,

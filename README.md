@@ -29,6 +29,7 @@ README は概要と導線だけを持ちます。仕様準拠、互換性メモ�
 | アーカイブ | tar (UStar/GNU/PAX) | ✅ | ✅ |
 | アーカイブ | cpio (`odc` / SVR4 `newc` / `newcrc`) | ✅ | ✅ |
 | アーカイブ | ar (GNU/BSD) | ✅ | ✅ |
+| アーカイブ | deb (Debian package、read) | ✅ | — |
 | アーカイブ | zip | ✅ | ✅ |
 | アーカイブ | 7z | ✅ | ✅ |
 

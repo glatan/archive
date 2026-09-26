@@ -52,6 +52,16 @@ pub enum SevenZMethod {
     Lzma2 { dict_size: u32 },
     /// Use a single PPMdH / PPMd7 coder.
     Ppmd { order: u8, mem_size: u32 },
+    /// Use DEFLATE compression (7z method `04 01 08`).
+    Deflate {
+        /// DEFLATE compression level.
+        level: crate::compress::deflate::encode::Level,
+    },
+    /// Use BZip2 compression (7z method `04 02 02`).
+    Bzip2 {
+        /// BZip2 block size level (1-9).
+        level: u8,
+    },
     /// Use Brotli compression (requires `brotli` feature).
     #[cfg(feature = "brotli")]
     Brotli,
@@ -340,6 +350,10 @@ fn encode_method(input: &[u8], method: SevenZMethod) -> Result<Vec<u8>, Error> {
             let props = ppmd::Ppmd7Properties::new(order, mem_size)?;
             ppmd::encode(input, props, false)?
         }
+        SevenZMethod::Deflate { level } => crate::compress::deflate::encode::encode(input, level),
+        SevenZMethod::Bzip2 { level } => {
+            crate::compress::bzip2::encode::encode_with_level(input, level)
+        }
         #[cfg(feature = "brotli")]
         SevenZMethod::Brotli => crate::compress::brotli::encode::encode(input),
     })
@@ -544,6 +558,18 @@ fn encode_bcj2_stream(
                 num_out_streams: 1,
             }
         }
+        SevenZMethod::Deflate { .. } => CoderDescription {
+            method_id: vec![0x04, 0x01, 0x08],
+            properties: Vec::new(),
+            num_in_streams: 1,
+            num_out_streams: 1,
+        },
+        SevenZMethod::Bzip2 { .. } => CoderDescription {
+            method_id: vec![0x04, 0x02, 0x02],
+            properties: Vec::new(),
+            num_in_streams: 1,
+            num_out_streams: 1,
+        },
         #[cfg(feature = "brotli")]
         SevenZMethod::Brotli => CoderDescription {
             method_id: vec![0x04, 0xF7, 0x11, 0x01],
@@ -666,6 +692,24 @@ fn build_folder(
             coders.push(CoderDescription {
                 method_id: vec![0x03, 0x04, 0x01],
                 properties: props.to_sevenz_properties().to_vec(),
+                num_in_streams: 1,
+                num_out_streams: 1,
+            });
+            unpack_sizes.push(filtered_size);
+        }
+        SevenZMethod::Deflate { .. } => {
+            coders.push(CoderDescription {
+                method_id: vec![0x04, 0x01, 0x08],
+                properties: Vec::new(),
+                num_in_streams: 1,
+                num_out_streams: 1,
+            });
+            unpack_sizes.push(filtered_size);
+        }
+        SevenZMethod::Bzip2 { .. } => {
+            coders.push(CoderDescription {
+                method_id: vec![0x04, 0x02, 0x02],
+                properties: Vec::new(),
                 num_in_streams: 1,
                 num_out_streams: 1,
             });
@@ -1626,6 +1670,34 @@ mod tests {
         let entries = decode(&archive).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "brotli.txt");
+        assert_eq!(entries[0].data, payload);
+    }
+
+    #[test]
+    fn test_encode_deflate_method_roundtrip() {
+        let payload = b"Deflate method roundtrip test data for sevenz archive";
+        let mut encoder = SevenZEncoder::new();
+        encoder.set_method(SevenZMethod::Deflate {
+            level: crate::compress::deflate::encode::Level::Default,
+        });
+        encoder.add_file("deflate.txt", payload);
+        let archive = encoder.finish().unwrap();
+        let entries = decode(&archive).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "deflate.txt");
+        assert_eq!(entries[0].data, payload);
+    }
+
+    #[test]
+    fn test_encode_bzip2_method_roundtrip() {
+        let payload = b"BZip2 method roundtrip test data for sevenz archive";
+        let mut encoder = SevenZEncoder::new();
+        encoder.set_method(SevenZMethod::Bzip2 { level: 9 });
+        encoder.add_file("bzip2.txt", payload);
+        let archive = encoder.finish().unwrap();
+        let entries = decode(&archive).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "bzip2.txt");
         assert_eq!(entries[0].data, payload);
     }
 
