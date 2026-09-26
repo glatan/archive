@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | SquashFS binary format documentation (dr-emann.github.io/squashfs、SquashFS 4.0) |
-| 形式概要 | 96B superblock + metadata block 列 (inode/dir table) + lookup table (fragment/ID/export/xattr) + data block |
+| 形式概要 | 96B superblock + metadata block 列 (inode/dir table) + lookup table (fragment/ID を実読み、export/xattr は境界計算のみ) + data block |
 | 実装範囲 | **read のみ** (write は intentional scope 外) |
 
 参照: <https://dr-emann.github.io/squashfs/squashfs.html>
@@ -37,10 +37,10 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 15 | common inode header (type/mode/uid_idx/gid_idx/mtime/inode_number) | §5.1 | ✅ | `InodeHeader::parse` |
-| 16 | basic/extended directory inode → dir table 参照 (listing size = file_size - 3) | §5.2 | ✅ | `parses_subdir_symlink` |
-| 17 | basic/extended file inode → block sizes 配列 + fragment 参照 | §5.3 | ✅ | `parses_basic_image` |
-| 18 | basic/extended symlink inode → target path | §5.4 | ✅ | `parses_subdir_symlink` |
-| 19 | device / IPC inode (basic + extended) を受理 | §5.5/§5.6 | ✅ | `InodeBody::Device`/`Ipc` |
+| 16 | basic/extended directory inode → dir table 参照 (listing size = file_size - 3) | §5.2 | ⚠️ | `parses_subdir_symlink` (basic のみ検証。extended 分岐は実装済み・未テスト) |
+| 17 | basic/extended file inode → block sizes 配列 + fragment 参照 | §5.3 | ⚠️ | `parses_basic_image` (basic のみ検証。extended 分岐は実装済み・未テスト) |
+| 18 | basic/extended symlink inode → target path | §5.4 | ⚠️ | `parses_subdir_symlink` (basic のみ検証。extended 分岐は実装済み・未テスト) |
+| 19 | device / IPC inode (basic + extended) を受理 | §5.5/§5.6 | ⚠️ | `InodeBody::Device`/`Ipc` 分岐実装済み (テストなし) |
 | 20 | dir table: header (count-1 / start / base inode) + entry (offset / s16 diff / basic type / name_size-1 / name) | §6 | ✅ | `read_dir_listing` |
 | 21 | data block: bit24 = 非圧縮、size 0 = sparse zero block | §4 | ✅ | `read_data_block` |
 | 22 | fragment tail: frag table entry (start/size/unused) + frag_offset | §4/§7 | ✅ | `parses_fragment_tail` |
@@ -50,7 +50,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 24 | `mksquashfs` 生成 image (gzip/zstd/xz/lz4/lzo) の decode | system interop | ✅ | `test_squashfs_decode_mksquashfs_image` |
+| 24 | `mksquashfs` 生成 image (gzip/zstd/xz/lz4/lzo) の decode | system interop | ✅ | `test_squashfs_decode_mksquashfs_image` (mksquashfs 不在環境では実質 skip) |
 
 ### CLI / fuzz 連携
 

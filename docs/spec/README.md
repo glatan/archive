@@ -46,6 +46,9 @@
 | zim | openZIM ZIM file format (v5/v6) | 80B header + dirent + cluster。compressor: none/xz(lzma2)/zstd。extended cluster (8B offset) 対応。read のみ |
 | mtree | FreeBSD mtree(5) / libarchive mtree | 行指向テキスト manifest。/set・/unset、相対/full エントリ、8進エスケープ対応。コンテンツ非保持。read のみ |
 | warc | ISO 28500:2009 (WARC 1.0) / IIPC WARC 1.1 | version line + named-field + `Content-Length` block の record 列。LWS folding・拡張フィールド無視対応。`.warc.gz` は gzip 伸張後 decode。read のみ |
+| lha | lha header documentation (apphead / lzh_note) | header level 0/1/2、method `-lh0-` (stored) / `-lhd-` (dir) のみ。LZH 圧縮メソッドは非対応。write は level-0 のみ |
+| arj | ARJ technical note (ARJ 2.x) | `0x60 0xEA` signature + 30B 基本 header + CRC-32。method 0 (stored) / dir / label のみ。method 1-4・garbled は非対応。write は method-0 のみ |
+| arc | SEA ARC file format description | `0x1A` marker + method byte の member 列 (flat name、dir なし)。method 1/2 (stored) のみ。method 3+ は非対応。write は method-2 のみ |
 | xca | [MS-XCA] Xpress Compression Algorithm (Microsoft Open Specifications) | 3 バリアント: Plain LZ77 (32bit flag word + 13/3bit match word + nibble/byte/u16/u32 拡張長)、LZ77+Huffman (64KiB block + 512シンボル canonical Huffman + Pos1/Pos2/Pos 3ポインタビットストリーム)、LZNT1 (4KiB chunk + 位置依存 4-12bit displacement)。magic なし生コーデック |
 | lzf | liblzf format (lzfP.h コメント / ning compress LZFFormat) | ctrl byte セグメント: 0-31 リテラルラン (1-32B)、32+ マッチ (len 3-8 2B 形 / len 9-264 拡張 byte 付き 3B 形、offset 13bit)。magic なし生コーデック |
 | fastlz | FastLZ (fastlz.c リファレンス、MIT) | level 1/2 ストリーム (先頭バイト bit5 が L2 マーカー): ctrl<32 リテラル、len field+2 / field 7 で拡張 (L1: 1byte、L2: 0xff chain)、offset 13bit。L2 far match: u16 距離拡張 (8192-73727)。magic なし生コーデック |
@@ -121,7 +124,7 @@
 | zstd | [zstd.md](zstd.md) | 126 | 0 | 0 | 126 |
 | bzip2 | [bzip2.md](bzip2.md) | 68 | 0 | 0 | 68 |
 | lzip | [lzip.md](lzip.md) | 39 | 0 | 0 | 39 |
-| `.lzma` | [lzma_alone.md](lzma_alone.md) | 24 | 0 | 0 | 24 |
+| `.lzma` | [lzma_alone.md](lzma_alone.md) | 25 | 0 | 0 | 25 |
 | LZW | [lzw.md](lzw.md) | 21 | 0 | 0 | 21 |
 | LZ4 | [lz4.md](lz4.md) | 58 | 0 | 0 | 58 |
 | LZO | [lzo.md](lzo.md) | 39 | 0 | 0 | 39 |
@@ -133,9 +136,9 @@
 | fastlz | [fastlz.md](fastlz.md) | 22 | 0 | 0 | 22 |
 | zx0 | [zx0.md](zx0.md) | 20 | 0 | 0 | 20 |
 | lzrw1a | [lzrw1a.md](lzrw1a.md) | 20 | 0 | 0 | 20 |
-| lzsa | [lzsa.md](lzsa.md) | 31 | 0 | 0 | 31 |
-| lzxd | [lzxd.md](lzxd.md) | 22 | 0 | 0 | 22 |
-| cmpsc | [cmpsc.md](cmpsc.md) | 20 | 0 | 0 | 20 |
+| lzsa | [lzsa.md](lzsa.md) | 28 | 3 | 0 | 31 |
+| lzxd | [lzxd.md](lzxd.md) | 19 | 3 | 0 | 22 |
+| cmpsc | [cmpsc.md](cmpsc.md) | 19 | 1 | 0 | 20 |
 | rzip | [rzip.md](rzip.md) | 20 | 0 | 0 | 20 |
 | lrzip | [lrzip.md](lrzip.md) | 37 | 0 | 0 | 37 |
 | xz | [xz.md](xz.md) | 54 | 0 | 0 | 54 |
@@ -149,12 +152,15 @@
 | cpio | [cpio.md](cpio.md) | 35 | 0 | 0 | 35 |
 | ar | [ar.md](ar.md) | 26 | 0 | 0 | 26 |
 | deb | [deb.md](deb.md) | 20 | 0 | 3 | 23 |
-| rpm | [rpm.md](rpm.md) | 24 | 0 | 3 | 27 |
-| squashfs | [squashfs.md](squashfs.md) | 26 | 1 | 4 | 31 |
-| mscab | [mscab.md](mscab.md) | 20 | 0 | 5 | 25 |
-| zim | [zim.md](zim.md) | 16 | 0 | 5 | 21 |
-| mtree | [mtree.md](mtree.md) | 19 | 0 | 3 | 22 |
-| warc | [warc.md](warc.md) | 19 | 0 | 4 | 23 |
+| rpm | [rpm.md](rpm.md) | 23 | 1 | 3 | 27 |
+| squashfs | [squashfs.md](squashfs.md) | 22 | 5 | 4 | 31 |
+| mscab | [mscab.md](mscab.md) | 14 | 6 | 5 | 25 |
+| zim | [zim.md](zim.md) | 13 | 3 | 5 | 21 |
+| mtree | [mtree.md](mtree.md) | 18 | 1 | 3 | 22 |
+| warc | [warc.md](warc.md) | 16 | 3 | 4 | 23 |
+| lha | [lha.md](lha.md) | 17 | 1 | 3 | 21 |
+| arj | [arj.md](arj.md) | 17 | 1 | 4 | 22 |
+| arc | [arc.md](arc.md) | 13 | 1 | 3 | 17 |
 | ZIP | [zip.md](zip.md) | 150 | 0 | 3 | 153 |
 | 7z | [sevenz.md](sevenz.md) | 120 | 0 | 0 | 120 |
 
@@ -168,9 +174,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1156 |
-| ⚠️ 部分実装 | 0 |
-| ❌ 未実装 | 6 |
-| **合計** | **1162** |
+| ✅ 実装+テスト済み | 1505 |
+| ⚠️ 部分実装 | 29 |
+| ❌ 未実装 | 40 |
+| **合計** | **1574** |
 
-**全体カバー率**: 1156 / 1162 = **99.5%** (intentional exclusion 除外後: 1156 / 1156 = **100%**)
+**全体カバー率**: 1505 / 1574 = **95.6%** (intentional exclusion 除外後: 1505 / 1534 = **98.1%**)

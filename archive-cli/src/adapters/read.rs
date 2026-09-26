@@ -392,6 +392,72 @@ fn decode_items(
                     .collect(),
             ))
         }
+        Format::Lha => {
+            let entries = archive_formats::lha::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            Ok((
+                ContentKind::Archive,
+                entries
+                    .into_iter()
+                    .map(|entry| DecodedItem {
+                        payload: Some(entry.data.clone()),
+                        summary: EntrySummary {
+                            path: entry.name,
+                            kind: if entry.is_dir { "dir" } else { "file" }.to_owned(),
+                            size: Some(entry.data.len() as u64),
+                            compressed_size: None,
+                            mtime: None,
+                            mode: None,
+                            extra: Vec::new(),
+                        },
+                    })
+                    .collect(),
+            ))
+        }
+        Format::Arj => {
+            let entries = archive_formats::arj::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            Ok((
+                ContentKind::Archive,
+                entries
+                    .into_iter()
+                    .map(|entry| DecodedItem {
+                        payload: Some(entry.data.clone()),
+                        summary: EntrySummary {
+                            path: entry.name,
+                            kind: if entry.is_dir { "dir" } else { "file" }.to_owned(),
+                            size: Some(entry.data.len() as u64),
+                            compressed_size: None,
+                            mtime: None,
+                            mode: None,
+                            extra: Vec::new(),
+                        },
+                    })
+                    .collect(),
+            ))
+        }
+        Format::Arc => {
+            let entries = archive_formats::arc::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            Ok((
+                ContentKind::Archive,
+                entries
+                    .into_iter()
+                    .map(|entry| DecodedItem {
+                        payload: Some(entry.data.clone()),
+                        summary: EntrySummary {
+                            path: entry.name,
+                            kind: "file".to_owned(),
+                            size: Some(entry.data.len() as u64),
+                            compressed_size: None,
+                            mtime: None,
+                            mode: None,
+                            extra: Vec::new(),
+                        },
+                    })
+                    .collect(),
+            ))
+        }
         Format::Zpaq => match archive_formats::zpaq::decode::decode(input) {
             Ok(entries) => Ok((
                 ContentKind::Archive,

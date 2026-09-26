@@ -21,43 +21,49 @@ specifications or standards documents:
 - zlib: RFC 1950
 - zstd: RFC 8878
 - Brotli stream format: RFC 7932
-- FastLZ: format behavior documented by the reference `fastlz.c`
-  implementation (Ariya Hidayat, MIT license). Known-answer decode vectors
-  in tests/integration/fastlz.rs were produced by running the reference
-  encoder locally; no code was copied.
-- LZRW1-A: format documented by Ross Williams' public-domain `lzrw1-a.c`.
-  Known-answer decode vectors in tests/integration/lzrw1a.rs were produced
-  by running the reference encoder locally; no code was copied.
 - LZSA: format documentation (StreamFormat.md, BlockFormat_LZSA1.md,
   BlockFormat_LZSA2.md) and reference implementation by Emmanuel Marty
-  et al. (zlib license; src/matchfinder.c is CC0). Known-answer decode
-  vectors in tests/integration/lzsa.rs were produced by running the
-  reference lzsa tool v1.4.1 locally; no code was copied.
+  et al. (zlib license; src/matchfinder.c is CC0). Where the written
+  specification is ambiguous (extended-length marker values, the LZSA2
+  offset model), behavior was confirmed against the reference sources
+  (`expand_block_v*.c`, `shrink_block_v2.c`); the implementation is
+  spec-informed, with no code copied. Known-answer decode vectors in
+  tests/integration/lzsa.rs were produced by running the reference lzsa
+  tool v1.4.1 locally; no code was copied.
 - ZX0: format and implementation by Einar Saukas (BSD 3-Clause).
+  Known-answer decode vectors in tests/integration/zx0.rs were
+  produced by running the reference compressor (ZX0 v2.2)
+  locally; no code was copied.
+- lzxd: [MS-PATCH] LZX DELTA Compression and Decompression
+  (Microsoft Open Specifications,
+  https://learn.microsoft.com/openspecs/exchange_server_protocols/ms-patch).
   LZXD streams embedded in tests/integration/lzxd.rs were produced by a
   test-side encoder and validated against libmspack's LZXD decoder
   (LGPL 2.1); libmspack is used only as a local test-time reference,
   not linked or distributed. No code was copied.
-
-  CMPSC test dictionaries in tests/integration/cmpsc.rs were
-  hand-built from the z/Architecture POP Appendix D layouts.
-  SDL-Hercules-390/hyperion (QPL) was consulted only to confirm
-  interpretation of the public specification; no code was copied.
-
-  Known-answer decode vectors in tests/integration/zx0.rs were
-  produced by running the reference compressor (ZX0 v2.2)
-  locally; no code was copied.
-- LZF: liblzf format documentation in `lzfP.h`/`lzf_c.c`
-  (Marc Alexander Lehmann, BSD license) and the LZFFormat description
-  (ning/compress wiki)
+- cmpsc: IBM z/Architecture Principles of Operation (SA22-7832)
+  chapter 7 / appendix D and ESA/390 Data Compression (SA22-7208);
+  the PKWARE APPNOTE.TXT method-16 container format. CMPSC test
+  dictionaries in tests/integration/cmpsc.rs were hand-built from the
+  z/Architecture POP Appendix D layouts. SDL-Hercules-390/hyperion
+  (QPL) was consulted only to confirm interpretation of the public
+  specification; no code was copied.
+- LZF: format description in the `lzfP.h` header comments
+  (Marc Alexander Lehmann, BSD-2-Clause) and the LZFFormat description
+  (ning/compress wiki). `lzf_c.c` was consulted for behavior
+  confirmation only; no code was copied.
 - Snappy: Google snappy `format_description.txt` (raw block format) and
   `framing_format.txt` (framed stream format)
 - xz: `xz-file-format.txt` from Tukaani
 - lzip container: GNU lzip manual
-- LZMA-Alone `.lzma` container: `lzma-file-format.txt` from the XZ
-  documentation (public domain)
+- LZMA-Alone `.lzma` container: `lzma-file-format.txt` (2022-07-13)
+  from the XZ documentation (public domain). The system `xz` binary is
+  invoked only as a test-time interoperability oracle; it is not
+  linked or distributed.
 - LZ4: LZ4 frame format specification
-  (https://github.com/lz4/lz4/blob/dev/doc/lz4_Frame_format.md)
+  (https://github.com/lz4/lz4/blob/dev/doc/lz4_Frame_format.md) and
+  LZ4 block format specification
+  (https://github.com/lz4/lz4/blob/dev/doc/lz4_Block_format.md)
 - tar: POSIX.1-2001 UStar / GNU tar extensions / POSIX PAX extensions
 - cpio: POSIX `odc` / SVR4 `newc` / `newcrc`
 - ar: IEEE Std 1003.1 (POSIX) ar format / GNU ar extensions / BSD ar extensions
@@ -67,25 +73,54 @@ specifications or standards documents:
   format_lead, https://rpm-software-management.github.io/rpm/manual/)
   and rpm `lib/cpio.c` stripped payload behavior notes
 - squashfs: SquashFS binary format documentation
-  (https://dr-emann.github.io/squashfs/squashfs.html, CC BY-SA 4.0)
+  (https://dr-emann.github.io/squashfs/squashfs.html, CC BY-SA 4.0).
+  Test fixtures are produced by `mksquashfs` (squashfs-tools,
+  GPL-2.0-only), invoked only as a local test-time fixture generator;
+  it is not linked or distributed.
 - mscab: [MS-CAB] Cabinet File Format documentation
   (Microsoft Open Specifications,
-  https://learn.microsoft.com/openspecs/windows_protocols/ms-cab/)
+  https://learn.microsoft.com/openspecs/windows_protocols/ms-cab/).
+  MSZIP payloads reuse the existing RFC 1951 DEFLATE decoder
+  (`compress::deflate`); no new codec was ported.
 - xca: [MS-XCA] Xpress Compression Algorithm documentation
   (Microsoft Open Specifications,
   https://learn.microsoft.com/openspecs/windows_protocols/ms-xca/).
-  Known-answer decode vectors in tests/integration/xca.rs are drawn from
-  [MS-XCA] section 3 examples and from Windows RtlCompressBuffer output
-  reproduced in Samba lib/compression test suite (GPLv3+); the vectors
-  are byte-level test data only, with no code copied.
+  Some known-answer decode vectors in tests/integration/xca.rs
+  reproduce a Windows RtlCompressBuffer test fixture (input string and
+  compressed output bytes) from the Samba lib/compression test suite
+  (GPLv3+); the embedded material is byte-level test data only, with
+  no code copied, and GPLv3 section 13 permits combination with
+  AGPLv3-licensed work. Other vectors are drawn from [MS-XCA]
+  section 3 examples or are self-constructed.
 - zim: openZIM Wiki "ZIM file format" documentation
-  (https://wiki.openzim.org/wiki/ZIM_file_format)
+  (https://wiki.openzim.org/wiki/ZIM_file_format, CC BY-SA)
 - mtree: FreeBSD mtree(5) manual page
-  (https://man.freebsd.org/cgi/man.cgi?mtree(5))
+  (https://man.freebsd.org/cgi/man.cgi?mtree(5)); dialect behavior
+  (optional `#mtree` signature, keyword handling) was cross-checked
+  against libarchive's `archive_read_support_format_mtree`
+  (BSD 2-Clause); no code was copied. The `bsdtar` binary is invoked
+  only as a test-time interoperability oracle.
 - warc: IIPC WARC 1.1 specification / ISO 28500:2009
   (https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1/)
+- lha: lha header documentation (apphead / lzh_note) as distributed
+  with GNU lha and documented at
+  https://github.com/jca02266/lha/blob/master/apphead.txt.jp;
+  header field facts only, no code or document text was copied.
+- arj: ARJ technical note (ARJ 2.x archiver file format description);
+  header field facts only, no code was copied.
+- arc: SEA ARC file format description
+  (wotsit.org "arc" format entry); member structure facts only,
+  no code was copied.
+  For lha/arj/arc interoperability checks the `bsdtar` (libarchive,
+  BSD 2-Clause) and `7z` binaries are invoked only as local test-time
+  oracles; they are not linked or distributed.
 - zip: PKWARE APPNOTE.TXT 6.3.10
 - 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00)
+- LZMA codec: LZMA algorithm specification (`lzma-specification.txt`)
+  from the LZMA SDK documentation
+- The system `7z` binary is invoked only as a local test-time
+  interoperability oracle (method round-trip vectors); it is not
+  linked or distributed.
 
 Where code or tests use constants/tables taken from these specifications, those
 values are treated as specification material rather than as third-party source
@@ -97,6 +132,35 @@ code.
 
 Some formats do not have a single RFC-grade specification and are implemented
 against de facto reference behavior:
+
+- Deflate64 (ZIP method 9 / 7z method ID 0x04 0x01 0x09)
+  - Reference: PKWARE APPNOTE.TXT registers the method ID only; the
+    bit-level structure (64 KiB window, distance codes 30/31, length
+    code 285) is defined by the de facto description embodied in
+    Info-ZIP `unzip`/`inflate.c` ("Info-ZIP APPNOTE additions")
+  - Repository scope: Rust reimplementation of the Deflate64 bit
+    structure; decode only, no upstream code copied
+
+- FastLZ
+  - Reference: `fastlz.c` reference implementation by Ariya Hidayat
+    (MIT license); there is no independent written specification, so
+    the reference implementation's behavior is the de facto format
+    definition
+  - Repository scope: Rust reimplementation informed by that observed
+    behavior; no code was copied
+  - Known-answer decode vectors in tests/integration/fastlz.rs were
+    produced by running the reference encoder locally
+
+- LZRW1-A
+  - Reference: Ross Williams' public-domain `lzrw1-a.c`; the format is
+    defined by that file's format description
+  - Repository scope: Rust reimplementation of the documented format;
+    the encoder's hash function (multiplier and shift structure)
+    follows the reference encoder's heuristic
+  - Known-answer decode vectors in tests/integration/lzrw1a.rs were
+    produced by running the reference encoder locally after a
+    small 64-bit portability patch; the patched source is not
+    included in this repository
 
 - bzip2
   - Reference: bzip2 1.0.x reference implementation by Julian Seward
@@ -179,6 +243,8 @@ against de facto reference behavior:
     their provenance documented alongside the source update
 
 - Cryptographic and checksum primitives (`src/util/`)
+  - CRC-16/ARC (`crc16.rs`): clean-room Rust, polynomial 0x8005
+    reflected; used by LHA and SEA ARC member CRCs
   - CRC-32 (IEEE, `crc32.rs`): clean-room Rust, polynomial from ISO 3309
   - CRC-32C (Castagnoli, `crc32c.rs`): clean-room Rust, polynomial 0x1EDC6F41
   - CRC-64/XZ (`crc64.rs`): clean-room Rust

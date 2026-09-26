@@ -12,14 +12,14 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 1 | CFHEADER: magic `MSCF`、reserved フィールド、cbCabinet、coffFiles、cFolders、cFiles、flags、setID、iCabinet (全て LE) | MS-CAB §2.1 | ✅ | `parses_stored_cabinet` |
-| 2 | version 1.x (major=1, minor<=3) を受理、それ以外は reject | MS-CAB §2.1 | ✅ | `rejects_bad_magic` 系 |
-| 3 | flags bit0/bit1 (prev/next cabinet) の ASCIIZ 文字列を skip して解釈 | MS-CAB §2.1 | ✅ | header_ext 処理 |
-| 4 | flags bit2 (RESERVE_PRESENT): cbCFHeader/cbCFFolder/cbCFData による reserved 領域 skip | MS-CAB §2.1 | ✅ | header_ext 処理 |
+| 1 | CFHEADER: magic `MSCF`、reserved フィールド、cbCabinet、coffFiles、cFolders、cFiles、flags (全て LE)。setID / iCabinet は単一 cabinet reader では読み飛ばし | MS-CAB §2.1 | ✅ | `parses_stored_cabinet` |
+| 2 | version 1.x (major=1, minor<=3) を受理、それ以外は reject | MS-CAB §2.1 | ⚠️ | 実装済み (未テスト。`rejects_bad_magic` は magic 破壊のみ検証) |
+| 3 | flags bit0/bit1 (prev/next cabinet) の ASCIIZ 文字列を skip して解釈 | MS-CAB §2.1 | ⚠️ | 実装済み (未テスト。header_ext 処理) |
+| 4 | flags bit2 (RESERVE_PRESENT): cbCFHeader/cbCFFolder/cbCFData による reserved 領域 skip | MS-CAB §2.1 | ⚠️ | 実装済み (未テスト。header_ext 処理) |
 | 5 | CFFOLDER: coffCabStart / cCFDATA / typeCompress (type は下位バイト) | MS-CAB §2.2 | ✅ | `Folder` |
-| 6 | CFFILE: cbFile / uoffFolderStart / iFolder / date / time / attribs / ASCIIZ 名 | MS-CAB §2.3 | ✅ | `FileRec` |
+| 6 | CFFILE: cbFile / uoffFolderStart / iFolder / attribs / ASCIIZ 名。date / time は読み飛ばし | MS-CAB §2.3 | ✅ | `FileRec` |
 | 7 | CFDATA: csum / cbData / cbUncomp + データ (cbCFData reserve 対応) | MS-CAB §2.4 | ✅ | `decompress_folder` |
-| 8 | csum 非ゼロ時は CFDATA チェックサム (LE u32 ワード XOR) を検証 | MS-CAB §2.4 | ✅ | `checksum` |
+| 8 | csum 非ゼロ時は CFDATA チェックサム (LE u32 ワード XOR) を検証 | MS-CAB §2.4 | ⚠️ | `checksum` 実装済み (不一致検出は未テスト) |
 
 ### 圧縮フォルダ
 
@@ -27,8 +27,8 @@
 |---|------|----------|-----------|----------------|
 | 9 | tcompTYPE_NONE (0): CFDATA は生データ | MS-CAB §3.1 | ✅ | `parses_stored_cabinet` |
 | 10 | tcompTYPE_MSZIP (1): 各 CFDATA は `CK` シグネチャ + raw DEFLATE stream | MS-CAB §3.1 | ✅ | `parses_mszip_cabinet` |
-| 11 | MSZIP の LZ77 window (32KiB) は同一フォルダ内の CFDATA ブロック間で継続 | MS-CAB §3.1 | ✅ | `mszip_history_spans_cfdata_blocks` |
-| 12 | cbUncomp と実出力サイズの不一致は reject | MS-CAB §2.4 | ✅ | `MSZIP block size mismatch` |
+| 11 | MSZIP の LZ77 window (32KiB) は同一フォルダ内の CFDATA ブロック間で継続 | MS-CAB §3.1 | ⚠️ | `mszip_history_spans_cfdata_blocks` は dict 引き渡し経路を通すのみで、クロスブロック後方参照の解決は未検証 |
+| 12 | cbUncomp と実出力サイズの不一致は reject | MS-CAB §2.4 | ⚠️ | `MSZIP block size mismatch` エラー実装済み (専用テストなし) |
 
 ### ファイル再構成
 
@@ -51,7 +51,7 @@
 |---|------|----------|-----------|----------------|
 | 18 | magic `MSCF` で `.cab` を自動検出 | CLI detection | ✅ | `detect_mscab` |
 | 19 | `archive extract` は entry を展開 | CLI semantics | ✅ | `extract.rs` の `Format::Mscab` アーム |
-| 20 | fuzz algorithm `mscab` (self-regression 含む) | fuzz harness | ✅ | `fuzz/src/algorithms.rs` |
+| 20 | fuzz algorithm `mscab` (self-regression 含む) | fuzz harness | ✅ | `fuzz/src/algorithms.rs`。fixture は stored のみ生成 (MSZIP/flags/csum パスは fuzz 対象外) |
 
 ### Intentional scope (実装対象外)
 

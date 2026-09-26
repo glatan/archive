@@ -433,6 +433,45 @@ fn self_pattern_body(algo: Algorithm) -> String {
             "    assert_eq!(entries[0].data, input);\n"
         )
         .to_string(),
+        Algorithm::Lha => concat!(
+            "    let mut e = archive::archive::lha::encode::LhaEncoder::new();
+",
+            "    e.add_file(\"fuzz_test\", input, 0).unwrap();
+",
+            "    let encoded = e.finish();
+",
+            "    let entries = archive::archive::lha::decode::decode(&encoded).unwrap();
+",
+            "    assert_eq!(entries[0].data, input);
+"
+        )
+        .to_string(),
+        Algorithm::Arj => concat!(
+            "    let mut e = archive::archive::arj::encode::ArjEncoder::new();
+",
+            "    e.add_file(\"fuzz_test\", input, 0).unwrap();
+",
+            "    let encoded = e.finish();
+",
+            "    let entries = archive::archive::arj::decode::decode(&encoded).unwrap();
+",
+            "    assert_eq!(entries[0].data, input);
+"
+        )
+        .to_string(),
+        Algorithm::Arc => concat!(
+            "    let mut e = archive::archive::arc::encode::ArcEncoder::new();
+",
+            "    e.add_file(\"fuzz_test\", input, 0, 0).unwrap();
+",
+            "    let encoded = e.finish();
+",
+            "    let entries = archive::archive::arc::decode::decode(&encoded).unwrap();
+",
+            "    assert_eq!(entries[0].data, input);
+"
+        )
+        .to_string(),
         Algorithm::Mtree => concat!(
             "    let mut m = Vec::new();\n",
             "    m.extend_from_slice(b\"#mtree\\n\");\n",

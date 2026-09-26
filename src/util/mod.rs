@@ -3,6 +3,10 @@
 /// CRC32 (IEEE) checksum computation.
 pub(crate) mod crc32;
 
+/// CRC-16/ARC checksum for LHA and SEA ARC.
+#[cfg(any(feature = "lha", feature = "arc"))]
+pub(crate) mod crc16;
+
 /// CRC32C (Castagnoli) checksum for Snappy framing.
 #[cfg(feature = "snappy")]
 pub(crate) mod crc32c;

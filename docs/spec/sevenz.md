@@ -162,7 +162,7 @@
 | 67b | RISC-V BCJ (0x04 0x0B) | Methods.txt: BCJ RISC-V | ✅ | decode + encode: `SevenZFilter::RiscVBcj` |
 | 68 | Brotli (0x04 0xF7 0x11 0x01) | Methods.txt: Brotli | ✅ | decode + encode (`brotli` feature): `SevenZMethod::Brotli`, `test_encode_brotli_method_roundtrip` |
 | 68a | Deflate (0x04 0x01 0x08): no properties, encode/decode | Methods.txt: Deflate | ✅ | `SevenZMethod::Deflate`, `test_decode_folder_deflate_method`, `test_encode_deflate_method_roundtrip`, system interop |
-| 68b | Deflate64 (0x04 0x01 0x09): no properties, decode-only | Methods.txt: Deflate64 | ✅ | `test_decode_folder_deflate64_method`, `test_sevenz_deflate64_method_system_decode_compat` |
+| 68b | Deflate64 (0x04 0x01 0x09): no properties, decode-only | Methods.txt: Deflate64 + PKWARE APPNOTE §5.6 (概要) + Info-ZIP deflate64 de facto 挙動 (距離コード 30/31・14bit 拡張・長さコード 285・16bit 拡張は APPNOTE 未記載のため参照実装観察に基づく) | ✅ | `test_decode_folder_deflate64_method`, `test_sevenz_deflate64_method_system_decode_compat` |
 | 68c | BZip2 (0x04 0x02 0x02): no properties, encode/decode | Methods.txt: BZip2 | ✅ | `SevenZMethod::Bzip2`, `test_decode_folder_bzip2_method`, `test_encode_bzip2_method_roundtrip`, system interop |
 | 69 | Unsupported encryption methods (0x06 prefix, 7zAES 以外) | Methods.txt | ✅ | `is_encryption_method()` → `Unsupported` |
 | 70 | Unknown coder method: reject | 7zFormat.txt: Folder / Coder | ✅ | `decode_coder()` → `Unsupported("7z: unsupported coder method")` |

@@ -8,7 +8,9 @@
 //! `&[u8] → Vec<u8>` interface as compression: a single file named
 //! `"fuzz_test"` is packed/unpacked as the archive payload.
 
-use archive::archive::{ar, cpio, deb, mscab, mtree, rpm, sevenz, squashfs, tar, warc, zim, zip};
+use archive::archive::{
+    ar, arc, arj, cpio, deb, lha, mscab, mtree, rpm, sevenz, squashfs, tar, warc, zim, zip,
+};
 use archive::compress::*;
 use archive::error::Error;
 use std::fmt;
@@ -79,6 +81,9 @@ pub enum Algorithm {
     Zim,
     Mtree,
     Warc,
+    Lha,
+    Arj,
+    Arc,
     Zip,
     ZipStore,
     ZipBzip2,
@@ -245,6 +250,9 @@ impl Algorithm {
             Algorithm::Zim => "zim",
             Algorithm::Mtree => "mtree",
             Algorithm::Warc => "warc",
+            Algorithm::Lha => "lha",
+            Algorithm::Arj => "arj",
+            Algorithm::Arc => "arc",
             Algorithm::Zip => "zip",
             Algorithm::ZipStore => "zip-store",
             Algorithm::ZipBzip2 => "zip-bzip2",
@@ -329,6 +337,9 @@ impl Algorithm {
             "zim" => Some(Algorithm::Zim),
             "mtree" => Some(Algorithm::Mtree),
             "warc" => Some(Algorithm::Warc),
+            "lha" | "lzh" => Some(Algorithm::Lha),
+            "arj" => Some(Algorithm::Arj),
+            "arc" => Some(Algorithm::Arc),
             "zip" => Some(Algorithm::Zip),
             "zip-store" => Some(Algorithm::ZipStore),
             "zip-bzip2" => Some(Algorithm::ZipBzip2),
@@ -445,6 +456,24 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
         Algorithm::Zim => zim_fixture(data),
         Algorithm::Mtree => mtree_fixture(data),
         Algorithm::Warc => warc_fixture(data),
+        Algorithm::Lha => {
+            let mut enc = lha::encode::LhaEncoder::new();
+            enc.add_file("fuzz_test", data, 0)
+                .expect("lha encode should succeed");
+            enc.finish()
+        }
+        Algorithm::Arj => {
+            let mut enc = arj::encode::ArjEncoder::new();
+            enc.add_file("fuzz_test", data, 0)
+                .expect("arj encode should succeed");
+            enc.finish()
+        }
+        Algorithm::Arc => {
+            let mut enc = arc::encode::ArcEncoder::new();
+            enc.add_file("fuzz_test", data, 0, 0)
+                .expect("arc encode should succeed");
+            enc.finish()
+        }
         Algorithm::Zip => {
             let mut enc = zip::encode::ZipEncoder::new();
             enc.add_file("fuzz_test", data);
@@ -636,6 +665,18 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
         }
         Algorithm::Warc => {
             let entries = warc::decode::decode(data)?;
+            Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::Lha => {
+            let entries = lha::decode::decode(data)?;
+            Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::Arj => {
+            let entries = arj::decode::decode(data)?;
+            Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::Arc => {
+            let entries = arc::decode::decode(data)?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
         }
         Algorithm::Zip | Algorithm::ZipStore | Algorithm::ZipBzip2 | Algorithm::ZipZstd => {
@@ -909,52 +950,6 @@ pub fn run_special_case(algo: Algorithm, label: &str, data: &[u8]) -> Result<Vec
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{Algorithm, decode_with, encode_with, run_special_case, special_case_labels};
-
-    #[test]
-    fn roundtrips_new_archive_targets() {
-        let payload = b"archive fuzz payload";
-        for algo in [
-            Algorithm::Ar,
-            Algorithm::ArBsd,
-            Algorithm::Zip,
-            Algorithm::ZipStore,
-            Algorithm::ZipBzip2,
-            Algorithm::ZipZstd,
-            Algorithm::SevenZ,
-            Algorithm::SevenZCopy,
-            Algorithm::SevenZLzma,
-            Algorithm::SevenZPpmd,
-        ] {
-            let encoded = encode_with(algo, payload);
-            let decoded = decode_with(algo, &encoded).unwrap();
-            assert_eq!(decoded, payload, "{algo}");
-        }
-    }
-
-    #[test]
-    fn special_cases_roundtrip_payload() {
-        let payload = b"special case payload";
-        for algo in [
-            Algorithm::Ar,
-            Algorithm::ArBsd,
-            Algorithm::TarGnu,
-            Algorithm::TarPax,
-            Algorithm::Cpio,
-            Algorithm::CpioCrc,
-            Algorithm::Zip,
-            Algorithm::SevenZ,
-        ] {
-            for &label in special_case_labels(algo) {
-                let decoded = run_special_case(algo, label, payload).unwrap();
-                assert_eq!(decoded, payload, "{algo}::{label}");
-            }
-        }
-    }
-}
-
 /// Build a minimal `.rpm` fixture: lead + signature header + package header
 /// (uncompressed cpio payload) wrapping a single `fuzz_test` file.
 fn rpm_fixture(data: &[u8]) -> Vec<u8> {
@@ -1203,4 +1198,50 @@ fn squashfs_fixture(data: &[u8]) -> Vec<u8> {
     out[80..88].copy_from_slice(&u64::MAX.to_le_bytes()); // fragment absent
     out[88..96].copy_from_slice(&u64::MAX.to_le_bytes()); // export absent
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Algorithm, decode_with, encode_with, run_special_case, special_case_labels};
+
+    #[test]
+    fn roundtrips_new_archive_targets() {
+        let payload = b"archive fuzz payload";
+        for algo in [
+            Algorithm::Ar,
+            Algorithm::ArBsd,
+            Algorithm::Zip,
+            Algorithm::ZipStore,
+            Algorithm::ZipBzip2,
+            Algorithm::ZipZstd,
+            Algorithm::SevenZ,
+            Algorithm::SevenZCopy,
+            Algorithm::SevenZLzma,
+            Algorithm::SevenZPpmd,
+        ] {
+            let encoded = encode_with(algo, payload);
+            let decoded = decode_with(algo, &encoded).unwrap();
+            assert_eq!(decoded, payload, "{algo}");
+        }
+    }
+
+    #[test]
+    fn special_cases_roundtrip_payload() {
+        let payload = b"special case payload";
+        for algo in [
+            Algorithm::Ar,
+            Algorithm::ArBsd,
+            Algorithm::TarGnu,
+            Algorithm::TarPax,
+            Algorithm::Cpio,
+            Algorithm::CpioCrc,
+            Algorithm::Zip,
+            Algorithm::SevenZ,
+        ] {
+            for &label in special_case_labels(algo) {
+                let decoded = run_special_case(algo, label, payload).unwrap();
+                assert_eq!(decoded, payload, "{algo}::{label}");
+            }
+        }
+    }
 }

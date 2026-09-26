@@ -21,7 +21,7 @@
 | 7 | 相対エントリで `type=dir` なら現在ディレクトリを push | Relative | ✅ | `relative_entries_descend_into_dirs` |
 | 8 | `..` は現在ディレクトリを pop、keyword は無視 | dot-dot | ✅ | `relative_entries_descend_into_dirs` |
 | 9 | `\ooo` 8進エスケープと `\\` を名前・値で decode | libarchive mtree escaping | ✅ | `octal_escapes_in_names` |
-| 10 | UTF-8 以外の入力は reject | crate エラー規約 | ✅ | `rejects_non_utf8` |
+| 10 | UTF-8 以外の入力は reject、空パス行は `InvalidData` | crate エラー規約 | ✅ | `rejects_non_utf8` |
 
 ### キーワード
 
@@ -30,7 +30,7 @@
 | 11 | `type=` : file/dir/link/block/char/fifo/socket を `MtreeKind` に写像、未知値は `Other` | Keywords/type | ✅ | `kind_of` |
 | 12 | `size` `mode`(8進) `uid` `gid` `uname` `gname` `time` `link` を構造化フィールドで公開 | Keywords | ✅ | `parses_basic_manifest` |
 | 13 | digest 系 (`md5`/`sha1`/`sha256`/`sha384`/`sha512`/`rmd160` + `*digest` 別名) を正規化名で `digests` に格納 | Keywords (digest synonyms) | ✅ | `digest_synonyms_normalised` |
-| 14 | 未知キーワードは値を保持せず無視 (warn 相当: パース継続) | Keywords ("warn about unrecognized") | ✅ | `entry_from` (無視) |
+| 14 | 未知キーワードは値を保持せず無視 (warn 相当: パース継続) | Keywords ("warn about unrecognized") | ⚠️ | `entry_from` 実装済み (無視を直接検証する専用テストなし) |
 
 ### システム相互運用
 
@@ -42,7 +42,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 16 | `#mtree` 先頭で `.mtree` を自動検出 | CLI detection | ✅ | `detect_mtree` |
+| 16 | `#mtree` 先頭で `.mtree` を自動検出 (signature 非保持の mtree は CLI 検出対象外。decoder 自体は signature なしでも受理) | CLI detection | ✅ | `detect_mtree` |
 | 17 | `archive read` は entry をメタデータ付きで一覧化 (payload なし) | CLI semantics | ✅ | `read.rs` の `Format::Mtree` アーム |
 | 18 | `archive extract` は Unsupported を返す (内容を持たない) | CLI semantics | ✅ | `extract.rs` の `Format::Mtree` アーム |
 | 19 | fuzz algorithm `mtree` | fuzz harness | ✅ | `fuzz/src/algorithms.rs` |

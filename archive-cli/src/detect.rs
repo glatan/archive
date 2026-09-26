@@ -15,6 +15,9 @@ pub enum Format {
     Zim,
     Mtree,
     Warc,
+    Lha,
+    Arj,
+    Arc,
     Zpaq,
     Zip,
     #[value(name = "7z")]
@@ -57,6 +60,9 @@ pub enum ArchiveFormat {
     Zip,
     #[value(name = "7z")]
     SevenZ,
+    Lha,
+    Arj,
+    Arc,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -112,6 +118,9 @@ impl core::fmt::Display for Format {
             Self::Zim => "zim",
             Self::Mtree => "mtree",
             Self::Warc => "warc",
+            Self::Lha => "lha",
+            Self::Arj => "arj",
+            Self::Arc => "arc",
             Self::Zpaq => "zpaq",
             Self::Zip => "zip",
             Self::SevenZ => "7z",
@@ -163,6 +172,9 @@ impl From<ArchiveFormat> for Format {
             ArchiveFormat::Zpaq => Self::Zpaq,
             ArchiveFormat::Zip => Self::Zip,
             ArchiveFormat::SevenZ => Self::SevenZ,
+            ArchiveFormat::Lha => Self::Lha,
+            ArchiveFormat::Arj => Self::Arj,
+            ArchiveFormat::Arc => Self::Arc,
         }
     }
 }
@@ -247,6 +259,20 @@ pub fn detect_format(input: &[u8]) -> Option<Format> {
     }
     if input.starts_with(&[0x1F, 0x9D]) {
         return Some(Format::Lzw);
+    }
+    if input.starts_with(&[0x60, 0xEA]) {
+        return Some(Format::Arj);
+    }
+    if input.len() >= 2 && input[0] == 0x1A && (1..=8).contains(&input[1]) {
+        return Some(Format::Arc);
+    }
+    if input.len() >= 21
+        && input[2] == b'-'
+        && input[3] == b'l'
+        && input[6] == b'-'
+        && input[20] <= 2
+    {
+        return Some(Format::Lha);
     }
     if input.starts_with(b"!<arch>\ndebian-binary") {
         return Some(Format::Deb);
@@ -340,6 +366,15 @@ pub fn scope_notes(format: Format) -> Vec<String> {
         Format::Warc => vec![
             "warc support is read-only; .warc.gz must be decompressed as gzip first".to_owned(),
         ],
+        Format::Lha => vec![
+            "lha support covers stored (-lh0-/-lhd-) entries only; LZH-compressed methods are rejected".to_owned(),
+        ],
+        Format::Arj => vec![
+            "arj support covers method-0 (stored) entries only; compressed/encrypted entries are rejected".to_owned(),
+        ],
+        Format::Arc => vec![
+            "arc support covers stored methods (1/2) only; packed/squeezed/crunched members are rejected".to_owned(),
+        ],
         Format::Xpress | Format::XpressHuff | Format::Lznt1 => vec![
             "MS-XCA streams carry no container header or magic; --format is required".to_owned(),
         ],
@@ -373,6 +408,9 @@ pub const fn checksum_verified_by_default(format: Format) -> bool {
             | Format::Ar
             | Format::Deb
             | Format::Zpaq
+            | Format::Lha
+            | Format::Arj
+            | Format::Arc
             | Format::Zip
             | Format::SevenZ
             | Format::Gzip
