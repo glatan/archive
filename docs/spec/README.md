@@ -46,6 +46,8 @@
 | zim | openZIM ZIM file format (v5/v6) | 80B header + dirent + cluster。compressor: none/xz(lzma2)/zstd。extended cluster (8B offset) 対応。read のみ |
 | mtree | FreeBSD mtree(5) / libarchive mtree | 行指向テキスト manifest。/set・/unset、相対/full エントリ、8進エスケープ対応。コンテンツ非保持。read のみ |
 | warc | ISO 28500:2009 (WARC 1.0) / IIPC WARC 1.1 | version line + named-field + `Content-Length` block の record 列。LWS folding・拡張フィールド無視対応。`.warc.gz` は gzip 伸張後 decode。read のみ |
+| xca | [MS-XCA] Xpress Compression Algorithm (Microsoft Open Specifications) | 3 バリアント: Plain LZ77 (32bit flag word + 13/3bit match word + nibble/byte/u16/u32 拡張長)、LZ77+Huffman (64KiB block + 512シンボル canonical Huffman + Pos1/Pos2/Pos 3ポインタビットストリーム)、LZNT1 (4KiB chunk + 位置依存 4-12bit displacement)。magic なし生コーデック |
+| lzf | liblzf format (lzfP.h コメント / ning compress LZFFormat) | ctrl byte セグメント: 0-31 リテラルラン (1-32B)、32+ マッチ (len 3-8 2B 形 / len 9-264 拡張 byte 付き 3B 形、offset 13bit)。magic なし生コーデック |
 | zip | APPNOTE.TXT 6.3.10 (PKWARE, 2024) | §4.3.7 Local File Header / §4.3.8 Data Descriptor / §4.3.12 Central Directory / §4.3.16 EOCD / §4.3.20-22 ZIP64 / §4.4.1 General Purpose Bit Flag (bit 0,3,11) / Compression method 0,1,2-5,6,8,12,14,93,95,98 / §4.5.2 Traditional PKZIP Encryption / WinZip AES-128/192/256 (extra field 0x9901) |
 | 7z | 7zFormat.txt (LZMA SDK 26.00) / Methods.txt | SignatureHeader (`37 7A BC AF 27 1C`) / StartHeader CRC / UINT64 VLI / Header property IDs 0x00-0x19 / Folder DAG with BindPair / Methods: Copy (0x00), LZMA (0x03 0x01 0x01), LZMA2 (0x21), PPMdH (0x03 0x04 0x01), Deflate (0x04 0x01 0x08), Deflate64 (0x04 0x01 0x09), BZip2 (0x04 0x02 0x02), x86/PowerPC/ARM/ARM-Thumb/SPARC/ARM64/RISC-V BCJ, Delta (0x03), BCJ2 (0x03 0x03 0x01 0x1B), Brotli (0x04 0xF7 0x11 0x01), 7zAES (0x06 0xF1 0x07 0x01) / timestamp metadata (ctime/atime/mtime) |
 
@@ -120,6 +122,8 @@
 | Snappy | [snappy.md](snappy.md) | 35 | 0 | 0 | 35 |
 | Brotli | [brotli.md](brotli.md) | 51 | 0 | 0 | 51 |
 | zlib | [zlib.md](zlib.md) | 19 | 0 | 0 | 19 |
+| xca | [xca.md](xca.md) | 40 | 0 | 0 | 40 |
+| lzf | [lzf.md](lzf.md) | 20 | 0 | 0 | 20 |
 | rzip | [rzip.md](rzip.md) | 20 | 0 | 0 | 20 |
 | lrzip | [lrzip.md](lrzip.md) | 37 | 0 | 0 | 37 |
 | xz | [xz.md](xz.md) | 54 | 0 | 0 | 54 |

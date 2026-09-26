@@ -21,6 +21,9 @@ specifications or standards documents:
 - zlib: RFC 1950
 - zstd: RFC 8878
 - Brotli stream format: RFC 7932
+- LZF: liblzf format documentation in `lzfP.h`/`lzf_c.c`
+  (Marc Alexander Lehmann, BSD license) and the LZFFormat description
+  (ning/compress wiki)
 - Snappy: Google snappy `format_description.txt` (raw block format) and
   `framing_format.txt` (framed stream format)
 - xz: `xz-file-format.txt` from Tukaani
@@ -42,6 +45,13 @@ specifications or standards documents:
 - mscab: [MS-CAB] Cabinet File Format documentation
   (Microsoft Open Specifications,
   https://learn.microsoft.com/openspecs/windows_protocols/ms-cab/)
+- xca: [MS-XCA] Xpress Compression Algorithm documentation
+  (Microsoft Open Specifications,
+  https://learn.microsoft.com/openspecs/windows_protocols/ms-xca/).
+  Known-answer decode vectors in tests/integration/xca.rs are drawn from
+  [MS-XCA] section 3 examples and from Windows RtlCompressBuffer output
+  reproduced in Samba lib/compression test suite (GPLv3+); the vectors
+  are byte-level test data only, with no code copied.
 - zim: openZIM Wiki "ZIM file format" documentation
   (https://wiki.openzim.org/wiki/ZIM_file_format)
 - mtree: FreeBSD mtree(5) manual page

@@ -123,6 +123,17 @@ pub mod zpaq;
 #[cfg(feature = "xz")]
 pub mod xz;
 
+/// Microsoft Xpress Compression Algorithms ([MS-XCA]):
+/// plain LZ77 ("Xpress"), LZ77+Huffman ("Xpress Huffman"), and LZNT1.
+///
+/// [MS-XCA]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-xca/
+#[cfg(feature = "xca")]
+pub mod xca;
+
+/// LZF compression and decompression (liblzf format).
+#[cfg(feature = "lzf")]
+pub mod lzf;
+
 /// Snappy compression and decompression.
 #[cfg(feature = "snappy")]
 pub mod snappy;

@@ -96,6 +96,12 @@ pub fn analyze_bytes(
                 .to_owned(),
         );
     }
+    if matches!(format, Format::Xpress | Format::XpressHuff | Format::Lznt1) {
+        notes.push(
+            "MS-XCA streams have no magic signature; auto-detection normally requires --format xpress, xpress-huff, or lznt1"
+                .to_owned(),
+        );
+    }
 
     Ok(Analysis {
         kind,
@@ -563,6 +569,30 @@ fn decode_items(
             path,
             input,
             compress_formats::deflate::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Xpress => decode_single_payload(
+            path,
+            input,
+            compress_formats::xca::lz77::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::XpressHuff => decode_single_payload(
+            path,
+            input,
+            compress_formats::xca::huffman::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Lznt1 => decode_single_payload(
+            path,
+            input,
+            compress_formats::xca::lznt1::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Lzf => decode_single_payload(
+            path,
+            input,
+            compress_formats::lzf::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
         Format::Xz => decode_single_payload(

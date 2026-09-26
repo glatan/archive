@@ -25,6 +25,10 @@ README は概要と導線だけを持ちます。仕様準拠、互換性メモ�
 | 圧縮 | lrzip (LZMA/bzip2/LZO/zlib/ZPAQ/none) | ✅ | ✅ |
 | 圧縮 | rzip (`.rz`) | ✅ | ✅ |
 | 圧縮 | Snappy | ✅ | ✅ |
+| 圧縮 | Xpress (MS-XCA Plain LZ77) | ✅ | ✅ |
+| 圧縮 | Xpress Huffman (MS-XCA LZ77+Huffman) | ✅ | ✅ |
+| 圧縮 | LZNT1 (MS-XCA) | ✅ | ✅ |
+| 圧縮 | LZF (liblzf) | ✅ | ✅ |
 | アーカイブ | ZPAQ (複数エントリ + crate-local journaling) | ✅ | ✅ |
 | アーカイブ | tar (UStar/GNU/PAX) | ✅ | ✅ |
 | アーカイブ | cpio (`odc` / SVR4 `newc` / `newcrc`) | ✅ | ✅ |

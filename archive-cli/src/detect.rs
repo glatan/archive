@@ -35,6 +35,11 @@ pub enum Format {
     Brotli,
     Deflate,
     Xz,
+    Xpress,
+    #[value(name = "xpress-huff")]
+    XpressHuff,
+    Lznt1,
+    Lzf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -67,6 +72,11 @@ pub enum CompressionFormat {
     Deflate,
     Xz,
     Zpaq,
+    Xpress,
+    #[value(name = "xpress-huff")]
+    XpressHuff,
+    Lznt1,
+    Lzf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +117,10 @@ impl core::fmt::Display for Format {
             Self::Brotli => "brotli",
             Self::Deflate => "deflate",
             Self::Xz => "xz",
+            Self::Xpress => "xpress",
+            Self::XpressHuff => "xpress-huff",
+            Self::Lznt1 => "lznt1",
+            Self::Lzf => "lzf",
         };
         f.write_str(name)
     }
@@ -153,6 +167,10 @@ impl From<CompressionFormat> for Format {
             CompressionFormat::Deflate => Self::Deflate,
             CompressionFormat::Xz => Self::Xz,
             CompressionFormat::Zpaq => Self::Zpaq,
+            CompressionFormat::Xpress => Self::Xpress,
+            CompressionFormat::XpressHuff => Self::XpressHuff,
+            CompressionFormat::Lznt1 => Self::Lznt1,
+            CompressionFormat::Lzf => Self::Lzf,
         }
     }
 }
@@ -288,6 +306,12 @@ pub fn scope_notes(format: Format) -> Vec<String> {
         ],
         Format::Warc => vec![
             "warc support is read-only; .warc.gz must be decompressed as gzip first".to_owned(),
+        ],
+        Format::Xpress | Format::XpressHuff | Format::Lznt1 => vec![
+            "MS-XCA streams carry no container header or magic; --format is required".to_owned(),
+        ],
+        Format::Lzf => vec![
+            "lzf streams carry no container header or magic; --format is required".to_owned(),
         ],
         _ => Vec::new(),
     }
