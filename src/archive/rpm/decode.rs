@@ -228,7 +228,9 @@ impl RpmHeaderSection {
             self.entry_bytes(entry, 4 * entry.count as usize)
                 .map(|bytes| {
                     bytes
-                        .chunks_exact(4)
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
                         .map(|c| i32::from_be_bytes([c[0], c[1], c[2], c[3]]))
                         .collect()
                 }),
@@ -245,7 +247,9 @@ impl RpmHeaderSection {
             self.entry_bytes(entry, 8 * entry.count as usize)
                 .map(|bytes| {
                     bytes
-                        .chunks_exact(8)
+                        .as_chunks::<8>()
+                        .0
+                        .iter()
                         .map(|c| {
                             i64::from_be_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]])
                         })

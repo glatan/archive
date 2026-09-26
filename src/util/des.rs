@@ -299,7 +299,7 @@ fn decrypt_cbc_8(
 
     let mut out = Vec::with_capacity(data.len());
     let mut prev = *iv;
-    for chunk in data.chunks_exact(BLOCK_SIZE) {
+    for chunk in data.as_chunks::<BLOCK_SIZE>().0 {
         let mut block = [0u8; 8];
         block.copy_from_slice(chunk);
         let current = block;
@@ -428,7 +428,7 @@ mod tests {
 
         let mut encrypted = Vec::new();
         let mut prev = iv;
-        for chunk in padded.chunks_exact(BLOCK_SIZE) {
+        for chunk in padded.as_chunks::<BLOCK_SIZE>().0 {
             let mut block = [0u8; 8];
             block.copy_from_slice(chunk);
             for i in 0..BLOCK_SIZE {
@@ -459,7 +459,7 @@ mod tests {
 
         let mut encrypted = Vec::new();
         let mut prev = iv;
-        for chunk in padded.chunks_exact(BLOCK_SIZE) {
+        for chunk in padded.as_chunks::<BLOCK_SIZE>().0 {
             let mut block = [0u8; 8];
             block.copy_from_slice(chunk);
             for i in 0..BLOCK_SIZE {

@@ -535,14 +535,14 @@ mod tests {
     #[test]
     fn test_undo_rle1_short_run() {
         // Only 3 copies — no count byte follows
-        let data = [b'A', b'A', b'A', b'B'];
+        let data = *b"AAAB";
         let result = undo_rle1(&data).unwrap();
         assert_eq!(result, [b'A', b'A', b'A', b'B']);
     }
 
     #[test]
     fn test_undo_mtf_rle2_simple() {
-        let seq_to_unseq = [b'A', b'B', b'C'];
+        let seq_to_unseq = *b"ABC";
         // Symbol 2 = MTF index 1 = 'B', then RUNA(0) = 1 copy of MTF[0] which is now 'B'
         let symbols = [2u16, 0]; // MTF[1]='B', then RUNA → 1×MTF[0]='B'
         let result = undo_mtf_rle2(&symbols, &seq_to_unseq, 3, 900_000).unwrap();
@@ -551,7 +551,7 @@ mod tests {
 
     #[test]
     fn test_undo_mtf_rle2_runb() {
-        let seq_to_unseq = [b'X'];
+        let seq_to_unseq = *b"X";
         // bijective base-2: RUNA,RUNB = (0+1)*1 + (1+1)*2 = 1 + 4 = 5
         let symbols = [0u16, 1]; // RUNA, RUNB
         let result = undo_mtf_rle2(&symbols, &seq_to_unseq, 1, 900_000).unwrap();
@@ -560,7 +560,7 @@ mod tests {
 
     #[test]
     fn test_undo_mtf_rle2_invalid_index() {
-        let seq_to_unseq = [b'A', b'B'];
+        let seq_to_unseq = *b"AB";
         // Symbol 10 → MTF index 9, but only 2 symbols in MTF list
         let symbols = [10u16];
         let result = undo_mtf_rle2(&symbols, &seq_to_unseq, 2, 900_000);
@@ -569,7 +569,7 @@ mod tests {
 
     #[test]
     fn test_undo_mtf_rle2_run_exceeds_block_size() {
-        let seq_to_unseq = [b'A'];
+        let seq_to_unseq = *b"A";
         // 30 RUNB symbols → run_len ≈ 2^31, far exceeds max_output of 100
         let symbols = vec![RUNB; 30];
         let result = undo_mtf_rle2(&symbols, &seq_to_unseq, 1, 100);
@@ -592,19 +592,19 @@ mod tests {
 
     #[test]
     fn test_invalid_magic() {
-        let data = [b'X', b'Z', b'h', b'9'];
+        let data = *b"XZh9";
         assert!(decode(&data).is_err());
     }
 
     #[test]
     fn test_invalid_block_size() {
-        let data = [b'B', b'Z', b'h', b'0'];
+        let data = *b"BZh0";
         assert!(decode(&data).is_err());
     }
 
     #[test]
     fn test_truncated_header() {
-        let data = [b'B', b'Z'];
+        let data = *b"BZ";
         assert!(decode(&data).is_err());
     }
 

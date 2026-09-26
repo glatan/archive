@@ -12,6 +12,7 @@
 //! the position where the decoder's 16-bit reads have reached.
 
 use alloc::vec::Vec;
+use core::cmp::Reverse;
 
 use crate::error::Error;
 
@@ -361,7 +362,7 @@ fn code_lengths(freq: &[u32; NUM_SYMBOLS]) -> [u8; NUM_SYMBOLS] {
 
     // Huffman tree via the two-queue method (stable: lower symbol index
     // wins ties), giving optimal code lengths.
-    active.sort_by(|a, b| (a.1, a.0).cmp(&(b.1, b.0)));
+    active.sort_by_key(|a| (a.1, a.0));
     let n = active.len();
     let total = 2 * n - 1;
     let mut node_freq = vec![0u64; total];
@@ -418,7 +419,7 @@ fn code_lengths(freq: &[u32; NUM_SYMBOLS]) -> [u8; NUM_SYMBOLS] {
     }
 
     // Redistribute lengths: least frequent symbols get the longest codes.
-    active.sort_by(|a, b| (b.1, b.0).cmp(&(a.1, a.0))); // freq desc, sym desc
+    active.sort_by_key(|a| Reverse((a.1, a.0))); // freq desc, sym desc
     let mut idx = 0usize;
     for l in (1..=MAX_BITS).rev() {
         for _ in 0..bl_count[l] {

@@ -420,16 +420,15 @@ impl<'a> Decoder<'a> {
             9 + lt.decode(&mut self.bits)? as usize
         };
 
-        let match_offset: u32;
-        match pos_slot {
-            0 => match_offset = self.r[0],
+        let match_offset: u32 = match pos_slot {
+            0 => self.r[0],
             1 => {
                 self.r.swap(0, 1);
-                match_offset = self.r[0];
+                self.r[0]
             }
             2 => {
                 self.r.swap(0, 2);
-                match_offset = self.r[0];
+                self.r[0]
             }
             _ => {
                 let (base, footer_bits) = slot_base_footer(pos_slot);
@@ -453,9 +452,9 @@ impl<'a> Decoder<'a> {
                 self.r[2] = self.r[1];
                 self.r[1] = self.r[0];
                 self.r[0] = real;
-                match_offset = real;
+                real
             }
-        }
+        };
 
         if match_len == 257 {
             // Extra length field ([MS-PATCH] 2.6.6).

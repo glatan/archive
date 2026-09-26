@@ -618,23 +618,25 @@ fn extract_entry(
     // may contain masked (zeroed) values. The real values come from the Local
     // File Header (or its ZIP64 extra field).
     let cd_masked = (record.flags & 0x2000) != 0;
-    let effective_crc32;
-    let effective_compressed_size;
-    let effective_uncompressed_size;
-    if cd_masked {
+
+    let (effective_crc32, effective_compressed_size, effective_uncompressed_size) = if cd_masked {
         // Use local file header values (with ZIP64 override if applicable)
-        effective_crc32 = local_crc32;
-        effective_compressed_size = local_zip64
-            .compressed_size
-            .unwrap_or(local_compressed_size as u64);
-        effective_uncompressed_size = local_zip64
-            .uncompressed_size
-            .unwrap_or(local_uncompressed_size as u64);
+        (
+            local_crc32,
+            local_zip64
+                .compressed_size
+                .unwrap_or(local_compressed_size as u64),
+            local_zip64
+                .uncompressed_size
+                .unwrap_or(local_uncompressed_size as u64),
+        )
     } else {
-        effective_crc32 = record.crc32;
-        effective_compressed_size = record.compressed_size;
-        effective_uncompressed_size = record.uncompressed_size;
-    }
+        (
+            record.crc32,
+            record.compressed_size,
+            record.uncompressed_size,
+        )
+    };
 
     let data_end = data_start
         .checked_add(
@@ -834,10 +836,10 @@ fn extract_entry(
             let props_bytes = &effective_compressed[4..4 + prop_size];
             let lzma_data = &effective_compressed[4 + prop_size..];
             let prop_byte = props_bytes[0];
-            let lc = (prop_byte % 9) as u8;
+            let lc = prop_byte % 9;
             let rem = prop_byte / 9;
-            let lp = (rem % 5) as u8;
-            let pb = (rem / 5) as u8;
+            let lp = rem % 5;
+            let pb = rem / 5;
             let dict_size = u32::from_le_bytes([
                 props_bytes[1],
                 props_bytes[2],

@@ -1557,7 +1557,7 @@ mod tests {
     #[test]
     fn test_brotli_encode_low_cardinality_literals_use_compressed_metablock() {
         let mut state = 0x1234_5678u32;
-        let alphabet = [b'A', b'B', b'C', b'D'];
+        let alphabet = *b"ABCD";
         let input: Vec<u8> = (0..1024)
             .map(|_| {
                 state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);

@@ -85,11 +85,10 @@ fn read_asciiz(data: &[u8], off: usize) -> Result<(String, usize), Error> {
 /// Per-MS-CAB checksum: XOR of little-endian u32 words, tail zero-padded.
 fn checksum(data: &[u8]) -> u32 {
     let mut sum = 0u32;
-    let mut chunks = data.chunks_exact(4);
-    for c in &mut chunks {
-        sum ^= u32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+    let (chunks, rem) = data.as_chunks::<4>();
+    for c in chunks {
+        sum ^= u32::from_le_bytes(*c);
     }
-    let rem = chunks.remainder();
     if !rem.is_empty() {
         let mut word = [0u8; 4];
         word[..rem.len()].copy_from_slice(rem);
