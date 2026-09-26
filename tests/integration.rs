@@ -3,6 +3,8 @@
     feature = "deb",
     feature = "rpm",
     feature = "squashfs",
+    feature = "mscab",
+    feature = "zim",
     feature = "cpio",
     feature = "tar",
     feature = "bzip2",
@@ -200,10 +202,18 @@ mod sevenz_tests;
 mod snappy_tests;
 #[path = "integration/squashfs.rs"]
 mod squashfs_tests;
+
+#[cfg(feature = "mscab")]
+#[path = "integration/mscab.rs"]
+mod mscab_tests;
+
 #[path = "integration/tar.rs"]
 mod tar_tests;
 #[path = "integration/xz.rs"]
 mod xz_tests;
+#[cfg(feature = "zim")]
+#[path = "integration/zim.rs"]
+mod zim_tests;
 #[cfg(feature = "zip")]
 #[path = "integration/zip.rs"]
 mod zip_tests;

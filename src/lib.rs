@@ -58,6 +58,8 @@
 //! | `deb` (default) | Debian binary package (`.deb`) read support |
 //! | `rpm` (default) | RPM package (`.rpm`) read support |
 //! | `squashfs` (default) | SquashFS image read support |
+//! | `mscab` (default) | Microsoft Cabinet (`.cab`) read support (MSZIP/stored) |
+//! | `zim` (default) | ZIM archive (`.zim`) read support |
 //! | `zip` | ZIP archive format |
 //! | `sevenz` | 7z archive format |
 //!
@@ -447,7 +449,7 @@ pub(crate) mod util;
 ))]
 pub mod compress;
 
-/// Archive formats: tar, cpio, ar, deb, rpm, squashfs, zpaq, zip, and 7z.
+/// Archive formats: tar, cpio, ar, deb, rpm, squashfs, mscab, zim, zpaq, zip, and 7z.
 #[cfg(any(
     feature = "tar",
     feature = "cpio",
@@ -455,6 +457,8 @@ pub mod compress;
     feature = "deb",
     feature = "rpm",
     feature = "squashfs",
+    feature = "mscab",
+    feature = "zim",
     feature = "zpaq",
     feature = "zip",
     feature = "sevenz",

@@ -8,7 +8,7 @@
 //! `&[u8] → Vec<u8>` interface as compression: a single file named
 //! `"fuzz_test"` is packed/unpacked as the archive payload.
 
-use archive::archive::{ar, cpio, deb, rpm, sevenz, squashfs, tar, zip};
+use archive::archive::{ar, cpio, deb, mscab, rpm, sevenz, squashfs, tar, zim, zip};
 use archive::compress::*;
 use archive::error::Error;
 use std::fmt;
@@ -64,6 +64,8 @@ pub enum Algorithm {
     Deb,
     Rpm,
     Squashfs,
+    Mscab,
+    Zim,
     Zip,
     ZipStore,
     ZipBzip2,
@@ -132,6 +134,8 @@ impl Algorithm {
         Algorithm::Deb,
         Algorithm::Rpm,
         Algorithm::Squashfs,
+        Algorithm::Mscab,
+        Algorithm::Zim,
         Algorithm::Zip,
         Algorithm::ZipStore,
         Algorithm::ZipBzip2,
@@ -200,6 +204,8 @@ impl Algorithm {
             Algorithm::Deb => "deb",
             Algorithm::Rpm => "rpm",
             Algorithm::Squashfs => "squashfs",
+            Algorithm::Mscab => "mscab",
+            Algorithm::Zim => "zim",
             Algorithm::Zip => "zip",
             Algorithm::ZipStore => "zip-store",
             Algorithm::ZipBzip2 => "zip-bzip2",
@@ -269,6 +275,8 @@ impl Algorithm {
             "deb" => Some(Algorithm::Deb),
             "rpm" => Some(Algorithm::Rpm),
             "squashfs" | "sqfs" => Some(Algorithm::Squashfs),
+            "mscab" | "cab" => Some(Algorithm::Mscab),
+            "zim" => Some(Algorithm::Zim),
             "zip" => Some(Algorithm::Zip),
             "zip-store" => Some(Algorithm::ZipStore),
             "zip-bzip2" => Some(Algorithm::ZipBzip2),
@@ -370,6 +378,8 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
         }
         Algorithm::Rpm => rpm_fixture(data),
         Algorithm::Squashfs => squashfs_fixture(data),
+        Algorithm::Mscab => mscab_fixture(data),
+        Algorithm::Zim => zim_fixture(data),
         Algorithm::Zip => {
             let mut enc = zip::encode::ZipEncoder::new();
             enc.add_file("fuzz_test", data);
@@ -536,6 +546,14 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
                 .into_iter()
                 .find(|e| e.kind == squashfs::decode::SquashfsKind::File)
                 .map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::Mscab => {
+            let entries = mscab::decode::decode(data)?;
+            Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::Zim => {
+            let entries = zim::decode::decode(data)?;
+            Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
         }
         Algorithm::Zip | Algorithm::ZipStore | Algorithm::ZipBzip2 | Algorithm::ZipZstd => {
             let entries = zip::decode::decode(data)?;
@@ -889,6 +907,101 @@ fn rpm_fixture(data: &[u8]) -> Vec<u8> {
     rpm.extend_from_slice(&header);
     rpm.extend_from_slice(&payload.finish());
     rpm
+}
+
+/// Build a minimal `.zim` archive with one stored cluster holding a
+/// single `C/fuzz_test` entry.
+fn zim_fixture(data: &[u8]) -> Vec<u8> {
+    let mime = b"text/plain\0\0";
+    // content dirent: mimetype 0, param 0, ns 'C', rev 0, cluster 0, blob 0
+    let mut dirent = Vec::new();
+    dirent.extend_from_slice(&0u16.to_le_bytes());
+    dirent.push(0);
+    dirent.push(b'C');
+    dirent.extend_from_slice(&0u32.to_le_bytes());
+    dirent.extend_from_slice(&0u32.to_le_bytes());
+    dirent.extend_from_slice(&0u32.to_le_bytes());
+    dirent.extend_from_slice(b"fuzz_test");
+    dirent.push(0);
+    dirent.push(0);
+
+    let dirent_pos = 80 + mime.len();
+    let path_ptr_pos = dirent_pos + dirent.len();
+    let title_ptr_pos = path_ptr_pos + 8;
+    let cluster_ptr_pos = title_ptr_pos + 4;
+    let cluster_pos = cluster_ptr_pos + 8;
+
+    // stored cluster: info=1, offsets [8, 8+len], blob data
+    let mut cluster = Vec::new();
+    cluster.push(1u8);
+    cluster.extend_from_slice(&8u32.to_le_bytes());
+    cluster.extend_from_slice(&((8 + data.len()) as u32).to_le_bytes());
+    cluster.extend_from_slice(data);
+    let checksum_pos = (cluster_pos + cluster.len()) as u64;
+
+    let mut out = Vec::new();
+    out.extend_from_slice(&0x044D_495Au32.to_le_bytes());
+    out.extend_from_slice(&5u16.to_le_bytes()); // major 5
+    out.extend_from_slice(&0u16.to_le_bytes());
+    out.extend_from_slice(&[0u8; 16]);
+    out.extend_from_slice(&1u32.to_le_bytes()); // entryCount
+    out.extend_from_slice(&1u32.to_le_bytes()); // clusterCount
+    out.extend_from_slice(&(path_ptr_pos as u64).to_le_bytes());
+    out.extend_from_slice(&(title_ptr_pos as u64).to_le_bytes());
+    out.extend_from_slice(&(cluster_ptr_pos as u64).to_le_bytes());
+    out.extend_from_slice(&80u64.to_le_bytes()); // mimeListPos
+    out.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
+    out.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
+    out.extend_from_slice(&checksum_pos.to_le_bytes());
+    out.extend_from_slice(mime);
+    out.extend_from_slice(&dirent);
+    out.extend_from_slice(&(dirent_pos as u64).to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&(cluster_pos as u64).to_le_bytes());
+    out.extend_from_slice(&cluster);
+    out
+}
+
+/// Build a minimal stored (uncompressed) `.cab` archive containing a
+/// single `fuzz_test` file.
+fn mscab_fixture(data: &[u8]) -> Vec<u8> {
+    let mut files_buf = Vec::new();
+    files_buf.extend_from_slice(&(data.len() as u32).to_le_bytes()); // cbFile
+    files_buf.extend_from_slice(&0u32.to_le_bytes()); // uoffFolderStart
+    files_buf.extend_from_slice(&0u16.to_le_bytes()); // iFolder
+    files_buf.extend_from_slice(&0u16.to_le_bytes()); // date
+    files_buf.extend_from_slice(&0u16.to_le_bytes()); // time
+    files_buf.extend_from_slice(&0u16.to_le_bytes()); // attribs
+    files_buf.extend_from_slice(b"fuzz_test");
+    files_buf.push(0);
+
+    let folders_off = 36usize;
+    let files_off = folders_off + 8;
+    let data_off = files_off + files_buf.len();
+    let cb_cabinet = (data_off + 8 + data.len()) as u32;
+
+    let mut out = Vec::with_capacity(cb_cabinet as usize);
+    out.extend_from_slice(b"MSCF");
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&cb_cabinet.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&(files_off as u32).to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&[3u8, 1u8]); // version 1.3
+    out.extend_from_slice(&1u16.to_le_bytes()); // cFolders
+    out.extend_from_slice(&1u16.to_le_bytes()); // cFiles
+    out.extend_from_slice(&0u16.to_le_bytes()); // flags
+    out.extend_from_slice(&0u16.to_le_bytes()); // setID
+    out.extend_from_slice(&0u16.to_le_bytes()); // iCabinet
+    out.extend_from_slice(&(data_off as u32).to_le_bytes()); // coffCabStart
+    out.extend_from_slice(&1u16.to_le_bytes()); // cCFDATA
+    out.extend_from_slice(&0u16.to_le_bytes()); // tcompTYPE_NONE
+    out.extend_from_slice(&files_buf);
+    out.extend_from_slice(&0u32.to_le_bytes()); // csum
+    out.extend_from_slice(&(data.len() as u16).to_le_bytes()); // cbData
+    out.extend_from_slice(&(data.len() as u16).to_le_bytes()); // cbUncomp
+    out.extend_from_slice(data);
+    out
 }
 
 /// Build a minimal uncompressed `.squashfs` image containing a single

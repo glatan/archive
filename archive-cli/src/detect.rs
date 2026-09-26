@@ -11,6 +11,8 @@ pub enum Format {
     Deb,
     Rpm,
     Squashfs,
+    Mscab,
+    Zim,
     Zpaq,
     Zip,
     #[value(name = "7z")]
@@ -81,6 +83,8 @@ impl core::fmt::Display for Format {
             Self::Deb => "deb",
             Self::Rpm => "rpm",
             Self::Squashfs => "squashfs",
+            Self::Mscab => "mscab",
+            Self::Zim => "zim",
             Self::Zpaq => "zpaq",
             Self::Zip => "zip",
             Self::SevenZ => "7z",
@@ -206,6 +210,12 @@ pub fn detect_format(input: &[u8]) -> Option<Format> {
     if input.starts_with(b"hsqs") {
         return Some(Format::Squashfs);
     }
+    if input.starts_with(b"MSCF") {
+        return Some(Format::Mscab);
+    }
+    if input.len() >= 4 && u32::from_le_bytes(input[..4].try_into().unwrap()) == 0x044D_495A {
+        return Some(Format::Zim);
+    }
     if input.starts_with(b"!<arch>\n") {
         return Some(Format::Ar);
     }
@@ -256,6 +266,12 @@ pub fn scope_notes(format: Format) -> Vec<String> {
         ],
         Format::Squashfs => vec![
             "squashfs support is read-only; LZMA1-compressed images are unsupported".to_owned(),
+        ],
+        Format::Mscab => vec![
+            "mscab support is read-only; Quantum/LZX folders and multi-cabinet sets are unsupported".to_owned(),
+        ],
+        Format::Zim => vec![
+            "zim support is read-only; entry names include the ZIM namespace prefix".to_owned(),
         ],
         _ => Vec::new(),
     }
@@ -337,6 +353,18 @@ mod tests {
     #[test]
     fn detect_squashfs() {
         assert_eq!(detect_format(b"hsqsrest"), Some(Format::Squashfs));
+    }
+
+    #[test]
+    fn detect_mscab() {
+        assert_eq!(detect_format(b"MSCFrest"), Some(Format::Mscab));
+    }
+
+    #[test]
+    fn detect_zim() {
+        let mut d = vec![0u8; 8];
+        d[..4].copy_from_slice(&0x044D_495Au32.to_le_bytes());
+        assert_eq!(detect_format(&d), Some(Format::Zim));
     }
 
     #[test]

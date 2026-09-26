@@ -106,6 +106,8 @@ magic bytes からフォーマットを自動検出します。
 `.deb` は `!<arch>\n` の直後の member 名 `debian-binary` で識別され、汎用 `ar` より優先されます。
 `.rpm` は Lead magic `ED AB EE DB` で識別されます (read のみ、署名検証は対象外)。
 `.squashfs` は `hsqs` magic で識別されます (read のみ、LZMA1 image は非対応)。
+`.cab` は `MSCF` magic で識別されます (read のみ、MSZIP/stored のみ対応、Quantum/LZX/マルチキャビネットは非対応)。
+`.zim` は magic `0x044D495A` で識別されます (read のみ、entry 名は namespace prefix 付き)。
 検出できない場合 (raw deflate, brotli, snappy, lzma など) は `--format` で明示してください。
 
 ## ライセンス

@@ -98,6 +98,22 @@
 |---|---|
 | `mksquashfs` 生成 image (gzip/zstd/xz/lz4/lzo) の decode | `test_squashfs_decode_mksquashfs_image` |
 
+### `mscab.rs`
+
+| 内容 | テスト名 |
+|------|----------|
+| MSZIP 圧縮 cabinet の decode | `test_mscab_decode_mszip_cabinet` |
+| crate 生成 cab の `bsdtar` 展開 interop | `test_mscab_bsdtar_interop` |
+
+### `zim.rs`
+
+| 内容 | テスト名 |
+|------|----------|
+| stored cluster decode | `test_zim_decode_stored_cluster` |
+| xz cluster decode | `test_zim_decode_xz_cluster` |
+| zstd cluster decode | `test_zim_decode_zstd_cluster` |
+| truncated header reject | `test_zim_rejects_truncated_header` |
+
 ### `brotli.rs`
 
 | Coverage | Test cases |

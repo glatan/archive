@@ -135,6 +135,8 @@ external tool が必要な pattern は `#[ignore]` 付きの placeholder とし�
 | deb | `deb` |
 | rpm | `rpm` |
 | squashfs | `squashfs` |
+| mscab | `mscab` |
+| zim | `zim` |
 | zip | `zip`, `zip-store`, `zip-bzip2`, `zip-zstd` |
 | 7z | `7z`, `7z-copy`, `7z-lzma`, `7z-ppmd`, `7z-deflate`, `7z-bzip2` |
 | tar | `tar-gnu`, `tar-ustar`, `tar-pax` |
