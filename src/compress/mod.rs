@@ -146,6 +146,16 @@ pub mod lzsa;
 #[cfg(feature = "zx0")]
 pub mod zx0;
 
+#[cfg(feature = "cmpsc")]
+pub mod cmpsc;
+/// LZX DELTA decompression ([MS-PATCH]): delta-compressed streams with
+/// caller-supplied reference data, used by Exchange Offline Address Book
+/// differential patches.
+///
+/// [MS-PATCH]: https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-patch/
+#[cfg(feature = "lzxd")]
+pub mod lzxd;
+
 /// LZF compression and decompression (liblzf format).
 #[cfg(feature = "lzf")]
 pub mod lzf;

@@ -86,7 +86,7 @@ archive compress bzip2 data.bin -o data.bin.bz2 --level 9
 archive compress lrzip data.bin -o data.bin.lrz --backend bzip2
 ```
 
-対応フォーマット: `gzip`, `zstd`, `bzip2`, `lzip`, `lzma`, `lzw`, `lz4`, `lzo`, `lrzip`, `rzip`, `zlib`, `snappy`, `brotli`, `deflate`, `xz`, `zpaq`, `xpress`, `xpress-huff`, `lznt1`, `lzf`, `fastlz`, `lzsa`, `lzsa2`, `lzrw1a`, `zx0`
+対応フォーマット: `gzip`, `zstd`, `bzip2`, `lzip`, `lzma`, `lzw`, `lz4`, `lzo`, `lrzip`, `rzip`, `zlib`, `snappy`, `brotli`, `deflate`, `xz`, `zpaq`, `xpress`, `xpress-huff`, `lznt1`, `lzf`, `fastlz`, `lzsa`, `lzsa2`, `lzrw1a`, `zx0`, `lzxd`, `cmpsc`
 
 `--level` は gzip (0-9), bzip2 (1-9), rzip (1-9), lzw (9-16), zpaq (1-3) で有効。
 `--backend` は lrzip のみ (`none`, `bzip2`, `lzo`, `lzma`, `gzip`, `zpaq`)。
@@ -111,7 +111,9 @@ magic bytes からフォーマットを自動検出します。
 `.mtree` は `#mtree` signature で識別されます (manifest 形式のため `read` でメタデータ一覧、`extract` は非対応)。
 `.warc` は `WARC/1.0` / `WARC/1.1` version line で識別されます (read のみ。`.warc.gz` は gzip として伸張してから読み込みます)。
 lzsa ストリームは `7b 9e` magic + traits byte で識別されます (raw ブロックは検出不可のため `--format` が必要)。
-検出できない場合 (raw deflate, brotli, snappy, lzma, xpress, xpress-huff, lznt1, lzf, fastlz, lzrw1a, zx0 など) は `--format` で明示してください。
+検出できない場合 (raw deflate, brotli, snappy, lzma, xpress, xpress-huff, lznt1, lzf, fastlz, lzrw1a, zx0, lzxd, cmpsc など) は `--format` で明示してください。
+lzxd の decode はストリーム外パラメータのウィンドウサイズに最大値 (32MiB) を仮定します (小さいウィンドウで作られたストリームも正しく decode できます)。
+cmpsc は PKWARE APPNOTE method-16 コンテナ (辞書ヘッダ + 展開辞書 + CMPSC データ) を扱います。encode は alphabet-only 辞書を使うためデータは実質非圧縮です。
 
 ## ライセンス
 

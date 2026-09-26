@@ -50,6 +50,8 @@ pub enum Algorithm {
     Lzsa,
     Lzsa2,
     Lzrw1a,
+    Lzxd,
+    Cmpsc,
     Lzo,
     LzoFast,
     LzoBest,
@@ -131,6 +133,8 @@ impl Algorithm {
         Algorithm::Lzsa,
         Algorithm::Lzsa2,
         Algorithm::Lzrw1a,
+        Algorithm::Lzxd,
+        Algorithm::Cmpsc,
         Algorithm::Lzo,
         Algorithm::LzoFast,
         Algorithm::LzoBest,
@@ -212,6 +216,8 @@ impl Algorithm {
             Algorithm::Lzsa => "lzsa",
             Algorithm::Lzsa2 => "lzsa2",
             Algorithm::Lzrw1a => "lzrw1a",
+            Algorithm::Lzxd => "lzxd",
+            Algorithm::Cmpsc => "cmpsc",
             Algorithm::Lzo => "lzo",
             Algorithm::LzoFast => "lzo-fast",
             Algorithm::LzoBest => "lzo-best",
@@ -294,6 +300,8 @@ impl Algorithm {
             "lzsa" => Some(Algorithm::Lzsa),
             "lzsa2" => Some(Algorithm::Lzsa2),
             "lzrw1a" => Some(Algorithm::Lzrw1a),
+            "lzxd" => Some(Algorithm::Lzxd),
+            "cmpsc" => Some(Algorithm::Cmpsc),
             "lzo" => Some(Algorithm::Lzo),
             "lzo-fast" => Some(Algorithm::LzoFast),
             "lzo-best" => Some(Algorithm::LzoBest),
@@ -380,6 +388,8 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
         Algorithm::Lzsa => lzsa::encode(data),
         Algorithm::Lzsa2 => lzsa::encode_lzsa2(data),
         Algorithm::Lzrw1a => lzrw1a::encode(data),
+        Algorithm::Lzxd => lzxd::encode(data),
+        Algorithm::Cmpsc => cmpsc::encode(data),
         Algorithm::Lzo | Algorithm::LzoFast | Algorithm::LzoBest => lzo::encode::encode(data),
         Algorithm::LrzipLzma => {
             lrzip::encode::encode_with(data, lrzip::encode::CompressionType::Lzma)
@@ -572,6 +582,8 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
         Algorithm::Zx0 => zx0::decode(data),
         Algorithm::Lzsa | Algorithm::Lzsa2 => lzsa::decode(data),
         Algorithm::Lzrw1a => lzrw1a::decode(data),
+        Algorithm::Lzxd => lzxd::decode_all(data, 1 << 25, &[], 64 << 20),
+        Algorithm::Cmpsc => cmpsc::decode(data, 64 << 20),
         Algorithm::Lzo | Algorithm::LzoFast | Algorithm::LzoBest => lzo::decode::decode(data),
         Algorithm::LrzipLzma
         | Algorithm::LrzipBzip2

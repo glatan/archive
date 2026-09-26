@@ -44,6 +44,8 @@ pub enum Format {
     Lzrw1a,
     Lzsa,
     Zx0,
+    Lzxd,
+    Cmpsc,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -86,6 +88,8 @@ pub enum CompressionFormat {
     Lzsa,
     Lzsa2,
     Zx0,
+    Lzxd,
+    Cmpsc,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,6 +138,8 @@ impl core::fmt::Display for Format {
             Self::Lzrw1a => "lzrw1a",
             Self::Lzsa => "lzsa",
             Self::Zx0 => "zx0",
+            Self::Lzxd => "lzxd",
+            Self::Cmpsc => "cmpsc",
         };
         f.write_str(name)
     }
@@ -188,6 +194,8 @@ impl From<CompressionFormat> for Format {
             CompressionFormat::Lzrw1a => Self::Lzrw1a,
             CompressionFormat::Lzsa | CompressionFormat::Lzsa2 => Self::Lzsa,
             CompressionFormat::Zx0 => Self::Zx0,
+            CompressionFormat::Lzxd => Self::Lzxd,
+            CompressionFormat::Cmpsc => Self::Cmpsc,
         }
     }
 }
@@ -346,6 +354,12 @@ pub fn scope_notes(format: Format) -> Vec<String> {
         ],
         Format::Lzrw1a => vec![
             "lzrw1a streams carry no magic; --format is required".to_owned(),
+        ],
+        Format::Lzxd => vec![
+            "lzxd streams carry no magic; --format is required (decoding assumes the maximum window size)".to_owned(),
+        ],
+        Format::Cmpsc => vec![
+            "cmpsc streams carry no magic; --format is required (payload must be an APPNOTE method-16 stream)".to_owned(),
         ],
         _ => Vec::new(),
     }
