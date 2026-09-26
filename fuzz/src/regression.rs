@@ -373,6 +373,34 @@ fn self_pattern_body(algo: Algorithm) -> String {
             "    assert_eq!(entries[0].data, input);\n"
         )
         .to_string(),
+        Algorithm::Warc => concat!(
+            "    let mut w = Vec::new();\n",
+            "    w.extend_from_slice(b\"WARC/1.1\\r\\n\");\n",
+            "    w.extend_from_slice(b\"WARC-Type: resource\\r\\n\");\n",
+            "    w.extend_from_slice(b\"WARC-Record-ID: <urn:uuid:fuzz>\\r\\n\");\n",
+            "    w.extend_from_slice(b\"WARC-Date: 2024-01-01T00:00:00Z\\r\\n\");\n",
+            "    w.extend_from_slice(b\"WARC-Target-URI: fuzz_test\\r\\n\");\n",
+            "    w.extend_from_slice(format!(\"Content-Length: {}\\r\\n\", input.len()).as_bytes());\n",
+            "    w.extend_from_slice(b\"\\r\\n\");\n",
+            "    w.extend_from_slice(input);\n",
+            "    w.extend_from_slice(b\"\\r\\n\\r\\n\");\n",
+            "    let encoded = w;\n",
+            "    let entries = archive::archive::warc::decode::decode(&encoded).unwrap();\n",
+            "    assert_eq!(entries[0].data, input);\n"
+        )
+        .to_string(),
+        Algorithm::Mtree => concat!(
+            "    let mut m = Vec::new();\n",
+            "    m.extend_from_slice(b\"#mtree\\n\");\n",
+            "    m.extend_from_slice(b\"/set type=file uid=0 gid=0 mode=644\\n\");\n",
+            "    m.extend_from_slice(b\"./fuzz_test size=\");\n",
+            "    m.extend_from_slice(input.len().to_string().as_bytes());\n",
+            "    m.extend_from_slice(b\"\\n\");\n",
+            "    let encoded = m;\n",
+            "    let entries = archive::archive::mtree::decode::decode(&encoded).unwrap();\n",
+            "    assert_eq!(entries[0].size, Some(input.len() as u64));\n"
+        )
+        .to_string(),
         Algorithm::Zim => concat!(
             "    let mime = b\"text/plain\\0\\0\";\n",
             "    let mut dirent = Vec::new();\n",

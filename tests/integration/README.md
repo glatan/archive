@@ -114,6 +114,20 @@
 | zstd cluster decode | `test_zim_decode_zstd_cluster` |
 | truncated header reject | `test_zim_rejects_truncated_header` |
 
+### `mtree.rs`
+
+| 内容 | テスト名 |
+|------|----------|
+| basic manifest decode (/set・相対 dir 遷移) | `test_mtree_decode_basic` |
+| `bsdtar --format=mtree` 生成マニフェストの decode interop | `test_mtree_bsdtar_interop` |
+
+### `warc.rs`
+
+| 内容 | テスト名 |
+|------|----------|
+| 複数 record ストリーム decode (warcinfo/response/revisit) | `test_warc_decode_records` |
+| gzip 伸張経路経由の `.warc.gz` decode | `test_warc_gzip_members` |
+
 ### `brotli.rs`
 
 | Coverage | Test cases |

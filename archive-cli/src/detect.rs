@@ -13,6 +13,8 @@ pub enum Format {
     Squashfs,
     Mscab,
     Zim,
+    Mtree,
+    Warc,
     Zpaq,
     Zip,
     #[value(name = "7z")]
@@ -85,6 +87,8 @@ impl core::fmt::Display for Format {
             Self::Squashfs => "squashfs",
             Self::Mscab => "mscab",
             Self::Zim => "zim",
+            Self::Mtree => "mtree",
+            Self::Warc => "warc",
             Self::Zpaq => "zpaq",
             Self::Zip => "zip",
             Self::SevenZ => "7z",
@@ -216,6 +220,12 @@ pub fn detect_format(input: &[u8]) -> Option<Format> {
     if input.len() >= 4 && u32::from_le_bytes(input[..4].try_into().unwrap()) == 0x044D_495A {
         return Some(Format::Zim);
     }
+    if input.starts_with(b"#mtree") {
+        return Some(Format::Mtree);
+    }
+    if input.starts_with(b"WARC/1.0\r\n") || input.starts_with(b"WARC/1.1\r\n") {
+        return Some(Format::Warc);
+    }
     if input.starts_with(b"!<arch>\n") {
         return Some(Format::Ar);
     }
@@ -272,6 +282,12 @@ pub fn scope_notes(format: Format) -> Vec<String> {
         ],
         Format::Zim => vec![
             "zim support is read-only; entry names include the ZIM namespace prefix".to_owned(),
+        ],
+        Format::Mtree => vec![
+            "mtree is a manifest format; entries carry metadata only, no file content".to_owned(),
+        ],
+        Format::Warc => vec![
+            "warc support is read-only; .warc.gz must be decompressed as gzip first".to_owned(),
         ],
         _ => Vec::new(),
     }
@@ -365,6 +381,16 @@ mod tests {
         let mut d = vec![0u8; 8];
         d[..4].copy_from_slice(&0x044D_495Au32.to_le_bytes());
         assert_eq!(detect_format(&d), Some(Format::Zim));
+    }
+
+    #[test]
+    fn detect_mtree() {
+        assert_eq!(detect_format(b"#mtree\n/set"), Some(Format::Mtree));
+    }
+
+    #[test]
+    fn detect_warc() {
+        assert_eq!(detect_format(b"WARC/1.1\r\nrest"), Some(Format::Warc));
     }
 
     #[test]

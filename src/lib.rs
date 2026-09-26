@@ -60,6 +60,8 @@
 //! | `squashfs` (default) | SquashFS image read support |
 //! | `mscab` (default) | Microsoft Cabinet (`.cab`) read support (MSZIP/stored) |
 //! | `zim` (default) | ZIM archive (`.zim`) read support |
+//! | `mtree` (default) | mtree(5) manifest read support |
+//! | `warc` (default) | WARC (`.warc`) record read support |
 //! | `zip` | ZIP archive format |
 //! | `sevenz` | 7z archive format |
 //!
@@ -449,7 +451,7 @@ pub(crate) mod util;
 ))]
 pub mod compress;
 
-/// Archive formats: tar, cpio, ar, deb, rpm, squashfs, mscab, zim, zpaq, zip, and 7z.
+/// Archive formats: tar, cpio, ar, deb, rpm, squashfs, mscab, zim, mtree, warc, zpaq, zip, and 7z.
 #[cfg(any(
     feature = "tar",
     feature = "cpio",
@@ -459,6 +461,8 @@ pub mod compress;
     feature = "squashfs",
     feature = "mscab",
     feature = "zim",
+    feature = "mtree",
+    feature = "warc",
     feature = "zpaq",
     feature = "zip",
     feature = "sevenz",

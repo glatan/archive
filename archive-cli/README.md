@@ -108,6 +108,8 @@ magic bytes からフォーマットを自動検出します。
 `.squashfs` は `hsqs` magic で識別されます (read のみ、LZMA1 image は非対応)。
 `.cab` は `MSCF` magic で識別されます (read のみ、MSZIP/stored のみ対応、Quantum/LZX/マルチキャビネットは非対応)。
 `.zim` は magic `0x044D495A` で識別されます (read のみ、entry 名は namespace prefix 付き)。
+`.mtree` は `#mtree` signature で識別されます (manifest 形式のため `read` でメタデータ一覧、`extract` は非対応)。
+`.warc` は `WARC/1.0` / `WARC/1.1` version line で識別されます (read のみ。`.warc.gz` は gzip として伸張してから読み込みます)。
 検出できない場合 (raw deflate, brotli, snappy, lzma など) は `--format` で明示してください。
 
 ## ライセンス
