@@ -42,6 +42,8 @@ pub enum Format {
     Lzf,
     Fastlz,
     Lzrw1a,
+    Lzsa,
+    Zx0,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -81,6 +83,9 @@ pub enum CompressionFormat {
     Lzf,
     Fastlz,
     Lzrw1a,
+    Lzsa,
+    Lzsa2,
+    Zx0,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,6 +132,8 @@ impl core::fmt::Display for Format {
             Self::Lzf => "lzf",
             Self::Fastlz => "fastlz",
             Self::Lzrw1a => "lzrw1a",
+            Self::Lzsa => "lzsa",
+            Self::Zx0 => "zx0",
         };
         f.write_str(name)
     }
@@ -179,6 +186,8 @@ impl From<CompressionFormat> for Format {
             CompressionFormat::Lzf => Self::Lzf,
             CompressionFormat::Fastlz => Self::Fastlz,
             CompressionFormat::Lzrw1a => Self::Lzrw1a,
+            CompressionFormat::Lzsa | CompressionFormat::Lzsa2 => Self::Lzsa,
+            CompressionFormat::Zx0 => Self::Zx0,
         }
     }
 }
@@ -259,6 +268,14 @@ pub fn detect_format(input: &[u8]) -> Option<Format> {
     {
         return Some(Format::Cpio);
     }
+    if input.len() >= 3
+        && input[0] == 0x7b
+        && input[1] == 0x9e
+        && input[2] & 0x1f == 0
+        && input[2] >> 5 <= 1
+    {
+        return Some(Format::Lzsa);
+    }
     if input.starts_with(b"zPQ") {
         return Some(Format::Zpaq);
     }
@@ -323,6 +340,9 @@ pub fn scope_notes(format: Format) -> Vec<String> {
         ],
         Format::Fastlz => vec![
             "fastlz streams carry no container header or magic; --format is required".to_owned(),
+        ],
+        Format::Zx0 => vec![
+            "zx0 streams carry no magic; --format is required".to_owned(),
         ],
         Format::Lzrw1a => vec![
             "lzrw1a streams carry no magic; --format is required".to_owned(),

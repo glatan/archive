@@ -8,7 +8,7 @@ name = "archive-fuzz"
 path = "src/main.rs"
 
 [dependencies]
-archive = { path = "..", features = ["std", "tar", "cpio", "ar", "deb", "rpm", "squashfs", "mscab", "zim", "mtree", "warc", "xca", "lzf", "fastlz", "lzrw1a", "gzip", "zstd", "bzip2", "lzip", "lzma-alone", "lzw", "lz4", "lzo", "lrzip", "xz", "zlib", "zpaq", "rzip", "snappy", "zip", "sevenz"] }
+archive = { path = "..", features = ["std", "tar", "cpio", "ar", "deb", "rpm", "squashfs", "mscab", "zim", "mtree", "warc", "xca", "lzf", "fastlz", "lzrw1a", "lzsa", "zx0", "gzip", "zstd", "bzip2", "lzip", "lzma-alone", "lzw", "lz4", "lzo", "lrzip", "xz", "zlib", "zpaq", "rzip", "snappy", "zip", "sevenz"] }
 sha3 = "0.10.8"
 blake3 = "1.8.3"
 rand = "0.10.0"

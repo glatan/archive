@@ -601,6 +601,18 @@ fn decode_items(
             compress_formats::fastlz::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
+        Format::Lzsa => decode_single_payload(
+            path,
+            input,
+            compress_formats::lzsa::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Zx0 => decode_single_payload(
+            path,
+            input,
+            compress_formats::zx0::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
         Format::Lzrw1a => decode_single_payload(
             path,
             input,

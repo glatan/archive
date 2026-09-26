@@ -138,6 +138,14 @@ pub mod fastlz;
 #[cfg(feature = "lzrw1a")]
 pub mod lzrw1a;
 
+/// LZSA stream and raw block compression/decompression.
+#[cfg(feature = "lzsa")]
+pub mod lzsa;
+
+/// ZX0 compression and decompression.
+#[cfg(feature = "zx0")]
+pub mod zx0;
+
 /// LZF compression and decompression (liblzf format).
 #[cfg(feature = "lzf")]
 pub mod lzf;

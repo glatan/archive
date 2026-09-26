@@ -30,7 +30,9 @@ README は概要と導線だけを持ちます。仕様準拠、互換性メモ�
 | 圧縮 | LZNT1 (MS-XCA) | ✅ | ✅ |
 | 圧縮 | LZF (liblzf) | ✅ | ✅ |
 | 圧縮 | FastLZ | ✅ | ✅ |
+| 圧縮 | ZX0 | ✅ | ✅ |
 | 圧縮 | LZRW1-A | ✅ | ✅ |
+| 圧縮 | LZSA (v1/v2 ストリーム + raw ブロック) | ✅ | ✅ |
 | アーカイブ | ZPAQ (複数エントリ + crate-local journaling) | ✅ | ✅ |
 | アーカイブ | tar (UStar/GNU/PAX) | ✅ | ✅ |
 | アーカイブ | cpio (`odc` / SVR4 `newc` / `newcrc`) | ✅ | ✅ |
