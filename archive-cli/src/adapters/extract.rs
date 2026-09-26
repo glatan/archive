@@ -386,6 +386,24 @@ pub fn extract_input(
             compress_formats::lzrw1a::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
+        Format::Lzsa => extract_single_payload(
+            input_path,
+            &base_dir,
+            format,
+            selected_paths,
+            overwrite,
+            compress_formats::lzsa::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Zx0 => extract_single_payload(
+            input_path,
+            &base_dir,
+            format,
+            selected_paths,
+            overwrite,
+            compress_formats::zx0::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
     }
 }
 

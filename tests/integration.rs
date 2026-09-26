@@ -25,7 +25,9 @@
     feature = "xca",
     feature = "lzf",
     feature = "fastlz",
-    feature = "lzrw1a"
+    feature = "lzrw1a",
+    feature = "lzsa",
+    feature = "zx0"
 ))]
 
 use archive::archive::ar;
@@ -60,6 +62,7 @@ use archive::compress::xca;
 use archive::compress::xz;
 use archive::compress::zlib;
 use archive::compress::zstd;
+use archive::compress::zx0;
 
 // ============================================================
 // 7z tests
@@ -222,13 +225,19 @@ mod fastlz_tests;
 #[path = "integration/lzf.rs"]
 mod lzf_tests;
 
+#[path = "integration/lzsa.rs"]
+mod lzsa_tests;
+
 #[path = "integration/lzrw1a.rs"]
 mod lzrw1a_tests;
+
 #[cfg(feature = "mtree")]
 #[path = "integration/mtree.rs"]
 mod mtree_tests;
 #[path = "integration/tar.rs"]
 mod tar_tests;
+#[path = "integration/zx0.rs"]
+mod zx0_tests;
 
 #[path = "integration/xca.rs"]
 mod xca_tests;

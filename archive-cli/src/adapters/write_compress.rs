@@ -158,6 +158,21 @@ pub fn compress_input(command: CompressCommand) -> Result<(), CliError> {
             reject_unexpected_backend(command.backend.as_deref(), "lzrw1a")?;
             compress::lzrw1a::encode(&input)
         }
+        CompressionFormat::Lzsa => {
+            reject_unexpected_level(command.level, "lzsa")?;
+            reject_unexpected_backend(command.backend.as_deref(), "lzsa")?;
+            compress::lzsa::encode(&input)
+        }
+        CompressionFormat::Lzsa2 => {
+            reject_unexpected_level(command.level, "lzsa2")?;
+            reject_unexpected_backend(command.backend.as_deref(), "lzsa2")?;
+            compress::lzsa::encode_lzsa2(&input)
+        }
+        CompressionFormat::Zx0 => {
+            reject_unexpected_level(command.level, "zx0")?;
+            reject_unexpected_backend(command.backend.as_deref(), "zx0")?;
+            compress::zx0::encode(&input)
+        }
     };
     fs::write(&command.output, encoded)?;
     Ok(())

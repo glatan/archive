@@ -142,6 +142,8 @@ external tool が必要な pattern は `#[ignore]` 付きの placeholder とし�
 | xca | `xpress`, `xpress-huff`, `lznt1` |
 | lzf | `lzf` |
 | fastlz | `fastlz` |
+| zx0 | `zx0` |
+| lzsa | `lzsa`, `lzsa2` |
 | lzrw1a | `lzrw1a` |
 | zip | `zip`, `zip-store`, `zip-bzip2`, `zip-zstd` |
 | 7z | `7z`, `7z-copy`, `7z-lzma`, `7z-ppmd`, `7z-deflate`, `7z-bzip2` |

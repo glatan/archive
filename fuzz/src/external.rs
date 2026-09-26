@@ -254,6 +254,8 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
         Algorithm::Xpress | Algorithm::XpressHuff | Algorithm::Lznt1 => None,
         Algorithm::Lzf => None,
         Algorithm::Fastlz => None,
+        Algorithm::Zx0 => None,
+        Algorithm::Lzsa | Algorithm::Lzsa2 => None,
         Algorithm::Lzrw1a => None,
         Algorithm::Zip => Some(ExternalSpec::Archive(ArchiveSpec::Zip {
             extra_compress_args: &["-q"],

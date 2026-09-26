@@ -28,6 +28,15 @@ specifications or standards documents:
 - LZRW1-A: format documented by Ross Williams' public-domain `lzrw1-a.c`.
   Known-answer decode vectors in tests/integration/lzrw1a.rs were produced
   by running the reference encoder locally; no code was copied.
+- LZSA: format documentation (StreamFormat.md, BlockFormat_LZSA1.md,
+  BlockFormat_LZSA2.md) and reference implementation by Emmanuel Marty
+  et al. (zlib license; src/matchfinder.c is CC0). Known-answer decode
+  vectors in tests/integration/lzsa.rs were produced by running the
+  reference lzsa tool v1.4.1 locally; no code was copied.
+- ZX0: format and implementation by Einar Saukas (BSD 3-Clause).
+  Known-answer decode vectors in tests/integration/zx0.rs were
+  produced by running the reference compressor (ZX0 v2.2)
+  locally; no code was copied.
 - LZF: liblzf format documentation in `lzfP.h`/`lzf_c.c`
   (Marc Alexander Lehmann, BSD license) and the LZFFormat description
   (ning/compress wiki)

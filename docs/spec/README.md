@@ -49,7 +49,9 @@
 | xca | [MS-XCA] Xpress Compression Algorithm (Microsoft Open Specifications) | 3 バリアント: Plain LZ77 (32bit flag word + 13/3bit match word + nibble/byte/u16/u32 拡張長)、LZ77+Huffman (64KiB block + 512シンボル canonical Huffman + Pos1/Pos2/Pos 3ポインタビットストリーム)、LZNT1 (4KiB chunk + 位置依存 4-12bit displacement)。magic なし生コーデック |
 | lzf | liblzf format (lzfP.h コメント / ning compress LZFFormat) | ctrl byte セグメント: 0-31 リテラルラン (1-32B)、32+ マッチ (len 3-8 2B 形 / len 9-264 拡張 byte 付き 3B 形、offset 13bit)。magic なし生コーデック |
 | fastlz | FastLZ (fastlz.c リファレンス、MIT) | level 1/2 ストリーム (先頭バイト bit5 が L2 マーカー): ctrl<32 リテラル、len field+2 / field 7 で拡張 (L1: 1byte、L2: 0xff chain)、offset 13bit。L2 far match: u16 距離拡張 (8192-73727)。magic なし生コーデック |
+| zx0 | ZX0 v2 (Einar Saukas、BSD-3) | interleaved control-bit/data-byte ストリーム: literal `0`+elias / rep-offset `0`+elias / new-offset `1`+elias(msb,反転)+LSB7bit+elias(len-1)。offset 最大 32640。magic なし生コーデック |
 | lzrw1a | LZRW1-A (lzrw1-a.c リファレンス、public domain) | 4B copy flag (1=verbatim) + グループ列: 各 2B control word (bit i=item i、0=リテラル/1=コピー) + 最大16アイテム。コピーアイテム 2B: len 3-18、offset 1-4095。magic なし生コーデック |
+| lzsa | LZSA (emmanuel-marty/lzsa、StreamFormat/BlockFormat_LZSA1/LZSA2、zlib) | `7b 9e` magic + traits + 64KiB フレーム + EOD。LZSA1 `<O|LLL|MMMM>` / LZSA2 `<XYZ|LL|MMM>` (rep-match・nibble ストリーム)。raw ブロック (-r 形式) も対応 |
 | zip | APPNOTE.TXT 6.3.10 (PKWARE, 2024) | §4.3.7 Local File Header / §4.3.8 Data Descriptor / §4.3.12 Central Directory / §4.3.16 EOCD / §4.3.20-22 ZIP64 / §4.4.1 General Purpose Bit Flag (bit 0,3,11) / Compression method 0,1,2-5,6,8,12,14,93,95,98 / §4.5.2 Traditional PKZIP Encryption / WinZip AES-128/192/256 (extra field 0x9901) |
 | 7z | 7zFormat.txt (LZMA SDK 26.00) / Methods.txt | SignatureHeader (`37 7A BC AF 27 1C`) / StartHeader CRC / UINT64 VLI / Header property IDs 0x00-0x19 / Folder DAG with BindPair / Methods: Copy (0x00), LZMA (0x03 0x01 0x01), LZMA2 (0x21), PPMdH (0x03 0x04 0x01), Deflate (0x04 0x01 0x08), Deflate64 (0x04 0x01 0x09), BZip2 (0x04 0x02 0x02), x86/PowerPC/ARM/ARM-Thumb/SPARC/ARM64/RISC-V BCJ, Delta (0x03), BCJ2 (0x03 0x03 0x01 0x1B), Brotli (0x04 0xF7 0x11 0x01), 7zAES (0x06 0xF1 0x07 0x01) / timestamp metadata (ctime/atime/mtime) |
 
@@ -127,7 +129,9 @@
 | xca | [xca.md](xca.md) | 40 | 0 | 0 | 40 |
 | lzf | [lzf.md](lzf.md) | 20 | 0 | 0 | 20 |
 | fastlz | [fastlz.md](fastlz.md) | 22 | 0 | 0 | 22 |
+| zx0 | [zx0.md](zx0.md) | 20 | 0 | 0 | 20 |
 | lzrw1a | [lzrw1a.md](lzrw1a.md) | 20 | 0 | 0 | 20 |
+| lzsa | [lzsa.md](lzsa.md) | 31 | 0 | 0 | 31 |
 | rzip | [rzip.md](rzip.md) | 20 | 0 | 0 | 20 |
 | lrzip | [lrzip.md](lrzip.md) | 37 | 0 | 0 | 37 |
 | xz | [xz.md](xz.md) | 54 | 0 | 0 | 54 |

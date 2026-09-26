@@ -55,7 +55,9 @@
 //! | `xca` (default) | MS-XCA Xpress / Xpress Huffman / LZNT1 codecs |
 //! | `lzf` (default) | LZF (liblzf) raw codec |
 //! | `fastlz` (default) | FastLZ raw codec (level 1/2) |
+//! | `zx0` (default) | ZX0 raw codec |
 //! | `lzrw1a` (default) | LZRW1-A raw codec |
+//! | `lzsa` (default) | LZSA stream / LZSA1 / LZSA2 raw codecs |
 //! | `tar` (default) | tar archive format |
 //! | `cpio` (default) | cpio archive format |
 //! | `ar` (default) | GNU/BSD `ar` archive format |
