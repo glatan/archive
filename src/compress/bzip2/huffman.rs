@@ -5,6 +5,7 @@
 
 use alloc::vec;
 use alloc::vec::Vec;
+use core::cmp::Reverse;
 
 use crate::error::Error;
 
@@ -227,7 +228,7 @@ pub(crate) fn build_huffman_table(freqs: &[u32], num_symbols: usize) -> HuffmanT
             (f, i)
         })
         .collect();
-    adjusted_freqs.sort_by(|a, b| b.0.cmp(&a.0));
+    adjusted_freqs.sort_by_key(|a| Reverse(a.0));
 
     if num_symbols == 1 {
         lengths[0] = 1;

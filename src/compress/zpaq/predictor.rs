@@ -468,24 +468,22 @@ impl Predictor {
                             stretch(self.components[i].prediction as u32);
                     }
                 }
-                SSE => {
-                    if !self.components[i].inputs.is_empty() {
-                        let inp = self.components[i].inputs[0];
-                        let ci = self.components[i].context_index;
-                        let ctx = if ci < self.z.h.len() { self.z.h[ci] } else { 0 };
-                        let idx = (ctx & self.components[i].mask) as usize;
-                        let p_in = if inp < n {
-                            squash(self.components[inp].prediction)
-                        } else {
-                            1u32 << 15
-                        };
-                        // Quantize input probability to 0..63
-                        let q = (p_in >> 10).min(63) as usize;
-                        let table_idx = idx * 64 + q;
-                        if table_idx < self.components[i].sse_table.len() {
-                            let p = self.components[i].sse_table[table_idx];
-                            self.components[i].prediction = stretch(p);
-                        }
+                SSE if !self.components[i].inputs.is_empty() => {
+                    let inp = self.components[i].inputs[0];
+                    let ci = self.components[i].context_index;
+                    let ctx = if ci < self.z.h.len() { self.z.h[ci] } else { 0 };
+                    let idx = (ctx & self.components[i].mask) as usize;
+                    let p_in = if inp < n {
+                        squash(self.components[inp].prediction)
+                    } else {
+                        1u32 << 15
+                    };
+                    // Quantize input probability to 0..63
+                    let q = (p_in >> 10).min(63) as usize;
+                    let table_idx = idx * 64 + q;
+                    if table_idx < self.components[i].sse_table.len() {
+                        let p = self.components[i].sse_table[table_idx];
+                        self.components[i].prediction = stretch(p);
                     }
                 }
                 _ => {}
@@ -603,25 +601,23 @@ impl Predictor {
                         self.components[i].state_table[idx] = next_state(state, bit);
                     }
                 }
-                SSE => {
-                    if !self.components[i].inputs.is_empty() {
-                        let inp = self.components[i].inputs[0];
-                        let ci = self.components[i].context_index;
-                        let ctx = if ci < self.z.h.len() { self.z.h[ci] } else { 0 };
-                        let idx = (ctx & self.components[i].mask) as usize;
-                        let p_in = if inp < n {
-                            squash(self.components[inp].prediction)
-                        } else {
-                            1u32 << 15
-                        };
-                        let q = (p_in >> 10).min(63) as usize;
-                        let table_idx = idx * 64 + q;
-                        if table_idx < self.components[i].sse_table.len() {
-                            let p = self.components[i].sse_table[table_idx];
-                            let error = ((y as i32) << 16) - p as i32;
-                            let new_p = (p as i32 + error / 4).clamp(1, 65534) as u32;
-                            self.components[i].sse_table[table_idx] = new_p;
-                        }
+                SSE if !self.components[i].inputs.is_empty() => {
+                    let inp = self.components[i].inputs[0];
+                    let ci = self.components[i].context_index;
+                    let ctx = if ci < self.z.h.len() { self.z.h[ci] } else { 0 };
+                    let idx = (ctx & self.components[i].mask) as usize;
+                    let p_in = if inp < n {
+                        squash(self.components[inp].prediction)
+                    } else {
+                        1u32 << 15
+                    };
+                    let q = (p_in >> 10).min(63) as usize;
+                    let table_idx = idx * 64 + q;
+                    if table_idx < self.components[i].sse_table.len() {
+                        let p = self.components[i].sse_table[table_idx];
+                        let error = ((y as i32) << 16) - p as i32;
+                        let new_p = (p as i32 + error / 4).clamp(1, 65534) as u32;
+                        self.components[i].sse_table[table_idx] = new_p;
                     }
                 }
                 _ => {}

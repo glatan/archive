@@ -661,7 +661,7 @@ mod tests {
 
     #[test]
     fn test_rle1_run_of_3_no_encoding() {
-        let data = [b'A', b'A', b'A', b'B'];
+        let data = *b"AAAB";
         let result = apply_rle1(&data);
         assert_eq!(result, [b'A', b'A', b'A', b'B']);
     }

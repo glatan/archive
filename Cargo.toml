@@ -2,6 +2,7 @@
 name = "archive"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 description = "Pure Rust archive and compression library (DEFLATE, gzip, zlib, zstd, bzip2, lzip, lzma, xz, LZW, LZ4, LZO, Snappy, Brotli, ZPAQ, rzip, lrzip, tar, cpio, ar, zip, 7z, deb, rpm, squashfs, mscab, zim, mtree, warc, lha, arj, arc, xca, lzf, fastlz, lzrw1a, lzsa, zx0, lzxd, cmpsc)"
 
 [features]
@@ -64,6 +65,7 @@ members = [".", "archive-cli", "fuzz"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.98.1"
 
 [workspace.dependencies]
 clap = { version = "4.6.0", features = ["derive"] }
