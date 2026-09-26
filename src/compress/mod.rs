@@ -137,8 +137,9 @@ pub mod brotli;
 /// Deflate64 (Enhanced Deflating) decompression.
 ///
 /// Extends DEFLATE with a 64KB window, two additional distance codes,
-/// and a longer maximum match length. Used as ZIP method 9.
-#[cfg(feature = "zip")]
+/// and a longer maximum match length. Used as ZIP method 9 and 7z
+/// method `04 01 09`.
+#[cfg(any(feature = "zip", feature = "sevenz"))]
 pub(crate) mod deflate64;
 
 /// Shared PPMd (PPMd var.H / PPMdH) codec, currently used by 7z.

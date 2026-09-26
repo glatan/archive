@@ -201,6 +201,48 @@ mod bench_sevenz {
 }
 
 // ---------------------------------------------------------------------------
+// deb
+// ---------------------------------------------------------------------------
+#[cfg(feature = "deb")]
+mod bench_deb {
+    use super::*;
+    use archive::archive::{ar, deb, tar};
+
+    fn encode_deb(entries: &[(String, Vec<u8>)]) -> Vec<u8> {
+        let mut data_tar = tar::encode::TarEncoder::new();
+        for (name, data) in entries {
+            data_tar.add_file(name, data);
+        }
+        let mut control_tar = tar::encode::TarEncoder::new();
+        control_tar.add_file("./control", b"Package: bench\n");
+        let mut enc = ar::encode::ArEncoder::new();
+        enc.add_file("debian-binary", b"2.0\n");
+        enc.add_file("control.tar", &control_tar.finish());
+        enc.add_file("data.tar", &data_tar.finish());
+        enc.finish().unwrap()
+    }
+
+    pub fn bench(c: &mut Criterion) {
+        let mut g = c.benchmark_group("deb");
+        let entries = build_entries();
+        let deb_bytes = encode_deb(&entries);
+
+        g.throughput(Throughput::Bytes(deb_bytes.len() as u64));
+        g.bench_with_input(
+            BenchmarkId::new("decode", "50x4KiB"),
+            &deb_bytes,
+            |b, data| {
+                b.iter(|| {
+                    let package = deb::decode::decode(data).unwrap();
+                    package.data_entries().unwrap()
+                });
+            },
+        );
+        g.finish();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Stubs for disabled features
 // ---------------------------------------------------------------------------
 
@@ -216,6 +258,7 @@ macro_rules! bench_stub {
 bench_stub!(bench_tar, "tar");
 bench_stub!(bench_cpio, "cpio");
 bench_stub!(bench_ar, "ar");
+bench_stub!(bench_deb, "deb");
 bench_stub!(bench_zip, "zip");
 bench_stub!(bench_sevenz, "sevenz");
 
@@ -228,6 +271,7 @@ criterion_group!(
     bench_tar::bench,
     bench_cpio::bench,
     bench_ar::bench,
+    bench_deb::bench,
     bench_zip::bench,
     bench_sevenz::bench,
 );

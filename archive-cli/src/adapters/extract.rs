@@ -49,6 +49,14 @@ pub fn extract_input(
             }
             requested.finish()
         }
+        Format::Deb => {
+            let package = archive_formats::deb::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            let entries = package
+                .data_entries()
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            extract_tar_entries(&base_dir, entries, selected_paths, overwrite)
+        }
         Format::Zpaq => match archive_formats::zpaq::decode::decode(input) {
             Ok(entries) => {
                 let requested = RequestedPaths::new(selected_paths);

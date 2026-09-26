@@ -1,5 +1,6 @@
 #![cfg(all(
     feature = "ar",
+    feature = "deb",
     feature = "cpio",
     feature = "tar",
     feature = "bzip2",
@@ -20,6 +21,7 @@
 
 use archive::archive::ar;
 use archive::archive::cpio;
+use archive::archive::deb;
 #[cfg(feature = "sevenz")]
 use archive::archive::sevenz;
 use archive::archive::tar;
@@ -162,6 +164,8 @@ mod bzip2_tests;
 mod combined_tests;
 #[path = "integration/cpio.rs"]
 mod cpio_tests;
+#[path = "integration/deb.rs"]
+mod deb_tests;
 #[path = "integration/deflate.rs"]
 mod deflate_tests;
 #[path = "integration/generated/mod.rs"]

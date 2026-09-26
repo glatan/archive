@@ -112,6 +112,14 @@
       "version": "RFC 1321 (April 1992)",
       "url": "https://www.rfc-editor.org/rfc/rfc1321.txt",
       "filename": "rfc1321.txt"
+    },
+    {
+      "id": "deb-5",
+      "format": "deb",
+      "title": "deb — Debian binary package format",
+      "version": "deb(5) dpkg man page (unstable)",
+      "url": "https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html",
+      "filename": "deb_5_unstable.html"
     }
   ],
   "no_url_available": [

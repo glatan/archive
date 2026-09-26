@@ -39,6 +39,143 @@ fn test_sevenz_encode_system_extract_compat() {
     let _ = std::fs::remove_dir(&dir);
 }
 
+/// System `7z` generates an archive with a legacy codec (`-m0=<method>`) and
+/// this crate decodes it.
+#[cfg(feature = "sevenz")]
+fn system_method_decode_compat(method: &str, payload: &[u8]) {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let Some(cmd) = sevenz_binary() else {
+        return;
+    };
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_sevenz_{method}_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let input_path = dir.join("method.txt");
+    let archive_path = dir.join(format!("method-{method}.7z"));
+    std::fs::write(&input_path, payload).unwrap();
+
+    let created = Command::new(cmd)
+        .args([
+            "a",
+            "-t7z",
+            &format!("-m0={method}"),
+            archive_path.to_str().unwrap(),
+            "method.txt",
+        ])
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    if !created.status.success() {
+        let _ = std::fs::remove_dir_all(&dir);
+        panic!(
+            "{cmd} a -t7z -m0={method} failed: {}",
+            String::from_utf8_lossy(&created.stderr)
+        );
+    }
+
+    let archive = std::fs::read(&archive_path).unwrap();
+    let entries = sevenz::decode::decode(&archive).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "method.txt");
+    assert_eq!(entries[0].data, payload);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// This crate encodes an archive with a legacy codec and system `7z`
+/// extracts it.
+#[cfg(feature = "sevenz")]
+fn encoded_method_system_extract_compat(method: sevenz::encode::SevenZMethod, payload: &[u8]) {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let Some(cmd) = sevenz_binary() else {
+        return;
+    };
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_sevenz_enc_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let archive_path = dir.join("encoded.7z");
+
+    let mut encoder = sevenz::encode::SevenZEncoder::new();
+    encoder.set_method(method);
+    encoder.add_file("method.txt", payload);
+    let archive = encoder.finish().unwrap();
+    std::fs::write(&archive_path, &archive).unwrap();
+
+    let extracted = Command::new(cmd)
+        .args(["e", "-so", archive_path.to_str().unwrap(), "method.txt"])
+        .output()
+        .unwrap();
+
+    assert!(
+        extracted.status.success(),
+        "{cmd} e -so failed: {}",
+        String::from_utf8_lossy(&extracted.stderr)
+    );
+    assert_eq!(extracted.stdout, payload);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(feature = "sevenz")]
+#[test]
+fn test_sevenz_deflate_method_system_decode_compat() {
+    system_method_decode_compat(
+        "Deflate",
+        b"system deflate method payload payload payload payload",
+    );
+}
+
+#[cfg(feature = "sevenz")]
+#[test]
+fn test_sevenz_deflate64_method_system_decode_compat() {
+    system_method_decode_compat(
+        "Deflate64",
+        b"system deflate64 method payload payload payload payload",
+    );
+}
+
+#[cfg(feature = "sevenz")]
+#[test]
+fn test_sevenz_bzip2_method_system_decode_compat() {
+    system_method_decode_compat(
+        "BZip2",
+        b"system bzip2 method payload payload payload payload",
+    );
+}
+
+#[cfg(feature = "sevenz")]
+#[test]
+fn test_sevenz_deflate_method_system_extract_compat() {
+    encoded_method_system_extract_compat(
+        sevenz::encode::SevenZMethod::Deflate {
+            level: archive::compress::deflate::encode::Level::Default,
+        },
+        b"crate deflate method payload payload payload",
+    );
+}
+
+#[cfg(feature = "sevenz")]
+#[test]
+fn test_sevenz_bzip2_method_system_extract_compat() {
+    encoded_method_system_extract_compat(
+        sevenz::encode::SevenZMethod::Bzip2 { level: 9 },
+        b"crate bzip2 method payload payload payload",
+    );
+}
+
 #[cfg(feature = "sevenz")]
 #[test]
 fn test_sevenz_empty_archive_roundtrip_and_system_list() {

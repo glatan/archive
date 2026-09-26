@@ -166,7 +166,7 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
             decompress_cmd: "lz4",
             decompress_args: &["-dc"],
         })),
-        Algorithm::Lz4SmallBlock => None,
+        Algorithm::Lz4SmallBlock | Algorithm::Lz4Block => None,
         Algorithm::Lzo => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "lzop",
             compress_args: &["-c"],
@@ -244,6 +244,7 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
         Algorithm::Zlib => None,
         Algorithm::Zpaq | Algorithm::ZpaqLevel2 | Algorithm::ZpaqLevel3 => None,
         Algorithm::Ar | Algorithm::ArBsd => Some(ExternalSpec::Archive(ArchiveSpec::Ar)),
+        Algorithm::Deb => None,
         Algorithm::Zip => Some(ExternalSpec::Archive(ArchiveSpec::Zip {
             extra_compress_args: &["-q"],
         })),
@@ -262,6 +263,12 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
         })),
         Algorithm::SevenZPpmd => Some(ExternalSpec::Archive(ArchiveSpec::SevenZ {
             extra_compress_args: &["-m0=PPMd", "-y"],
+        })),
+        Algorithm::SevenZDeflate => Some(ExternalSpec::Archive(ArchiveSpec::SevenZ {
+            extra_compress_args: &["-m0=Deflate", "-y"],
+        })),
+        Algorithm::SevenZBzip2 => Some(ExternalSpec::Archive(ArchiveSpec::SevenZ {
+            extra_compress_args: &["-m0=BZip2", "-y"],
         })),
         Algorithm::TarGnu | Algorithm::TarUstar => {
             Some(ExternalSpec::Archive(ArchiveSpec::Tar { format_args: &[] }))

@@ -32,6 +32,8 @@ specifications or standards documents:
 - tar: POSIX.1-2001 UStar / GNU tar extensions / POSIX PAX extensions
 - cpio: POSIX `odc` / SVR4 `newc` / `newcrc`
 - ar: IEEE Std 1003.1 (POSIX) ar format / GNU ar extensions / BSD ar extensions
+- deb: `deb(5)` Debian binary package format (dpkg manual page,
+  https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html)
 - zip: PKWARE APPNOTE.TXT 6.3.10
 - 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00)
 

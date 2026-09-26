@@ -43,7 +43,7 @@
 //! | `lzip` (default) | lzip format (LZMA) |
 //! | `lzma-alone` (default) | LZMA-Alone `.lzma` format |
 //! | `lzw` (default) | LZW / Unix compress (`.Z`) format |
-//! | `lz4` (default) | LZ4 frame format |
+//! | `lz4` (default) | LZ4 frame format and raw block codec |
 //! | `lzo` (default) | LZO / lzop format |
 //! | `rzip` (default) | rzip long-range redundancy reduction |
 //! | `zlib` (default) | zlib format (auto-enables `deflate`) |
@@ -55,6 +55,7 @@
 //! | `tar` (default) | tar archive format |
 //! | `cpio` (default) | cpio archive format |
 //! | `ar` (default) | GNU/BSD `ar` archive format |
+//! | `deb` (default) | Debian binary package (`.deb`) read support |
 //! | `zip` | ZIP archive format |
 //! | `sevenz` | 7z archive format |
 //!
@@ -74,7 +75,7 @@
 //! - `lzip`, `lzma-alone`, `xz`, `lrzip`, and `sevenz` reuse the shared internal `compress::lzma` codec. `xz` and `sevenz` additionally use `compress::lzma2` for chunked LZMA2 paths. `xz` / `lrzip` / `lzma-alone` decoders accept arbitrary valid `lc/lp/pb` within the shared literal-context limit (`lc+lp<=4`); current encoders still emit the default `3/0/2` property tuple.
 //! - `brotli` decoder supports the full RFC 7932 stream format. The encoder currently emits uncompressed metablocks for baseline interoperability; LZ77 compressed metablock emission is not yet implemented.
 //! - `zip` supports baseline Store/Deflate read/write, ZIP64, Data Descriptor, CP437/UTF-8 metadata, traditional PKZIP encrypted entries, and WinZip AES-128/192/256 entry read/write.
-//! - `sevenz` supports plain/encoded headers, multi-folder decode for the current supported folder DAG subset, password-based 7zAES decode for those folders and encoded headers, x86 BCJ2 decode for supported DAG layouts, and bounded writing with one or two linear folders using LZMA2/LZMA/PPMdH/Copy plus x86 BCJ / Delta filters, including linear 7zAES file-content encryption and encoded-header write. Current direct `system 7z` interop coverage includes baseline one-folder archives, one-folder/two-folder PPMd including encoded-header and encrypted/encrypted+encoded-header PPMd, two-folder encrypted / encoded-header / encrypted+encoded-header variants, and one-folder / two-folder x86 BCJ / Delta writer combinations including encoded-header and encrypted filter variants. The decoder normalizes folder graphs to explicit input-source / output-owner / final-root metadata and executes them through a demand-driven cached evaluator. Upstream interface audit shows that the current method surface uses single-stream interfaces for `Copy`, `LZMA`, `LZMA2`, `PPMdH`, `Delta`, and `7zAES`, while `BCJ2` remains the only fixed 4-input multi-stream coder. Non-`BCJ2` multi-input or multi-output declarations are therefore rejected as nonstandard arity instead of being treated as pending feature work.
+//! - `sevenz` supports plain/encoded headers, multi-folder decode for the current supported folder DAG subset, password-based 7zAES decode for those folders and encoded headers, x86 BCJ2 decode for supported DAG layouts, and bounded writing with one or two linear folders using LZMA2/LZMA/PPMdH/Deflate/BZip2/Copy plus x86 BCJ / Delta filters, including linear 7zAES file-content encryption and encoded-header write. Current direct `system 7z` interop coverage includes baseline one-folder archives, one-folder/two-folder PPMd including encoded-header and encrypted/encrypted+encoded-header PPMd, two-folder encrypted / encoded-header / encrypted+encoded-header variants, and one-folder / two-folder x86 BCJ / Delta writer combinations including encoded-header and encrypted filter variants. The decoder normalizes folder graphs to explicit input-source / output-owner / final-root metadata and executes them through a demand-driven cached evaluator. Upstream interface audit shows that the current method surface uses single-stream interfaces for `Copy`, `LZMA`, `LZMA2`, `PPMdH`, `Delta`, `7zAES`, `Deflate`, `Deflate64`, and `BZip2`, while `BCJ2` remains the only fixed 4-input multi-stream coder. Non-`BCJ2` multi-input or multi-output declarations are therefore rejected as nonstandard arity instead of being treated as pending feature work.
 //! - `xz` supports LZMA2 final filters, the standard BCJ / Delta prefilter set, and registry-backed custom filter IDs on encode/decode paths plus the reader adapters. `FilterRegistry::register_passthrough()` provides an identity codec for application-defined custom IDs, while unregistered custom filters are preserved at parse time but still fail explicitly when application is attempted.
 //! - ZPAQ is exposed as two layers: `compress::zpaq` for low-level single-payload blocks and `archive::zpaq` for multi-entry archives. The low-level encoder supports both the validated built-in level `1..=3` models and a validated `CustomModel` surface for arbitrary predictor/HCOMP authoring, while the archive layer now covers same-block append, crate-local journaling transactions, and a materializing `ZpaqArchiveEditor` that can import plain archives or the latest journal view, apply push/put/delete operations, and rewrite one simplified block. The decoder accepts arbitrary upstream level bytes if the parsed model/header is otherwise valid. The current bounded acceptance corpus includes upstream-style `CONS` / `CM` / `ICM` / `AVG` / `MATCH` / `MIX2` / `MIX` / `ISSE` / `SSE` fixtures, bounded component size sweeps, deeper predictor chains, mixed HCOMP register/jump/arithmetic/logical/memory/hash sequences, multi-segment archive metadata/truncation/corruption plus empty-payload boundaries, same-block append workflows that reuse an existing parsed header/model, and crate-local journaling transactions with committed latest-view / version-history helpers. The archive encoder rejects embedded NUL bytes in filename/comment metadata because those fields are stored as NUL-terminated strings.
 //!
@@ -444,11 +445,12 @@ pub(crate) mod util;
 ))]
 pub mod compress;
 
-/// Archive formats: tar, cpio, ar, zpaq, zip, and 7z.
+/// Archive formats: tar, cpio, ar, deb, zpaq, zip, and 7z.
 #[cfg(any(
     feature = "tar",
     feature = "cpio",
     feature = "ar",
+    feature = "deb",
     feature = "zpaq",
     feature = "zip",
     feature = "sevenz",

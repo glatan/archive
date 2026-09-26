@@ -8,7 +8,7 @@
 //! `&[u8] → Vec<u8>` interface as compression: a single file named
 //! `"fuzz_test"` is packed/unpacked as the archive payload.
 
-use archive::archive::{ar, cpio, sevenz, tar, zip};
+use archive::archive::{ar, cpio, deb, sevenz, tar, zip};
 use archive::compress::*;
 use archive::error::Error;
 use std::fmt;
@@ -40,6 +40,7 @@ pub enum Algorithm {
     Lz4Fast,
     Lz4Best,
     Lz4SmallBlock,
+    Lz4Block,
     Lzo,
     LzoFast,
     LzoBest,
@@ -60,6 +61,7 @@ pub enum Algorithm {
     ZpaqLevel3,
     Ar,
     ArBsd,
+    Deb,
     Zip,
     ZipStore,
     ZipBzip2,
@@ -68,6 +70,8 @@ pub enum Algorithm {
     SevenZCopy,
     SevenZLzma,
     SevenZPpmd,
+    SevenZDeflate,
+    SevenZBzip2,
     TarGnu,
     TarUstar,
     TarPax,
@@ -102,6 +106,7 @@ impl Algorithm {
         Algorithm::Lz4Fast,
         Algorithm::Lz4Best,
         Algorithm::Lz4SmallBlock,
+        Algorithm::Lz4Block,
         Algorithm::Lzo,
         Algorithm::LzoFast,
         Algorithm::LzoBest,
@@ -122,6 +127,7 @@ impl Algorithm {
         Algorithm::ZpaqLevel3,
         Algorithm::Ar,
         Algorithm::ArBsd,
+        Algorithm::Deb,
         Algorithm::Zip,
         Algorithm::ZipStore,
         Algorithm::ZipBzip2,
@@ -130,6 +136,8 @@ impl Algorithm {
         Algorithm::SevenZCopy,
         Algorithm::SevenZLzma,
         Algorithm::SevenZPpmd,
+        Algorithm::SevenZDeflate,
+        Algorithm::SevenZBzip2,
         Algorithm::TarGnu,
         Algorithm::TarUstar,
         Algorithm::TarPax,
@@ -164,6 +172,7 @@ impl Algorithm {
             Algorithm::Lz4Fast => "lz4-fast",
             Algorithm::Lz4Best => "lz4-best",
             Algorithm::Lz4SmallBlock => "lz4-small-block",
+            Algorithm::Lz4Block => "lz4-block",
             Algorithm::Lzo => "lzo",
             Algorithm::LzoFast => "lzo-fast",
             Algorithm::LzoBest => "lzo-best",
@@ -184,6 +193,7 @@ impl Algorithm {
             Algorithm::ZpaqLevel3 => "zpaq-level3",
             Algorithm::Ar => "ar",
             Algorithm::ArBsd => "ar-bsd",
+            Algorithm::Deb => "deb",
             Algorithm::Zip => "zip",
             Algorithm::ZipStore => "zip-store",
             Algorithm::ZipBzip2 => "zip-bzip2",
@@ -192,6 +202,8 @@ impl Algorithm {
             Algorithm::SevenZCopy => "7z-copy",
             Algorithm::SevenZLzma => "7z-lzma",
             Algorithm::SevenZPpmd => "7z-ppmd",
+            Algorithm::SevenZDeflate => "7z-deflate",
+            Algorithm::SevenZBzip2 => "7z-bzip2",
             Algorithm::TarGnu => "tar-gnu",
             Algorithm::TarUstar => "tar-ustar",
             Algorithm::TarPax => "tar-pax",
@@ -227,6 +239,7 @@ impl Algorithm {
             "lz4-fast" => Some(Algorithm::Lz4Fast),
             "lz4-best" => Some(Algorithm::Lz4Best),
             "lz4-small-block" => Some(Algorithm::Lz4SmallBlock),
+            "lz4-block" => Some(Algorithm::Lz4Block),
             "lzo" => Some(Algorithm::Lzo),
             "lzo-fast" => Some(Algorithm::LzoFast),
             "lzo-best" => Some(Algorithm::LzoBest),
@@ -247,6 +260,7 @@ impl Algorithm {
             "zpaq-level3" => Some(Algorithm::ZpaqLevel3),
             "ar" | "ar-gnu" => Some(Algorithm::Ar),
             "ar-bsd" => Some(Algorithm::ArBsd),
+            "deb" => Some(Algorithm::Deb),
             "zip" => Some(Algorithm::Zip),
             "zip-store" => Some(Algorithm::ZipStore),
             "zip-bzip2" => Some(Algorithm::ZipBzip2),
@@ -255,6 +269,8 @@ impl Algorithm {
             "7z-copy" => Some(Algorithm::SevenZCopy),
             "7z-lzma" => Some(Algorithm::SevenZLzma),
             "7z-ppmd" => Some(Algorithm::SevenZPpmd),
+            "7z-deflate" => Some(Algorithm::SevenZDeflate),
+            "7z-bzip2" => Some(Algorithm::SevenZBzip2),
             "tar" | "tar-gnu" => Some(Algorithm::TarGnu),
             "tar-ustar" => Some(Algorithm::TarUstar),
             "tar-pax" => Some(Algorithm::TarPax),
@@ -294,6 +310,7 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
         Algorithm::Lz4SmallBlock => {
             lz4::encode::encode_with_options(data, lz4::encode::BlockMaxSize::KB64, true)
         }
+        Algorithm::Lz4Block => lz4::encode::encode_block(data),
         Algorithm::Lzo | Algorithm::LzoFast | Algorithm::LzoBest => lzo::encode::encode(data),
         Algorithm::LrzipLzma => {
             lrzip::encode::encode_with(data, lrzip::encode::CompressionType::Lzma)
@@ -331,6 +348,17 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
             let mut enc = ar::encode::ArEncoder::new_bsd();
             enc.add_file("fuzz_test", data);
             enc.finish().expect("ar bsd encode should succeed")
+        }
+        Algorithm::Deb => {
+            let mut data_tar = tar::encode::TarEncoder::new();
+            data_tar.add_file("fuzz_test", data);
+            let mut control_tar = tar::encode::TarEncoder::new();
+            control_tar.add_file("./control", b"Package: fuzz\n");
+            let mut enc = ar::encode::ArEncoder::new();
+            enc.add_file("debian-binary", b"2.0\n");
+            enc.add_file("control.tar", &control_tar.finish());
+            enc.add_file("data.tar", &data_tar.finish());
+            enc.finish().expect("deb encode should succeed")
         }
         Algorithm::Zip => {
             let mut enc = zip::encode::ZipEncoder::new();
@@ -399,6 +427,20 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
             enc.add_file("fuzz_test", data);
             enc.finish().expect("7z-ppmd encode should succeed")
         }
+        Algorithm::SevenZDeflate => {
+            let mut enc = sevenz::encode::SevenZEncoder::new();
+            enc.set_method(sevenz::encode::SevenZMethod::Deflate {
+                level: archive::compress::deflate::encode::Level::Default,
+            });
+            enc.add_file("fuzz_test", data);
+            enc.finish().expect("7z-deflate encode should succeed")
+        }
+        Algorithm::SevenZBzip2 => {
+            let mut enc = sevenz::encode::SevenZEncoder::new();
+            enc.set_method(sevenz::encode::SevenZMethod::Bzip2 { level: 9 });
+            enc.add_file("fuzz_test", data);
+            enc.finish().expect("7z-bzip2 encode should succeed")
+        }
         Algorithm::TarGnu => {
             let mut enc = tar::encode::TarEncoder::new();
             enc.add_file("fuzz_test", data);
@@ -446,6 +488,7 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
         Algorithm::Lz4 | Algorithm::Lz4Fast | Algorithm::Lz4Best | Algorithm::Lz4SmallBlock => {
             lz4::decode::decode(data)
         }
+        Algorithm::Lz4Block => lz4::decode::decode_block(data, 64 << 20),
         Algorithm::Lzo | Algorithm::LzoFast | Algorithm::LzoBest => lzo::decode::decode(data),
         Algorithm::LrzipLzma
         | Algorithm::LrzipBzip2
@@ -466,6 +509,11 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
             let entries = ar::decode::decode(data)?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
         }
+        Algorithm::Deb => {
+            let package = deb::decode::decode(data)?;
+            let entries = package.data_entries()?;
+            Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
+        }
         Algorithm::Zip | Algorithm::ZipStore | Algorithm::ZipBzip2 | Algorithm::ZipZstd => {
             let entries = zip::decode::decode(data)?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
@@ -473,7 +521,9 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
         Algorithm::SevenZ
         | Algorithm::SevenZCopy
         | Algorithm::SevenZLzma
-        | Algorithm::SevenZPpmd => {
+        | Algorithm::SevenZPpmd
+        | Algorithm::SevenZDeflate
+        | Algorithm::SevenZBzip2 => {
             let entries = sevenz::decode::decode(data)?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
         }

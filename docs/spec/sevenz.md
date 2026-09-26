@@ -3,8 +3,8 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) |
-| current scope | multi-folder decode (supported single-output DAG subset)、one/two-folder linear writer、supported codec/filter chain (LZMA2, LZMA, PPMdH, Copy + x86/PowerPC/ARM/ARM-Thumb/SPARC/ARM64/RISC-V BCJ, Delta, BCJ2, Brotli) + 7zAES file-content / encoded-header encrypt + timestamp metadata (ctime/atime/mtime) |
-| intentional exclusion | non-linear DAG writer (3+ folder)、empty-stream/directory/anti-item entries、external stream/folder lists、IA64 BCJ encode |
+| current scope | multi-folder decode (supported single-output DAG subset)、one/two-folder linear writer、supported codec/filter chain (LZMA2, LZMA, PPMdH, Copy, Deflate, Deflate64 (decode-only), BZip2 + x86/PowerPC/ARM/ARM-Thumb/SPARC/ARM64/RISC-V BCJ, Delta, BCJ2, Brotli) + 7zAES file-content / encoded-header encrypt + timestamp metadata (ctime/atime/mtime) |
+| intentional exclusion | non-linear DAG writer (3+ folder)、empty-stream/directory/anti-item entries、external stream/folder lists、IA64 BCJ encode、Deflate64 encode |
 
 状態マーカー: ✅ 実装+テスト済み / ⚠️ 部分実装 / ❌ 未実装
 
@@ -161,6 +161,9 @@
 | 67a | ARM64 BCJ (0x04 0x09) | Methods.txt: BCJ ARM64 | ✅ | decode + encode: `SevenZFilter::Arm64Bcj` |
 | 67b | RISC-V BCJ (0x04 0x0B) | Methods.txt: BCJ RISC-V | ✅ | decode + encode: `SevenZFilter::RiscVBcj` |
 | 68 | Brotli (0x04 0xF7 0x11 0x01) | Methods.txt: Brotli | ✅ | decode + encode (`brotli` feature): `SevenZMethod::Brotli`, `test_encode_brotli_method_roundtrip` |
+| 68a | Deflate (0x04 0x01 0x08): no properties, encode/decode | Methods.txt: Deflate | ✅ | `SevenZMethod::Deflate`, `test_decode_folder_deflate_method`, `test_encode_deflate_method_roundtrip`, system interop |
+| 68b | Deflate64 (0x04 0x01 0x09): no properties, decode-only | Methods.txt: Deflate64 | ✅ | `test_decode_folder_deflate64_method`, `test_sevenz_deflate64_method_system_decode_compat` |
+| 68c | BZip2 (0x04 0x02 0x02): no properties, encode/decode | Methods.txt: BZip2 | ✅ | `SevenZMethod::Bzip2`, `test_decode_folder_bzip2_method`, `test_encode_bzip2_method_roundtrip`, system interop |
 | 69 | Unsupported encryption methods (0x06 prefix, 7zAES 以外) | Methods.txt | ✅ | `is_encryption_method()` → `Unsupported` |
 | 70 | Unknown coder method: reject | 7zFormat.txt: Folder / Coder | ✅ | `decode_coder()` → `Unsupported("7z: unsupported coder method")` |
 
@@ -177,7 +180,7 @@
 | 75 | Multi-folder decode (sequential folder processing) | 7zFormat.txt: Folder | ✅ | `test_decode_multi_folder_copy_archive`, `test_decode_multi_folder_lzma2_and_copy_archive` |
 | 76 | Multi-folder BCJ2 decode | 7zFormat.txt: Folder | ✅ | `test_decode_multi_folder_bcj2_and_copy_archive` |
 | 77 | Nonstandard multi-input (non-BCJ2): reject | 7zFormat.txt: Folder validation | ✅ | `test_decode_rejects_multi_output_multi_input_copy_graph_archive`, `test_decode_rejects_delta_multi_input_archive` |
-| 78 | Nonstandard arity per coder type: reject | 7zFormat.txt: Folder validation | ✅ | `test_decode_folder_rejects_multi_input_lzma2_coder`, `test_decode_folder_rejects_multi_input_ppmd_coder`, `test_decode_folder_rejects_multi_input_delta_coder`, `test_decode_folder_rejects_bcj2_with_nonstandard_input_arity` |
+| 78 | Nonstandard arity per coder type: reject | 7zFormat.txt: Folder validation | ✅ | `test_decode_folder_rejects_multi_input_lzma2_coder`, `test_decode_folder_rejects_multi_input_ppmd_coder`, `test_decode_folder_rejects_multi_input_delta_coder`, `test_decode_folder_rejects_multi_input_deflate_coder`, `test_decode_folder_rejects_bcj2_with_nonstandard_input_arity` |
 
 ---
 
@@ -241,6 +244,8 @@
 | 111 | crate encode (x86 BCJ) → system `7z` extract | system interop | ✅ | `test_sevenz_x86_bcj_filter_system_extract_compat` |
 | 112 | crate encode (Delta) → system `7z` extract | system interop | ✅ | `test_sevenz_delta_filter_system_extract_compat` |
 | 113 | crate encode (two-folder + encrypted/encoded-header/PPMd/BCJ/Delta combinations) → system `7z` extract | system interop | ✅ | 20+ two-folder system interop tests |
+| 114 | system `7z` encode (Deflate / Deflate64 / BZip2) → crate decode | system interop | ✅ | `test_sevenz_deflate_method_system_decode_compat`, `test_sevenz_deflate64_method_system_decode_compat`, `test_sevenz_bzip2_method_system_decode_compat` |
+| 115 | crate encode (Deflate / BZip2) → system `7z` extract | system interop | ✅ | `test_sevenz_deflate_method_system_extract_compat`, `test_sevenz_bzip2_method_system_extract_compat` |
 
 ---
 
@@ -248,7 +253,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 115 |
-| **合計** | **115** |
+| ✅ 実装+テスト済み | 120 |
+| **合計** | **120** |
 
-**カバー率**: 115 / 115 = **100%** (仕様全体)
+**カバー率**: 120 / 120 = **100%** (仕様全体)
