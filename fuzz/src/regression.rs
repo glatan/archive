@@ -220,6 +220,22 @@ fn self_pattern_body(algo: Algorithm) -> String {
             "archive::compress::lz4::encode::encode_block(input)",
             "archive::compress::lz4::decode::decode_block(&encoded, input.len()).unwrap()",
         ),
+        Algorithm::Xpress => roundtrip_body(
+            "archive::compress::xca::lz77::encode(input)",
+            "archive::compress::xca::lz77::decode(&encoded).unwrap()",
+        ),
+        Algorithm::XpressHuff => roundtrip_body(
+            "archive::compress::xca::huffman::encode(input)",
+            "archive::compress::xca::huffman::decode(&encoded).unwrap()",
+        ),
+        Algorithm::Lznt1 => roundtrip_body(
+            "archive::compress::xca::lznt1::encode(input)",
+            "archive::compress::xca::lznt1::decode(&encoded).unwrap()",
+        ),
+        Algorithm::Lzf => roundtrip_body(
+            "archive::compress::lzf::encode(input)",
+            "archive::compress::lzf::decode(&encoded).unwrap()",
+        ),
         Algorithm::Lz4SmallBlock => roundtrip_body(
             "archive::compress::lz4::encode::encode_with_options(input, archive::compress::lz4::encode::BlockMaxSize::KB64, true)",
             "archive::compress::lz4::decode::decode(&encoded).unwrap()",

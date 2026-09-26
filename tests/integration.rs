@@ -21,7 +21,9 @@
     feature = "xz",
     feature = "zlib",
     feature = "zstd",
-    feature = "zpaq"
+    feature = "zpaq",
+    feature = "xca",
+    feature = "lzf"
 ))]
 
 use archive::archive::ar;
@@ -42,6 +44,7 @@ use archive::compress::deflate;
 use archive::compress::gzip;
 use archive::compress::lrzip;
 use archive::compress::lz4;
+use archive::compress::lzf;
 use archive::compress::lzip;
 use archive::compress::lzma_alone;
 use archive::compress::lzo;
@@ -49,6 +52,7 @@ use archive::compress::lzw;
 #[cfg(feature = "rzip")]
 use archive::compress::rzip;
 use archive::compress::snappy;
+use archive::compress::xca;
 use archive::compress::xz;
 use archive::compress::zlib;
 use archive::compress::zstd;
@@ -208,11 +212,17 @@ mod squashfs_tests;
 #[path = "integration/mscab.rs"]
 mod mscab_tests;
 
+#[path = "integration/lzf.rs"]
+mod lzf_tests;
 #[cfg(feature = "mtree")]
 #[path = "integration/mtree.rs"]
 mod mtree_tests;
 #[path = "integration/tar.rs"]
 mod tar_tests;
+
+#[path = "integration/xca.rs"]
+mod xca_tests;
+
 #[path = "integration/xz.rs"]
 mod xz_tests;
 

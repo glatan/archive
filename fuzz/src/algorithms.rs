@@ -41,6 +41,10 @@ pub enum Algorithm {
     Lz4Best,
     Lz4SmallBlock,
     Lz4Block,
+    Xpress,
+    XpressHuff,
+    Lznt1,
+    Lzf,
     Lzo,
     LzoFast,
     LzoBest,
@@ -113,6 +117,10 @@ impl Algorithm {
         Algorithm::Lz4Best,
         Algorithm::Lz4SmallBlock,
         Algorithm::Lz4Block,
+        Algorithm::Xpress,
+        Algorithm::XpressHuff,
+        Algorithm::Lznt1,
+        Algorithm::Lzf,
         Algorithm::Lzo,
         Algorithm::LzoFast,
         Algorithm::LzoBest,
@@ -185,6 +193,10 @@ impl Algorithm {
             Algorithm::Lz4Best => "lz4-best",
             Algorithm::Lz4SmallBlock => "lz4-small-block",
             Algorithm::Lz4Block => "lz4-block",
+            Algorithm::Xpress => "xpress",
+            Algorithm::XpressHuff => "xpress-huff",
+            Algorithm::Lznt1 => "lznt1",
+            Algorithm::Lzf => "lzf",
             Algorithm::Lzo => "lzo",
             Algorithm::LzoFast => "lzo-fast",
             Algorithm::LzoBest => "lzo-best",
@@ -258,6 +270,10 @@ impl Algorithm {
             "lz4-best" => Some(Algorithm::Lz4Best),
             "lz4-small-block" => Some(Algorithm::Lz4SmallBlock),
             "lz4-block" => Some(Algorithm::Lz4Block),
+            "xpress" => Some(Algorithm::Xpress),
+            "xpress-huff" => Some(Algorithm::XpressHuff),
+            "lznt1" => Some(Algorithm::Lznt1),
+            "lzf" => Some(Algorithm::Lzf),
             "lzo" => Some(Algorithm::Lzo),
             "lzo-fast" => Some(Algorithm::LzoFast),
             "lzo-best" => Some(Algorithm::LzoBest),
@@ -335,6 +351,10 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
             lz4::encode::encode_with_options(data, lz4::encode::BlockMaxSize::KB64, true)
         }
         Algorithm::Lz4Block => lz4::encode::encode_block(data),
+        Algorithm::Xpress => xca::lz77::encode(data),
+        Algorithm::XpressHuff => xca::huffman::encode(data),
+        Algorithm::Lznt1 => xca::lznt1::encode(data),
+        Algorithm::Lzf => lzf::encode(data),
         Algorithm::Lzo | Algorithm::LzoFast | Algorithm::LzoBest => lzo::encode::encode(data),
         Algorithm::LrzipLzma => {
             lrzip::encode::encode_with(data, lrzip::encode::CompressionType::Lzma)
@@ -519,6 +539,10 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
             lz4::decode::decode(data)
         }
         Algorithm::Lz4Block => lz4::decode::decode_block(data, 64 << 20),
+        Algorithm::Xpress => xca::lz77::decode(data),
+        Algorithm::XpressHuff => xca::huffman::decode(data),
+        Algorithm::Lznt1 => xca::lznt1::decode(data),
+        Algorithm::Lzf => lzf::decode(data),
         Algorithm::Lzo | Algorithm::LzoFast | Algorithm::LzoBest => lzo::decode::decode(data),
         Algorithm::LrzipLzma
         | Algorithm::LrzipBzip2
