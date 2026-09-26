@@ -45,6 +45,8 @@ pub enum Algorithm {
     XpressHuff,
     Lznt1,
     Lzf,
+    Fastlz,
+    Lzrw1a,
     Lzo,
     LzoFast,
     LzoBest,
@@ -121,6 +123,8 @@ impl Algorithm {
         Algorithm::XpressHuff,
         Algorithm::Lznt1,
         Algorithm::Lzf,
+        Algorithm::Fastlz,
+        Algorithm::Lzrw1a,
         Algorithm::Lzo,
         Algorithm::LzoFast,
         Algorithm::LzoBest,
@@ -197,6 +201,8 @@ impl Algorithm {
             Algorithm::XpressHuff => "xpress-huff",
             Algorithm::Lznt1 => "lznt1",
             Algorithm::Lzf => "lzf",
+            Algorithm::Fastlz => "fastlz",
+            Algorithm::Lzrw1a => "lzrw1a",
             Algorithm::Lzo => "lzo",
             Algorithm::LzoFast => "lzo-fast",
             Algorithm::LzoBest => "lzo-best",
@@ -274,6 +280,8 @@ impl Algorithm {
             "xpress-huff" => Some(Algorithm::XpressHuff),
             "lznt1" => Some(Algorithm::Lznt1),
             "lzf" => Some(Algorithm::Lzf),
+            "fastlz" => Some(Algorithm::Fastlz),
+            "lzrw1a" => Some(Algorithm::Lzrw1a),
             "lzo" => Some(Algorithm::Lzo),
             "lzo-fast" => Some(Algorithm::LzoFast),
             "lzo-best" => Some(Algorithm::LzoBest),
@@ -355,6 +363,8 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
         Algorithm::XpressHuff => xca::huffman::encode(data),
         Algorithm::Lznt1 => xca::lznt1::encode(data),
         Algorithm::Lzf => lzf::encode(data),
+        Algorithm::Fastlz => fastlz::encode(data),
+        Algorithm::Lzrw1a => lzrw1a::encode(data),
         Algorithm::Lzo | Algorithm::LzoFast | Algorithm::LzoBest => lzo::encode::encode(data),
         Algorithm::LrzipLzma => {
             lrzip::encode::encode_with(data, lrzip::encode::CompressionType::Lzma)
@@ -543,6 +553,8 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
         Algorithm::XpressHuff => xca::huffman::decode(data),
         Algorithm::Lznt1 => xca::lznt1::decode(data),
         Algorithm::Lzf => lzf::decode(data),
+        Algorithm::Fastlz => fastlz::decode(data),
+        Algorithm::Lzrw1a => lzrw1a::decode(data),
         Algorithm::Lzo | Algorithm::LzoFast | Algorithm::LzoBest => lzo::decode::decode(data),
         Algorithm::LrzipLzma
         | Algorithm::LrzipBzip2

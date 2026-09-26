@@ -40,6 +40,8 @@ pub enum Format {
     XpressHuff,
     Lznt1,
     Lzf,
+    Fastlz,
+    Lzrw1a,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -77,6 +79,8 @@ pub enum CompressionFormat {
     XpressHuff,
     Lznt1,
     Lzf,
+    Fastlz,
+    Lzrw1a,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,6 +125,8 @@ impl core::fmt::Display for Format {
             Self::XpressHuff => "xpress-huff",
             Self::Lznt1 => "lznt1",
             Self::Lzf => "lzf",
+            Self::Fastlz => "fastlz",
+            Self::Lzrw1a => "lzrw1a",
         };
         f.write_str(name)
     }
@@ -171,6 +177,8 @@ impl From<CompressionFormat> for Format {
             CompressionFormat::XpressHuff => Self::XpressHuff,
             CompressionFormat::Lznt1 => Self::Lznt1,
             CompressionFormat::Lzf => Self::Lzf,
+            CompressionFormat::Fastlz => Self::Fastlz,
+            CompressionFormat::Lzrw1a => Self::Lzrw1a,
         }
     }
 }
@@ -312,6 +320,12 @@ pub fn scope_notes(format: Format) -> Vec<String> {
         ],
         Format::Lzf => vec![
             "lzf streams carry no container header or magic; --format is required".to_owned(),
+        ],
+        Format::Fastlz => vec![
+            "fastlz streams carry no container header or magic; --format is required".to_owned(),
+        ],
+        Format::Lzrw1a => vec![
+            "lzrw1a streams carry no magic; --format is required".to_owned(),
         ],
         _ => Vec::new(),
     }

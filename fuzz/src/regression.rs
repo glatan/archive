@@ -236,6 +236,14 @@ fn self_pattern_body(algo: Algorithm) -> String {
             "archive::compress::lzf::encode(input)",
             "archive::compress::lzf::decode(&encoded).unwrap()",
         ),
+        Algorithm::Fastlz => roundtrip_body(
+            "archive::compress::fastlz::encode(input)",
+            "archive::compress::fastlz::decode(&encoded).unwrap()",
+        ),
+        Algorithm::Lzrw1a => roundtrip_body(
+            "archive::compress::lzrw1a::encode(input)",
+            "archive::compress::lzrw1a::decode(&encoded).unwrap()",
+        ),
         Algorithm::Lz4SmallBlock => roundtrip_body(
             "archive::compress::lz4::encode::encode_with_options(input, archive::compress::lz4::encode::BlockMaxSize::KB64, true)",
             "archive::compress::lz4::decode::decode(&encoded).unwrap()",
