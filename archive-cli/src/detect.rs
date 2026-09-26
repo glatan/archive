@@ -16,6 +16,8 @@ pub enum Format {
     Zstd,
     Bzip2,
     Lzip,
+    #[value(name = "lzma")]
+    LzmaAlone,
     Lzw,
     Lz4,
     Lzo,
@@ -45,6 +47,8 @@ pub enum CompressionFormat {
     Zstd,
     Bzip2,
     Lzip,
+    #[value(name = "lzma")]
+    LzmaAlone,
     Lzw,
     Lz4,
     Lzo,
@@ -78,6 +82,7 @@ impl core::fmt::Display for Format {
             Self::Zstd => "zstd",
             Self::Bzip2 => "bzip2",
             Self::Lzip => "lzip",
+            Self::LzmaAlone => "lzma",
             Self::Lzw => "lzw",
             Self::Lz4 => "lz4",
             Self::Lzo => "lzo",
@@ -122,6 +127,7 @@ impl From<CompressionFormat> for Format {
             CompressionFormat::Zstd => Self::Zstd,
             CompressionFormat::Bzip2 => Self::Bzip2,
             CompressionFormat::Lzip => Self::Lzip,
+            CompressionFormat::LzmaAlone => Self::LzmaAlone,
             CompressionFormat::Lzw => Self::Lzw,
             CompressionFormat::Lz4 => Self::Lz4,
             CompressionFormat::Lzo => Self::Lzo,

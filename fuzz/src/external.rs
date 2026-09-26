@@ -112,6 +112,12 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
             decompress_cmd: "lzip",
             decompress_args: &["-dc"],
         })),
+        Algorithm::LzmaAlone => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "xz",
+            compress_args: &["--format=lzma", "-c"],
+            decompress_cmd: "xz",
+            decompress_args: &["--format=lzma", "-dc"],
+        })),
         Algorithm::Xz => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "xz",
             compress_args: &["-c"],

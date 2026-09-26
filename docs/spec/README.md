@@ -25,6 +25,7 @@
 | zstd | RFC 8878 | Appendix A に事前定義FSEテーブル全値、repeat offset例あり |
 | bzip2 | リファレンス実装 (bzip2 1.0.x, Julian Seward) | 正式なRFC/ISOなし。リファレンス実装がデファクト仕様 |
 | lzip | lzip マニュアル (https://www.nongnu.org/lzip/manual/lzip_manual.html) | LZMA (lc=3/lp=0/pb=2) + シンプルフレーミング |
+| `.lzma` | `lzma-file-format.txt` (tukaani-project/xz `doc/`, public domain) | 13B ヘッダ (properties + dict size + unpacked size) + 生 LZMA ストリーム。trailing data は reject |
 | LZW | ncompress (compress42.c) | 正式なRFC/ISOなし。Unix compress `.Z` フォーマットのデファクト標準 |
 | LZ4 | LZ4 フレームフォーマット仕様 | ブロックフォーマット + フレームヘッダー + xxhash32 チェックサム |
 | LZO | LZO1X-1 バイトコード + lzop ファイルフォーマット | Linux kernel Documentation/lzo.txt、lzop ヘッダー仕様 |
@@ -134,6 +135,7 @@
 | zstd | [zstd.md](zstd.md) | 126 | 0 | 0 | 126 |
 | bzip2 | [bzip2.md](bzip2.md) | 68 | 0 | 0 | 68 |
 | lzip | [lzip.md](lzip.md) | 39 | 0 | 0 | 39 |
+| `.lzma` | [lzma_alone.md](lzma_alone.md) | 24 | 0 | 0 | 24 |
 | LZW | [lzw.md](lzw.md) | 21 | 0 | 0 | 21 |
 | LZ4 | [lz4.md](lz4.md) | 56 | 0 | 0 | 56 |
 | LZO | [lzo.md](lzo.md) | 39 | 0 | 0 | 39 |
@@ -165,9 +167,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1112 |
+| ✅ 実装+テスト済み | 1136 |
 | ⚠️ 部分実装 | 0 |
 | ❌ 未実装 | 3 |
-| **合計** | **1115** |
+| **合計** | **1139** |
 
-**全体カバー率**: 1112 / 1115 = **99.7%** (intentional exclusion 除外後: 1112 / 1112 = **100%**)
+**全体カバー率**: 1136 / 1139 = **99.7%** (intentional exclusion 除外後: 1136 / 1136 = **100%**)

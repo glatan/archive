@@ -8,6 +8,7 @@
     feature = "lrzip",
     feature = "lz4",
     feature = "lzip",
+    feature = "lzma-alone",
     feature = "lzo",
     feature = "lzw",
     feature = "snappy",
@@ -33,6 +34,7 @@ use archive::compress::gzip;
 use archive::compress::lrzip;
 use archive::compress::lz4;
 use archive::compress::lzip;
+use archive::compress::lzma_alone;
 use archive::compress::lzo;
 use archive::compress::lzw;
 #[cfg(feature = "rzip")]
@@ -172,6 +174,8 @@ mod lrzip_tests;
 mod lz4_tests;
 #[path = "integration/lzip.rs"]
 mod lzip_tests;
+#[path = "integration/lzma_alone.rs"]
+mod lzma_alone_tests;
 #[path = "integration/lzo.rs"]
 mod lzo_tests;
 #[path = "integration/lzw.rs"]

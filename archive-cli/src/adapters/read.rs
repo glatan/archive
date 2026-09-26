@@ -90,6 +90,12 @@ pub fn analyze_bytes(
                 .to_owned(),
         );
     }
+    if matches!(format, Format::LzmaAlone) {
+        notes.push(
+            "lzma-alone streams have no magic signature; auto-detection normally requires --format lzma"
+                .to_owned(),
+        );
+    }
 
     Ok(Analysis {
         kind,
@@ -302,6 +308,12 @@ fn decode_items(
             path,
             input,
             compress_formats::lzip::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::LzmaAlone => decode_single_payload(
+            path,
+            input,
+            compress_formats::lzma_alone::decode::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
         Format::Lzw => decode_single_payload(

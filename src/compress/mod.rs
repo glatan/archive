@@ -32,12 +32,13 @@ pub mod zstd;
 #[cfg(feature = "bzip2")]
 pub mod bzip2;
 
-/// Shared LZMA1 codec used by lzip/xz/lrzip/7z-style formats.
+/// Shared LZMA1 codec used by lzip/xz/lrzip/7z-style formats and `.lzma`.
 #[cfg(any(
     feature = "lzip",
     feature = "xz",
     feature = "sevenz",
-    feature = "lrzip"
+    feature = "lrzip",
+    feature = "lzma-alone"
 ))]
 pub(crate) mod lzma;
 
@@ -51,6 +52,13 @@ pub(crate) mod lzma2;
 /// framing format with CRC-32 integrity checking.
 #[cfg(feature = "lzip")]
 pub mod lzip;
+
+/// LZMA-Alone `.lzma` compression and decompression.
+///
+/// A 13-byte header (properties, dictionary size, uncompressed size)
+/// followed by a raw LZMA stream.
+#[cfg(feature = "lzma-alone")]
+pub mod lzma_alone;
 
 /// LZW compression and decompression (Unix compress `.Z` format).
 ///

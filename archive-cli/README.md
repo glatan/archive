@@ -81,7 +81,7 @@ archive compress bzip2 data.bin -o data.bin.bz2 --level 9
 archive compress lrzip data.bin -o data.bin.lrz --backend bzip2
 ```
 
-対応フォーマット: `gzip`, `zstd`, `bzip2`, `lzip`, `lzw`, `lz4`, `lzo`, `lrzip`, `rzip`, `zlib`, `snappy`, `brotli`, `deflate`, `xz`, `zpaq`
+対応フォーマット: `gzip`, `zstd`, `bzip2`, `lzip`, `lzma`, `lzw`, `lz4`, `lzo`, `lrzip`, `rzip`, `zlib`, `snappy`, `brotli`, `deflate`, `xz`, `zpaq`
 
 `--level` は gzip (0-9), bzip2 (1-9), rzip (1-9), lzw (9-16), zpaq (1-3) で有効。
 `--backend` は lrzip のみ (`none`, `bzip2`, `lzo`, `lzma`, `gzip`, `zpaq`)。
@@ -98,7 +98,7 @@ archive compress lrzip data.bin -o data.bin.lrz --backend bzip2
 ## フォーマット自動検出
 
 magic bytes からフォーマットを自動検出します。
-検出できない場合 (raw deflate, brotli, snappy など) は `--format` で明示してください。
+検出できない場合 (raw deflate, brotli, snappy, lzma など) は `--format` で明示してください。
 
 ## ライセンス
 

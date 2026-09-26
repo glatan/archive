@@ -109,7 +109,7 @@ external tool が必要な pattern は `#[ignore]` 付きの placeholder とし�
 
 ## 対応アルゴリズム
 
-### 圧縮 (41 variant)
+### 圧縮 (42 variant)
 
 | グループ | アルゴリズム名 |
 |---------|------------|
@@ -118,6 +118,7 @@ external tool が必要な pattern は `#[ignore]` 付きの placeholder とし�
 | zstd | `zstd`, `zstd-fast`, `zstd-best`, `zstd-nochecksum` |
 | bzip2 | `bzip2`, `bzip2-fast`, `bzip2-best` |
 | lzip | `lzip`, `lzip-fast`, `lzip-best` |
+| lzma | `lzma` |
 | xz | `xz`, `xz-fast`, `xz-best` |
 | lzw | `lzw`, `lzw-bits9` |
 | lz4 | `lz4`, `lz4-fast`, `lz4-best`, `lz4-small-block` |

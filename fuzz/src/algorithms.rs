@@ -30,6 +30,7 @@ pub enum Algorithm {
     Lzip,
     LzipFast,
     LzipBest,
+    LzmaAlone,
     Xz,
     XzFast,
     XzBest,
@@ -91,6 +92,7 @@ impl Algorithm {
         Algorithm::Lzip,
         Algorithm::LzipFast,
         Algorithm::LzipBest,
+        Algorithm::LzmaAlone,
         Algorithm::Xz,
         Algorithm::XzFast,
         Algorithm::XzBest,
@@ -152,6 +154,7 @@ impl Algorithm {
             Algorithm::Lzip => "lzip",
             Algorithm::LzipFast => "lzip-fast",
             Algorithm::LzipBest => "lzip-best",
+            Algorithm::LzmaAlone => "lzma",
             Algorithm::Xz => "xz",
             Algorithm::XzFast => "xz-fast",
             Algorithm::XzBest => "xz-best",
@@ -214,6 +217,7 @@ impl Algorithm {
             "lzip" => Some(Algorithm::Lzip),
             "lzip-fast" => Some(Algorithm::LzipFast),
             "lzip-best" => Some(Algorithm::LzipBest),
+            "lzma" | "lzma-alone" => Some(Algorithm::LzmaAlone),
             "xz" => Some(Algorithm::Xz),
             "xz-fast" => Some(Algorithm::XzFast),
             "xz-best" => Some(Algorithm::XzBest),
@@ -283,6 +287,7 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
         Algorithm::Bzip2Fast => bzip2::encode::encode_with_level(data, 1),
         Algorithm::Bzip2Best => bzip2::encode::encode_with_level(data, 9),
         Algorithm::Lzip | Algorithm::LzipFast | Algorithm::LzipBest => lzip::encode::encode(data),
+        Algorithm::LzmaAlone => lzma_alone::encode::encode(data),
         Algorithm::Xz | Algorithm::XzFast | Algorithm::XzBest => xz::encode::encode(data),
         Algorithm::Lzw | Algorithm::LzwBits9 => lzw::encode::encode(data),
         Algorithm::Lz4 | Algorithm::Lz4Fast | Algorithm::Lz4Best => lz4::encode::encode(data),
@@ -435,6 +440,7 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
             bzip2::decode::decode(data)
         }
         Algorithm::Lzip | Algorithm::LzipFast | Algorithm::LzipBest => lzip::decode::decode(data),
+        Algorithm::LzmaAlone => lzma_alone::decode::decode(data),
         Algorithm::Xz | Algorithm::XzFast | Algorithm::XzBest => xz::decode::decode(data),
         Algorithm::Lzw | Algorithm::LzwBits9 => lzw::decode::decode(data),
         Algorithm::Lz4 | Algorithm::Lz4Fast | Algorithm::Lz4Best | Algorithm::Lz4SmallBlock => {

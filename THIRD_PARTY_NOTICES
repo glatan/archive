@@ -25,6 +25,8 @@ specifications or standards documents:
   `framing_format.txt` (framed stream format)
 - xz: `xz-file-format.txt` from Tukaani
 - lzip container: GNU lzip manual
+- LZMA-Alone `.lzma` container: `lzma-file-format.txt` from the XZ
+  documentation (public domain)
 - LZ4: LZ4 frame format specification
   (https://github.com/lz4/lz4/blob/dev/doc/lz4_Frame_format.md)
 - tar: POSIX.1-2001 UStar / GNU tar extensions / POSIX PAX extensions
