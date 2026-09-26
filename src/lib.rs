@@ -54,6 +54,8 @@
 //! | `snappy` (default) | Snappy raw/framed format |
 //! | `xca` (default) | MS-XCA Xpress / Xpress Huffman / LZNT1 codecs |
 //! | `lzf` (default) | LZF (liblzf) raw codec |
+//! | `fastlz` (default) | FastLZ raw codec (level 1/2) |
+//! | `lzrw1a` (default) | LZRW1-A raw codec |
 //! | `tar` (default) | tar archive format |
 //! | `cpio` (default) | cpio archive format |
 //! | `ar` (default) | GNU/BSD `ar` archive format |
@@ -432,7 +434,7 @@ pub mod traits_io;
 /// Utility modules: CRC32, XXH64, bit reader.
 pub(crate) mod util;
 
-/// Compression formats and shared filters: DEFLATE, gzip, zlib, zstd, bzip2, lzip, `.lzma`, LZW, LZ4, LZO, lrzip, xz, Snappy, Brotli, ZPAQ, MS-XCA, LZF, plus BCJ/Delta helpers.
+/// Compression formats and shared filters: DEFLATE, gzip, zlib, zstd, bzip2, lzip, `.lzma`, LZW, LZ4, LZO, lrzip, xz, Snappy, Brotli, ZPAQ, MS-XCA, LZF, FastLZ, LZRW1-A, plus BCJ/Delta helpers.
 #[cfg(any(
     feature = "deflate",
     feature = "gzip",

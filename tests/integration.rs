@@ -23,7 +23,9 @@
     feature = "zstd",
     feature = "zpaq",
     feature = "xca",
-    feature = "lzf"
+    feature = "lzf",
+    feature = "fastlz",
+    feature = "lzrw1a"
 ))]
 
 use archive::archive::ar;
@@ -41,6 +43,7 @@ use archive::archive::zpaq;
 use archive::compress::brotli;
 use archive::compress::bzip2;
 use archive::compress::deflate;
+use archive::compress::fastlz;
 use archive::compress::gzip;
 use archive::compress::lrzip;
 use archive::compress::lz4;
@@ -48,6 +51,7 @@ use archive::compress::lzf;
 use archive::compress::lzip;
 use archive::compress::lzma_alone;
 use archive::compress::lzo;
+use archive::compress::lzrw1a;
 use archive::compress::lzw;
 #[cfg(feature = "rzip")]
 use archive::compress::rzip;
@@ -212,8 +216,14 @@ mod squashfs_tests;
 #[path = "integration/mscab.rs"]
 mod mscab_tests;
 
+#[path = "integration/fastlz.rs"]
+mod fastlz_tests;
+
 #[path = "integration/lzf.rs"]
 mod lzf_tests;
+
+#[path = "integration/lzrw1a.rs"]
+mod lzrw1a_tests;
 #[cfg(feature = "mtree")]
 #[path = "integration/mtree.rs"]
 mod mtree_tests;

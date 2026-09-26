@@ -130,6 +130,14 @@ pub mod xz;
 #[cfg(feature = "xca")]
 pub mod xca;
 
+/// FastLZ compression and decompression.
+#[cfg(feature = "fastlz")]
+pub mod fastlz;
+
+/// LZRW1-A compression and decompression.
+#[cfg(feature = "lzrw1a")]
+pub mod lzrw1a;
+
 /// LZF compression and decompression (liblzf format).
 #[cfg(feature = "lzf")]
 pub mod lzf;

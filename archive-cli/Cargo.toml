@@ -13,7 +13,7 @@ path = "src/main.rs"
 doc = false
 
 [dependencies]
-archive = { path = "..", default-features = false, features = ["std", "tar", "cpio", "ar", "deb", "rpm", "squashfs", "mscab", "zim", "mtree", "warc", "xca", "lzf", "gzip", "zstd", "bzip2", "lzip", "lzma-alone", "lzw", "lz4", "lzo", "lrzip", "xz", "zlib", "zpaq", "rzip", "snappy", "brotli", "zip", "sevenz"] }
+archive = { path = "..", default-features = false, features = ["std", "tar", "cpio", "ar", "deb", "rpm", "squashfs", "mscab", "zim", "mtree", "warc", "xca", "lzf", "fastlz", "lzrw1a", "gzip", "zstd", "bzip2", "lzip", "lzma-alone", "lzw", "lz4", "lzo", "lrzip", "xz", "zlib", "zpaq", "rzip", "snappy", "brotli", "zip", "sevenz"] }
 clap = { workspace = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
