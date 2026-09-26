@@ -613,6 +613,18 @@ fn decode_items(
             compress_formats::zx0::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
+        Format::Lzxd => decode_single_payload(
+            path,
+            input,
+            compress_formats::lzxd::decode_all(input, 1 << 25, &[], usize::MAX)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Cmpsc => decode_single_payload(
+            path,
+            input,
+            compress_formats::cmpsc::decode(input, usize::MAX)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
         Format::Lzrw1a => decode_single_payload(
             path,
             input,

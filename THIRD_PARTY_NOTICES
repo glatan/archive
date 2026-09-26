@@ -34,6 +34,16 @@ specifications or standards documents:
   vectors in tests/integration/lzsa.rs were produced by running the
   reference lzsa tool v1.4.1 locally; no code was copied.
 - ZX0: format and implementation by Einar Saukas (BSD 3-Clause).
+  LZXD streams embedded in tests/integration/lzxd.rs were produced by a
+  test-side encoder and validated against libmspack's LZXD decoder
+  (LGPL 2.1); libmspack is used only as a local test-time reference,
+  not linked or distributed. No code was copied.
+
+  CMPSC test dictionaries in tests/integration/cmpsc.rs were
+  hand-built from the z/Architecture POP Appendix D layouts.
+  SDL-Hercules-390/hyperion (QPL) was consulted only to confirm
+  interpretation of the public specification; no code was copied.
+
   Known-answer decode vectors in tests/integration/zx0.rs were
   produced by running the reference compressor (ZX0 v2.2)
   locally; no code was copied.

@@ -256,6 +256,14 @@ fn self_pattern_body(algo: Algorithm) -> String {
             "archive::compress::lzrw1a::encode(input)",
             "archive::compress::lzrw1a::decode(&encoded).unwrap()",
         ),
+        Algorithm::Lzxd => roundtrip_body(
+            "archive::compress::lzxd::encode(input)",
+            "archive::compress::lzxd::decode_all(&encoded, 1 << 25, &[], 64 << 20).unwrap()",
+        ),
+        Algorithm::Cmpsc => roundtrip_body(
+            "archive::compress::cmpsc::encode(input)",
+            "archive::compress::cmpsc::decode(&encoded, 64 << 20).unwrap()",
+        ),
         Algorithm::Lz4SmallBlock => roundtrip_body(
             "archive::compress::lz4::encode::encode_with_options(input, archive::compress::lz4::encode::BlockMaxSize::KB64, true)",
             "archive::compress::lz4::decode::decode(&encoded).unwrap()",

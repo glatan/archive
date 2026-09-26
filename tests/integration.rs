@@ -27,7 +27,9 @@
     feature = "fastlz",
     feature = "lzrw1a",
     feature = "lzsa",
-    feature = "zx0"
+    feature = "zx0",
+    feature = "lzxd",
+    feature = "cmpsc"
 ))]
 
 use archive::archive::ar;
@@ -44,6 +46,7 @@ use archive::archive::zpaq;
 #[cfg(feature = "brotli")]
 use archive::compress::brotli;
 use archive::compress::bzip2;
+use archive::compress::cmpsc;
 use archive::compress::deflate;
 use archive::compress::fastlz;
 use archive::compress::gzip;
@@ -55,6 +58,7 @@ use archive::compress::lzma_alone;
 use archive::compress::lzo;
 use archive::compress::lzrw1a;
 use archive::compress::lzw;
+use archive::compress::lzxd;
 #[cfg(feature = "rzip")]
 use archive::compress::rzip;
 use archive::compress::snappy;
@@ -227,6 +231,12 @@ mod lzf_tests;
 
 #[path = "integration/lzsa.rs"]
 mod lzsa_tests;
+
+#[path = "integration/lzxd.rs"]
+mod lzxd_tests;
+
+#[path = "integration/cmpsc.rs"]
+mod cmpsc_tests;
 
 #[path = "integration/lzrw1a.rs"]
 mod lzrw1a_tests;

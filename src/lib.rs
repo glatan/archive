@@ -58,6 +58,7 @@
 //! | `zx0` (default) | ZX0 raw codec |
 //! | `lzrw1a` (default) | LZRW1-A raw codec |
 //! | `lzsa` (default) | LZSA stream / LZSA1 / LZSA2 raw codecs |
+//! | `lzxd` (default) | LZX DELTA (MS-PATCH) codec (decode; uncompressed-block encode) |
 //! | `tar` (default) | tar archive format |
 //! | `cpio` (default) | cpio archive format |
 //! | `ar` (default) | GNU/BSD `ar` archive format |
