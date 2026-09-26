@@ -8,7 +8,7 @@
 //! `&[u8] → Vec<u8>` interface as compression: a single file named
 //! `"fuzz_test"` is packed/unpacked as the archive payload.
 
-use archive::archive::{ar, cpio, deb, sevenz, tar, zip};
+use archive::archive::{ar, cpio, deb, rpm, sevenz, squashfs, tar, zip};
 use archive::compress::*;
 use archive::error::Error;
 use std::fmt;
@@ -62,6 +62,8 @@ pub enum Algorithm {
     Ar,
     ArBsd,
     Deb,
+    Rpm,
+    Squashfs,
     Zip,
     ZipStore,
     ZipBzip2,
@@ -128,6 +130,8 @@ impl Algorithm {
         Algorithm::Ar,
         Algorithm::ArBsd,
         Algorithm::Deb,
+        Algorithm::Rpm,
+        Algorithm::Squashfs,
         Algorithm::Zip,
         Algorithm::ZipStore,
         Algorithm::ZipBzip2,
@@ -194,6 +198,8 @@ impl Algorithm {
             Algorithm::Ar => "ar",
             Algorithm::ArBsd => "ar-bsd",
             Algorithm::Deb => "deb",
+            Algorithm::Rpm => "rpm",
+            Algorithm::Squashfs => "squashfs",
             Algorithm::Zip => "zip",
             Algorithm::ZipStore => "zip-store",
             Algorithm::ZipBzip2 => "zip-bzip2",
@@ -261,6 +267,8 @@ impl Algorithm {
             "ar" | "ar-gnu" => Some(Algorithm::Ar),
             "ar-bsd" => Some(Algorithm::ArBsd),
             "deb" => Some(Algorithm::Deb),
+            "rpm" => Some(Algorithm::Rpm),
+            "squashfs" | "sqfs" => Some(Algorithm::Squashfs),
             "zip" => Some(Algorithm::Zip),
             "zip-store" => Some(Algorithm::ZipStore),
             "zip-bzip2" => Some(Algorithm::ZipBzip2),
@@ -360,6 +368,8 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
             enc.add_file("data.tar", &data_tar.finish());
             enc.finish().expect("deb encode should succeed")
         }
+        Algorithm::Rpm => rpm_fixture(data),
+        Algorithm::Squashfs => squashfs_fixture(data),
         Algorithm::Zip => {
             let mut enc = zip::encode::ZipEncoder::new();
             enc.add_file("fuzz_test", data);
@@ -513,6 +523,19 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
             let package = deb::decode::decode(data)?;
             let entries = package.data_entries()?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::Rpm => {
+            let package = rpm::decode::decode(data)?;
+            let entries = package.payload_entries()?;
+            Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::Squashfs => {
+            let image = squashfs::decode::decode(data)?;
+            Ok(image
+                .entries
+                .into_iter()
+                .find(|e| e.kind == squashfs::decode::SquashfsKind::File)
+                .map_or(Vec::new(), |e| e.data))
         }
         Algorithm::Zip | Algorithm::ZipStore | Algorithm::ZipBzip2 | Algorithm::ZipZstd => {
             let entries = zip::decode::decode(data)?;
@@ -829,4 +852,128 @@ mod tests {
             }
         }
     }
+}
+
+/// Build a minimal `.rpm` fixture: lead + signature header + package header
+/// (uncompressed cpio payload) wrapping a single `fuzz_test` file.
+fn rpm_fixture(data: &[u8]) -> Vec<u8> {
+    fn build_header(tags: &[(u32, u32, &[u8])]) -> Vec<u8> {
+        let mut index = Vec::new();
+        let mut store = Vec::new();
+        for &(tag, ty, bytes) in tags {
+            index.extend_from_slice(&tag.to_be_bytes());
+            index.extend_from_slice(&ty.to_be_bytes());
+            index.extend_from_slice(&(store.len() as u32).to_be_bytes());
+            index.extend_from_slice(&1u32.to_be_bytes());
+            store.extend_from_slice(bytes);
+        }
+        let mut out = vec![0x8e, 0xad, 0xe8, 0x01, 0, 0, 0, 0];
+        out.extend_from_slice(&(tags.len() as u32).to_be_bytes());
+        out.extend_from_slice(&(store.len() as u32).to_be_bytes());
+        out.extend_from_slice(&index);
+        out.extend_from_slice(&store);
+        out
+    }
+
+    let mut rpm = vec![0u8; 96];
+    rpm[..4].copy_from_slice(&[0xed, 0xab, 0xee, 0xdb]);
+    rpm[4] = 4;
+    let mut sig = build_header(&[(62, 7, &[0u8; 16])]);
+    while !sig.len().is_multiple_of(8) {
+        sig.push(0);
+    }
+    let header = build_header(&[(63, 7, &[0u8; 16]), (1125, 6, b"none\0")]);
+    let mut payload = cpio::encode::CpioEncoder::new();
+    payload.add_file("fuzz_test", data);
+    rpm.extend_from_slice(&sig);
+    rpm.extend_from_slice(&header);
+    rpm.extend_from_slice(&payload.finish());
+    rpm
+}
+
+/// Build a minimal uncompressed `.squashfs` image containing a single
+/// `fuzz_test` file in the root directory.
+fn squashfs_fixture(data: &[u8]) -> Vec<u8> {
+    let block_size = 4096usize;
+    let mut out = vec![0u8; 96];
+
+    // data blocks, stored uncompressed (bit 24 of each size field set)
+    let data_start = out.len();
+    let mut sizes = Vec::new();
+    for chunk in data.chunks(block_size) {
+        sizes.push(chunk.len() as u32 | (1 << 24));
+        out.extend_from_slice(chunk);
+    }
+
+    // inode table: one uncompressed metadata block holding the root dir
+    // inode followed by the file inode
+    let inode_table_start = out.len();
+    let mut inode_stream = Vec::new();
+    // basic dir inode (type 1), inode number 1
+    inode_stream.extend_from_slice(&1u16.to_le_bytes());
+    inode_stream.extend_from_slice(&0o755u16.to_le_bytes());
+    inode_stream.extend_from_slice(&0u16.to_le_bytes());
+    inode_stream.extend_from_slice(&0u16.to_le_bytes());
+    inode_stream.extend_from_slice(&0u32.to_le_bytes());
+    inode_stream.extend_from_slice(&1u32.to_le_bytes());
+    inode_stream.extend_from_slice(&0u32.to_le_bytes()); // dir block_index
+    inode_stream.extend_from_slice(&3u32.to_le_bytes()); // link_count
+    inode_stream.extend_from_slice(&32u16.to_le_bytes()); // listing size + 3
+    inode_stream.extend_from_slice(&0u16.to_le_bytes()); // block_offset
+    inode_stream.extend_from_slice(&0u32.to_le_bytes()); // parent
+    // basic file inode (type 2), inode number 2, at stream offset 32
+    inode_stream.extend_from_slice(&2u16.to_le_bytes());
+    inode_stream.extend_from_slice(&0o644u16.to_le_bytes());
+    inode_stream.extend_from_slice(&0u16.to_le_bytes());
+    inode_stream.extend_from_slice(&0u16.to_le_bytes());
+    inode_stream.extend_from_slice(&0u32.to_le_bytes());
+    inode_stream.extend_from_slice(&2u32.to_le_bytes());
+    inode_stream.extend_from_slice(&(data_start as u32).to_le_bytes());
+    inode_stream.extend_from_slice(&u32::MAX.to_le_bytes()); // no fragment
+    inode_stream.extend_from_slice(&0u32.to_le_bytes());
+    inode_stream.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    for s in &sizes {
+        inode_stream.extend_from_slice(&s.to_le_bytes());
+    }
+    out.extend_from_slice(&((inode_stream.len() as u16 | 0x8000).to_le_bytes()));
+    out.extend_from_slice(&inode_stream);
+
+    // directory table: one uncompressed metadata block, one header + entry
+    let dir_table_start = out.len();
+    let mut dir_stream = Vec::new();
+    dir_stream.extend_from_slice(&0u32.to_le_bytes()); // count-1: 1 entry
+    dir_stream.extend_from_slice(&0u32.to_le_bytes()); // inode meta block rel
+    dir_stream.extend_from_slice(&2u32.to_le_bytes()); // base inode number
+    dir_stream.extend_from_slice(&32u16.to_le_bytes()); // inode block offset
+    dir_stream.extend_from_slice(&0i16.to_le_bytes()); // inode diff
+    dir_stream.extend_from_slice(&2u16.to_le_bytes()); // type: basic file
+    dir_stream.extend_from_slice(&8u16.to_le_bytes()); // name_size-1
+    dir_stream.extend_from_slice(b"fuzz_test");
+    out.extend_from_slice(&((dir_stream.len() as u16 | 0x8000).to_le_bytes()));
+    out.extend_from_slice(&dir_stream);
+
+    // ID table: uncompressed location list + one-entry metadata block
+    let id_table_start = out.len();
+    let id_meta_pos = id_table_start + 8;
+    out.extend_from_slice(&(id_meta_pos as u64).to_le_bytes());
+    out.extend_from_slice(&((4u16 | 0x8000).to_le_bytes()));
+    out.extend_from_slice(&0u32.to_le_bytes());
+
+    let bytes_used = out.len() as u64;
+    out[0..4].copy_from_slice(&0x7371_7368u32.to_le_bytes());
+    out[4..8].copy_from_slice(&2u32.to_le_bytes()); // inode_count
+    out[12..16].copy_from_slice(&block_size.to_le_bytes());
+    out[20..22].copy_from_slice(&1u16.to_le_bytes()); // compressor: gzip
+    out[22..24].copy_from_slice(&12u16.to_le_bytes()); // block_log
+    out[26..28].copy_from_slice(&1u16.to_le_bytes()); // id_count
+    out[28..30].copy_from_slice(&4u16.to_le_bytes()); // version 4.0
+    out[32..40].copy_from_slice(&0u64.to_le_bytes()); // root inode ref
+    out[40..48].copy_from_slice(&bytes_used.to_le_bytes());
+    out[48..56].copy_from_slice(&(id_table_start as u64).to_le_bytes());
+    out[56..64].copy_from_slice(&u64::MAX.to_le_bytes()); // xattr absent
+    out[64..72].copy_from_slice(&(inode_table_start as u64).to_le_bytes());
+    out[72..80].copy_from_slice(&(dir_table_start as u64).to_le_bytes());
+    out[80..88].copy_from_slice(&u64::MAX.to_le_bytes()); // fragment absent
+    out[88..96].copy_from_slice(&u64::MAX.to_le_bytes()); // export absent
+    out
 }

@@ -224,6 +224,65 @@ fn decode_items(
                     .collect(),
             ))
         }
+        Format::Rpm => {
+            let package = archive_formats::rpm::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            let name = package.name().transpose().ok().flatten();
+            let version = package.version().transpose().ok().flatten();
+            let entries = package
+                .payload_entries()
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            Ok((
+                ContentKind::Archive,
+                entries
+                    .into_iter()
+                    .map(|entry| {
+                        let mut extra = Vec::new();
+                        if let (Some(name), Some(version)) = (&name, &version) {
+                            extra.push(format!("rpm={name}-{version}"));
+                        }
+                        if let Some(fx) = entry.file_index {
+                            extra.push(format!("rpm-file-index={fx}"));
+                        }
+                        DecodedItem {
+                            payload: Some(entry.data.clone()),
+                            summary: EntrySummary {
+                                path: entry.name,
+                                kind: "file".to_owned(),
+                                size: Some(entry.data.len() as u64),
+                                compressed_size: None,
+                                mtime: None,
+                                mode: None,
+                                extra,
+                            },
+                        }
+                    })
+                    .collect(),
+            ))
+        }
+        Format::Squashfs => {
+            let image = archive_formats::squashfs::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            Ok((
+                ContentKind::Archive,
+                image
+                    .entries
+                    .into_iter()
+                    .map(|entry| DecodedItem {
+                        payload: Some(entry.data.clone()),
+                        summary: EntrySummary {
+                            path: entry.name,
+                            kind: format!("{:?}", entry.kind).to_lowercase(),
+                            size: Some(entry.data.len() as u64),
+                            compressed_size: None,
+                            mtime: Some(entry.mtime as i64),
+                            mode: Some(u32::from(entry.mode)),
+                            extra: Vec::new(),
+                        },
+                    })
+                    .collect(),
+            ))
+        }
         Format::Zpaq => match archive_formats::zpaq::decode::decode(input) {
             Ok(entries) => Ok((
                 ContentKind::Archive,

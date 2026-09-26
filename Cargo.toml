@@ -2,15 +2,17 @@
 name = "archive"
 version.workspace = true
 edition.workspace = true
-description = "Pure Rust archive and compression library (DEFLATE, gzip, zlib, zstd, bzip2, lzip, lzma, xz, LZW, LZ4, LZO, Snappy, Brotli, ZPAQ, rzip, lrzip, tar, cpio, ar, zip, 7z, deb)"
+description = "Pure Rust archive and compression library (DEFLATE, gzip, zlib, zstd, bzip2, lzip, lzma, xz, LZW, LZ4, LZO, Snappy, Brotli, ZPAQ, rzip, lrzip, tar, cpio, ar, zip, 7z, deb, rpm, squashfs)"
 
 [features]
-default = ["std", "tar", "cpio", "ar", "deb", "gzip", "zstd", "bzip2", "lzip", "lzma-alone", "lzw", "lz4", "lzo", "lrzip", "xz", "zlib", "zpaq", "rzip", "snappy"]
+default = ["std", "tar", "cpio", "ar", "deb", "rpm", "squashfs", "gzip", "zstd", "bzip2", "lzip", "lzma-alone", "lzw", "lz4", "lzo", "lrzip", "xz", "zlib", "zpaq", "rzip", "snappy"]
 std = []
 tar = []
 cpio = []
 ar = []
 deb = ["ar", "tar", "gzip", "xz", "zstd", "bzip2", "lzma-alone", "lzw"]
+rpm = ["cpio", "gzip", "bzip2", "xz", "zstd", "lzma-alone"]
+squashfs = ["zlib", "lzo", "lz4", "xz", "zstd"]
 gzip = ["deflate"]
 deflate = []
 zstd = []

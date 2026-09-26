@@ -9,6 +9,8 @@ pub enum Format {
     Cpio,
     Ar,
     Deb,
+    Rpm,
+    Squashfs,
     Zpaq,
     Zip,
     #[value(name = "7z")]
@@ -77,6 +79,8 @@ impl core::fmt::Display for Format {
             Self::Cpio => "cpio",
             Self::Ar => "ar",
             Self::Deb => "deb",
+            Self::Rpm => "rpm",
+            Self::Squashfs => "squashfs",
             Self::Zpaq => "zpaq",
             Self::Zip => "zip",
             Self::SevenZ => "7z",
@@ -196,6 +200,12 @@ pub fn detect_format(input: &[u8]) -> Option<Format> {
     if input.starts_with(b"!<arch>\ndebian-binary") {
         return Some(Format::Deb);
     }
+    if input.starts_with(&[0xED, 0xAB, 0xEE, 0xDB]) {
+        return Some(Format::Rpm);
+    }
+    if input.starts_with(b"hsqs") {
+        return Some(Format::Squashfs);
+    }
     if input.starts_with(b"!<arch>\n") {
         return Some(Format::Ar);
     }
@@ -240,6 +250,12 @@ pub fn scope_notes(format: Format) -> Vec<String> {
         ],
         Format::Deb => vec![
             "deb extraction unpacks the data.tar payload; use --format ar for raw member access".to_owned(),
+        ],
+        Format::Rpm => vec![
+            "rpm support is read-only; header signatures and payload digests are parsed but not verified".to_owned(),
+        ],
+        Format::Squashfs => vec![
+            "squashfs support is read-only; LZMA1-compressed images are unsupported".to_owned(),
         ],
         _ => Vec::new(),
     }
@@ -308,6 +324,19 @@ mod tests {
             detect_format(b"!<arch>\ndebian-binary/   rest"),
             Some(Format::Deb)
         );
+    }
+
+    #[test]
+    fn detect_rpm() {
+        assert_eq!(
+            detect_format(&[0xED, 0xAB, 0xEE, 0xDB, 4, 0]),
+            Some(Format::Rpm)
+        );
+    }
+
+    #[test]
+    fn detect_squashfs() {
+        assert_eq!(detect_format(b"hsqsrest"), Some(Format::Squashfs));
     }
 
     #[test]

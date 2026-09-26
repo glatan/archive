@@ -1,0 +1,34 @@
+//! SquashFS (`.sqfs` / `.squashfs`) read support.
+//!
+//! SquashFS 4.0 is a compressed read-only filesystem image: a 96-byte
+//! superblock, compressed metadata block runs (inode and directory tables),
+//! lookup tables (fragment / ID / export / xattr), and per-file data blocks.
+//! Supported compressors: zlib ("gzip"), LZO, xz, LZ4, zstd. LZMA 1
+//! (compressor id 2, deprecated upstream) is rejected.
+//!
+//! This module is read-only: writing images and interpreting filesystem
+//! semantics (device nodes, xattrs) beyond name/content listing are
+//! intentionally out of scope.
+
+use alloc::vec::Vec;
+
+use crate::error::Error;
+
+/// `.squashfs` image decoding.
+pub mod decode;
+
+pub use decode::{
+    SquashfsCompression, SquashfsEntry, SquashfsImage, SquashfsKind, SquashfsSuperblock, decode,
+    decode_with_limit,
+};
+
+/// Codec struct for trait-based `.squashfs` decode operations.
+pub struct SquashfsCodec;
+
+impl crate::traits::ArchiveDecode for SquashfsCodec {
+    type Entry = decode::SquashfsEntry;
+
+    fn decode(&self, input: &[u8]) -> Result<Vec<Self::Entry>, Error> {
+        Ok(decode::decode(input)?.entries)
+    }
+}

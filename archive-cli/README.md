@@ -56,6 +56,8 @@ archive extract sample.zip --password secret            # 暗号化 zip
 archive extract sample.tar.gz dir/file.txt              # 特定 entry のみ
 archive extract sample.tar.gz --overwrite               # 既存ファイルを上書き
 archive extract sample.deb                              # data.tar ペイロードを展開
+archive extract sample.rpm                              # cpio payload の内容を展開
+archive extract image.sqfs                              # squashfs 内の regular file を展開
 ```
 
 `.deb` は `data.tar` の内容を展開します。生の member (`debian-binary` / `control.tar.*`) は `--format ar` で展開してください。
@@ -102,6 +104,8 @@ archive compress lrzip data.bin -o data.bin.lrz --backend bzip2
 
 magic bytes からフォーマットを自動検出します。
 `.deb` は `!<arch>\n` の直後の member 名 `debian-binary` で識別され、汎用 `ar` より優先されます。
+`.rpm` は Lead magic `ED AB EE DB` で識別されます (read のみ、署名検証は対象外)。
+`.squashfs` は `hsqs` magic で識別されます (read のみ、LZMA1 image は非対応)。
 検出できない場合 (raw deflate, brotli, snappy, lzma など) は `--format` で明示してください。
 
 ## ライセンス

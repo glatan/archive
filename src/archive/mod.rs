@@ -31,3 +31,11 @@ pub mod sevenz;
 /// Debian binary package (`.deb`) read support.
 #[cfg(feature = "deb")]
 pub mod deb;
+
+/// RPM package (`.rpm`) read support.
+#[cfg(feature = "rpm")]
+pub mod rpm;
+
+/// SquashFS (`.squashfs`) image read support.
+#[cfg(feature = "squashfs")]
+pub mod squashfs;

@@ -34,6 +34,11 @@ specifications or standards documents:
 - ar: IEEE Std 1003.1 (POSIX) ar format / GNU ar extensions / BSD ar extensions
 - deb: `deb(5)` Debian binary package format (dpkg manual page,
   https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html)
+- rpm: rpm.org Package Format documentation (format_v6 / format_header /
+  format_lead, https://rpm-software-management.github.io/rpm/manual/)
+  and rpm `lib/cpio.c` stripped payload behavior notes
+- squashfs: SquashFS binary format documentation
+  (https://dr-emann.github.io/squashfs/squashfs.html, CC BY-SA 4.0)
 - zip: PKWARE APPNOTE.TXT 6.3.10
 - 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00)
 
