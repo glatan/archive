@@ -149,6 +149,13 @@
 | system interop / regressions | `test_lzip_decode_system_compressed`<br>`test_lzip_decode_system_compressed_fuzz_regression`<br>`test_lzip_encode_decoded_by_system`<br>`test_lzip_multi_member_system_decode` |
 | multi-member | `test_lzip_multi_member`<br>`test_lzip_multi_member_system_decode` |
 
+### `lzma_alone.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| roundtrip baseline | `test_lzma_alone_roundtrip_large`<br>`test_lzma_alone_roundtrip_empty`<br>`test_lzma_alone_roundtrip_tiny`<br>`test_lzma_alone_roundtrip_high_entropy` |
+| system `xz --format=lzma` interop | `test_lzma_alone_decode_system_compressed`<br>`test_lzma_alone_encode_decoded_by_system` |
+
 ### `lzo.rs`
 
 | Coverage | Test cases |

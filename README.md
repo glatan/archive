@@ -14,6 +14,7 @@ README は概要と導線だけを持ちます。仕様準拠、互換性メモ�
 | 圧縮 | zstd (RFC 8878) | ✅ | ✅ |
 | 圧縮 | bzip2 | ✅ | ✅ |
 | 圧縮 | lzip (LZMA) | ✅ | ✅ |
+| 圧縮 | LZMA-Alone (`.lzma`) | ✅ | ✅ |
 | 圧縮 | xz (LZMA2) | ✅ | ✅ |
 | 圧縮 | LZW (Unix compress `.Z`) | ✅ | ✅ |
 | 圧縮 | LZ4 | ✅ | ✅ |

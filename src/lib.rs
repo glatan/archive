@@ -6,8 +6,8 @@
 //!
 //! # Module layout
 //!
-//! - [`compress`] provides DEFLATE, gzip, zlib, zstd, bzip2, lzip, xz, LZW,
-//!   LZ4, LZO, Snappy, Brotli, ZPAQ, rzip, and lrzip support.
+//! - [`compress`] provides DEFLATE, gzip, zlib, zstd, bzip2, lzip, `.lzma`,
+//!   xz, LZW, LZ4, LZO, Snappy, Brotli, ZPAQ, rzip, and lrzip support.
 //! - [`archive`] provides tar, cpio, ar, zpaq, zip, and 7z support.
 //! - [`traits`] defines common [`Decode`](traits::Decode) / [`Encode`](traits::Encode)
 //!   traits for compression codecs, and [`ArchiveEntry`](traits::ArchiveEntry) /
@@ -41,6 +41,7 @@
 //! | `zstd` (default) | zstd format |
 //! | `bzip2` (default) | bzip2 format |
 //! | `lzip` (default) | lzip format (LZMA) |
+//! | `lzma-alone` (default) | LZMA-Alone `.lzma` format |
 //! | `lzw` (default) | LZW / Unix compress (`.Z`) format |
 //! | `lz4` (default) | LZ4 frame format |
 //! | `lzo` (default) | LZO / lzop format |
@@ -70,7 +71,7 @@
 //!   current coverage includes system-authored simple and match-rich LZMA decode
 //!   plus crate encode consumed by system `lrzip -d` across the supported
 //!   backend matrix.
-//! - `lzip`, `xz`, `lrzip`, and `sevenz` reuse the shared internal `compress::lzma` codec. `xz` and `sevenz` additionally use `compress::lzma2` for chunked LZMA2 paths. `xz` / `lrzip` decoders accept arbitrary valid `lc/lp/pb`; current encoders still emit the default `3/0/2` property tuple.
+//! - `lzip`, `lzma-alone`, `xz`, `lrzip`, and `sevenz` reuse the shared internal `compress::lzma` codec. `xz` and `sevenz` additionally use `compress::lzma2` for chunked LZMA2 paths. `xz` / `lrzip` / `lzma-alone` decoders accept arbitrary valid `lc/lp/pb` within the shared literal-context limit (`lc+lp<=4`); current encoders still emit the default `3/0/2` property tuple.
 //! - `brotli` decoder supports the full RFC 7932 stream format. The encoder currently emits uncompressed metablocks for baseline interoperability; LZ77 compressed metablock emission is not yet implemented.
 //! - `zip` supports baseline Store/Deflate read/write, ZIP64, Data Descriptor, CP437/UTF-8 metadata, traditional PKZIP encrypted entries, and WinZip AES-128/192/256 entry read/write.
 //! - `sevenz` supports plain/encoded headers, multi-folder decode for the current supported folder DAG subset, password-based 7zAES decode for those folders and encoded headers, x86 BCJ2 decode for supported DAG layouts, and bounded writing with one or two linear folders using LZMA2/LZMA/PPMdH/Copy plus x86 BCJ / Delta filters, including linear 7zAES file-content encryption and encoded-header write. Current direct `system 7z` interop coverage includes baseline one-folder archives, one-folder/two-folder PPMd including encoded-header and encrypted/encrypted+encoded-header PPMd, two-folder encrypted / encoded-header / encrypted+encoded-header variants, and one-folder / two-folder x86 BCJ / Delta writer combinations including encoded-header and encrypted filter variants. The decoder normalizes folder graphs to explicit input-source / output-owner / final-root metadata and executes them through a demand-driven cached evaluator. Upstream interface audit shows that the current method surface uses single-stream interfaces for `Copy`, `LZMA`, `LZMA2`, `PPMdH`, `Delta`, and `7zAES`, while `BCJ2` remains the only fixed 4-input multi-stream coder. Non-`BCJ2` multi-input or multi-output declarations are therefore rejected as nonstandard arity instead of being treated as pending feature work.
@@ -422,13 +423,14 @@ pub mod traits_io;
 /// Utility modules: CRC32, XXH64, bit reader.
 pub(crate) mod util;
 
-/// Compression formats and shared filters: DEFLATE, gzip, zlib, zstd, bzip2, lzip, LZW, LZ4, LZO, lrzip, xz, Snappy, Brotli, ZPAQ, plus BCJ/Delta helpers.
+/// Compression formats and shared filters: DEFLATE, gzip, zlib, zstd, bzip2, lzip, `.lzma`, LZW, LZ4, LZO, lrzip, xz, Snappy, Brotli, ZPAQ, plus BCJ/Delta helpers.
 #[cfg(any(
     feature = "deflate",
     feature = "gzip",
     feature = "zstd",
     feature = "bzip2",
     feature = "lzip",
+    feature = "lzma-alone",
     feature = "lzw",
     feature = "lz4",
     feature = "lzo",

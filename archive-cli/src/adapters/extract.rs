@@ -147,6 +147,15 @@ pub fn extract_input(
             compress_formats::lzip::decode::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
+        Format::LzmaAlone => extract_single_payload(
+            input_path,
+            &base_dir,
+            format,
+            selected_paths,
+            overwrite,
+            compress_formats::lzma_alone::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
         Format::Lzw => extract_single_payload(
             input_path,
             &base_dir,

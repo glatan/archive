@@ -192,6 +192,37 @@ mod bench_lzip {
 }
 
 // ---------------------------------------------------------------------------
+// LZMA-Alone
+// ---------------------------------------------------------------------------
+#[cfg(feature = "lzma-alone")]
+mod bench_lzma_alone {
+    use super::*;
+    use archive::compress::lzma_alone::{decode, encode};
+
+    pub fn bench(c: &mut Criterion) {
+        let mut g = c.benchmark_group("lzma-alone");
+        for &(label, size) in SIZES {
+            let data = helpers::generate_text_data(size);
+            let compressed = encode::encode(&data);
+
+            g.throughput(Throughput::Bytes(data.len() as u64));
+            g.bench_with_input(BenchmarkId::new("encode", label), &data, |b, data| {
+                b.iter(|| encode::encode(data));
+            });
+            g.throughput(Throughput::Bytes(compressed.len() as u64));
+            g.bench_with_input(
+                BenchmarkId::new("decode", label),
+                &compressed,
+                |b, compressed| {
+                    b.iter(|| decode::decode(compressed).unwrap());
+                },
+            );
+        }
+        g.finish();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // LZW
 // ---------------------------------------------------------------------------
 #[cfg(feature = "lzw")]
@@ -492,6 +523,7 @@ bench_stub!(bench_zlib, "zlib");
 bench_stub!(bench_zstd, "zstd");
 bench_stub!(bench_bzip2, "bzip2");
 bench_stub!(bench_lzip, "lzip");
+bench_stub!(bench_lzma_alone, "lzma-alone");
 bench_stub!(bench_lzw, "lzw");
 bench_stub!(bench_lz4, "lz4");
 bench_stub!(bench_lzo, "lzo");
@@ -514,6 +546,7 @@ criterion_group!(
     bench_zstd::bench,
     bench_bzip2::bench,
     bench_lzip::bench,
+    bench_lzma_alone::bench,
     bench_lzw::bench,
     bench_lz4::bench,
     bench_lzo::bench,

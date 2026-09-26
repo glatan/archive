@@ -198,6 +198,10 @@ fn self_pattern_body(algo: Algorithm) -> String {
             "archive::compress::lzip::encode::encode(input)",
             "archive::compress::lzip::decode::decode(&encoded).unwrap()",
         ),
+        Algorithm::LzmaAlone => roundtrip_body(
+            "archive::compress::lzma_alone::encode::encode(input)",
+            "archive::compress::lzma_alone::decode::decode(&encoded).unwrap()",
+        ),
         Algorithm::Xz | Algorithm::XzFast | Algorithm::XzBest => roundtrip_body(
             "archive::compress::xz::encode::encode(input)",
             "archive::compress::xz::decode::decode(&encoded).unwrap()",
