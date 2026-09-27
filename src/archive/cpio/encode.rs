@@ -1,10 +1,10 @@
-//! cpio archive encoding (`odc`, SVR4 `newc`, and `newcrc` formats).
+//! cpio archive encoding (`odc`, SVR4 `newc`, `newcrc`, and `bin` formats).
 
 use alloc::vec::Vec;
 
-use super::header::{CpioFormat, S_IFDIR, S_IFLNK, S_IFSOCK, align4};
+use super::header::{BIN_HEADER_SIZE, BIN_MAGIC, CpioFormat, S_IFDIR, S_IFLNK, S_IFSOCK, align_to};
 
-/// Builder for creating cpio archives (`odc`, SVR4 `newc`, and `newcrc` formats).
+/// Builder for creating cpio archives (`odc`, SVR4 `newc`, `newcrc`, and `bin` formats).
 ///
 /// # Examples
 ///
@@ -121,6 +121,21 @@ impl CpioEncoder {
             data: Vec::new(),
             ino_counter: 1,
             format: CpioFormat::Odc,
+            custom_ino: None,
+        }
+    }
+
+    /// Create a new encoder that produces SVR4 binary `bin` (070707 u16) format.
+    ///
+    /// 16-bit fields are written little-endian; 32-bit fields are written as
+    /// two u16s, most significant word first (FreeBSD cpio(5), "New Binary
+    /// Format"). Entries are padded to even offsets and the archive is padded
+    /// to a 512-byte boundary.
+    pub const fn new_bin() -> Self {
+        Self {
+            data: Vec::new(),
+            ino_counter: 1,
+            format: CpioFormat::Bin,
             custom_ino: None,
         }
     }
@@ -313,39 +328,22 @@ impl CpioEncoder {
         let ino = self.next_ino();
 
         let name_with_nul = name.len() + 1;
-        let header = if self.format == CpioFormat::Odc {
-            build_odc_header(
-                ino & 0o777777,
-                mode & 0o777777,
-                0u32,
-                0u32,
-                1u32,
-                combine_odc_device(rdevmajor, rdevminor),
-                0u32,
-                name_with_nul as u32,
-                0u32,
-            )
-        } else {
-            let magic = core::str::from_utf8(self.format.magic()).unwrap_or("070701");
-            alloc::format!(
-                "{magic}\
-                 {ino:08X}\
-                 {mode:08X}\
-                 00000000\
-                 00000000\
-                 00000001\
-                 00000000\
-                 00000000\
-                 00000000\
-                 00000000\
-                 {rdevmajor:08X}\
-                 {rdevminor:08X}\
-                 {:08X}\
-                 00000000",
-                name_with_nul,
-            )
-        };
-        self.data.extend_from_slice(header.as_bytes());
+        self.data.extend_from_slice(&build_header(
+            self.format,
+            &HeaderFields {
+                ino,
+                mode,
+                uid: 0,
+                gid: 0,
+                nlink: 1,
+                rdevmajor,
+                rdevminor,
+                mtime: 0,
+                filesize: 0,
+                namesize: name_with_nul as u32,
+                check: 0,
+            },
+        ));
 
         self.data.extend_from_slice(name.as_bytes());
         self.data.push(0);
@@ -384,45 +382,22 @@ impl CpioEncoder {
             0
         };
 
-        let header = if self.format == CpioFormat::Odc {
-            build_odc_header(
-                ino & 0o777777,
-                opts.mode & 0o777777,
-                opts.uid & 0o777777,
-                opts.gid & 0o777777,
-                opts.nlink & 0o777777,
-                0u32,
-                opts.mtime,
-                name_with_nul as u32,
-                file_data.len() as u32,
-            )
-        } else {
-            let magic = core::str::from_utf8(self.format.magic()).unwrap_or("070701");
-            alloc::format!(
-                "{magic}\
-                 {ino:08X}\
-                 {:08X}\
-                 {:08X}\
-                 {:08X}\
-                 {:08X}\
-                 {:08X}\
-                 {:08X}\
-                 00000000\
-                 00000000\
-                 00000000\
-                 00000000\
-                 {:08X}\
-                 {check:08X}",
-                opts.mode,
-                opts.uid,
-                opts.gid,
-                opts.nlink,
-                opts.mtime,
-                file_data.len(),
-                name_with_nul,
-            )
-        };
-        self.data.extend_from_slice(header.as_bytes());
+        self.data.extend_from_slice(&build_header(
+            self.format,
+            &HeaderFields {
+                ino,
+                mode: opts.mode,
+                uid: opts.uid,
+                gid: opts.gid,
+                nlink: opts.nlink,
+                rdevmajor: 0,
+                rdevminor: 0,
+                mtime: opts.mtime,
+                filesize: file_data.len() as u32,
+                namesize: name_with_nul as u32,
+                check,
+            },
+        ));
 
         self.data.extend_from_slice(name.as_bytes());
         self.data.push(0);
@@ -451,29 +426,22 @@ impl CpioEncoder {
     pub fn finish(mut self) -> Vec<u8> {
         let name = "TRAILER!!!";
         let name_with_nul = name.len() + 1;
-        let header = if self.format == CpioFormat::Odc {
-            build_odc_header(0, 0, 0, 0, 1, 0, 0, name_with_nul as u32, 0)
-        } else {
-            let magic = core::str::from_utf8(self.format.magic()).unwrap_or("070701");
-            alloc::format!(
-                "{magic}\
-                 00000000\
-                 00000000\
-                 00000000\
-                 00000000\
-                 00000001\
-                 00000000\
-                 00000000\
-                 00000000\
-                 00000000\
-                 00000000\
-                 00000000\
-                 {:08X}\
-                 00000000",
-                name_with_nul,
-            )
-        };
-        self.data.extend_from_slice(header.as_bytes());
+        self.data.extend_from_slice(&build_header(
+            self.format,
+            &HeaderFields {
+                ino: 0,
+                mode: 0,
+                uid: 0,
+                gid: 0,
+                nlink: 1,
+                rdevmajor: 0,
+                rdevminor: 0,
+                mtime: 0,
+                filesize: 0,
+                namesize: name_with_nul as u32,
+                check: 0,
+            },
+        ));
         self.data.extend_from_slice(name.as_bytes());
         self.data.push(0);
 
@@ -519,22 +487,108 @@ impl CpioEncoder {
 }
 
 fn pad_name_if_needed(data: &mut Vec<u8>, format: CpioFormat) {
-    if format.uses_align4() {
-        let current = data.len();
-        let padded = align4(current);
-        data.resize(padded, 0);
-    }
+    let padded = align_to(data.len(), format.alignment());
+    data.resize(padded, 0);
 }
 
 fn pad_data_if_needed(data: &mut Vec<u8>, format: CpioFormat) {
-    if format.uses_align4() {
-        let current = data.len();
-        let padded = align4(current);
-        data.resize(padded, 0);
+    let padded = align_to(data.len(), format.alignment());
+    data.resize(padded, 0);
+}
+
+/// Field values used to construct a cpio entry header.
+struct HeaderFields {
+    ino: u32,
+    mode: u32,
+    uid: u32,
+    gid: u32,
+    nlink: u32,
+    rdevmajor: u32,
+    rdevminor: u32,
+    mtime: u32,
+    filesize: u32,
+    namesize: u32,
+    check: u32,
+}
+
+/// Serialize a cpio header for `format`. `dev`/`devminor` are always 0
+/// (matching the previous encoder behavior).
+fn build_header(format: CpioFormat, f: &HeaderFields) -> Vec<u8> {
+    match format {
+        CpioFormat::Odc => build_odc_header(
+            f.ino & 0o777777,
+            f.mode & 0o777777,
+            f.uid & 0o777777,
+            f.gid & 0o777777,
+            f.nlink & 0o777777,
+            combine_device(f.rdevmajor, f.rdevminor),
+            f.mtime,
+            f.namesize,
+            f.filesize,
+        )
+        .into_bytes(),
+        CpioFormat::Newc | CpioFormat::Newcrc => {
+            let magic: &str = if format.is_crc() { "070702" } else { "070701" };
+            alloc::format!(
+                "{magic}\
+                 {:08X}\
+                 {:08X}\
+                 {:08X}\
+                 {:08X}\
+                 {:08X}\
+                 {:08X}\
+                 {:08X}\
+                 00000000\
+                 00000000\
+                 {:08X}\
+                 {:08X}\
+                 {:08X}\
+                 {:08X}",
+                f.ino,
+                f.mode,
+                f.uid,
+                f.gid,
+                f.nlink,
+                f.mtime,
+                f.filesize,
+                f.rdevmajor,
+                f.rdevminor,
+                f.namesize,
+                f.check,
+            )
+            .into_bytes()
+        }
+        CpioFormat::Bin => build_bin_header(f),
     }
 }
 
-const fn combine_odc_device(major: u32, minor: u32) -> u32 {
+/// Serialize a SVR4 binary ("bin") header: thirteen u16 fields,
+/// little-endian, with 32-bit fields stored as two u16s (most significant
+/// word first).
+fn build_bin_header(f: &HeaderFields) -> Vec<u8> {
+    let rdev = combine_device(f.rdevmajor, f.rdevminor);
+    let mut header = Vec::with_capacity(BIN_HEADER_SIZE);
+    for v in [
+        BIN_MAGIC,
+        0, // dev
+        f.ino as u16,
+        f.mode as u16,
+        f.uid as u16,
+        f.gid as u16,
+        f.nlink as u16,
+        rdev as u16,
+        (f.mtime >> 16) as u16,
+        f.mtime as u16,
+        f.namesize as u16,
+        (f.filesize >> 16) as u16,
+        f.filesize as u16,
+    ] {
+        header.extend_from_slice(&v.to_le_bytes());
+    }
+    header
+}
+
+const fn combine_device(major: u32, minor: u32) -> u32 {
     ((major & 0xFF) << 8) | (minor & 0xFF)
 }
 
@@ -551,8 +605,7 @@ fn build_odc_header(
     filesize: u32,
 ) -> alloc::string::String {
     alloc::format!(
-        "{}{:06o}{:06o}{:06o}{:06o}{:06o}{:06o}{:06o}{:011o}{:06o}{:011o}",
-        core::str::from_utf8(CpioFormat::Odc.magic()).unwrap_or("070707"),
+        "070707{:06o}{:06o}{:06o}{:06o}{:06o}{:06o}{:06o}{:011o}{:06o}{:011o}",
         0u32,
         ino,
         mode,
@@ -958,9 +1011,129 @@ mod tests {
                 crate::archive::cpio::header::CpioHeader::parse(&archive[pos..]).unwrap();
             let data_start = pos + header_total;
             let data_size = header.filesize as usize;
-            pos = crate::archive::cpio::header::align4(data_start + data_size);
+            pos = crate::archive::cpio::header::align_to(data_start + data_size, 4);
         }
         // Should have found the 2 file headers + 1 TRAILER header = 3
         assert_eq!(found_headers, 3);
+    }
+
+    #[test]
+    fn test_bin_roundtrip_single_file() {
+        let mut encoder = CpioEncoder::new_bin();
+        encoder.add_file("test.txt", b"bin payload");
+        let archive = encoder.finish();
+        // Binary magic: u16 070707 little-endian
+        assert_eq!(&archive[0..2], &[0xC7, 0x71]);
+        let entries = decode::decode(&archive).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "test.txt");
+        assert_eq!(entries[0].data, b"bin payload");
+        assert_eq!(
+            entries[0].header.format,
+            crate::archive::cpio::header::CpioFormat::Bin
+        );
+    }
+
+    #[test]
+    fn test_bin_roundtrip_multiple_files() {
+        let mut encoder = CpioEncoder::new_bin();
+        encoder.add_file("a.txt", b"AAA");
+        encoder.add_file("b.txt", b"BBBBB");
+        encoder.add_file("empty.txt", b"");
+        let archive = encoder.finish();
+        let entries = decode::decode(&archive).unwrap();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].data, b"AAA");
+        assert_eq!(entries[1].data, b"BBBBB");
+        assert_eq!(entries[2].data, b"");
+    }
+
+    #[test]
+    fn test_bin_even_alignment() {
+        // "odd.bin" has namesize 8 (even), data 1 byte -> one pad byte after data.
+        let mut encoder = CpioEncoder::new_bin();
+        encoder.add_file("odd.bin", b"x");
+        let archive = encoder.finish();
+        // header (26) + name (8) = 34, data at 34..35, pad at 35, next header at 36
+        let (h, total) = crate::archive::cpio::header::CpioHeader::parse(&archive).unwrap();
+        assert_eq!(h.filesize, 1);
+        assert_eq!(total, 34);
+        assert_eq!(archive[35], 0);
+        // next entry (TRAILER) starts at even offset 36
+        assert_eq!(&archive[36..38], &[0xC7, 0x71]);
+    }
+
+    #[test]
+    fn test_bin_odd_namesize_padding() {
+        // name "ab" -> namesize 3 (odd) -> 1 pad byte after name
+        let mut encoder = CpioEncoder::new_bin();
+        encoder.add_file("ab", b"dd");
+        let archive = encoder.finish();
+        let (h, total) = crate::archive::cpio::header::CpioHeader::parse(&archive).unwrap();
+        assert_eq!(h.namesize, 3);
+        assert_eq!(total, 26 + 4); // name padded to even
+        let entries = decode::decode(&archive).unwrap();
+        assert_eq!(entries[0].name, "ab");
+        assert_eq!(entries[0].data, b"dd");
+    }
+
+    #[test]
+    fn test_bin_symlink_roundtrip() {
+        let mut encoder = CpioEncoder::new_bin();
+        encoder.add_symlink("link.txt", "target.txt");
+        let archive = encoder.finish();
+        let entries = decode::decode(&archive).unwrap();
+        assert!(entries[0].header.is_symlink());
+        assert_eq!(entries[0].symlink_target(), Some("target.txt"));
+    }
+
+    #[test]
+    fn test_bin_device_roundtrip() {
+        use crate::archive::cpio::header::S_IFCHR;
+        let mut encoder = CpioEncoder::new_bin();
+        encoder.add_device("null", S_IFCHR | 0o666, 1, 3);
+        let archive = encoder.finish();
+        let entries = decode::decode(&archive).unwrap();
+        assert_eq!(entries[0].header.rdevmajor, 1);
+        assert_eq!(entries[0].header.rdevminor, 3);
+    }
+
+    #[test]
+    fn test_bin_big_endian_decode() {
+        // Same archive bytes with all u16 fields byte-swapped (BE variant).
+        let mut encoder = CpioEncoder::new_bin();
+        encoder.add_file("be.txt", b"BE!");
+        let le = encoder.finish();
+        // Swap each u16 in the 26-byte headers only (names and data are bytes).
+        let mut be = le.clone();
+        let mut pos = 0;
+        while pos + 26 <= be.len() && be[pos] == 0xC7 && be[pos + 1] == 0x71 {
+            for i in 0..13 {
+                be.swap(pos + 2 * i, pos + 2 * i + 1);
+            }
+            let namesize = u16::from_be_bytes([be[pos + 20], be[pos + 21]]) as usize;
+            let filesize = ((u16::from_be_bytes([be[pos + 22], be[pos + 23]]) as usize) << 16)
+                | u16::from_be_bytes([be[pos + 24], be[pos + 25]]) as usize;
+            let name_end = pos + 26 + ((namesize + 1) & !1);
+            pos = name_end + ((filesize + 1) & !1);
+        }
+        let entries = decode::decode(&be).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "be.txt");
+        assert_eq!(entries[0].data, b"BE!");
+        assert_eq!(
+            entries[0].header.format,
+            crate::archive::cpio::header::CpioFormat::Bin
+        );
+    }
+
+    #[test]
+    fn test_bin_trailer_and_512_padding() {
+        let mut encoder = CpioEncoder::new_bin();
+        encoder.add_file("a", b"");
+        let archive = encoder.finish();
+        assert_eq!(archive.len() % 512, 0);
+        let entries = decode::decode(&archive).unwrap();
+        assert_eq!(entries.len(), 1);
     }
 }

@@ -1,4 +1,4 @@
-//! cpio archive decoding (`odc`, SVR4 `newc`, and `newcrc` formats).
+//! cpio archive decoding (`odc`, SVR4 `newc`, `newcrc`, and `bin` formats).
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 
 use crate::error::Error;
 
-use super::header::{CpioHeader, align4};
+use super::header::{CpioHeader, align_to};
 
 /// A single entry in a cpio archive.
 ///
@@ -212,12 +212,9 @@ pub fn decode(input: &[u8]) -> Result<Vec<CpioEntry>, Error> {
             return Err(Error::InvalidData("cpio newc check field must be zero"));
         }
 
-        // Next entry starts after data. Only newc/newcrc use 4-byte padding.
-        pos = if header.format.uses_align4() {
-            align4(data_start + data_size)
-        } else {
-            data_start + data_size
-        };
+        // Next entry starts after data + per-format padding
+        // (odc: none, bin: 2-byte, newc/newcrc: 4-byte).
+        pos = align_to(data_start + data_size, header.format.alignment());
 
         entries.push(CpioEntry { header, name, data });
     }
@@ -330,7 +327,7 @@ mod tests {
 
         let (header, header_total) =
             crate::archive::cpio::header::CpioHeader::parse(&archive).unwrap();
-        let entry_end = align4(header_total + header.filesize as usize);
+        let entry_end = align_to(header_total + header.filesize as usize, 4);
         let truncated = &archive[..entry_end];
         let err = decode(truncated).unwrap_err();
         assert!(matches!(

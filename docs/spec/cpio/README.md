@@ -1,4 +1,4 @@
-# cpio (`odc` / SVR4 `newc` / `newcrc`)
+# cpio (`odc` / SVR4 `newc` / `newcrc` / `bin`)
 
 | 項目 | 内容 |
 |------|------|
@@ -11,7 +11,8 @@
 | `odc` (POSIX portable ASCII) | [POSIX.1 cpio](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/pax.html) | ✅ | ✅ | 76B header、magic `070707`、パディングなし |
 | `newc` (SVR4 ASCII) | SVR4 cpio | ✅ | ✅ | 110B header、magic `070701`、4B align |
 | `newcrc` (SVR4 + CRC) | SVR4 cpio | ✅ | ✅ | magic `070702`、data CRC 検証 |
-| `bin` (SVR4 binary header) | SVR4 binary cpio | ❌ | ❌ | intentional scope: バイナリヘッダ形式は非対応 |
+| `bin` (SVR4 binary header) | [FreeBSD `cpio(5)` "New Binary Format"](https://man.freebsd.org/cgi/man.cgi?cpio(5)) | ✅ | ✅ | 26B ヘッダ、magic u16 `070707`、2B align。LE/BE 両 decode、encode は LE |
+| PWB binary | [FreeBSD `cpio(5)` "PWB format"](https://man.freebsd.org/cgi/man.cgi?cpio(5)) | ⚠️ | ❌ | intentional scope: wire 上で new binary と判別不能なため new-binary の mode semantics で解釈 (PWB アーカイブは file type がずれる) |
 
 ### テスト対象要件と網羅状況
 
@@ -58,12 +59,26 @@
 | 34 | Hard link 検出: ino + dev 一致 | POSIX cpio | ✅ | `is_hard_link()`, `find_hard_link_groups()`, `test_is_hard_link`, `test_find_hard_link_groups` |
 | 35 | Socket type (S_IFSOCK = 0140000) | POSIX cpio | ✅ | `S_IFSOCK` 定数、`is_socket()` メソッド、`add_socket()` エンコーダー、`test_socket_roundtrip` |
 
+### `bin` (SVR4 binary) 形式要件
+
+| # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
+|---|---------|---------|------|----------------|
+| 36 | bin ヘッダ: 26 バイト、13×u16 フィールド (magic/dev/ino/mode/uid/gid/nlink/rdev/mtime(2)/namesize/filesize(2)) | FreeBSD cpio(5) "New Binary Format" | ✅ | `test_cpio_bin_parse_le`, `test_bin_roundtrip_single_file` |
+| 37 | u16 エンディアンは magic 観測で決定 — LE/BE 両 decode、encode は LE | FreeBSD cpio(5) "endianness must be determined by observing the magic number" | ✅ | `test_cpio_bin_parse_be`, `test_bin_big_endian_decode` |
+| 38 | 32bit フィールド (mtime, filesize) は u16 2個、MSW first | FreeBSD cpio(5) "most significant word first" | ✅ | `test_cpio_bin_parse_le` / `test_cpio_bin_parse_be` |
+| 39 | name/data 後は偶数バイト境界にパディング (NUL) | FreeBSD cpio(5) "additional NUL byte" | ✅ | `test_bin_even_alignment`, `test_bin_odd_namesize_padding` |
+| 40 | dev/rdev は u16 packed (major=high byte, minor=low byte) → devmajor/devminor に分解 | FreeBSD cpio(5) h_majmin | ✅ | `test_cpio_bin_dev_rdev_split`, `test_bin_device_roundtrip` |
+| 41 | new-binary の mode bits (S_IFMT=0170000: S_IFLNK 等) で解釈。PWB の IALLOC/ILARG  semantics では解釈しない | FreeBSD cpio(5) "revised use of the various bits" | ✅ | `test_bin_symlink_roundtrip`, fixture decode |
+| 42 | GNU cpio interop: `cpio -o -H bin` 出力を decode、自前出力を `cpio -id` で伸張 | GNU cpio 2.15 (fixture generator のみ) | ✅ | `test_cpio_bin_decode_fixture_multi`, `test_cpio_bin_decode_fixture_mixed`, `test_cpio_bin_decode_system_archive`, `test_cpio_bin_extract_with_system` |
+| 43 | PWB binary は判別不能のため new-binary semantics で解釈 (IALLOC/ILARG は解釈しない) | FreeBSD cpio(5) "no obvious way to tell" | ✅ | variant table 参照 — PWB archive の file type はずれる intentional 制限 |
+
 ---
 
 ## 集計
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 35 |
-| **合計** | **35** |
+| ✅ 実装+テスト済み | 42 |
+| ⚠️ 部分対応 | 1 |
+| **合計** | **43** |
 

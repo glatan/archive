@@ -265,3 +265,174 @@ fn test_cpio_encode_newcrc_system_extract_compat() {
     let _ = std::fs::remove_file(dir.join("crc.txt"));
     let _ = std::fs::remove_dir(&dir);
 }
+
+// ============================================================
+// cpio `bin` (SVR4 binary) tests
+// ============================================================
+//
+// The `bin_*.cpio` fixtures were produced by GNU cpio 2.15
+// (`cpio -o -H bin`) and are used as known-answer decode tests.
+
+#[test]
+fn test_cpio_bin_decode_fixture_multi() {
+    let data = include_bytes!("../fixtures/cpio/bin_multi.cpio");
+    let entries = cpio::decode::decode(data).unwrap();
+    assert_eq!(entries.len(), 3);
+    assert!(
+        entries
+            .iter()
+            .all(|e| e.header.format == cpio::header::CpioFormat::Bin)
+    );
+
+    assert_eq!(entries[0].name, "data.bin");
+    let mut expected0 = vec![b'a'; 29];
+    expected0.extend_from_slice(b"bbbbbbb");
+    assert_eq!(entries[0].data, expected0);
+    assert_eq!(entries[0].header.mode & 0o170000, 0o100000);
+
+    assert_eq!(entries[1].name, "hello.txt");
+    assert_eq!(entries[1].data, b"hello cpio bin format\n");
+
+    assert_eq!(entries[2].name, "odd.bin");
+    assert_eq!(entries[2].data, b"x");
+}
+
+#[test]
+fn test_cpio_bin_decode_fixture_mixed() {
+    let data = include_bytes!("../fixtures/cpio/bin_mixed.cpio");
+    let entries = cpio::decode::decode(data).unwrap();
+    assert_eq!(entries.len(), 3);
+    assert!(
+        entries
+            .iter()
+            .all(|e| e.header.format == cpio::header::CpioFormat::Bin)
+    );
+
+    assert_eq!(entries[0].name, "subdir/nested.txt");
+    assert_eq!(entries[0].data, b"nested file content\n");
+
+    assert_eq!(entries[1].name, "link.txt");
+    assert!(entries[1].header.is_symlink());
+    assert_eq!(entries[1].symlink_target(), Some("hello.txt"));
+
+    assert_eq!(entries[2].name, "hello.txt");
+    assert_eq!(entries[2].data, b"hello cpio bin format\n");
+}
+
+#[test]
+fn test_cpio_bin_roundtrip_integration() {
+    let mut encoder = cpio::encode::CpioEncoder::new_bin();
+    encoder.add_file("a", b"1");
+    encoder.add_file("bbb", b"22");
+    encoder.add_symlink("ln", "a");
+    let archive = encoder.finish();
+
+    let entries = cpio::decode::decode(&archive).unwrap();
+    assert_eq!(entries.len(), 3);
+    assert!(
+        entries
+            .iter()
+            .all(|e| e.header.format == cpio::header::CpioFormat::Bin)
+    );
+    assert_eq!(entries[0].name, "a");
+    assert_eq!(entries[0].data, b"1");
+    assert_eq!(entries[1].name, "bbb");
+    assert_eq!(entries[1].data, b"22");
+    assert_eq!(entries[2].symlink_target(), Some("a"));
+}
+
+#[test]
+fn test_cpio_bin_decode_system_archive() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let Some(cpio_cmd) = cpio_binary() else {
+        return;
+    };
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_cpio_bin_decode_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("sys.bin"), b"system bin payload").unwrap();
+
+    let mut child = Command::new(cpio_cmd)
+        .current_dir(&dir)
+        .args(["-o", "-H", "bin"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"sys.bin\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "system cpio -H bin create failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let entries = cpio::decode::decode(&output.stdout).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].header.format, cpio::header::CpioFormat::Bin);
+    assert_eq!(entries[0].name, "sys.bin");
+    assert_eq!(entries[0].data, b"system bin payload");
+
+    let _ = std::fs::remove_file(dir.join("sys.bin"));
+    let _ = std::fs::remove_dir(&dir);
+}
+
+#[test]
+fn test_cpio_bin_extract_with_system() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let Some(cpio_cmd) = cpio_binary() else {
+        return;
+    };
+
+    let mut encoder = cpio::encode::CpioEncoder::new_bin();
+    encoder.add_file("bin.txt", b"bin extract payload");
+    let archive = encoder.finish();
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_cpio_bin_extract_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let mut child = Command::new(cpio_cmd)
+        .current_dir(&dir)
+        .args(["-id"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.as_mut().unwrap().write_all(&archive).unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "system cpio bin extract failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        std::fs::read(dir.join("bin.txt")).unwrap(),
+        b"bin extract payload"
+    );
+
+    let _ = std::fs::remove_file(dir.join("bin.txt"));
+    let _ = std::fs::remove_dir(&dir);
+}

@@ -1,4 +1,4 @@
-//! cpio header parsing (`odc`, SVR4 `newc`, and `newcrc` formats).
+//! cpio header parsing (`odc`, SVR4 `newc`, `newcrc`, and `bin` formats).
 
 use crate::error::Error;
 
@@ -11,11 +11,17 @@ pub(crate) const NEWCRC_MAGIC: &[u8; 6] = b"070702";
 /// Magic number for POSIX/SUSv2 portable ASCII "odc" cpio format.
 pub(crate) const ODC_MAGIC: &[u8; 6] = b"070707";
 
+/// Magic number for SVR4 binary "bin" cpio format (u16 field, octal 070707).
+pub(crate) const BIN_MAGIC: u16 = 0o070707;
+
 /// Size of the newc header in bytes.
 pub(crate) const HEADER_SIZE: usize = 110;
 
 /// Size of the odc header in bytes.
 pub(crate) const ODC_HEADER_SIZE: usize = 76;
+
+/// Size of the binary header in bytes (thirteen u16 fields).
+pub(crate) const BIN_HEADER_SIZE: usize = 26;
 
 // Unix file type mode bits
 /// Regular file.
@@ -44,29 +50,30 @@ pub enum CpioFormat {
     Newc,
     /// SVR4 CRC variant with hexadecimal fields and checksum.
     Newcrc,
+    /// SVR4 binary format with 16-bit fields and 2-byte alignment.
+    Bin,
 }
 
 impl CpioFormat {
-    /// Magic string for the format.
-    pub(crate) const fn magic(self) -> &'static [u8; 6] {
-        match self {
-            Self::Odc => ODC_MAGIC,
-            Self::Newc => NEWC_MAGIC,
-            Self::Newcrc => NEWCRC_MAGIC,
-        }
-    }
-
     /// Fixed header size.
     pub(crate) const fn header_size(self) -> usize {
         match self {
             Self::Odc => ODC_HEADER_SIZE,
             Self::Newc | Self::Newcrc => HEADER_SIZE,
+            Self::Bin => BIN_HEADER_SIZE,
         }
     }
 
-    /// Whether entry name/data are padded to a 4-byte boundary.
-    pub(crate) const fn uses_align4(self) -> bool {
-        !matches!(self, Self::Odc)
+    /// Byte alignment applied after each entry's name and file data.
+    ///
+    /// `odc` has no padding, `bin` pads to even offsets, and `newc`/`newcrc`
+    /// pad to 4-byte boundaries.
+    pub(crate) const fn alignment(self) -> usize {
+        match self {
+            Self::Odc => 1,
+            Self::Bin => 2,
+            Self::Newc | Self::Newcrc => 4,
+        }
     }
 
     /// Whether this format carries a checksum field.
@@ -219,7 +226,20 @@ impl CpioHeader {
             return Err(Error::UnexpectedEof);
         }
 
-        let format = if &data[0..6] == NEWC_MAGIC {
+        // The binary format stores the magic as a u16 whose byte order is
+        // determined by observing the magic itself (FreeBSD cpio(5), "New
+        // Binary Format").
+        let bin_le = if data[0..2] == BIN_MAGIC.to_le_bytes() {
+            Some(true)
+        } else if data[0..2] == BIN_MAGIC.to_be_bytes() {
+            Some(false)
+        } else {
+            None
+        };
+
+        let format = if bin_le.is_some() {
+            CpioFormat::Bin
+        } else if &data[0..6] == NEWC_MAGIC {
             CpioFormat::Newc
         } else if &data[0..6] == NEWCRC_MAGIC {
             CpioFormat::Newcrc
@@ -234,6 +254,40 @@ impl CpioHeader {
         }
 
         let header = match format {
+            CpioFormat::Bin => {
+                let little = bin_le == Some(true);
+                let u16_at = |i: usize| -> u16 {
+                    let b = [data[i], data[i + 1]];
+                    if little {
+                        u16::from_le_bytes(b)
+                    } else {
+                        u16::from_be_bytes(b)
+                    }
+                };
+                // 32-bit fields are stored as two u16s, most significant
+                // word first.
+                let u32_at =
+                    |i: usize| -> u32 { (u32::from(u16_at(i)) << 16) | u32::from(u16_at(i + 2)) };
+                let dev = u32::from(u16_at(2));
+                let rdev = u32::from(u16_at(14));
+                CpioHeader {
+                    ino: u32::from(u16_at(4)),
+                    mode: u32::from(u16_at(6)),
+                    uid: u32::from(u16_at(8)),
+                    gid: u32::from(u16_at(10)),
+                    nlink: u32::from(u16_at(12)),
+                    mtime: u32_at(16),
+                    filesize: u32_at(22),
+                    devmajor: (dev >> 8) & 0xFF,
+                    devminor: dev & 0xFF,
+                    rdevmajor: (rdev >> 8) & 0xFF,
+                    rdevminor: rdev & 0xFF,
+                    namesize: u32::from(u16_at(20)),
+                    check: 0,
+                    is_crc: false,
+                    format,
+                }
+            }
             CpioFormat::Odc => {
                 let dev = parse_octal_field(&data[6..12])?;
                 let rdev = parse_octal_field(&data[42..48])?;
@@ -280,14 +334,10 @@ impl CpioHeader {
             ));
         }
 
-        // Total consumed: header + filename, plus name padding for newc/newcrc.
+        // Total consumed: header + filename, plus name padding.
         let name_offset = format.header_size();
         let name_end = name_offset + header.namesize as usize;
-        let total = if format.uses_align4() {
-            align4(name_end)
-        } else {
-            name_end
-        };
+        let total = align_to(name_end, format.alignment());
 
         Ok((header, total))
     }
@@ -307,9 +357,9 @@ fn parse_octal_field(field: &[u8]) -> Result<u32, Error> {
     u32::from_str_radix(s, 8).map_err(|_| Error::InvalidData("invalid octal field in cpio header"))
 }
 
-/// Round up to the next 4-byte boundary.
-pub(crate) const fn align4(n: usize) -> usize {
-    (n + 3) & !3
+/// Round up to the next `boundary`-byte boundary.
+pub(crate) const fn align_to(n: usize, boundary: usize) -> usize {
+    (n + boundary - 1) & !(boundary - 1)
 }
 
 #[cfg(test)]
@@ -331,12 +381,15 @@ mod tests {
     }
 
     #[test]
-    fn test_align4() {
-        assert_eq!(align4(0), 0);
-        assert_eq!(align4(1), 4);
-        assert_eq!(align4(4), 4);
-        assert_eq!(align4(5), 8);
-        assert_eq!(align4(110), 112);
+    fn test_align_to() {
+        assert_eq!(align_to(0, 4), 0);
+        assert_eq!(align_to(1, 4), 4);
+        assert_eq!(align_to(4, 4), 4);
+        assert_eq!(align_to(5, 4), 8);
+        assert_eq!(align_to(110, 4), 112);
+        assert_eq!(align_to(3, 2), 4);
+        assert_eq!(align_to(4, 2), 4);
+        assert_eq!(align_to(5, 1), 5);
     }
 
     // Phase 1: Error detection
@@ -473,5 +526,91 @@ mod tests {
         data[94..102].copy_from_slice(b"00000000"); // namesize = 0
         let result = CpioHeader::parse(&data);
         assert!(matches!(result, Err(Error::InvalidData(_))));
+    }
+
+    fn bin_header(fields: &[(usize, u16)], little: bool) -> Vec<u8> {
+        let mut h = vec![0u8; BIN_HEADER_SIZE];
+        let magic = if little {
+            BIN_MAGIC.to_le_bytes()
+        } else {
+            BIN_MAGIC.to_be_bytes()
+        };
+        h[0..2].copy_from_slice(&magic);
+        for (off, v) in fields {
+            let b = if little {
+                v.to_le_bytes()
+            } else {
+                v.to_be_bytes()
+            };
+            h[*off..*off + 2].copy_from_slice(&b);
+        }
+        h
+    }
+
+    #[test]
+    fn test_cpio_bin_parse_le() {
+        // namesize=1, mode S_IFREG|0644, mtime 0x0001_0002, filesize 0x0003_0004
+        let h = bin_header(
+            &[
+                (4, 7),
+                (6, 0o100644),
+                (8, 1000),
+                (10, 100),
+                (12, 1),
+                (16, 1),
+                (18, 2),
+                (20, 1),
+                (22, 3),
+                (24, 4),
+            ],
+            true,
+        );
+        let (header, consumed) = CpioHeader::parse(&h).unwrap();
+        assert_eq!(header.format, CpioFormat::Bin);
+        assert_eq!(header.ino, 7);
+        assert_eq!(header.mode, 0o100644);
+        assert_eq!(header.file_type(), S_IFREG);
+        assert_eq!(header.uid, 1000);
+        assert_eq!(header.gid, 100);
+        assert_eq!(header.nlink, 1);
+        assert_eq!(header.mtime, 0x0001_0002);
+        assert_eq!(header.filesize, 0x0003_0004);
+        assert_eq!(header.namesize, 1);
+        assert!(!header.is_crc);
+        assert_eq!(consumed, BIN_HEADER_SIZE + 2); // name + even pad
+    }
+
+    #[test]
+    fn test_cpio_bin_parse_be() {
+        // Same header byte-swapped per u16 field: big-endian variant.
+        let h = bin_header(
+            &[
+                (4, 7),
+                (6, 0o100644),
+                (16, 1),
+                (18, 2),
+                (20, 1),
+                (22, 3),
+                (24, 4),
+            ],
+            false,
+        );
+        assert_eq!(&h[0..2], &[0x71, 0xC7]);
+        let (header, _) = CpioHeader::parse(&h).unwrap();
+        assert_eq!(header.format, CpioFormat::Bin);
+        assert_eq!(header.ino, 7);
+        assert_eq!(header.mtime, 0x0001_0002);
+        assert_eq!(header.filesize, 0x0003_0004);
+    }
+
+    #[test]
+    fn test_cpio_bin_dev_rdev_split() {
+        // dev=0x0308 -> major 3 minor 8; rdev=0x0103 -> major 1 minor 3
+        let h = bin_header(&[(2, 0x0308), (14, 0x0103), (20, 1)], true);
+        let (header, _) = CpioHeader::parse(&h).unwrap();
+        assert_eq!(header.devmajor, 3);
+        assert_eq!(header.devminor, 8);
+        assert_eq!(header.rdevmajor, 1);
+        assert_eq!(header.rdevminor, 3);
     }
 }

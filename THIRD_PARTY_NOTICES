@@ -98,7 +98,11 @@ specifications or standards documents:
   LZ4 block format specification
   (https://github.com/lz4/lz4/blob/dev/doc/lz4_Block_format.md)
 - tar: POSIX.1-2001 UStar / GNU tar extensions / POSIX PAX extensions
-- cpio: POSIX `odc` / SVR4 `newc` / `newcrc`
+- cpio: POSIX `odc` / SVR4 `newc` / `newcrc` / `bin` (FreeBSD
+  `cpio(5)` "PWB format" / "New Binary Format" descriptions).
+  `bin` test fixtures are produced by GNU cpio (GPL-3.0-or-later),
+  invoked only as a local test-time fixture generator; it is not
+  linked or distributed
 - ar: IEEE Std 1003.1 (POSIX) ar format / GNU ar extensions / BSD ar extensions
 - deb: `deb(5)` Debian binary package format (dpkg manual page,
   https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html)

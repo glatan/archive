@@ -95,6 +95,11 @@
   - 単一エントリの SVR4 `newc` cpio fixture
   - エントリ名は `cpio_hello.txt`
   - 中身は `Hello from cpio!`
+- `bin_multi.cpio`
+  - GNU cpio 2.15 `cpio -o -H bin` で生成した SVR4 binary 形式 fixture (LE u16)
+  - エントリ: `data.bin` (36B)、`hello.txt` (22B)、`odd.bin` (1B)
+- `bin_mixed.cpio`
+  - 同ツール生成。エントリ: `subdir/nested.txt` (20B)、`link.txt` (symlink → `hello.txt`)、`hello.txt` (22B)
 
 ### `lzw/`
 
