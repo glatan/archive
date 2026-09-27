@@ -42,6 +42,14 @@
       "filename": "rfc8878.txt"
     },
     {
+      "id": "rfc3284",
+      "format": "vcdiff",
+      "title": "The VCDIFF Generic Differencing and Compression Data Format",
+      "version": "RFC 3284 (June 2002)",
+      "url": "https://www.rfc-editor.org/rfc/rfc3284.txt",
+      "filename": "rfc3284.txt"
+    },
+    {
       "id": "zstd-seekable-format",
       "format": "zstd-seekable",
       "title": "Zstandard Seekable Format",

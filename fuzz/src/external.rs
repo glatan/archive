@@ -258,6 +258,9 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
         Algorithm::Lzf => None,
         Algorithm::Fastlz => None,
         Algorithm::Zx0 | Algorithm::Zx1 | Algorithm::Zx2 | Algorithm::Zx5 => None,
+        // xdelta3 requires a source file argument; plain-pipe external
+        // interop is not wired, matching the other raw codecs.
+        Algorithm::Vcdiff => None,
         Algorithm::ZstdSeekable => None,
         Algorithm::Lzsa | Algorithm::Lzsa2 => None,
         Algorithm::Lzrw1 | Algorithm::Lzrw1a => None,

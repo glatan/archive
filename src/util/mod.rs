@@ -29,7 +29,7 @@ pub(crate) mod range_coder;
 pub(crate) mod xxhash;
 
 /// Adler-32 checksum for LZO/lzop and zlib.
-#[cfg(any(feature = "lzo", feature = "zlib"))]
+#[cfg(any(feature = "lzo", feature = "zlib", feature = "vcdiff"))]
 pub(crate) mod adler32;
 
 /// CRC-64/XZ checksum for xz.

@@ -59,6 +59,7 @@
 //! | `zx1` (default) | ZX1 raw codec |
 //! | `zx2` (default) | ZX2 raw codec |
 //! | `zx5` (default) | ZX5 raw codec |
+//! | `vcdiff` (default) | VCDIFF (RFC 3284) delta codec |
 //! | `lzrw1` (default) | LZRW1 raw codec |
 //! | `lzrw1a` (default) | LZRW1-A raw codec |
 //! | `lzrw2` (default) | LZRW2 raw codec |
@@ -478,6 +479,7 @@ pub(crate) mod util;
     feature = "zx1",
     feature = "zx2",
     feature = "zx5",
+    feature = "vcdiff",
     feature = "lzxd",
     feature = "cmpsc"
 ))]
