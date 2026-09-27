@@ -102,9 +102,9 @@
 | [zx0](zx0/README.md) | ZX0 v2 README (BSD-3) | 20 | 0 | 0 | 20 |
 | [zx1](zx1/README.md) | ZX1 README (BSD-3) | 21 | 0 | 0 | 21 |
 | [zx2](zx2/README.md) | ZX2 README (BSD-3) | 20 | 0 | 0 | 20 |
-| [zx5](zx5/README.md) | ZX5 README (BSD-3) | 24 | 0 | 0 | 24 |
+| [zx5](zx5/README.md) | ZX5 README (BSD-3) | 23 | 0 | 0 | 23 |
 | [vcdiff](vcdiff/README.md) | RFC 3284 | 30 | 0 | 0 | 30 |
-| [mppc](mppc/README.md) | RFC 2118 | 30 | 0 | 1 | 29 |
+| [mppc](mppc/README.md) | RFC 2118 | 31 | 1 | 0 | 32 |
 | [lzs](lzs/README.md) | RFC 2395 (§2.2 = ANSI X3.241 informational 転記) | 26 | 0 | 0 | 26 |
 | [lzrw1](lzrw1/README.md) | lzrw1.c 参照実装 (public domain) | 21 | 0 | 0 | 21 |
 | [lzrw1a](lzrw1a/README.md) | lzrw1-a.c 参照実装 (public domain) | 20 | 0 | 0 | 20 |
@@ -152,8 +152,8 @@
 | 状態 | 件数 |
 |------|------|
 | ✅ 実装+テスト済み | 1718 |
-| ⚠️ 部分実装 | 0 |
-| ❌ 未実装 | 41 |
-| **合計** | **1790** |
+| ⚠️ 部分実装 | 1 |
+| ❌ 未実装 | 40 |
+| **合計** | **1792** |
 
-**全体カバー率**: 1718 / 1760 = **97.6%** (intentional exclusion 除外後: 1718 / 1719 = **100%**)
+**全体カバー率**: 1718 / 1762 = **97.5%** (intentional exclusion 除外後: 1718 / 1722 = **99.8%**)

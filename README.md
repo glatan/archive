@@ -11,7 +11,7 @@ README は概要と導線だけを持ちます。仕様準拠、互換性メモ�
 |---------|------------|---------|-----------|
 | 圧縮 | DEFLATE (RFC 1951) | ✅ | ✅ |
 | 圧縮 | gzip (RFC 1952) | ✅ | ✅ |
-| 圧縮 | zstd (RFC 8878) | ✅ | ✅ |
+| 圧縮 | zstd (RFC 8878 + seekable format) | ✅ | ✅ |
 | 圧縮 | bzip2 | ✅ | ✅ |
 | 圧縮 | lzip (LZMA) | ✅ | ✅ |
 | 圧縮 | LZMA-Alone (`.lzma`) | ✅ | ✅ |
@@ -20,7 +20,7 @@ README は概要と導線だけを持ちます。仕様準拠、互換性メモ�
 | 圧縮 | LZ4 | ✅ | ✅ |
 | 圧縮 | LZO (lzop) | ✅ | ✅ |
 | 圧縮 | zlib (RFC 1950) | ✅ | ✅ |
-| 圧縮 | Brotli (RFC 7932) | ✅ | ✅ (非圧縮 metablock baseline) |
+| 圧縮 | Brotli (RFC 7932) | ✅ | ✅ |
 | 圧縮 | ZPAQ (コンテキストミキシング) | ✅ | ✅ |
 | 圧縮 | lrzip (LZMA/bzip2/LZO/zlib/ZPAQ/none) | ✅ | ✅ |
 | 圧縮 | rzip (`.rz`) | ✅ | ✅ |
@@ -31,11 +31,17 @@ README は概要と導線だけを持ちます。仕様準拠、互換性メモ�
 | 圧縮 | LZF (liblzf) | ✅ | ✅ |
 | 圧縮 | FastLZ | ✅ | ✅ |
 | 圧縮 | ZX0 | ✅ | ✅ |
+| 圧縮 | ZX1 | ✅ | ✅ |
+| 圧縮 | ZX2 | ✅ | ✅ |
+| 圧縮 | ZX5 | ✅ | ✅ |
+| 圧縮 | VCDIFF (RFC 3284) | ✅ | ✅ |
+| 圧縮 | MPPC (RFC 2118) | ✅ | ✅ |
+| 圧縮 | Stac LZS (RFC 2395) | ✅ | ✅ |
 | 圧縮 | LZRW1-A | ✅ | ✅ |
 | 圧縮 | LZSA (v1/v2 ストリーム + raw ブロック) | ✅ | ✅ |
 | アーカイブ | ZPAQ (複数エントリ + crate-local journaling) | ✅ | ✅ |
 | アーカイブ | tar (UStar/GNU/PAX) | ✅ | ✅ |
-| アーカイブ | cpio (`odc` / SVR4 `newc` / `newcrc`) | ✅ | ✅ |
+| アーカイブ | cpio (`odc` / SVR4 `newc` / `newcrc` / `bin`) | ✅ | ✅ |
 | アーカイブ | ar (GNU/BSD) | ✅ | ✅ |
 | アーカイブ | deb (Debian package、read) | ✅ | — |
 | アーカイブ | rpm (RPM package、read) | ✅ | — |

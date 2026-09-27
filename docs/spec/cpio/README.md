@@ -23,7 +23,7 @@
 | 3 | 不正マジックナンバーエラー | POSIX cpio / SVR4 cpio | ✅ | `test_invalid_cpio_magic` |
 | 4 | ヘッダー短すぎエラー | POSIX cpio / SVR4 cpio | ✅ | `test_cpio_header_too_short` |
 | 5 | 16進ASCII フィールド | SVR4 cpio `newc` / `newcrc` format | ✅ | `test_parse_hex_field` |
-| 6 | `newc/newcrc` の 4バイト境界アラインメント | SVR4 cpio `newc` / `newcrc` format | ✅ | `test_align4` |
+| 6 | `newc/newcrc` の 4バイト境界アラインメント | SVR4 cpio `newc` / `newcrc` format | ✅ | `test_align_to` |
 | 7 | `odc` の name/data 無パディング配置 | POSIX cpio `odc` format | ✅ | `test_decode_odc_without_newc_padding`, `test_odc_has_no_512_padding` |
 | 8 | TRAILER!!! によるEOF検出 | POSIX/SVR4 cpio entry layout | ✅ | `test_decode_trailer_only_archive`, `test_missing_trailer_rejected` |
 | 9 | 単一ファイルアーカイブ | POSIX/SVR4 cpio entry layout | ✅ | `test_cpio_decode_single_file`, `test_roundtrip_odc_format` |
@@ -70,7 +70,7 @@
 | 40 | dev/rdev は u16 packed (major=high byte, minor=low byte) → devmajor/devminor に分解 | FreeBSD cpio(5) h_majmin | ✅ | `test_cpio_bin_dev_rdev_split`, `test_bin_device_roundtrip` |
 | 41 | new-binary の mode bits (S_IFMT=0170000: S_IFLNK 等) で解釈。PWB の IALLOC/ILARG  semantics では解釈しない | FreeBSD cpio(5) "revised use of the various bits" | ✅ | `test_bin_symlink_roundtrip`, fixture decode |
 | 42 | GNU cpio interop: `cpio -o -H bin` 出力を decode、自前出力を `cpio -id` で伸張 | GNU cpio 2.15 (fixture generator のみ) | ✅ | `test_cpio_bin_decode_fixture_multi`, `test_cpio_bin_decode_fixture_mixed`, `test_cpio_bin_decode_system_archive`, `test_cpio_bin_extract_with_system` |
-| 43 | PWB binary は判別不能のため new-binary semantics で解釈 (IALLOC/ILARG は解釈しない) | FreeBSD cpio(5) "no obvious way to tell" | ✅ | variant table 参照 — PWB archive の file type はずれる intentional 制限 |
+| 43 | PWB binary は判別不能のため new-binary semantics で解釈 (IALLOC/ILARG は解釈しない) | FreeBSD cpio(5) "no obvious way to tell" | ⚠️ | variant table 参照 — PWB archive の file type はずれる intentional 制限 |
 
 ---
 
