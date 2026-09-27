@@ -10,6 +10,7 @@ fuzz/fuzz/
 # Claude Code エージェント作業ディレクトリ
 .claude/worktrees/
 # 仕様書キャッシュ (manifest.json はバージョン管理、ダウンロード済みファイルは除外)
+docs/spec/sources/*.adoc
 docs/spec/sources/*.txt
 docs/spec/sources/*.md
 docs/spec/sources/*.htm

@@ -461,6 +461,19 @@ fn self_pattern_body(algo: Algorithm) -> String {
             "    assert_eq!(entries[0].data, input);\n"
         )
         .to_string(),
+        Algorithm::GitPack => concat!(
+            "    let mut e = archive::archive::git_pack::encode::GitPackEncoder::new();
+",
+            "    e.add_object(archive::archive::git_pack::ObjectType::Blob, input);
+",
+            "    let encoded = e.finish();
+",
+            "    let entries = archive::archive::git_pack::decode::decode(&encoded).unwrap();
+",
+            "    assert_eq!(archive::traits::ArchiveEntry::data(&entries[0]), input);
+"
+        )
+        .to_string(),
         Algorithm::Warc => concat!(
             "    let mut w = Vec::new();\n",
             "    w.extend_from_slice(b\"WARC/1.1\\r\\n\");\n",

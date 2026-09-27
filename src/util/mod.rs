@@ -40,8 +40,8 @@ pub(crate) mod crc64;
 #[cfg(any(feature = "xz", feature = "sevenz"))]
 pub(crate) mod sha256;
 
-/// SHA-1 for ZIP AES key derivation and authentication.
-#[cfg(feature = "zip")]
+/// SHA-1 for ZIP AES key derivation and git pack object IDs/checksums.
+#[cfg(any(feature = "zip", feature = "git-pack"))]
 pub(crate) mod sha1;
 
 /// MD5 for lrzip file-level integrity verification.

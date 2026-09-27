@@ -79,6 +79,7 @@
 //! | `zim` (default) | ZIM archive (`.zim`) read support |
 //! | `mtree` (default) | mtree(5) manifest read support |
 //! | `warc` (default) | WARC (`.warc`) record read support |
+//! | `git-pack` (default) | Git pack (`pack-*.pack`/`pack-*.idx`) read/write support |
 //! | `lha` (default) | LHA/LZH archive support (store methods only) |
 //! | `arj` (default) | ARJ archive support (method 0 only) |
 //! | `arc` (default) | SEA ARC archive support (store methods only) |
@@ -490,6 +491,7 @@ pub(crate) mod util;
 pub mod compress;
 
 /// Archive formats: tar, cpio, ar, deb, rpm, squashfs, mscab, zim, mtree, warc,
+/// git pack,
 /// lha, arj, arc, zpaq, zip, and 7z.
 #[cfg(any(
     feature = "tar",

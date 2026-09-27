@@ -26,6 +26,7 @@ pub fn pack_inputs(command: PackCommand) -> Result<(), CliError> {
         ArchiveFormat::Lha => pack_lha(&entries),
         ArchiveFormat::Arj => pack_arj(&entries),
         ArchiveFormat::Arc => pack_arc(&entries),
+        ArchiveFormat::GitPack => pack_git_pack(&entries),
     }?;
     fs::write(&command.output, encoded)?;
     Ok(())
@@ -123,6 +124,16 @@ fn pack_lha(entries: &[PackedEntry]) -> Result<Vec<u8>, CliError> {
             encoder
                 .add_file(&entry.archive_path, entry_data(entry)?, 0)
                 .map_err(|error| CliError::from_archive_error(error, false))?;
+        }
+    }
+    Ok(encoder.finish())
+}
+
+fn pack_git_pack(entries: &[PackedEntry]) -> Result<Vec<u8>, CliError> {
+    let mut encoder = archive::git_pack::encode::GitPackEncoder::new();
+    for entry in entries {
+        if !entry.is_dir {
+            encoder.add_object(archive::git_pack::ObjectType::Blob, entry_data(entry)?);
         }
     }
     Ok(encoder.finish())

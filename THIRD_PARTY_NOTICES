@@ -113,6 +113,15 @@ specifications or standards documents:
   transparency and does not constitute legal advice. No formal
   freedom-to-operate opinion or exhaustive patent family search was
   performed.
+- Git pack format (gitformat-pack(5), git.git Documentation):
+  format specification pinned as docs/spec/sources/gitformat-pack.adoc
+  (git v2.51.0 Documentation; git is GPL-2.0, consulted as a written
+  specification only). The Rust implementation in src/archive/git_pack/
+  is spec-informed, with no code copied. Test-time provenance: fixtures
+  tests/fixtures/git-pack/real.{pack,idx} and ref.pack were produced by
+  git 2.55 `git repack` (GPL-2.0, used as an interoperability oracle);
+  encode-direction interop was verified by `git index-pack` accepting
+  this crate's output and producing a byte-identical .idx.
 - Zstandard Seekable Format: format documentation v0.1.0 by Meta
   Platforms (contrib/seekable_format, permissive redistribution
   notice) and reference implementation (BSD/GPL dual license).

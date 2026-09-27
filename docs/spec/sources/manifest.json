@@ -538,6 +538,14 @@
    "version": "SA22-7832-12 (Thirteenth Edition, 2019-09)",
    "url": "https://publibfp.boulder.ibm.com/epubs/pdf/a227832c.pdf",
    "filename": "sa22-7832-12.pdf"
+  },
+  {
+   "id": "gitformat-pack",
+   "format": "git-pack",
+   "title": "gitformat-pack - Git pack format",
+   "version": "git v2.51.0 Documentation",
+   "url": "https://raw.githubusercontent.com/git/git/v2.51.0/Documentation/gitformat-pack.adoc",
+   "filename": "gitformat-pack.adoc"
   }
  ],
  "no_url_available": [

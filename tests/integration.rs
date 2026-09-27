@@ -37,12 +37,15 @@
     feature = "zx5",
     feature = "vcdiff",
     feature = "lzxd",
-    feature = "cmpsc"
+    feature = "cmpsc",
+    feature = "git-pack"
 ))]
 
 use archive::archive::ar;
 use archive::archive::cpio;
 use archive::archive::deb;
+#[cfg(feature = "git-pack")]
+use archive::archive::git_pack;
 use archive::archive::rpm;
 #[cfg(feature = "sevenz")]
 use archive::archive::sevenz;
@@ -277,6 +280,10 @@ mod lzrw2_tests;
 mod lzrw3_tests;
 #[path = "integration/lzrw3a.rs"]
 mod lzrw3a_tests;
+
+#[cfg(feature = "git-pack")]
+#[path = "integration/git_pack.rs"]
+mod git_pack_tests;
 
 #[cfg(feature = "lzs")]
 #[path = "integration/lzs.rs"]

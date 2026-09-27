@@ -127,15 +127,25 @@ fn reverse_bits(value: u32, num_bits: u8) -> u32 {
 pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
     let mut reader = BitReader::new(input);
     let mut output = Vec::new();
+    decode_stream(&mut reader, &mut output)?;
+    Ok(output)
+}
 
+/// Decode DEFLATE blocks from `reader` until a BFINAL block completes,
+/// appending to `output`.
+///
+/// Used by container formats that embed a self-terminating DEFLATE
+/// stream (e.g. git pack objects): the caller can read the true
+/// consumed byte count afterwards via `reader.byte_position()`.
+pub(crate) fn decode_stream(reader: &mut BitReader, output: &mut Vec<u8>) -> Result<(), Error> {
     loop {
         let bfinal = reader.read_bits(1)?;
         let btype = reader.read_bits(2)?;
 
         match btype {
-            0b00 => decode_uncompressed(&mut reader, &mut output)?,
-            0b01 => decode_fixed_huffman(&mut reader, &mut output)?,
-            0b10 => decode_dynamic_huffman(&mut reader, &mut output)?,
+            0b00 => decode_uncompressed(reader, output)?,
+            0b01 => decode_fixed_huffman(reader, output)?,
+            0b10 => decode_dynamic_huffman(reader, output)?,
             _ => return Err(Error::InvalidData("invalid DEFLATE block type 11")),
         }
 
@@ -143,8 +153,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
             break;
         }
     }
-
-    Ok(output)
+    Ok(())
 }
 
 /// Decode DEFLATE data with a preset dictionary.

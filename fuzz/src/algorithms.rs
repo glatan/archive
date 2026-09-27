@@ -9,7 +9,8 @@
 //! `"fuzz_test"` is packed/unpacked as the archive payload.
 
 use archive::archive::{
-    ar, arc, arj, cpio, deb, lha, mscab, mtree, rpm, sevenz, squashfs, tar, warc, zim, zip,
+    ar, arc, arj, cpio, deb, git_pack, lha, mscab, mtree, rpm, sevenz, squashfs, tar, warc, zim,
+    zip,
 };
 use archive::compress::*;
 use archive::error::Error;
@@ -92,6 +93,7 @@ pub enum Algorithm {
     Zim,
     Mtree,
     Warc,
+    GitPack,
     Lha,
     Arj,
     Arc,
@@ -283,6 +285,7 @@ impl Algorithm {
             Algorithm::Zim => "zim",
             Algorithm::Mtree => "mtree",
             Algorithm::Warc => "warc",
+            Algorithm::GitPack => "git-pack",
             Algorithm::Lha => "lha",
             Algorithm::Arj => "arj",
             Algorithm::Arc => "arc",
@@ -381,6 +384,7 @@ impl Algorithm {
             "zim" => Some(Algorithm::Zim),
             "mtree" => Some(Algorithm::Mtree),
             "warc" => Some(Algorithm::Warc),
+            "git-pack" | "pack" => Some(Algorithm::GitPack),
             "lha" | "lzh" => Some(Algorithm::Lha),
             "arj" => Some(Algorithm::Arj),
             "arc" => Some(Algorithm::Arc),
@@ -511,6 +515,11 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
         Algorithm::Mscab => mscab_fixture(data),
         Algorithm::Zim => zim_fixture(data),
         Algorithm::Mtree => mtree_fixture(data),
+        Algorithm::GitPack => {
+            let mut enc = git_pack::encode::GitPackEncoder::new();
+            enc.add_object(git_pack::ObjectType::Blob, data);
+            enc.finish()
+        }
         Algorithm::Warc => warc_fixture(data),
         Algorithm::Lha => {
             let mut enc = lha::encode::LhaEncoder::new();
@@ -729,6 +738,12 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
         Algorithm::Mtree => {
             let _ = mtree::decode::decode(data)?;
             Ok(Vec::new())
+        }
+        Algorithm::GitPack => {
+            let entries = git_pack::decode::decode(data)?;
+            Ok(entries.into_iter().next().map_or(Vec::new(), |e| {
+                archive::traits::ArchiveEntry::data(&e).to_vec()
+            }))
         }
         Algorithm::Warc => {
             let entries = warc::decode::decode(data)?;

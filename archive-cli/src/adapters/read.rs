@@ -364,6 +364,32 @@ fn decode_items(
                     .collect(),
             ))
         }
+        Format::GitPack => {
+            let entries = archive_formats::git_pack::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            Ok((
+                ContentKind::Archive,
+                entries
+                    .into_iter()
+                    .map(|entry| {
+                        use archive::traits::ArchiveEntry;
+                        let data_len = entry.data().len() as u64;
+                        DecodedItem {
+                            payload: Some(entry.data().to_vec()),
+                            summary: EntrySummary {
+                                path: entry.name().to_owned(),
+                                kind: "file".to_owned(),
+                                size: Some(data_len),
+                                compressed_size: None,
+                                mtime: None,
+                                mode: None,
+                                extra: vec![format!("object-type={:?}", entry.object_type())],
+                            },
+                        }
+                    })
+                    .collect(),
+            ))
+        }
         Format::Warc => {
             let entries = archive_formats::warc::decode::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?;

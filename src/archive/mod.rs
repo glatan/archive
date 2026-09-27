@@ -67,3 +67,7 @@ pub mod arj;
 /// SEA ARC archive support (store methods only).
 #[cfg(feature = "arc")]
 pub mod arc;
+
+/// Git pack format (`pack-*.pack` / `pack-*.idx`) support.
+#[cfg(feature = "git-pack")]
+pub mod git_pack;
