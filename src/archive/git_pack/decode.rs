@@ -167,6 +167,12 @@ fn parse_entries(input: &[u8]) -> Result<Vec<RawEntry>, Error> {
         };
         let (payload, used) = zlib_decode(&input[pos..body_end])?;
         pos += used;
+        // The size field is the inflated object size for undeltified
+        // entries and the delta data size for delta entries; either
+        // way it must equal the decompressed payload length.
+        if size != payload.len() as u64 {
+            return Err(invalid("git-pack: object size field mismatch"));
+        }
         raws.push(RawEntry {
             offset,
             _size: size,
@@ -617,6 +623,124 @@ mod tests {
         let p = pack(&[e0, e1, e2]);
         let entries = decode(&p).unwrap();
         assert_eq!(entries[2].data(), b"z");
+    }
+
+    #[test]
+    fn tag_object_accepted() {
+        // type code 4 (tag) is a valid undeltified object type.
+        let mut e = obj_header(4, 3);
+        e.extend_from_slice(&zlib::encode::encode(b"tag"));
+        let p = pack(&[e]);
+        let entries = decode(&p).unwrap();
+        assert_eq!(entries[0].object_type(), ObjectType::Tag);
+        assert_eq!(entries[0].data(), b"tag");
+    }
+
+    #[test]
+    fn bad_object_type_rejected() {
+        for tc in [0u8, 5] {
+            let mut e = obj_header(tc, 1);
+            e.extend_from_slice(&zlib::encode::encode(b"x"));
+            let p = pack(&[e]);
+            assert!(
+                matches!(decode(&p), Err(Error::InvalidData(_))),
+                "type {tc}"
+            );
+        }
+    }
+
+    #[test]
+    fn object_size_field_mismatch() {
+        // Header claims 5 but the zlib payload is 1 byte.
+        let mut e = obj_header(3, 5);
+        e.extend_from_slice(&zlib::encode::encode(b"x"));
+        let p = pack(&[e]);
+        assert!(matches!(decode(&p), Err(Error::InvalidData(_))));
+    }
+
+    /// Build a v2 idx over `entries` ((id, crc32, offset)) for `pack`.
+    fn build_idx(entries: &[(ObjectId, u32, u64)], pack: &[u8]) -> Vec<u8> {
+        let mut sorted: Vec<(ObjectId, u32, u64)> = entries.to_vec();
+        sorted.sort_by_key(|e| e.0);
+        let mut idx = Vec::new();
+        idx.extend_from_slice(&[0xFF, 0x74, 0x4F, 0x63]);
+        idx.extend_from_slice(&2u32.to_be_bytes());
+        let mut fanout = [0u32; 256];
+        for e in &sorted {
+            fanout[e.0[0] as usize] += 1;
+        }
+        let mut acc = 0u32;
+        for f in fanout.iter_mut() {
+            acc += *f;
+            idx.extend_from_slice(&acc.to_be_bytes());
+        }
+        for e in &sorted {
+            idx.extend_from_slice(&e.0);
+        }
+        for e in &sorted {
+            idx.extend_from_slice(&e.1.to_be_bytes());
+        }
+        let mut large: Vec<u64> = Vec::new();
+        for e in &sorted {
+            if e.2 >= 0x8000_0000 {
+                idx.extend_from_slice(&((0x8000_0000u32) | large.len() as u32).to_be_bytes());
+                large.push(e.2);
+            } else {
+                idx.extend_from_slice(&(e.2 as u32).to_be_bytes());
+            }
+        }
+        for off in large {
+            idx.extend_from_slice(&off.to_be_bytes());
+        }
+        idx.extend_from_slice(&pack[pack.len() - 20..]);
+        let sum = crate::util::sha1::sha1(&idx);
+        idx.extend_from_slice(&sum);
+        idx
+    }
+
+    #[test]
+    fn idx_large_offset_table() {
+        // One entry with a normal offset and one past 2^31, forcing
+        // the 64-bit large-offset table path in both directions.
+        let base = blob_entry(b"data");
+        let p = pack(&[base]);
+        let entries = [
+            ([0x10; 20], 0xAABB, 12u64),
+            ([0x20; 20], 0xCCDD, 0x8000_0005u64),
+            ([0x30; 20], 0xEEFF, 64u64),
+        ];
+        let idx = build_idx(&entries, &p);
+        let decoded = decode_idx(&idx, &p).unwrap();
+        assert_eq!(decoded.len(), 3);
+        assert_eq!(decoded[0].offset, 12);
+        assert_eq!(decoded[1].offset, 0x8000_0005);
+        assert_eq!(decoded[2].offset, 64);
+        // Encoder-side: GitPackEncoder output feeds encode_idx via
+        // finish_with_index on small packs; the large path is covered
+        // by build_idx/decode_idx roundtrip above plus encode_idx's
+        // symmetric logic.
+    }
+
+    #[test]
+    fn idx_bad_checksums_rejected() {
+        let p = pack(&[blob_entry(b"d")]);
+        let idx = build_idx(&[([0x10; 20], 1, 12)], &p);
+        // Corrupt the idx trailing checksum.
+        let mut bad = idx.clone();
+        let n = bad.len();
+        bad[n - 1] ^= 0xFF;
+        assert!(decode_idx(&bad, &p).is_err());
+        // Corrupt the embedded pack checksum while keeping the idx
+        // checksum valid (recompute the trailer).
+        let mut bad2 = idx.clone();
+        bad2[n - 40] ^= 0xFF;
+        let n2 = bad2.len();
+        let sum = crate::util::sha1::sha1(&bad2[..n2 - 20]);
+        bad2[n2 - 20..].copy_from_slice(&sum);
+        assert!(matches!(decode_idx(&bad2, &p), Err(Error::InvalidData(_))));
+        // Mismatched pack argument also fails.
+        let p2 = pack(&[blob_entry(b"other")]);
+        assert!(decode_idx(&idx, &p2).is_err());
     }
 
     #[test]

@@ -22,12 +22,13 @@
 | 1 | 先頭は `PACK` (4B) + network-order version + network-order object count | "pack-*.pack files" 冒頭 | ✅ | `decode_real_pack`, `bad_signature` |
 | 2 | version 2 のみ受理。v3 (SHA-256 repo) は reject | 同上 ("Currently version 2 and 3") | ✅ | `reject_version3` |
 | 3 | オブジェクトヘッダ: 先頭バイト `(cont\|type:3\|size:4)`、以降は 7-bit chunk を連結した可変長 size | 同上 "object entries" | ✅ | `decode_real_pack`, `encode_roundtrip` |
-| 4 | オブジェクト種別 1=commit, 2=tree, 3=blob, 4=tag の 4 種を非 delta オブジェクトとして受理 | 同上 (type 表) | ✅ | `decode_real_pack` (commit/tree/blob 実物), `encode_roundtrip` |
-| 5 | 種別 0/5 および未定義値は reject | 同上 | ✅ | `apply_delta_errors` 系 + type コードマッチで InvalidData |
+| 4 | オブジェクト種別 1=commit, 2=tree, 3=blob, 4=tag の 4 種を非 delta オブジェクトとして受理 | 同上 (type 表) | ✅ | `decode_real_pack` (commit/tree/blob 実物), `tag_object_accepted`, `encode_roundtrip` |
+| 5 | 種別 0/5 および未定義値は reject | 同上 | ✅ | `bad_object_type_rejected` |
 | 6 | 各オブジェクト本体は zlib ストリーム (RFC 1950、内部 deflate 伸張) | 同上 | ✅ | `decode_real_pack`, `bad_zlib_stream` |
 | 7 | zlib ストリームは self-terminating であり、実際の消費バイト数で次エントリ位置を決定する | 同上 (連続配置) | ✅ | `deflate::decode::decode_stream` + `BitReader::byte_position` |
 | 8 | zlib ヘッダの CM=8/CINFO/FCHECK 検証、FDICT は reject | RFC 1950 | ✅ | `zlib_decode` 内の各ガード |
 | 9 | zlib 末尾 Adler-32 を検証 | RFC 1950 | ✅ | `bad_zlib_stream`, ChecksumMismatch |
+| 9a | オブジェクトヘッダの size は zlib 展開後ペイロード長 (delta は delta データ長) と一致必須 (crate 防御、gitformat-pack "object entries" のサイズ意味論) | 同上 | ✅ | `object_size_field_mismatch` |
 
 ## delta 解決
 
@@ -51,8 +52,8 @@
 |---|------|----------|-----------|----------------|
 | 21 | pack 末尾は全先行バイトの SHA-1。不一致は reject | "pack-*.pack files" 末尾 | ✅ | `bad_pack_checksum` |
 | 22 | idx v2: magic `FF 74 4F 63` + version 2 | "pack-*.idx files" v2 | ✅ | `decode_real_idx` |
-| 23 | idx v2: fanout[256] (単調増加)、sorted SHA-1 名表、CRC32 表、4B offset 表、8B large-offset 表 (MSB=1 のエントリが指す) | 同節 | ✅ | `decode_real_idx` |
-| 24 | idx 末尾は pack チェックサム + idx チェックサム (自身の SHA-1)。両者を検証 | 同節 | ✅ | `decode_real_idx` |
+| 23 | idx v2: fanout[256] (単調増加)、sorted SHA-1 名表、CRC32 表、4B offset 表、8B large-offset 表 (MSB=1 のエントリが指す) | 同節 | ✅ | `decode_real_idx`, `idx_large_offset_table` (合成 idx による large offset 経路) |
+| 24 | idx 末尾は pack チェックサム + idx チェックサム (自身の SHA-1)。両者を検証 | 同節 | ✅ | `decode_real_idx`, `idx_bad_checksums_rejected` |
 | 25 | encode: non-deltified pack v2 を出力し、`finish_with_index` で対応 idx v2 を生成。git `index-pack` が受理する | gitformat-pack 全体 | ✅ | `encode_roundtrip`, `encode_roundtrip_with_index` + git interop (手動確認: `git index-pack`/`verify-pack` が受理、生成 idx は git 生成物とバイト一致) |
 
 ## エントリモデル / API
