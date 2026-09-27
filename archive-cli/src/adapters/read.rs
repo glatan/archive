@@ -691,10 +691,34 @@ fn decode_items(
             compress_formats::cmpsc::decode(input, usize::MAX)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
+        Format::Lzrw1 => decode_single_payload(
+            path,
+            input,
+            compress_formats::lzrw1::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
         Format::Lzrw1a => decode_single_payload(
             path,
             input,
             compress_formats::lzrw1a::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Lzrw2 => decode_single_payload(
+            path,
+            input,
+            compress_formats::lzrw2::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Lzrw3 => decode_single_payload(
+            path,
+            input,
+            compress_formats::lzrw3::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Lzrw3a => decode_single_payload(
+            path,
+            input,
+            compress_formats::lzrw3a::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
         Format::Xz => decode_single_payload(

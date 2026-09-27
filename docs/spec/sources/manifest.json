@@ -308,6 +308,102 @@
       "filename": "lzrw1-a.txt"
     },
     {
+      "id": "lzrw1-source",
+      "format": "lzrw1",
+      "title": "lzrw1.c (DCC'91 論文収録コード、フォーマットは decompressor が定義)",
+      "version": "LZRW1 (Ross N. Williams, 1991、funet mirror)",
+      "url": "https://ftp.funet.fi/pub/misc/compression/lzrw1.c",
+      "filename": "lzrw1.c"
+    },
+    {
+      "id": "lzrw1-paper",
+      "format": "lzrw1",
+      "title": "lzrw1.tex (DCC'91 'An Extremely Fast Ziv-Lempel Data Compression Algorithm')",
+      "version": "LZRW1 paper (1991、funet mirror)",
+      "url": "https://ftp.funet.fi/pub/misc/compression/lzrw1.tex",
+      "filename": "lzrw1.tex"
+    },
+    {
+      "id": "lzrw2-source",
+      "format": "lzrw2",
+      "title": "lzrw2.c ('DEFINITION OF COMPRESSED FILE FORMAT' 節がフォーマット記述)",
+      "version": "LZRW2 (Ross N. Williams, 1991、funet mirror)",
+      "url": "https://ftp.funet.fi/pub/misc/compression/lzrw2.c",
+      "filename": "lzrw2.c"
+    },
+    {
+      "id": "lzrw2-notes",
+      "format": "lzrw2",
+      "title": "lzrw2.txt (release/format notes)",
+      "version": "LZRW2 (1991、funet mirror)",
+      "url": "https://ftp.funet.fi/pub/misc/compression/lzrw2.txt",
+      "filename": "lzrw2.txt"
+    },
+    {
+      "id": "lzrw3-source",
+      "format": "lzrw3",
+      "title": "lzrw3.c ('DEFINITION OF COMPRESSED FILE FORMAT' 節がフォーマット記述)",
+      "version": "LZRW3 (Ross N. Williams, 1991、funet mirror)",
+      "url": "https://ftp.funet.fi/pub/misc/compression/lzrw3.c",
+      "filename": "lzrw3.c"
+    },
+    {
+      "id": "lzrw3-notes",
+      "format": "lzrw3",
+      "title": "lzrw3.txt (release/format notes)",
+      "version": "LZRW3 (1991、funet mirror)",
+      "url": "https://ftp.funet.fi/pub/misc/compression/lzrw3.txt",
+      "filename": "lzrw3.txt"
+    },
+    {
+      "id": "lzrw3a-source",
+      "format": "lzrw3a",
+      "title": "lzrw3-a.c ('DEFINITION OF COMPRESSED FILE FORMAT' 節がフォーマット記述)",
+      "version": "LZRW3-A (Ross N. Williams, 1991、funet mirror)",
+      "url": "https://ftp.funet.fi/pub/misc/compression/lzrw3-a.c",
+      "filename": "lzrw3-a.c"
+    },
+    {
+      "id": "lzrw3a-notes",
+      "format": "lzrw3a",
+      "title": "lzrw3-a.txt (release/format notes)",
+      "version": "LZRW3-A (1991、funet mirror)",
+      "url": "https://ftp.funet.fi/pub/misc/compression/lzrw3-a.txt",
+      "filename": "lzrw3-a.txt"
+    },
+    {
+      "id": "lzrw4-notes",
+      "format": "lzrw4",
+      "title": "lzrw4.txt (experimental sketch; production 版は存在しない)",
+      "version": "LZRW4 (Ross N. Williams)",
+      "url": "https://ftp.funet.fi/pub/misc/compression/lzrw4.txt",
+      "filename": "lzrw4.txt"
+    },
+    {
+      "id": "lzrw45-covering",
+      "format": "lzrw4",
+      "title": "lzrw45_covering (LZRW4/5 covering note)",
+      "version": "Ross N. Williams",
+      "url": "https://ftp.funet.fi/pub/misc/compression/lzrw45_covering",
+      "filename": "lzrw45_covering"
+    },
+    {
+      "id": "lzrw5-source",
+      "format": "lzrw5",
+      "title": "lzrw5.txt ('half-baked' draft code + format notes)",
+      "version": "LZRW5 (Ross N. Williams)",
+      "url": "https://ftp.funet.fi/pub/misc/compression/lzrw5.txt",
+      "filename": "lzrw5.txt"
+    },
+    {
+      "id": "lzrw-headers",
+      "format": "lzrw-family",
+      "title": "lzrw_headers.h (LZRW* 参照実装の portability/interface ヘッダ)",
+      "version": "LZRW support code (Ross N. Williams, 1991、funet mirror)",
+      "url": "https://ftp.funet.fi/pub/misc/compression/lzrw_headers.h",
+      "filename": "lzrw_headers.h"
+    },
+    {
       "id": "liblzf-source",
       "format": "lzf",
       "title": "liblzf lzf_c.c (フォーマット記述は冒頭コメント)",

@@ -56,7 +56,11 @@
 //! | `lzf` (default) | LZF (liblzf) raw codec |
 //! | `fastlz` (default) | FastLZ raw codec (level 1/2) |
 //! | `zx0` (default) | ZX0 raw codec |
+//! | `lzrw1` (default) | LZRW1 raw codec |
 //! | `lzrw1a` (default) | LZRW1-A raw codec |
+//! | `lzrw2` (default) | LZRW2 raw codec |
+//! | `lzrw3` (default) | LZRW3 raw codec |
+//! | `lzrw3a` (default) | LZRW3-A raw codec |
 //! | `lzsa` (default) | LZSA stream / LZSA1 / LZSA2 raw codecs |
 //! | `lzxd` (default) | LZX DELTA (MS-PATCH) codec (decode; uncompressed-block encode) |
 //! | `tar` (default) | tar archive format |
@@ -457,7 +461,19 @@ pub(crate) mod util;
     feature = "zlib",
     feature = "zpaq",
     feature = "snappy",
-    feature = "brotli"
+    feature = "brotli",
+    feature = "xca",
+    feature = "lzf",
+    feature = "fastlz",
+    feature = "lzrw1",
+    feature = "lzrw1a",
+    feature = "lzrw2",
+    feature = "lzrw3",
+    feature = "lzrw3a",
+    feature = "lzsa",
+    feature = "zx0",
+    feature = "lzxd",
+    feature = "cmpsc"
 ))]
 pub mod compress;
 

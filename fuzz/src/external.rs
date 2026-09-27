@@ -259,7 +259,8 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
         Algorithm::Fastlz => None,
         Algorithm::Zx0 => None,
         Algorithm::Lzsa | Algorithm::Lzsa2 => None,
-        Algorithm::Lzrw1a => None,
+        Algorithm::Lzrw1 | Algorithm::Lzrw1a => None,
+        Algorithm::Lzrw2 | Algorithm::Lzrw3 | Algorithm::Lzrw3a => None,
         Algorithm::Lzxd => None,
         Algorithm::Cmpsc => None,
         Algorithm::Zip => Some(ExternalSpec::Archive(ArchiveSpec::Zip {

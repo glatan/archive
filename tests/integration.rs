@@ -25,7 +25,11 @@
     feature = "xca",
     feature = "lzf",
     feature = "fastlz",
+    feature = "lzrw1",
     feature = "lzrw1a",
+    feature = "lzrw2",
+    feature = "lzrw3",
+    feature = "lzrw3a",
     feature = "lzsa",
     feature = "zx0",
     feature = "lzxd",
@@ -56,7 +60,11 @@ use archive::compress::lzf;
 use archive::compress::lzip;
 use archive::compress::lzma_alone;
 use archive::compress::lzo;
+use archive::compress::lzrw1;
 use archive::compress::lzrw1a;
+use archive::compress::lzrw2;
+use archive::compress::lzrw3;
+use archive::compress::lzrw3a;
 use archive::compress::lzw;
 use archive::compress::lzxd;
 #[cfg(feature = "rzip")]
@@ -247,8 +255,16 @@ mod lzxd_tests;
 #[path = "integration/cmpsc.rs"]
 mod cmpsc_tests;
 
+#[path = "integration/lzrw1.rs"]
+mod lzrw1_tests;
 #[path = "integration/lzrw1a.rs"]
 mod lzrw1a_tests;
+#[path = "integration/lzrw2.rs"]
+mod lzrw2_tests;
+#[path = "integration/lzrw3.rs"]
+mod lzrw3_tests;
+#[path = "integration/lzrw3a.rs"]
+mod lzrw3a_tests;
 
 #[cfg(feature = "mtree")]
 #[path = "integration/mtree.rs"]
