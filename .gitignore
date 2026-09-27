@@ -15,3 +15,6 @@ docs/spec/sources/*.html
 docs/spec/sources/*.pdf
 docs/spec/sources/*.c
 docs/spec/sources/*.rst
+docs/spec/sources/*.tex
+docs/spec/sources/*.h
+docs/spec/sources/lzrw45_covering

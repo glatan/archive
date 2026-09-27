@@ -11,17 +11,21 @@
 //! and offset = `(C1 >> 4) << 8 | C2` (1..=4095, zero never used), copying
 //! from `output_len - offset`.
 
+use alloc::vec;
 use alloc::vec::Vec;
 
+use crate::compress::lzrw;
 use crate::error::Error;
 
-const FLAG_BYTES: usize = 4;
-const FLAG_COMPRESS: u8 = 0;
-const FLAG_COPY: u8 = 1;
 const MIN_MATCH: usize = 3;
 const MAX_MATCH: usize = 18;
 const MAX_OFFSET: usize = 4095;
 const HASH_BITS: usize = 12;
+
+const FLAG_ERRS: lzrw::FlagErrs = lzrw::FlagErrs {
+    truncated_flag: "lzrw1a: truncated copy flag",
+    unknown_flag: "lzrw1a: unknown copy flag",
+};
 
 /// Decode an LZRW1-A stream.
 pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
@@ -33,46 +37,28 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
     if input.is_empty() {
         return Ok(Vec::new());
     }
-    if input.len() < FLAG_BYTES {
-        return Err(Error::InvalidData("lzrw1a: truncated copy flag"));
-    }
-    if input[0] == FLAG_COPY {
-        let data = &input[FLAG_BYTES..];
-        if data.len() > max_output {
-            return Err(Error::OutputLimitExceeded { limit: max_output });
+    match lzrw::head(input, FLAG_ERRS)? {
+        lzrw::Head::Verbatim => {
+            let data = &input[lzrw::FLAG_BYTES..];
+            if data.len() > max_output {
+                return Err(Error::OutputLimitExceeded { limit: max_output });
+            }
+            return Ok(data.to_vec());
         }
-        return Ok(data.to_vec());
-    }
-    if input[0] != FLAG_COMPRESS {
-        return Err(Error::InvalidData("lzrw1a: unknown copy flag"));
+        lzrw::Head::Compressed => {}
     }
 
     let mut out: Vec<u8> = Vec::new();
-    let mut pos = FLAG_BYTES;
-    while pos + 2 <= input.len() {
-        let control = u16::from_le_bytes([input[pos], input[pos + 1]]);
-        pos += 2;
-        let mut mask = 1u16;
-        while mask != 0 {
-            if pos >= input.len() {
-                break;
-            }
-            if control & mask == 0 {
-                let b = input[pos];
-                pos += 1;
+    let mut items = lzrw::Items::new(input, MIN_MATCH, "lzrw1a: truncated copy item");
+    while let Some(item) = items.next()? {
+        match item {
+            lzrw::Item::Literal(b) => {
                 if out.len() == max_output {
                     return Err(Error::OutputLimitExceeded { limit: max_output });
                 }
                 out.push(b);
-            } else {
-                if pos + 2 > input.len() {
-                    return Err(Error::InvalidData("lzrw1a: truncated copy item"));
-                }
-                let c1 = input[pos] as usize;
-                let c2 = input[pos + 1] as usize;
-                pos += 2;
-                let len = (c1 & 0x0f) + 3;
-                let offset = (c1 >> 4) * 256 + c2;
+            }
+            lzrw::Item::Copy { len, index: offset } => {
                 if offset == 0 || offset > out.len() {
                     return Err(Error::InvalidData("lzrw1a: bad copy offset"));
                 }
@@ -80,12 +66,8 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
                     return Err(Error::OutputLimitExceeded { limit: max_output });
                 }
                 let start = out.len() - offset;
-                for i in 0..len {
-                    let b = out[start + i];
-                    out.push(b);
-                }
+                lzrw::copy_from_output(&mut out, start, len);
             }
-            mask = mask.wrapping_shl(1);
         }
     }
     Ok(out)
@@ -96,9 +78,7 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
 /// If compression does not reduce the size, the verbatim-copy form
 /// (copy flag = 1) is emitted, matching the reference encoder.
 pub fn encode(input: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(FLAG_BYTES + input.len() + input.len() / 16 + 4);
-    out.resize(FLAG_BYTES, 0);
-    out[0] = FLAG_COMPRESS;
+    let mut enc = lzrw::GroupEncoder::new();
 
     let mut head = vec![-1i32; 1 << HASH_BITS];
     let hash = |b: &[u8]| -> usize {
@@ -109,57 +89,40 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
 
     let mut pos = 0usize;
     while pos < input.len() {
-        // Reserve space for the group's control word.
-        let ctrl_pos = out.len();
-        out.extend_from_slice(&[0, 0]);
-        let mut control = 0u16;
-        let mut items = 0usize;
-        while items < 16 && pos < input.len() {
-            let mut match_len = 0usize;
-            let mut match_off = 0usize;
-            if pos + MIN_MATCH <= input.len() {
-                let h = hash(&input[pos..]);
-                let cand = head[h];
-                head[h] = pos as i32;
-                if cand >= 0 {
-                    let c = cand as usize;
-                    let dist = pos - c;
-                    if dist <= MAX_OFFSET && input[c..c + MIN_MATCH] == input[pos..pos + MIN_MATCH]
+        let mut match_len = 0usize;
+        let mut match_off = 0usize;
+        if pos + MIN_MATCH <= input.len() {
+            let h = hash(&input[pos..]);
+            let cand = head[h];
+            head[h] = pos as i32;
+            if cand >= 0 {
+                let c = cand as usize;
+                let dist = pos - c;
+                if dist <= MAX_OFFSET && input[c..c + MIN_MATCH] == input[pos..pos + MIN_MATCH] {
+                    let mut len = MIN_MATCH;
+                    while len < MAX_MATCH
+                        && pos + len < input.len()
+                        && input[c + len] == input[pos + len]
                     {
-                        let mut len = MIN_MATCH;
-                        while len < MAX_MATCH
-                            && pos + len < input.len()
-                            && input[c + len] == input[pos + len]
-                        {
-                            len += 1;
-                        }
-                        match_len = len;
-                        match_off = dist;
+                        len += 1;
                     }
+                    match_len = len;
+                    match_off = dist;
                 }
             }
-            if match_len >= MIN_MATCH {
-                control |= 1 << items;
-                let c1 = (((match_off >> 8) & 0x0f) << 4) | (match_len - 3);
-                out.push(c1 as u8);
-                out.push((match_off & 0xff) as u8);
-                pos += match_len;
-            } else {
-                out.push(input[pos]);
-                pos += 1;
-            }
-            items += 1;
         }
-        out[ctrl_pos] = (control & 0xff) as u8;
-        out[ctrl_pos + 1] = (control >> 8) as u8;
+        if match_len >= MIN_MATCH {
+            enc.copy(match_len - 3, match_off);
+            pos += match_len;
+        } else {
+            enc.literal(input[pos]);
+            pos += 1;
+        }
     }
 
-    if out.len() >= FLAG_BYTES + input.len() {
-        // Verbatim copy form.
-        let mut copy = Vec::with_capacity(FLAG_BYTES + input.len());
-        copy.extend_from_slice(&[FLAG_COPY, 0, 0, 0]);
-        copy.extend_from_slice(input);
-        return copy;
+    let out = enc.finish();
+    if out.len() >= lzrw::FLAG_BYTES + input.len() {
+        return lzrw::verbatim(input);
     }
     out
 }

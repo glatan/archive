@@ -134,9 +134,35 @@ pub mod xca;
 #[cfg(feature = "fastlz")]
 pub mod fastlz;
 
+/// Shared framing (copy flag + control-word groups) for the LZRW family.
+#[cfg(any(
+    feature = "lzrw1",
+    feature = "lzrw1a",
+    feature = "lzrw2",
+    feature = "lzrw3",
+    feature = "lzrw3a"
+))]
+mod lzrw;
+
+/// LZRW1 compression and decompression.
+#[cfg(feature = "lzrw1")]
+pub mod lzrw1;
+
 /// LZRW1-A compression and decompression.
 #[cfg(feature = "lzrw1a")]
 pub mod lzrw1a;
+
+/// LZRW2 compression and decompression.
+#[cfg(feature = "lzrw2")]
+pub mod lzrw2;
+
+/// LZRW3 compression and decompression.
+#[cfg(feature = "lzrw3")]
+pub mod lzrw3;
+
+/// LZRW3-A compression and decompression.
+#[cfg(feature = "lzrw3a")]
+pub mod lzrw3a;
 
 /// LZSA stream and raw block compression/decompression.
 #[cfg(feature = "lzsa")]

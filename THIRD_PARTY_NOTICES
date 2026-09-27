@@ -198,6 +198,27 @@ against de facto reference behavior:
     small 64-bit portability patch; the patched source is not
     included in this repository
 
+- LZRW1 / LZRW2 / LZRW3 / LZRW3-A
+  - Reference: Ross Williams' public-domain `lzrw1.c`, `lzrw2.c`,
+    `lzrw3.c`, `lzrw3-a.c` (and the `lzrw2.txt`, `lzrw3.txt`,
+    `lzrw3-a.txt` notes); the formats are defined by those files'
+    "DEFINITION OF COMPRESSED FILE FORMAT" sections and decoder
+    behavior
+  - Repository scope: Rust reimplementation of the documented formats;
+    the shared framing lives in `compress::lzrw` (crate-private) and
+    no code was copied. For LZRW2/3/3-A the shared 3-byte hash helper
+    adopts the reference implementations' hash arithmetic verbatim
+    (40543 multiplier, >>4 shift, mask); for LZRW1/LZRW1-A the encoders
+    reuse only the 40543 multiplier with a different shift position
+  - Known-answer decode vectors in tests/integration/{lzrw1,lzrw2,
+    lzrw3,lzrw3a}.rs were produced by running the reference encoders
+    locally after small portability patches (K&R prototypes, missing
+    TRUE/FALSE defines, un-commented header text); the patched sources
+    are not included in this repository
+  - LZRW4 and LZRW5 were evaluated and intentionally excluded: LZRW4
+    has no production wire format (experimental sketch only) and
+    LZRW5's reference is an incomplete draft; see docs/spec/README.md
+
 - bzip2
   - Reference: bzip2 1.0.x reference implementation by Julian Seward
     (BSD-style "bzip2 and libbzip2 License")

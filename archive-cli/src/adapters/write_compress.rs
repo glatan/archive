@@ -153,10 +153,30 @@ pub fn compress_input(command: CompressCommand) -> Result<(), CliError> {
             reject_unexpected_backend(command.backend.as_deref(), "fastlz")?;
             compress::fastlz::encode(&input)
         }
+        CompressionFormat::Lzrw1 => {
+            reject_unexpected_level(command.level, "lzrw1")?;
+            reject_unexpected_backend(command.backend.as_deref(), "lzrw1")?;
+            compress::lzrw1::encode(&input)
+        }
         CompressionFormat::Lzrw1a => {
             reject_unexpected_level(command.level, "lzrw1a")?;
             reject_unexpected_backend(command.backend.as_deref(), "lzrw1a")?;
             compress::lzrw1a::encode(&input)
+        }
+        CompressionFormat::Lzrw2 => {
+            reject_unexpected_level(command.level, "lzrw2")?;
+            reject_unexpected_backend(command.backend.as_deref(), "lzrw2")?;
+            compress::lzrw2::encode(&input)
+        }
+        CompressionFormat::Lzrw3 => {
+            reject_unexpected_level(command.level, "lzrw3")?;
+            reject_unexpected_backend(command.backend.as_deref(), "lzrw3")?;
+            compress::lzrw3::encode(&input)
+        }
+        CompressionFormat::Lzrw3a => {
+            reject_unexpected_level(command.level, "lzrw3a")?;
+            reject_unexpected_backend(command.backend.as_deref(), "lzrw3a")?;
+            compress::lzrw3a::encode(&input)
         }
         CompressionFormat::Lzsa => {
             reject_unexpected_level(command.level, "lzsa")?;

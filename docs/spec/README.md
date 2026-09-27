@@ -27,6 +27,7 @@
 | BCJ (x86/PowerPC/IA64/SPARC/ARM/ARM-Thumb/ARM64/RISC-V) | xz / 7z 系 BCJ filter behavior | liblzma/7-Zip style branch conversion |
 | Delta | xz / 7z 系 Delta filter behavior | distance 1..=256 の byte-wise Delta |
 | PPMdH / PPMd7 | 7-Zip public-domain `Ppmd.h`, `Ppmd7.c`, `Ppmd7Dec.c`, `Ppmd7Enc.c` | 7z coder `0x030401` と shared core を実装 |
+| LZRW family framing | lzrw1/lzrw1-a/lzrw2/lzrw3/lzrw3-a.c の "DEFINITION OF COMPRESSED FILE FORMAT" 節 (Ross Williams, public domain) | 4B copy flag + 16bit control + ≤16 item グループの共通 frame / 検証を crate-private `compress::lzrw` に集約 |
 
 → 詳細テスト: [util.md](util.md)
 
@@ -62,6 +63,8 @@
 | Exomizer | 書面仕様が存在しない（usage 文書と decruncher ソースのみ） |
 | OpenZL | ワイヤーフォーマットの安定した書面仕様が存在しない（公開済みは SDDL 記述言語のみ、unstable 明記）。安定仕様公開で再評価 |
 | ZOO | コンテナ・圧縮ともに書面仕様が存在しない |
+| LZRW4 | Ross Williams の付録コードはエントロピー推定器 (実験スケッチ) のみで、production ワイヤーフォーマットが存在しない (lzrw4.txt / lzrw45_covering) |
+| LZRW5 | 参照コードが未完 ("half-baked", decompressor の C パス無効化・65536 phrase 超で `exit(1)`・実質 64KB 入力制限)。ワイヤー形式の推定は可能だが production 仕様としての品質を欠くため intentional exclusion (lzrw5.txt) |
 
 ---
 
@@ -96,7 +99,11 @@
 | [lzf](lzf/README.md) | liblzf `lzfP.h` / ning LZFFormat (de facto) | 20 | 0 | 0 | 20 |
 | [fastlz](fastlz/README.md) | fastlz.c 参照実装 (MIT) | 22 | 0 | 0 | 22 |
 | [zx0](zx0/README.md) | ZX0 v2 README (BSD-3) | 20 | 0 | 0 | 20 |
+| [lzrw1](lzrw1/README.md) | lzrw1.c 参照実装 (public domain) | 21 | 0 | 0 | 21 |
 | [lzrw1a](lzrw1a/README.md) | lzrw1-a.c 参照実装 (public domain) | 20 | 0 | 0 | 20 |
+| [lzrw2](lzrw2/README.md) | lzrw2.c 参照実装 (public domain) | 22 | 0 | 0 | 22 |
+| [lzrw3](lzrw3/README.md) | lzrw3.c 参照実装 (public domain) | 23 | 0 | 0 | 23 |
+| [lzrw3a](lzrw3a/README.md) | lzrw3-a.c 参照実装 (public domain) | 23 | 0 | 0 | 23 |
 | [lzsa](lzsa/README.md) | LZSA StreamFormat / BlockFormat_LZSA1/LZSA2 v1.4.1 | 31 | 0 | 0 | 31 |
 | [lzxd](lzxd/README.md) | [MS-PATCH] LZX DELTA (Microsoft Open Specifications) | 22 | 0 | 0 | 22 |
 | [cmpsc](cmpsc/README.md) | IBM z/Arch POP App.D / ESA/390 Data Compression + APPNOTE method 16 | 20 | 0 | 0 | 20 |
@@ -135,9 +142,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1533 |
+| ✅ 実装+テスト済み | 1622 |
 | ⚠️ 部分実装 | 0 |
 | ❌ 未実装 | 41 |
-| **合計** | **1574** |
+| **合計** | **1663** |
 
-**全体カバー率**: 1533 / 1574 = **97.4%** (intentional exclusion 除外後: 1533 / 1533 = **100%**)
+**全体カバー率**: 1622 / 1663 = **97.5%** (intentional exclusion 除外後: 1622 / 1622 = **100%**)

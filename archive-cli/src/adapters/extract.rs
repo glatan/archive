@@ -419,6 +419,15 @@ pub fn extract_input(
             compress_formats::fastlz::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
+        Format::Lzrw1 => extract_single_payload(
+            input_path,
+            &base_dir,
+            format,
+            selected_paths,
+            overwrite,
+            compress_formats::lzrw1::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
         Format::Lzrw1a => extract_single_payload(
             input_path,
             &base_dir,
@@ -426,6 +435,33 @@ pub fn extract_input(
             selected_paths,
             overwrite,
             compress_formats::lzrw1a::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Lzrw2 => extract_single_payload(
+            input_path,
+            &base_dir,
+            format,
+            selected_paths,
+            overwrite,
+            compress_formats::lzrw2::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Lzrw3 => extract_single_payload(
+            input_path,
+            &base_dir,
+            format,
+            selected_paths,
+            overwrite,
+            compress_formats::lzrw3::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Lzrw3a => extract_single_payload(
+            input_path,
+            &base_dir,
+            format,
+            selected_paths,
+            overwrite,
+            compress_formats::lzrw3a::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
         Format::Lzsa => extract_single_payload(
