@@ -26,7 +26,7 @@ model: sonnet
 
 ## 調査対象
 
-- `docs/spec/*.md` — 仕様要件と実装状況の対応表
+- `docs/spec/<format>/` — 仕様要件と実装状況の対応表 (index = `README.md`、バリアント/トピック別は子ファイル)
 - `src/` — 実装コード
 - `tests/` — テストコード
 - `docs/spec/sources/` — バージョンピン留めされた仕様書キャッシュ
@@ -46,10 +46,11 @@ model: sonnet
 2. **MUST/SHALL/REQUIRED 要件を抽出**: 仕様書のセクション構成を走査し、
    実装に影響する要件を列挙する。情報提供のみの節 (例: RFC の Acknowledgements) は除外。
 
-3. **spec と照合**: 各要件に対応する `docs/spec/<format>.md` の行を探す。
+3. **spec と照合**: 各要件に対応する `docs/spec/<format>/` 内
+   (`README.md` または子ファイル) の行を探す。
    対応行がない要件を「**仕様欠落候補**」として報告する。
 
-4. **intentional scope の判定**: 欠落候補が `docs/spec/<format>.md` の
+4. **intentional scope の判定**: 欠落候補が `docs/spec/<format>/` 内の
    `intentional exclusion` に記載されているか確認。記載済みなら「intentional」として除外。
 
 ### 出力

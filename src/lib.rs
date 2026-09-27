@@ -27,9 +27,9 @@
 //!
 //! Quick status guide:
 //! - Known bugs: none are currently listed as open
-//! - Intentionally unsupported features: see `docs/spec/` section
-//!   "意図的に未実装の機能"
-//! - Future candidates: see `docs/spec/` section "将来候補"
+//! - Intentionally unsupported features: see `docs/spec/README.md` section
+//!   "実装対象外フォーマット" and each format's `intentional exclusion`
+//! - Future candidates: see `docs/spec/README.md` section "次の library 実装候補"
 //!
 //! # Feature flags
 //!

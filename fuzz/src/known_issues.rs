@@ -88,7 +88,7 @@ fn is_lzw_empty_input_quirk(
 
 /// System `7z` stores empty files as empty-stream entries rather than using a
 /// regular data stream.  Our decoder does not implement the empty-stream /
-/// empty-files header fields (intentional scope exclusion per `docs/spec/sevenz.md`).
+/// empty-files header fields (intentional scope exclusion per `docs/spec/sevenz/`).
 fn is_sevenz_empty_stream_entry(
     algo: Algorithm,
     pattern: TestPattern,

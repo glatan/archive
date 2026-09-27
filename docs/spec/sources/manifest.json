@@ -208,6 +208,15 @@
       "version": "ZX0 v2.2 (git main、タグなし)",
       "url": "https://raw.githubusercontent.com/einar-saukas/ZX0/main/README.md",
       "filename": "zx0_README_v2.2.md"
+    },
+    {
+      "id": "zpaq-format",
+      "format": "zpaq",
+      "title": "ZPAQ Level 1 and Level 2 specification",
+      "version": "zpaq206.pdf (2016-03-22, upstream zpaq 7.15 era)",
+      "note": "低レイヤ codec (ZPAQL VM / predictor component / block・model 構造) の公式仕様。crate-local archive/journaling 層は対象外のため bounded contract と併用",
+      "url": "https://mattmahoney.net/dc/zpaq206.pdf",
+      "filename": "zpaq206.pdf"
     }
   ],
   "no_url_available": [
@@ -273,13 +282,6 @@
       "title": "IEEE Std 1003.1 / GNU ar / BSD ar",
       "version": "IEEE Std 1003.1-2017",
       "note": "有償仕様書。man ar(5) / binutils ソースから参照"
-    },
-    {
-      "id": "zpaq-format",
-      "format": "zpaq",
-      "title": "ZPAQ / ZPAQL",
-      "version": "upstream zpaq 7.15",
-      "note": "正式標準なし。bounded contract で管理"
     },
     {
       "id": "ms-patch",
