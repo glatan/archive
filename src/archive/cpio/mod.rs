@@ -1,6 +1,6 @@
-//! cpio archive format (`odc`, SVR4 `newc`, and `newcrc`).
+//! cpio archive format (`odc`, SVR4 `newc`, `newcrc`, and `bin`).
 //!
-//! Supports portable ASCII `odc` (070707), `newc` (070701), and `newcrc` (070702).
+//! Supports portable ASCII `odc` (070707), `newc` (070701), `newcrc` (070702), and binary `bin`.
 //! The encoder can produce archives with regular files, symlinks, directories,
 //! device files, and hardlinks.
 

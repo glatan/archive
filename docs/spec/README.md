@@ -121,7 +121,7 @@
 | フォーマット | 基準仕様 | ✅ | ⚠️ | ❌ | 合計 |
 |---|---|---|---|---|---|
 | [tar](tar/README.md) | POSIX.1-1988 ustar / GNU tar / POSIX.1-2001 PAX | 59 | 0 | 0 | 59 |
-| [cpio](cpio/README.md) | POSIX `odc` / SVR4 `newc`/`newcrc` | 35 | 0 | 0 | 35 |
+| [cpio](cpio/README.md) | POSIX `odc` / SVR4 `newc`/`newcrc`/`bin` | 42 | 1 | 0 | 43 |
 | [ar](ar/README.md) | IEEE Std 1003.1 / GNU ar / BSD ar | 26 | 0 | 0 | 26 |
 | [deb](deb/README.md) | deb(5) (dpkg) | 20 | 0 | 3 | 23 |
 | [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 24 | 0 | 3 | 27 |
@@ -146,9 +146,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1710 |
+| ✅ 実装+テスト済み | 1717 |
 | ⚠️ 部分実装 | 0 |
 | ❌ 未実装 | 41 |
-| **合計** | **1751** |
+| **合計** | **1759** |
 
-**全体カバー率**: 1710 / 1751 = **97.6%** (intentional exclusion 除外後: 1710 / 1710 = **100%**)
+**全体カバー率**: 1717 / 1759 = **97.6%** (intentional exclusion 除外後: 1717 / 1718 = **100%**)

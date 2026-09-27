@@ -486,7 +486,7 @@
     {
       "id": "cpio-5-freebsd",
       "format": "cpio",
-      "title": "cpio(5) — FreeBSD man page (newc/crc format)",
+      "title": "cpio(5) — FreeBSD man page (newc/crc/bin format)",
       "version": "FreeBSD man page",
       "url": "https://man.freebsd.org/cgi/man.cgi?cpio(5)",
       "filename": "cpio_5_freebsd.html"
