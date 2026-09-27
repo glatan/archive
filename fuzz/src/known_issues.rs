@@ -97,7 +97,12 @@ fn is_sevenz_empty_stream_entry(
 ) -> bool {
     matches!(
         algo,
-        Algorithm::SevenZ | Algorithm::SevenZCopy | Algorithm::SevenZLzma | Algorithm::SevenZPpmd
+        Algorithm::SevenZ
+            | Algorithm::SevenZCopy
+            | Algorithm::SevenZLzma
+            | Algorithm::SevenZPpmd
+            | Algorithm::SevenZDeflate
+            | Algorithm::SevenZBzip2
     ) && pattern == TestPattern::OriginalCompress
         && data.is_empty()
         && error.contains("empty-stream entries are not supported")
@@ -180,6 +185,8 @@ mod tests {
             Algorithm::SevenZCopy,
             Algorithm::SevenZLzma,
             Algorithm::SevenZPpmd,
+            Algorithm::SevenZDeflate,
+            Algorithm::SevenZBzip2,
         ] {
             let issue = classify(
                 algo,

@@ -1184,7 +1184,7 @@ fn squashfs_fixture(data: &[u8]) -> Vec<u8> {
     let bytes_used = out.len() as u64;
     out[0..4].copy_from_slice(&0x7371_7368u32.to_le_bytes());
     out[4..8].copy_from_slice(&2u32.to_le_bytes()); // inode_count
-    out[12..16].copy_from_slice(&block_size.to_le_bytes());
+    out[12..16].copy_from_slice(&(block_size as u32).to_le_bytes());
     out[20..22].copy_from_slice(&1u16.to_le_bytes()); // compressor: gzip
     out[22..24].copy_from_slice(&12u16.to_le_bytes()); // block_log
     out[26..28].copy_from_slice(&1u16.to_le_bytes()); // id_count

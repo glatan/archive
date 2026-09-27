@@ -362,17 +362,21 @@ fn test_brotli_decode_rejects_truncated_stream() {
 }
 
 #[cfg(feature = "brotli")]
-fn brotli_compress_with_quality(data: &[u8], quality: u32) -> Vec<u8> {
+fn brotli_compress_with_quality(data: &[u8], quality: u32) -> Option<Vec<u8>> {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
-    let mut child = Command::new("brotli")
+    let mut child = match Command::new("brotli")
         .args(["-q", &quality.to_string(), "-c"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("brotli command not found");
+    {
+        Ok(child) => child,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => panic!("Failed to run brotli: {e}"),
+    };
     child.stdin.take().unwrap().write_all(data).unwrap();
     let output = child.wait_with_output().unwrap();
     assert!(
@@ -380,7 +384,7 @@ fn brotli_compress_with_quality(data: &[u8], quality: u32) -> Vec<u8> {
         "brotli -q {quality} failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    output.stdout
+    Some(output.stdout)
 }
 
 #[cfg(feature = "brotli")]
@@ -392,7 +396,9 @@ fn test_brotli_decode_system_quality_levels() {
         .collect();
 
     for quality in 0..=11 {
-        let compressed = brotli_compress_with_quality(&data, quality);
+        let Some(compressed) = brotli_compress_with_quality(&data, quality) else {
+            return;
+        };
         let decoded = brotli::decode::decode(&compressed).unwrap();
         assert_eq!(decoded, data, "quality {quality} roundtrip failed");
     }
@@ -406,9 +412,16 @@ fn test_brotli_decode_system_signed_context_mode_regression() {
     let data: Vec<u8> = (0..256)
         .map(|i| ((i as u64 * 7 + 19) % 256) as u8)
         .collect();
-    let compressed = brotli_compress_with_quality(&data, 10);
-    let decoded = brotli::decode::decode(&compressed).unwrap();
+    // Captured `brotli -q 10` output; the regression check does not require
+    // the system tool.
+    let compressed = include_bytes!("../fixtures/brotli/signed_context_mode_q10.br");
+    let decoded = brotli::decode::decode(compressed).unwrap();
     assert_eq!(decoded, data);
+
+    if let Some(live) = brotli_compress_with_quality(&data, 10) {
+        let decoded = brotli::decode::decode(&live).unwrap();
+        assert_eq!(decoded, data);
+    }
 }
 
 #[cfg(feature = "brotli")]
@@ -418,7 +431,14 @@ fn test_brotli_decode_system_utf8_context_table_regression() {
     let data: Vec<u8> = (0..512)
         .map(|i| ((i as u64 * 73 + 19) % 256) as u8)
         .collect();
-    let compressed = brotli_compress_with_quality(&data, 5);
-    let decoded = brotli::decode::decode(&compressed).unwrap();
+    // Captured `brotli -q 5` output; the regression check does not require
+    // the system tool.
+    let compressed = include_bytes!("../fixtures/brotli/utf8_context_table_q5.br");
+    let decoded = brotli::decode::decode(compressed).unwrap();
     assert_eq!(decoded, data);
+
+    if let Some(live) = brotli_compress_with_quality(&data, 5) {
+        let decoded = brotli::decode::decode(&live).unwrap();
+        assert_eq!(decoded, data);
+    }
 }
