@@ -12,7 +12,7 @@
 |---|------|----------|-----------|----------------|
 | 1 | magic は `xar!` (32bit, network order)。不一致は reject | §The Header | ✅ | `bad_magic`, `decode_real` |
 | 2 | header size (16bit) は 28 以上。cksum_alg=3 のとき 32 以上かつ 4 の倍数 | 同上 | ✅ | `decode_real` (28), `truncated` |
-| 3 | version SHOULD 1。v1 以外は reject | 同上 ("current version is one") | ✅ | `bad_version_rejected` |
+| 3 | version SHOULD 1。v1 以外は reject (libxar は読み込み時に version を無視するが、本実装は防御的に reject する設計判断) | 同上 ("current version is one" + "ignores the value when reading") | ✅ | `bad_version_rejected` |
 | 4 | `toc_length_compressed` / `toc_length_uncompressed` (各 64bit) で TOC 領域を決定 | 同上 | ✅ | `decode_real` |
 | 5 | cksum_alg: 0=none, 1=sha1, 2=md5 | 同上 | ✅ | `decode_real` (1), `decode_md5_checksums` (2), `decode_stored_no_checksum` (0) |
 | 6 | cksum_alg=3: 拡張ヘッダの NUL 終端 digest 名を読み、"sha1"/"md5" は受理、それ以外は reject。非 4 倍数・28 未満の拡張ヘッダは reject | 同上 | ✅ | cksum_alg 3 分岐 (実装済み、実物 fixture なし — libxar が生成するのは OpenSSL digest 名で固定 28B ではないため) |
@@ -73,3 +73,4 @@
 | 36 | cksum_alg=3 の "sha1"/"md5" 以外の digest 名 | OpenSSL digest 名依存 (sha256 等)。sha1/md5 は受理 |
 | 37 | `<archived-checksum>` の decode 時検証 | extracted-checksum で伸張後完全性は担保済み。格納バイトの追加検証は冗長 |
 | 38 | hardlink/character/block special の実データ展開 | TOC メタデータは保持するが特殊ファイル生成は対象外 |
+| 39 | heap 内エントリのストリーミング順序要件 (ea を data より先に置き per-file でグループ化する推奨) | 本実装は heap 全体をランダムアクセスで読むため順序制約は不要 |
