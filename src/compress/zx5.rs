@@ -110,7 +110,7 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
     let mut last2 = 0usize;
     let mut last3 = 0usize;
 
-    let mut copy = |out: &mut Vec<u8>, offset: usize, len: usize| -> Result<(), Error> {
+    let copy = |out: &mut Vec<u8>, offset: usize, len: usize| -> Result<(), Error> {
         if offset == 0 || offset > out.len() {
             return Err(Error::InvalidData("zx5: bad match offset"));
         }

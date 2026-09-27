@@ -305,5 +305,7 @@ mod zip_tests;
 mod zlib_tests;
 #[path = "integration/zpaq.rs"]
 mod zpaq_tests;
+#[path = "integration/zstd_seekable.rs"]
+mod zstd_seekable_tests;
 #[path = "integration/zstd.rs"]
 mod zstd_tests;

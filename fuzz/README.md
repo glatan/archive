@@ -115,7 +115,7 @@ external tool が必要な pattern は `#[ignore]` 付きの placeholder とし�
 |---------|------------|
 | deflate | `deflate` |
 | gzip | `gzip`, `gzip-fast`, `gzip-store` |
-| zstd | `zstd`, `zstd-fast`, `zstd-best`, `zstd-nochecksum` |
+| zstd | `zstd`, `zstd-fast`, `zstd-best`, `zstd-nochecksum`, `zstd-seekable` |
 | bzip2 | `bzip2`, `bzip2-fast`, `bzip2-best` |
 | lzip | `lzip`, `lzip-fast`, `lzip-best` |
 | lzma | `lzma` |

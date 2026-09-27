@@ -24,6 +24,8 @@ pub enum Format {
     SevenZ,
     Gzip,
     Zstd,
+    #[value(name = "zstd-seekable")]
+    ZstdSeekable,
     Bzip2,
     Lzip,
     #[value(name = "lzma")]
@@ -76,6 +78,8 @@ pub enum ArchiveFormat {
 pub enum CompressionFormat {
     Gzip,
     Zstd,
+    #[value(name = "zstd-seekable")]
+    ZstdSeekable,
     Bzip2,
     Lzip,
     #[value(name = "lzma")]
@@ -140,6 +144,7 @@ impl core::fmt::Display for Format {
             Self::SevenZ => "7z",
             Self::Gzip => "gzip",
             Self::Zstd => "zstd",
+            Self::ZstdSeekable => "zstd-seekable",
             Self::Bzip2 => "bzip2",
             Self::Lzip => "lzip",
             Self::LzmaAlone => "lzma",
@@ -205,6 +210,7 @@ impl From<CompressionFormat> for Format {
         match format {
             CompressionFormat::Gzip => Self::Gzip,
             CompressionFormat::Zstd => Self::Zstd,
+            CompressionFormat::ZstdSeekable => Self::ZstdSeekable,
             CompressionFormat::Bzip2 => Self::Bzip2,
             CompressionFormat::Lzip => Self::Lzip,
             CompressionFormat::LzmaAlone => Self::LzmaAlone,
@@ -423,6 +429,9 @@ pub fn scope_notes(format: Format) -> Vec<String> {
         ],
         Format::Zx5 => vec![
             "zx5 streams carry no magic; --format is required".to_owned(),
+        ],
+        Format::ZstdSeekable => vec![
+            "zstd-seekable streams auto-detect as zstd; selecting this format requires and validates the seek table".to_owned(),
         ],
         Format::Lzrw1 => vec![
             "lzrw1 streams carry no magic; --format is required".to_owned(),

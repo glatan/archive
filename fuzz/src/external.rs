@@ -258,6 +258,7 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
         Algorithm::Lzf => None,
         Algorithm::Fastlz => None,
         Algorithm::Zx0 | Algorithm::Zx1 | Algorithm::Zx2 | Algorithm::Zx5 => None,
+        Algorithm::ZstdSeekable => None,
         Algorithm::Lzsa | Algorithm::Lzsa2 => None,
         Algorithm::Lzrw1 | Algorithm::Lzrw1a => None,
         Algorithm::Lzrw2 | Algorithm::Lzrw3 | Algorithm::Lzrw3a => None,

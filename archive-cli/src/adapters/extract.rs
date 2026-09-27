@@ -257,6 +257,15 @@ pub fn extract_input(
             compress_formats::zstd::decode::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
+        Format::ZstdSeekable => extract_single_payload(
+            input_path,
+            &base_dir,
+            format,
+            selected_paths,
+            overwrite,
+            compress_formats::zstd::seekable::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
         Format::Bzip2 => extract_single_payload(
             input_path,
             &base_dir,

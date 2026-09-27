@@ -46,6 +46,14 @@ specifications or standards documents:
   Known-answer decode vectors in tests/integration/zx5.rs were
   produced by running the reference compressor (ZX5 v2.0)
   locally; no code was copied.
+- Zstandard Seekable Format: format documentation v0.1.0 by Meta
+  Platforms (contrib/seekable_format, permissive redistribution
+  notice) and reference implementation (BSD/GPL dual license).
+  The Rust implementation in src/compress/zstd/seekable.rs is an
+  independent implementation of the written format; no code was
+  copied. Known-answer decode vectors in tests/fixtures/zstd/
+  seekable_*.zst were produced by running the reference
+  seekable_compression tool locally; no code was copied.
 - lzxd: [MS-PATCH] LZX DELTA Compression and Decompression
   (Microsoft Open Specifications,
   https://learn.microsoft.com/openspecs/exchange_server_protocols/ms-patch).

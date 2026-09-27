@@ -17,6 +17,8 @@ pub(crate) mod frame;
 pub(crate) mod fse;
 /// Huffman literal compression and decompression.
 pub(crate) mod huff;
+/// Zstandard Seekable Format (multi-frame + seek table).
+pub mod seekable;
 /// Zstd sequence decoding and execution.
 pub(crate) mod sequences;
 /// zstd dictionary training.
