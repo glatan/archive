@@ -57,6 +57,7 @@
 //! | `fastlz` (default) | FastLZ raw codec (level 1/2) |
 //! | `zx0` (default) | ZX0 raw codec |
 //! | `zx1` (default) | ZX1 raw codec |
+//! | `zx2` (default) | ZX2 raw codec |
 //! | `lzrw1` (default) | LZRW1 raw codec |
 //! | `lzrw1a` (default) | LZRW1-A raw codec |
 //! | `lzrw2` (default) | LZRW2 raw codec |
@@ -474,6 +475,7 @@ pub(crate) mod util;
     feature = "lzsa",
     feature = "zx0",
     feature = "zx1",
+    feature = "zx2",
     feature = "lzxd",
     feature = "cmpsc"
 ))]
