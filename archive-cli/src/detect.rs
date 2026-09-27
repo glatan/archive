@@ -51,6 +51,7 @@ pub enum Format {
     Lzrw3a,
     Lzsa,
     Zx0,
+    Zx1,
     Lzxd,
     Cmpsc,
 }
@@ -102,6 +103,7 @@ pub enum CompressionFormat {
     Lzsa,
     Lzsa2,
     Zx0,
+    Zx1,
     Lzxd,
     Cmpsc,
 }
@@ -159,6 +161,7 @@ impl core::fmt::Display for Format {
             Self::Lzrw3a => "lzrw3a",
             Self::Lzsa => "lzsa",
             Self::Zx0 => "zx0",
+            Self::Zx1 => "zx1",
             Self::Lzxd => "lzxd",
             Self::Cmpsc => "cmpsc",
         };
@@ -222,6 +225,7 @@ impl From<CompressionFormat> for Format {
             CompressionFormat::Lzrw3a => Self::Lzrw3a,
             CompressionFormat::Lzsa | CompressionFormat::Lzsa2 => Self::Lzsa,
             CompressionFormat::Zx0 => Self::Zx0,
+            CompressionFormat::Zx1 => Self::Zx1,
             CompressionFormat::Lzxd => Self::Lzxd,
             CompressionFormat::Cmpsc => Self::Cmpsc,
         }
@@ -402,6 +406,9 @@ pub fn scope_notes(format: Format) -> Vec<String> {
         ],
         Format::Zx0 => vec![
             "zx0 streams carry no magic; --format is required".to_owned(),
+        ],
+        Format::Zx1 => vec![
+            "zx1 streams carry no magic; --format is required".to_owned(),
         ],
         Format::Lzrw1 => vec![
             "lzrw1 streams carry no magic; --format is required".to_owned(),
