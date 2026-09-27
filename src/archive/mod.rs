@@ -71,3 +71,7 @@ pub mod arc;
 /// Git pack format (`pack-*.pack` / `pack-*.idx`) support.
 #[cfg(feature = "git-pack")]
 pub mod git_pack;
+
+/// XAR (eXtensible ARchive) format support.
+#[cfg(feature = "xar")]
+pub mod xar;

@@ -121,6 +121,23 @@ pub fn extract_input(
         Format::Mtree => Err(CliError::Unsupported(
             "mtree is a manifest format and carries no file content".to_owned(),
         )),
+        Format::Xar => {
+            let entries = archive_formats::xar::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            let requested = RequestedPaths::new(selected_paths);
+            for entry in entries {
+                if entry.is_dir {
+                    continue;
+                }
+                if !requested.matches(&entry.name) {
+                    continue;
+                }
+                let path = resolved_archive_path(&base_dir, &entry.name)?;
+                write_file(&path, &entry.data, overwrite)?;
+                requested.mark_matched(&entry.name);
+            }
+            requested.finish()
+        }
         Format::GitPack => {
             let entries = archive_formats::git_pack::decode::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?;

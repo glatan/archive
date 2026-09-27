@@ -113,6 +113,16 @@ specifications or standards documents:
   transparency and does not constitute legal advice. No formal
   freedom-to-operate opinion or exhaustive patent family search was
   performed.
+- XAR (eXtensible ARchive): format specification is the upstream
+  xar project's wiki document `xarformat` (mackyle/xar; the project
+  is BSD-3-Clause licensed; the wiki was consulted as a written
+  specification only, pinned as docs/spec/sources/xarformat.wiki).
+  The Rust implementation in src/archive/xar/ is spec-informed,
+  with no code copied. Test-time provenance: fixtures under
+  tests/fixtures/xar/ were produced by the reference `xar` 1.6.1
+  tool built locally from mackyle/xar (BSD-3-Clause, used only as
+  an interoperability oracle); encode-direction interop was
+  verified by `xar -tf`/`-xf` accepting this crate's output.
 - Git pack format (gitformat-pack(5), git.git Documentation):
   format specification pinned as docs/spec/sources/gitformat-pack.adoc
   (git v2.51.0 Documentation; git is GPL-2.0, consulted as a written

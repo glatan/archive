@@ -9,7 +9,7 @@ name = "archive-fuzz"
 path = "src/main.rs"
 
 [dependencies]
-archive = { path = "..", features = ["std", "tar", "cpio", "ar", "deb", "rpm", "squashfs", "mscab", "zim", "mtree", "warc", "lha", "arj", "arc", "git-pack", "xca", "lzf", "fastlz", "lzrw1", "lzrw1a", "lzrw2", "lzrw3", "lzrw3a", "lzsa", "zx0", "zx1", "zx2", "zx5", "vcdiff", "mppc", "lzs", "lzxd", "cmpsc", "gzip", "zstd", "bzip2", "lzip", "lzma-alone", "lzw", "lz4", "lzo", "lrzip", "xz", "zlib", "zpaq", "rzip", "snappy", "zip", "sevenz"] }
+archive = { path = "..", features = ["std", "tar", "cpio", "ar", "deb", "rpm", "squashfs", "mscab", "zim", "mtree", "warc", "lha", "arj", "arc", "git-pack", "xar", "xca", "lzf", "fastlz", "lzrw1", "lzrw1a", "lzrw2", "lzrw3", "lzrw3a", "lzsa", "zx0", "zx1", "zx2", "zx5", "vcdiff", "mppc", "lzs", "lzxd", "cmpsc", "gzip", "zstd", "bzip2", "lzip", "lzma-alone", "lzw", "lz4", "lzo", "lrzip", "xz", "zlib", "zpaq", "rzip", "snappy", "zip", "sevenz"] }
 sha3 = "0.10.8"
 blake3 = "1.8.3"
 rand = "0.10.0"

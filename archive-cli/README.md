@@ -73,7 +73,7 @@ archive pack 7z data/ -o archive.7z
 archive pack cpio files/ -o archive.cpio --overwrite
 ```
 
-対応フォーマット: `tar`, `cpio`, `ar`, `zpaq`, `zip`, `7z`, `lha`, `arj`, `arc`, `git-pack` (ファイルを blob オブジェクトとして格納。non-deltified)
+対応フォーマット: `tar`, `cpio`, `ar`, `zpaq`, `zip`, `7z`, `lha`, `arj`, `arc`, `git-pack` (ファイルを blob オブジェクトとして格納。non-deltified), `xar` (sha1 チェックサム + gzip エンコード)
 
 ### `archive compress <format> <input> -o <output>`
 
@@ -111,6 +111,7 @@ magic bytes からフォーマットを自動検出します。
 `.mtree` は `#mtree` signature で識別されます (manifest 形式のため `read` でメタデータ一覧、`extract` は非対応)。
 `.warc` は `WARC/1.0` / `WARC/1.1` version line で識別されます (read のみ。`.warc.gz` は gzip として伸張してから読み込みます)。
 `.pack` は `PACK` + version 2 ヘッダで識別されます (v3 は検出しません)。エントリ名は hex オブジェクト ID です。
+`.xar` は `xar!` magic で識別されます (stored/gzip エンコード対応、拡張属性・署名は対象外)。
 `.lzh` は offset 2 の `-l`-`-` メソッドマーカー + offset 20 の header level byte で識別されます (store メソッドのみ。`-lh5-` 等の圧縮エントリは非対応)。
 `.arj` は `0x60 0xEA` signature で識別されます (method 0 stored のみ。圧縮・暗号化エントリは非対応)。
 `.arc` は `0x1A` marker + method byte で識別されます (method 1/2 stored のみ。packed/squeezed/crunched は非対応)。

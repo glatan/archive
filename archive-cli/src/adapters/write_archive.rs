@@ -27,6 +27,7 @@ pub fn pack_inputs(command: PackCommand) -> Result<(), CliError> {
         ArchiveFormat::Arj => pack_arj(&entries),
         ArchiveFormat::Arc => pack_arc(&entries),
         ArchiveFormat::GitPack => pack_git_pack(&entries),
+        ArchiveFormat::Xar => pack_xar(&entries),
     }?;
     fs::write(&command.output, encoded)?;
     Ok(())
@@ -134,6 +135,18 @@ fn pack_git_pack(entries: &[PackedEntry]) -> Result<Vec<u8>, CliError> {
     for entry in entries {
         if !entry.is_dir {
             encoder.add_object(archive::git_pack::ObjectType::Blob, entry_data(entry)?);
+        }
+    }
+    Ok(encoder.finish())
+}
+
+fn pack_xar(entries: &[PackedEntry]) -> Result<Vec<u8>, CliError> {
+    let mut encoder = archive::xar::encode::XarEncoder::new();
+    for entry in entries {
+        if entry.is_dir {
+            encoder.add_directory(&entry.archive_path);
+        } else {
+            encoder.add_file(&entry.archive_path, entry_data(entry)?);
         }
     }
     Ok(encoder.finish())

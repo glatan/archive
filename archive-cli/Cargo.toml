@@ -14,7 +14,7 @@ path = "src/main.rs"
 doc = false
 
 [dependencies]
-archive = { path = "..", default-features = false, features = ["std", "tar", "cpio", "ar", "deb", "rpm", "squashfs", "mscab", "zim", "mtree", "warc", "lha", "arj", "arc", "git-pack", "xca", "lzf", "fastlz", "lzrw1", "lzrw1a", "lzrw2", "lzrw3", "lzrw3a", "lzsa", "zx0", "zx1", "zx2", "zx5", "vcdiff", "mppc", "lzs", "lzxd", "cmpsc", "gzip", "zstd", "bzip2", "lzip", "lzma-alone", "lzw", "lz4", "lzo", "lrzip", "xz", "zlib", "zpaq", "rzip", "snappy", "brotli", "zip", "sevenz"] }
+archive = { path = "..", default-features = false, features = ["std", "tar", "cpio", "ar", "deb", "rpm", "squashfs", "mscab", "zim", "mtree", "warc", "lha", "arj", "arc", "git-pack", "xar", "xca", "lzf", "fastlz", "lzrw1", "lzrw1a", "lzrw2", "lzrw3", "lzrw3a", "lzsa", "zx0", "zx1", "zx2", "zx5", "vcdiff", "mppc", "lzs", "lzxd", "cmpsc", "gzip", "zstd", "bzip2", "lzip", "lzma-alone", "lzw", "lz4", "lzo", "lrzip", "xz", "zlib", "zpaq", "rzip", "snappy", "brotli", "zip", "sevenz"] }
 clap = { workspace = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
