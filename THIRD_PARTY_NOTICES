@@ -60,6 +60,22 @@ specifications or standards documents:
   tree (.local/xdelta3_ref) also contains xdelta1 sources under
   GPL-2.0; only the xdelta3 (Apache-2.0) portion was consulted or
   executed.
+- MPPC (RFC 2118, Microsoft Point-to-Point Compression Protocol):
+  format specification by G. Pall (Microsoft). The Rust implementation
+  in src/compress/mppc.rs is spec-informed, with no code copied.
+  Test-time provenance: packet fixtures under tests/fixtures/mppc/ were
+  produced by this crate's own encoder and cross-validated locally with
+  the MPPC decompressor in rdesktop (GPL-3.0, Matthew Chapman);
+  rdesktop was used only as a local decode oracle and no code was
+  copied. FreeRDP's mppc.c (Apache-2.0) and rdesktop's mppc.c were
+  consulted for behavioral semantics only (e.g. that uncompressed
+  packets do not update the history).
+  Patent note: RFC 2118 section 1.1 contains a licensing statement
+  restricting MPPC use to products implementing PPP for the purpose of
+  interoperation; this is recorded here for transparency and does not
+  constitute advice. rdesktop's comments additionally reference the
+  separate Stac/Hi/fn LZS patent family (now expired); MPPC's LZ77
+  token format is distinct from Stac LZS.
 - Zstandard Seekable Format: format documentation v0.1.0 by Meta
   Platforms (contrib/seekable_format, permissive redistribution
   notice) and reference implementation (BSD/GPL dual license).

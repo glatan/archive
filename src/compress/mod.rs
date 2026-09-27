@@ -188,6 +188,11 @@ pub mod zx5;
 #[cfg(feature = "vcdiff")]
 pub mod vcdiff;
 
+/// MPPC compression/decompression (RFC 2118): packet-oriented LZ77 with an
+/// 8192-byte history, packet flags, and a 12-bit coherency count.
+#[cfg(feature = "mppc")]
+pub mod mppc;
+
 #[cfg(feature = "cmpsc")]
 pub mod cmpsc;
 /// LZX DELTA decompression ([MS-PATCH]): delta-compressed streams with

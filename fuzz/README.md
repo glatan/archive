@@ -147,6 +147,7 @@ external tool が必要な pattern は `#[ignore]` 付きの placeholder とし�
 | zx2 | `zx2` |
 | zx5 | `zx5` |
 | vcdiff | `vcdiff` |
+| mppc | `mppc` |
 | lzsa | `lzsa`, `lzsa2` |
 | lzrw1a | `lzrw1a` |
 | zip | `zip`, `zip-store`, `zip-bzip2`, `zip-zstd` |
