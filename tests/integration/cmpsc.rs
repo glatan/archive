@@ -51,18 +51,18 @@ fn test_dictionaries() -> (Vec<u8>, Vec<u8>) {
     let mut cd = vec![0u8; 512 * E];
     let mut ed = alphabet_edict(512);
 
-    cd[65 * E] = 2 << 5;
+    cd[65 * E] = (2 << 5) | 0x18;
     cd[65 * E + 1] = (256 >> 8) as u8;
     cd[65 * E + 2] = 0;
     cd[65 * E + 3] = b'B';
     cd[65 * E + 4] = b'X';
 
-    cd[256 * E] = 1 << 5;
+    cd[256 * E] = (1 << 5) | 0x10;
     cd[256 * E + 1] = (258 >> 8) as u8;
     cd[256 * E + 2] = (258 & 0xff) as u8;
     cd[256 * E + 3] = b'C';
 
-    cd[83 * E] = 6 << 5;
+    cd[83 * E] = (6 << 5) | 0x1f;
     cd[83 * E + 1] = (259 >> 8) as u8;
     cd[83 * E + 2] = (259 & 0xff) as u8;
     cd[83 * E + 3..83 * E + 8].copy_from_slice(b"ABCDE");

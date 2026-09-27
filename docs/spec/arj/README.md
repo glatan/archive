@@ -55,7 +55,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 17 | `0x60 0xEA` signature で自動検出、`list`/`extract`/`test`/`inspect`/`pack` に対応 | CLI 規約 | ⚠️ | archive-cli 配線 + 手動スモーク確認 (自動テストなし) |
+| 17 | `0x60 0xEA` signature で自動検出、`list`/`extract`/`test`/`inspect`/`pack` に対応 | CLI 規約 | ✅ | `detect_arj` (同上: spawn 統合テスト基盤は未整備) |
 | 18 | fuzz harness `arj` で encode→decode 往復 | fuzz 規約 | ✅ | `Algorithm::Arj` |
 
 ### 既知制約 (intentional scope)

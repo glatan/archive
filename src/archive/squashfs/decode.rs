@@ -434,16 +434,16 @@ fn parse_inode(
             }
         }
         TYPE_EXT_FILE => {
-            let frag_index = le32(data, pos + 16 + 24)?;
+            let frag_index = le32(data, pos + 16 + 28)?;
             let file_size = le64(data, pos + 16 + 8)?;
             InodeBody::File {
                 blocks_start: le64(data, pos + 16)?,
                 frag_index,
-                frag_offset: le32(data, pos + 16 + 28)?,
+                frag_offset: le32(data, pos + 16 + 32)?,
                 file_size,
                 block_sizes: le_block_sizes(
                     data,
-                    pos + 16 + 36,
+                    pos + 16 + 40,
                     file_size,
                     frag_index,
                     block_size,
@@ -850,6 +850,19 @@ mod tests {
         ),
         Dir(&'static str, Vec<Node>),
         Symlink(&'static str, &'static str),
+        /// Regular file emitted as an extended file inode (TYPE_EXT_FILE).
+        ExtFile(
+            &'static str,
+            &'static [u8],
+            bool, /* use fragment tail */
+        ),
+        /// Arbitrary inode with a caller-supplied type-specific body.
+        Raw(
+            &'static str,
+            u16, /* inode type */
+            u16, /* mode */
+            Vec<u8>,
+        ),
     }
 
     struct Builder {
@@ -862,6 +875,8 @@ mod tests {
         compress: bool,
         block_size: u32,
         next_inode: u32,
+        /// Emit directories as extended directory inodes (TYPE_EXT_DIR).
+        ext_dirs: bool,
     }
 
     impl Builder {
@@ -876,6 +891,7 @@ mod tests {
                 compress,
                 block_size: 4096,
                 next_inode: 1,
+                ext_dirs: false,
             }
         }
 
@@ -959,6 +975,20 @@ mod tests {
                 }
                 listing_size = self.dir_stream.len() as u32 - listing_off as u32;
             }
+            if self.ext_dirs {
+                // extended dir body: link_count u32, file_size(+3) u32,
+                // block_index u32, parent u32, index_count u16,
+                // block_offset u16, xattr u32
+                let mut body = Vec::new();
+                body.extend_from_slice(&(entries.len() as u32 + 2).to_le_bytes());
+                body.extend_from_slice(&(listing_size + 3).to_le_bytes());
+                body.extend_from_slice(&0u32.to_le_bytes());
+                body.extend_from_slice(&1u32.to_le_bytes());
+                body.extend_from_slice(&0u16.to_le_bytes());
+                body.extend_from_slice(&(listing_off as u16).to_le_bytes());
+                body.extend_from_slice(&NO_INDEX.to_le_bytes());
+                return self.emit_inode(TYPE_EXT_DIR, 0o755, &body);
+            }
             // basic dir body: block_index, link_count, file_size(+3),
             // block_offset, parent
             let mut body = Vec::new();
@@ -973,50 +1003,16 @@ mod tests {
         fn emit_node(&mut self, node: Node) -> (usize, u16, String, u32) {
             match node {
                 Node::File(name, content, use_frag) => {
-                    let mut body = Vec::new();
-                    let blocks_start = self.data_region.len() as u64 + self.frag_block_start;
-                    let bs = self.block_size as usize;
-                    let (block_count, tail) = if use_frag {
-                        (content.len() / bs, content.len() % bs)
-                    } else {
-                        (content.len().div_ceil(bs), 0)
-                    };
-                    for i in 0..block_count {
-                        let chunk = &content[i * bs..(i * bs + bs).min(content.len())];
-                        let (packed, raw_flag) = self.pack_flag(chunk);
-                        let (body_bytes, flag) = if packed.len() < chunk.len() {
-                            (packed, 0u32)
-                        } else {
-                            (chunk.to_vec(), BLOCK_UNCOMPRESSED)
-                        };
-                        let _ = raw_flag;
-                        let field = body_bytes.len() as u32 | flag;
-                        self.data_region.extend_from_slice(&body_bytes);
-                        body.extend_from_slice(&field.to_le_bytes());
-                    }
-                    let frag_index = if use_frag && tail > 0 {
-                        self.fragment_offsets
-                            .push(self.fragment_payload.len() as u32);
-                        self.fragment_payload
-                            .extend_from_slice(&content[content.len() - tail..]);
-                        0u32
-                    } else {
-                        NO_INDEX
-                    };
-                    let frag_off = if frag_index == NO_INDEX {
-                        0
-                    } else {
-                        *self.fragment_offsets.last().unwrap()
-                    };
-                    let mut full = Vec::new();
-                    full.extend_from_slice(&(blocks_start as u32).to_le_bytes());
-                    full.extend_from_slice(&frag_index.to_le_bytes());
-                    full.extend_from_slice(&frag_off.to_le_bytes());
-                    full.extend_from_slice(&(content.len() as u32).to_le_bytes());
-                    full.extend_from_slice(&body);
+                    self.emit_file(name, content, use_frag, false)
+                }
+                Node::ExtFile(name, content, use_frag) => {
+                    self.emit_file(name, content, use_frag, true)
+                }
+                Node::Raw(name, inode_type, mode, body) => {
                     let ino = self.next_inode;
-                    let pos = self.emit_inode(TYPE_BASIC_FILE, 0o644, &full);
-                    (pos, TYPE_BASIC_FILE, name.to_owned(), ino)
+                    let pos = self.emit_inode(inode_type, mode, &body);
+                    let entry_type = basic_type(inode_type).unwrap();
+                    (pos, entry_type, name.to_owned(), ino)
                 }
                 Node::Dir(name, children) => {
                     let ino = self.next_inode;
@@ -1033,6 +1029,76 @@ mod tests {
                     (pos, TYPE_BASIC_SYMLINK, name.to_owned(), ino)
                 }
             }
+        }
+
+        fn emit_file(
+            &mut self,
+            name: &str,
+            content: &[u8],
+            use_frag: bool,
+            extended: bool,
+        ) -> (usize, u16, String, u32) {
+            let mut body = Vec::new();
+            let blocks_start = self.data_region.len() as u64 + self.frag_block_start;
+            let bs = self.block_size as usize;
+            let (block_count, tail) = if use_frag {
+                (content.len() / bs, content.len() % bs)
+            } else {
+                (content.len().div_ceil(bs), 0)
+            };
+            for i in 0..block_count {
+                let chunk = &content[i * bs..(i * bs + bs).min(content.len())];
+                let (packed, raw_flag) = self.pack_flag(chunk);
+                let (body_bytes, flag) = if packed.len() < chunk.len() {
+                    (packed, 0u32)
+                } else {
+                    (chunk.to_vec(), BLOCK_UNCOMPRESSED)
+                };
+                let _ = raw_flag;
+                let field = body_bytes.len() as u32 | flag;
+                self.data_region.extend_from_slice(&body_bytes);
+                body.extend_from_slice(&field.to_le_bytes());
+            }
+            let frag_index = if use_frag && tail > 0 {
+                self.fragment_offsets
+                    .push(self.fragment_payload.len() as u32);
+                self.fragment_payload
+                    .extend_from_slice(&content[content.len() - tail..]);
+                0u32
+            } else {
+                NO_INDEX
+            };
+            let frag_off = if frag_index == NO_INDEX {
+                0
+            } else {
+                *self.fragment_offsets.last().unwrap()
+            };
+            let mut full = Vec::new();
+            let inode_type = if extended {
+                // extended file body (SquashFS 4.0 §5.3 / kernel
+                // `squashfs_lreg_inode`): blocks_start u64,
+                // file_size u64, sparse u64, link_count u32,
+                // frag_index u32, block_offset u32, xattr u32,
+                // block_sizes[]
+                full.extend_from_slice(&blocks_start.to_le_bytes());
+                full.extend_from_slice(&(content.len() as u64).to_le_bytes());
+                full.extend_from_slice(&0u64.to_le_bytes()); // sparse
+                full.extend_from_slice(&2u32.to_le_bytes()); // link_count
+                full.extend_from_slice(&frag_index.to_le_bytes());
+                full.extend_from_slice(&frag_off.to_le_bytes());
+                full.extend_from_slice(&NO_INDEX.to_le_bytes()); // xattr
+                TYPE_EXT_FILE
+            } else {
+                full.extend_from_slice(&(blocks_start as u32).to_le_bytes());
+                full.extend_from_slice(&frag_index.to_le_bytes());
+                full.extend_from_slice(&frag_off.to_le_bytes());
+                full.extend_from_slice(&(content.len() as u32).to_le_bytes());
+                TYPE_BASIC_FILE
+            };
+            full.extend_from_slice(&body);
+            let ino = self.next_inode;
+            let pos = self.emit_inode(inode_type, 0o644, &full);
+            (pos, TYPE_BASIC_FILE, name.to_owned(), ino)
         }
 
         fn build(mut self, children: Vec<Node>) -> Vec<u8> {
@@ -1196,5 +1262,210 @@ mod tests {
         let img = Builder::new(false).build(vec![Node::File("f", b"x", false)]);
         let truncated = &img[..img.len() - 20];
         assert!(decode(truncated).is_err());
+    }
+
+    /// Concatenate little-endian u32 fields into an inode body.
+    fn le32_body(fields: &[u32]) -> Vec<u8> {
+        fields.iter().flat_map(|v| v.to_le_bytes()).collect()
+    }
+
+    /// spec #16: extended directory inode (§5.2) —
+    /// `link_count u32, file_size u32, block_index u32, parent u32,
+    /// index_count u16, block_offset u16, xattr u32`.
+    #[test]
+    fn parses_extended_dir_inode() {
+        // Direct parse_inode check with distinct values in every field.
+        let mut b = Builder::new(false);
+        let mut body = Vec::new();
+        body.extend_from_slice(&3u32.to_le_bytes()); // link_count
+        body.extend_from_slice(&(0x1234u32 + 3).to_le_bytes()); // file_size
+        body.extend_from_slice(&0x0000_abcdu32.to_le_bytes()); // block_index
+        body.extend_from_slice(&7u32.to_le_bytes()); // parent
+        body.extend_from_slice(&0u16.to_le_bytes()); // index_count
+        body.extend_from_slice(&0x0765u16.to_le_bytes()); // block_offset
+        body.extend_from_slice(&NO_INDEX.to_le_bytes()); // xattr
+        let pos = b.emit_inode(TYPE_EXT_DIR, 0o750, &body);
+        let (header, parsed) = parse_inode(&b.inode_stream, pos, b.block_size).unwrap();
+        assert_eq!(header.inode_type, TYPE_EXT_DIR);
+        assert_eq!(header.mode, 0o750);
+        assert_eq!(
+            kind_of(basic_type(header.inode_type).unwrap()),
+            SquashfsKind::Directory
+        );
+        match parsed {
+            InodeBody::Dir(listing) => {
+                assert_eq!(listing.size, 0x1234);
+                assert_eq!(listing.block_index, 0xabcd);
+                assert_eq!(listing.block_offset, 0x0765);
+            }
+            _ => panic!("expected directory body"),
+        }
+
+        // Full image where root and subdirectory are extended dir inodes;
+        // the subdirectory listing sits at a non-zero block_offset.
+        let mut b = Builder::new(false);
+        b.ext_dirs = true;
+        let img = b.build(vec![
+            Node::Dir(
+                "sub",
+                vec![
+                    Node::File("a.txt", b"alpha", false),
+                    Node::Dir("empty", vec![]),
+                ],
+            ),
+            Node::File("b.txt", b"bravo", false),
+        ]);
+        let image = decode(&img).unwrap();
+        let names: Vec<_> = image.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, [".", "sub", "sub/a.txt", "sub/empty", "b.txt"]);
+        assert_eq!(image.entries[0].kind, SquashfsKind::Directory);
+        assert_eq!(image.entries[1].kind, SquashfsKind::Directory);
+        assert_eq!(image.entries[3].kind, SquashfsKind::Directory);
+        assert_eq!(image.entries[2].data, b"alpha");
+        assert_eq!(image.entries[4].data, b"bravo");
+    }
+
+    /// spec #17: extended file inode (§5.3, kernel `squashfs_lreg_inode`) —
+    /// `blocks_start u64, file_size u64, sparse u64, link_count u32,
+    /// frag_index u32, block_offset u32, xattr u32, block_sizes[]`.
+    #[test]
+    fn parses_extended_file_inode() {
+        let big: Vec<u8> = (0..(4096 + 1000u32)).map(|i| (i % 253) as u8).collect();
+        let big: &'static [u8] = Box::leak(big.into_boxed_slice());
+        // A basic fragment file first so the extended file's fragment tail
+        // lands at a non-zero offset inside the shared fragment block.
+        let img = Builder::new(false).build(vec![
+            Node::File("first.bin", b"first-tail", true),
+            Node::ExtFile("ext-frag.bin", big, true),
+            Node::ExtFile("ext-blocks.bin", big, false),
+        ]);
+        let image = decode(&img).unwrap();
+        let names: Vec<_> = image.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, [".", "first.bin", "ext-frag.bin", "ext-blocks.bin"]);
+        assert_eq!(image.entries[1].data, b"first-tail");
+        for entry in &image.entries[2..] {
+            assert_eq!(entry.kind, SquashfsKind::File);
+            assert_eq!(entry.mode, 0o644);
+            assert_eq!(entry.data, big);
+        }
+
+        // Direct parse_inode check of the parsed fields.
+        let mut b = Builder::new(false);
+        let mut body = Vec::new();
+        body.extend_from_slice(&0x1_0000_0060u64.to_le_bytes()); // blocks_start
+        body.extend_from_slice(&(4096u64 * 2 + 5).to_le_bytes()); // file_size
+        body.extend_from_slice(&0u64.to_le_bytes()); // sparse
+        body.extend_from_slice(&1u32.to_le_bytes()); // link_count
+        body.extend_from_slice(&3u32.to_le_bytes()); // frag_index
+        body.extend_from_slice(&0x40u32.to_le_bytes()); // block_offset
+        body.extend_from_slice(&NO_INDEX.to_le_bytes()); // xattr
+        body.extend_from_slice(&le32_body(&[0x100, BLOCK_UNCOMPRESSED | 4096]));
+        let pos = b.emit_inode(TYPE_EXT_FILE, 0o600, &body);
+        let (header, parsed) = parse_inode(&b.inode_stream, pos, b.block_size).unwrap();
+        assert_eq!(
+            kind_of(basic_type(header.inode_type).unwrap()),
+            SquashfsKind::File
+        );
+        match parsed {
+            InodeBody::File {
+                blocks_start,
+                frag_index,
+                frag_offset,
+                file_size,
+                block_sizes,
+            } => {
+                assert_eq!(blocks_start, 0x1_0000_0060);
+                assert_eq!(file_size, 4096 * 2 + 5);
+                assert_eq!(frag_index, 3);
+                assert_eq!(frag_offset, 0x40);
+                assert_eq!(block_sizes, [0x100, BLOCK_UNCOMPRESSED | 4096]);
+            }
+            _ => panic!("expected file body"),
+        }
+    }
+
+    /// spec #18: extended symlink inode (§5.4) shares the basic layout
+    /// (`link_count u32, target_size u32, target[]`) plus a trailing xattr.
+    #[test]
+    fn parses_extended_symlink_inode() {
+        let target = b"../usr/bin/tool";
+        let mut body = le32_body(&[1, target.len() as u32]);
+        body.extend_from_slice(target);
+        body.extend_from_slice(&NO_INDEX.to_le_bytes()); // xattr
+        let img = Builder::new(false).build(vec![
+            Node::Raw("ext-link", TYPE_EXT_SYMLINK, 0o777, body),
+            Node::Symlink("basic-link", "../usr/bin/tool"),
+        ]);
+        let image = decode(&img).unwrap();
+        let names: Vec<_> = image.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, [".", "ext-link", "basic-link"]);
+        for entry in &image.entries[1..] {
+            assert_eq!(entry.kind, SquashfsKind::Symlink);
+            assert_eq!(entry.mode, 0o777);
+            assert_eq!(entry.data, target);
+        }
+    }
+
+    /// spec #19: device (§5.5: `link_count u32, rdev u32[, xattr u32]`) and
+    /// IPC (§5.6: `link_count u32[, xattr u32]`) inodes, basic + extended,
+    /// and their SquashfsKind mapping.
+    #[test]
+    fn parses_device_and_ipc_inodes() {
+        let rdev_blk = (8u32 << 8) | 1; // sda1
+        let rdev_chr = (1u32 << 8) | 3; // /dev/null
+        let img = Builder::new(false).build(vec![
+            Node::Raw("blk", TYPE_BASIC_BLKDEV, 0o660, le32_body(&[1, rdev_blk])),
+            Node::Raw(
+                "blk-ext",
+                TYPE_EXT_BLKDEV,
+                0o660,
+                le32_body(&[1, rdev_blk + 1, NO_INDEX]),
+            ),
+            Node::Raw("chr", TYPE_BASIC_CHRDEV, 0o666, le32_body(&[1, rdev_chr])),
+            Node::Raw(
+                "chr-ext",
+                TYPE_EXT_CHRDEV,
+                0o666,
+                le32_body(&[1, rdev_chr + 2, NO_INDEX]),
+            ),
+            Node::Raw("fifo", TYPE_BASIC_FIFO, 0o644, le32_body(&[1])),
+            Node::Raw("fifo-ext", TYPE_EXT_FIFO, 0o644, le32_body(&[1, NO_INDEX])),
+            Node::Raw("sock", TYPE_BASIC_SOCKET, 0o755, le32_body(&[1])),
+            Node::Raw(
+                "sock-ext",
+                TYPE_EXT_SOCKET,
+                0o755,
+                le32_body(&[1, NO_INDEX]),
+            ),
+        ]);
+        let image = decode(&img).unwrap();
+        let got: Vec<_> = image.entries[1..]
+            .iter()
+            .map(|e| (e.name.as_str(), e.kind, e.mode, e.data.clone()))
+            .collect();
+        let dev = |v: u32| v.to_le_bytes().to_vec();
+        assert_eq!(
+            got,
+            [
+                ("blk", SquashfsKind::BlockDevice, 0o660, dev(rdev_blk)),
+                (
+                    "blk-ext",
+                    SquashfsKind::BlockDevice,
+                    0o660,
+                    dev(rdev_blk + 1)
+                ),
+                ("chr", SquashfsKind::CharDevice, 0o666, dev(rdev_chr)),
+                (
+                    "chr-ext",
+                    SquashfsKind::CharDevice,
+                    0o666,
+                    dev(rdev_chr + 2)
+                ),
+                ("fifo", SquashfsKind::Fifo, 0o644, vec![]),
+                ("fifo-ext", SquashfsKind::Fifo, 0o644, vec![]),
+                ("sock", SquashfsKind::Socket, 0o755, vec![]),
+                ("sock-ext", SquashfsKind::Socket, 0o755, vec![]),
+            ]
+        );
     }
 }

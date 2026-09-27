@@ -70,7 +70,7 @@ fn parse_header_block(block: &[u8]) -> Result<BTreeMap<String, String>, Error> {
             return Err(Error::InvalidData("warc: malformed named-field"));
         };
         let name = name.trim();
-        if name.is_empty() || !name.bytes().all(|b| b.is_ascii() && b > b' ' && b != b':') {
+        if name.is_empty() || !name.bytes().all(|b| b.is_ascii_graphic() && b != b':') {
             return Err(Error::InvalidData("warc: bad field name"));
         }
         fields.insert(name.to_string(), value.trim().to_string());
@@ -259,5 +259,57 @@ mod tests {
     fn empty_stream() {
         assert_eq!(decode(b"").unwrap().len(), 0);
         assert_eq!(decode(b"\r\n\r\n").unwrap().len(), 0);
+    }
+
+    #[test]
+    fn rejects_bad_field_name() {
+        // Field names must be printable ASCII without SP/ctrl/colon.
+        for bad in [
+            &b"Bad Name: v"[..],
+            b"Bad\x01Name: v",
+            b": v",
+            b"Bad\x7fName: v",
+        ] {
+            let mut data = Vec::new();
+            data.extend_from_slice(b"WARC/1.1\r\n");
+            data.extend_from_slice(b"WARC-Type: resource\r\n");
+            data.extend_from_slice(b"WARC-Record-ID: <urn:x>\r\n");
+            data.extend_from_slice(b"WARC-Date: 2024-01-01T00:00:00Z\r\n");
+            data.extend_from_slice(bad);
+            data.extend_from_slice(b"\r\nContent-Length: 0\r\n\r\n");
+            assert!(
+                matches!(decode(&data), Err(Error::InvalidData(_))),
+                "accepted bad field name: {bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_non_utf8_header() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"WARC/1.1\r\n");
+        data.extend_from_slice(b"WARC-Type: resource\r\n");
+        data.extend_from_slice(b"WARC-Record-ID: <urn:x>\r\n");
+        data.extend_from_slice(b"WARC-Date: 2024-01-01T00:00:00Z\r\n");
+        data.extend_from_slice(b"X-Bad: \xff\xfe\r\n");
+        data.extend_from_slice(b"Content-Length: 0\r\n\r\n");
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn tolerates_missing_trailing_separator() {
+        // The record terminator is not verified: a block without the
+        // trailing CRLF CRLF still decodes, and the next record may follow
+        // immediately.
+        let data = record("resource", Some("http://a/"), b"body");
+        let bare = &data[..data.len() - 4];
+        assert_eq!(decode(bare).unwrap().len(), 1);
+
+        let mut two = Vec::new();
+        two.extend_from_slice(bare);
+        two.extend_from_slice(&record("warcinfo", None, b"i")[..]);
+        let entries = decode(&two).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].data, b"body");
     }
 }

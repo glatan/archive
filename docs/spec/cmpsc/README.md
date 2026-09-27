@@ -38,9 +38,9 @@
 |---|------|----------|------|----------------|
 | 8 | alphabet entry (0-255) は入力の 1 バイトで直接選択。child 探索で最後に一致したエントリの index を出力 | POP App.D Compression Process | ✅ | `compress_then_expand` |
 | 9 | CCT=0 (子なし): ACT = bits8-10、EC は byte 3 以降 | POP App.D Compression Dictionary | ✅ | リーフ子で検証 |
-| 10 | CCT=1: X = bit3 (examine)、ACT = bits8-10、CPTR = bits11-23、EC + 1 個の CC。実装は X bit を参照しない (EC の比較で child を選択し X の検査は行わない) | 同上 | ⚠️ | 256 "AB" → "ABC" で検証 (X bit 解釈は未実装) |
+| 10 | CCT=1: X = bit3 (examine)、ACT = bits8-10、CPTR = bits11-23、EC + 1 個の CC。X=0 の child は entry を fetch せず即選択して match 終了、X=1 で EC/子 entry を検査して descend | 同上 | ✅ |  (X=0 で 268 へ descend せず 257+'Y'、X=1 で "ABC"→258) |
 | 11 | CCT≥2: XXXXX = bits3-7、YY = bits8-9、ACT = bit10 (0/1 のみ)、CPTR = bits11-23、[EC] + CC 列。CCT = 5-ACT+1 で sibling descriptor が最後の子の後に続く | 同上 | ✅ | 'S' エントリ (CCT=6, 5 子 + SD) で検証 |
-| 12 | format-0 sibling descriptor: SCT = bits0-2 (0 or ≥7 で継続)、examine bits3-7、SC = bytes1-7。SD 自身も index を占め、指定する子は SD index+1 以降に連続 | 同上 / Format-0 Sibling Descriptor | ✅ | `cmpsc_compress_expand_roundtrip` (統合: "SF" が index 265) |
+| 12 | format-0 sibling descriptor: SCT = bits0-2 (0 or ≥7 で継続)、examine bits3-7、SC = bytes1-7。SD 自身も index を占め、指定する子は SD index+1 以降に連続 | 同上 / Format-0 Sibling Descriptor | ✅ | `cmpsc_compress_expand_roundtrip` (統合: "SF" が index 265)。SD の examine bits (及び YY) は未解釈で常時 examine として扱う |
 | 13 | 子 index = CPTR + ordinal で連続配置。matching は unordered comparison: 子/兄弟を左から走査、先行子の EC mismatch 後も残りの子を走査継続 (architected model-permitted 動作) | 同上 / Child and Sibling Characters | ✅ | 上記テストで検証 |
 | 14 | 出力 symbol = 最後に一致したエントリの index。マッチ失敗時は現在の親を出力 | POP App.D | ✅ | `compress_matches_expected_symbols` |
 

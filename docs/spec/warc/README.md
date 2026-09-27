@@ -22,9 +22,9 @@
 |---|------|----------|-----------|----------------|
 | 1 | `WARC/1.0` / `WARC/1.1` の version line を受け付ける | §WARC 1.1 "WARC file name and record structure" | ✅ | `tolerates_warc_1_0`, `parses_single_record` |
 | 2 | それ以外の version line は reject | 同上 | ✅ | `rejects_bad_version` |
-| 3 | named-field は `name ":" value`、field name は printable ASCII (制御・空白・`:` 不許可) | §named fields grammar | ⚠️ | `parse_header_block` 実装済み (reject パスの専用テストなし) |
+| 3 | named-field は `name ":" value`、field name は printable ASCII (制御・空白・`:` 不許可) | §named fields grammar | ✅ | `rejects_bad_field_name` (DEL 0x7f 漏れを `is_ascii_graphic` に修正済み) |
 | 4 | SP/HT で始まる継続行は直前フィールドの値に結合 (LWS folding) | §linear white space | ✅ | `header_folding_joins_value` |
-| 5 | header は UTF-8。非 UTF-8 は reject | §record structure (UTF-8 前提) | ⚠️ | `parse_header_block` 実装済み (reject パスの専用テストなし) |
+| 5 | header は UTF-8。非 UTF-8 は reject | §record structure (UTF-8 前提) | ✅ | `rejects_non_utf8_header` |
 | 6 | 未知の拡張フィールドは無視してパース継続 | §extension fields ("shall be ignored") | ✅ | `header_folding_joins_value` (X-Custom) |
 
 ### 必須フィールド
@@ -42,7 +42,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 13 | レコード間・末尾の CRLF は許容。block 後の終端 separator はレコード間・末尾を問わず検証しない | §record structure | ⚠️ | `empty_stream`, `parses_multiple_records` (separator 欠落ケースは未テスト) |
+| 13 | レコード間・末尾の CRLF は許容。block 後の終端 separator はレコード間・末尾を問わず検証しない | §record structure | ✅ | `tolerates_missing_trailing_separator` |
 | 14 | エントリ名は `WARC-Target-URI`、欠落時は `WARC-Record-ID` にフォールバック | crate エントリ規約 | ✅ | `parses_multiple_records` |
 | 15 | `.warc.gz` (concatenated gzip members) は gzip 伸張後に decode | gzip multi-member | ✅ | `test_warc_gzip_members` |
 

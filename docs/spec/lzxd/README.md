@@ -36,9 +36,9 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 17 | チャンクサイズ 0・チャンクデータ切り詰め・奇数バイト残りのチャンクは拒否 | [MS-PATCH] 2.2.1 | ⚠️ | `rejects_empty` (切り詰め・奇数チャンクの専用テストなし) |
-| 18 | 非合法ブロック型・不完全/超過 Huffman 木は拒否 | [MS-PATCH] 2.3-2.5 | ⚠️ | `lzxd_rejects_invalid` (統合: 型 5 拒否のみ。不完全木 reject は実装済み・未テスト) |
-| 19 | 出力済み+reference を超えるオフセット・32KiB 境界跨ぎマッチは拒否 | [MS-PATCH] 2.1.5 | ⚠️ | `lzxd_rejects_invalid` (統合: offset 超過のみ。境界跨ぎ reject は実装済み・未テスト) |
+| 17 | チャンクサイズ 0・チャンクデータ切り詰め・奇数バイト残りのチャンクは拒否 | [MS-PATCH] 2.2.1 | ✅ | `rejects_bad_chunk_layout` (size0・宣言超過・prefix 不足), `rejects_truncated`, `uncompressed_roundtrip_odd_last_chunk` |
+| 18 | 非合法ブロック型・超過 (over-subscribed) Huffman 木は拒否。不完全木は合法 (libmspack 検証ベクタが実際に含む) で受理し、未使用コード空間への decode は実行時エラー | [MS-PATCH] 2.3-2.5 | ✅ | `lzxd_rejects_invalid` (型 5), `huffman_decode` (over-subscribed), `huffman_accepts_incomplete_tree` |
+| 19 | 出力済み+reference を超えるオフセット・32KiB 境界跨ぎマッチは拒否 | [MS-PATCH] 2.1.5 | ✅ | `lzxd_rejects_invalid` (offset 超過), `lzxd_rejects_match_crossing_chunk_boundary` |
 | 20 | `decode` は期待出力サイズで厳密終端、`decode_all` はブロックの 24bit サイズで自己終端 (`max_output` 上限付き)。uncompressed ブロックが 32KiB 境界を跨ぐ場合はエラー `uncompressed block must not cross 32KB boundary` を返す | crate contract | ✅ | `lzxd_decode_all_matches_decode` (統合) |
 
 ## エンコード範囲 / 既知の制約

@@ -844,4 +844,26 @@ mod tests {
         e8_reverse(&mut chunk, 0, 1000);
         assert_eq!(&chunk[1..5], &[0xf4, 0x01, 0, 0]);
     }
+
+    #[test]
+    fn huffman_accepts_incomplete_tree() {
+        // Under-subscribed lens leave unassigned code space but are legal:
+        // the libmspack-validated vectors exercise real incomplete trees.
+        // Only oversubscription is a build-time error.
+        assert!(Huffman::build(&[2, 2]).is_ok());
+        assert!(Huffman::build(&[1]).is_ok());
+        assert!(Huffman::build(&[0; 8]).is_ok()); // empty tree builds; usage is checked later
+        // Length out of range still rejected.
+        assert!(Huffman::build(&[17, 1]).is_err());
+    }
+
+    #[test]
+    fn rejects_bad_chunk_layout() {
+        // Chunk prefix declaring a zero-size chunk.
+        assert!(decode(&[0x00, 0x00], W17, &[], 1).is_err());
+        // Declared chunk size exceeds the data actually present.
+        assert!(decode(&[0x05, 0x00, 0xaa], W17, &[], 1).is_err());
+        // A lone byte cannot even hold the 2-byte size prefix.
+        assert!(decode(&[0x05], W17, &[], 1).is_err());
+    }
 }

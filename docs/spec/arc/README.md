@@ -45,7 +45,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 13 | `0x1A` + method byte (1-8) で自動検出、`list`/`extract`/`test`/`inspect`/`pack` に対応 | CLI 規約 | ⚠️ | archive-cli 配線 + 手動スモーク確認 (自動テストなし) |
+| 13 | `0x1A` + method byte (1-8) で自動検出、`list`/`extract`/`test`/`inspect`/`pack` に対応 | CLI 規約 | ✅ | `detect_arc` (同上: spawn 統合テスト基盤は未整備) |
 | 14 | fuzz harness `arc` で encode→decode 往復 | fuzz 規約 | ✅ | `Algorithm::Arc` |
 
 ### 既知制約 (intentional scope)

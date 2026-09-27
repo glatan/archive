@@ -37,7 +37,7 @@
 | 11 | `type=` : file/dir/link/block/char/fifo/socket を `MtreeKind` に写像、未知値は `Other` | Keywords/type | ✅ | `kind_of` |
 | 12 | `size` `mode`(8進) `uid` `gid` `uname` `gname` `time` `link` を構造化フィールドで公開 | Keywords | ✅ | `parses_basic_manifest` |
 | 13 | digest 系 (`md5`/`sha1`/`sha256`/`sha384`/`sha512`/`rmd160` + `*digest` 別名) を正規化名で `digests` に格納 | Keywords (digest synonyms) | ✅ | `digest_synonyms_normalised` |
-| 14 | 未知キーワードは値を保持せず無視 (warn 相当: パース継続) | Keywords ("warn about unrecognized") | ⚠️ | `entry_from` 実装済み (無視を直接検証する専用テストなし) |
+| 14 | 未知キーワードは値を保持せず無視 (warn 相当: パース継続) | Keywords ("warn about unrecognized") | ✅ | `unknown_keyword_ignored` |
 
 ### システム相互運用
 

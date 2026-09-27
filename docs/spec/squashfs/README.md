@@ -38,7 +38,7 @@ mksquashfs 生成イメージとの相互運用はテストで確認済み。
 | 9 | ID 5 lz4 = raw LZ4 block → `compress::lz4` | §2.4 | ✅ | 同上 (lz4) |
 | 10 | ID 6 zstd → `compress::zstd` | §2.4 | ✅ | 同上 (zstd) |
 | 11 | ID 3 lzo = LZO1X raw → `compress::lzo` | §2.4 | ✅ | 同上 (lzo) |
-| 12 | ID 2 lzma (LZMA1, deprecated) は `Unsupported` | §2.4 | ⚠️ | upstream で deprecated のため非対応を明示 |
+| 12 | ID 2 lzma (LZMA1, deprecated) は `Unsupported` | §2.4 | ❌ | upstream で deprecated のため非対応を明示 (intentional exclusion) |
 | 13 | 圧縮が入力を超える場合の非圧縮格納 (data block bit24 / metadata MSB) | §2.1/§2.2 | ✅ | `parses_compressed_metadata_and_data` ほか |
 | 14 | metadata/data block の伸張上限 (8KiB / block_size) を強制 | §2.1/§2.2 | ✅ | bounded decompress |
 
@@ -47,10 +47,10 @@ mksquashfs 生成イメージとの相互運用はテストで確認済み。
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 15 | common inode header (type/mode/uid_idx/gid_idx/mtime/inode_number) | §5.1 | ✅ | `InodeHeader::parse` |
-| 16 | basic/extended directory inode → dir table 参照 (listing size = file_size - 3) | §5.2 | ⚠️ | `parses_subdir_symlink` (basic のみ検証。extended 分岐は実装済み・未テスト) |
-| 17 | basic/extended file inode → block sizes 配列 + fragment 参照 | §5.3 | ⚠️ | `parses_basic_image` (basic のみ検証。extended 分岐は実装済み・未テスト) |
-| 18 | basic/extended symlink inode → target path | §5.4 | ⚠️ | `parses_subdir_symlink` (basic のみ検証。extended 分岐は実装済み・未テスト) |
-| 19 | device / IPC inode (basic + extended) を受理 | §5.5/§5.6 | ⚠️ | `InodeBody::Device`/`Ipc` 分岐実装済み (テストなし) |
+| 16 | basic/extended directory inode → dir table 参照 (listing size = file_size - 3) | §5.2 | ✅ | `parses_subdir_symlink`, `parses_extended_dir_inode` |
+| 17 | basic/extended file inode → block sizes 配列 + fragment 参照 | §5.3 | ✅ | `parses_basic_image`, `parses_extended_file_inode` (実装の 4B オフセットずれを修正済み) |
+| 18 | basic/extended symlink inode → target path | §5.4 | ✅ | `parses_subdir_symlink`, `parses_extended_symlink_inode` |
+| 19 | device / IPC inode (basic + extended) を受理 | §5.5/§5.6 | ✅ | `parses_device_and_ipc_inodes` |
 | 20 | dir table: header (count-1 / start / base inode) + entry (offset / s16 diff / basic type / name_size-1 / name) | §6 | ✅ | `read_dir_listing` |
 | 21 | data block: bit24 = 非圧縮、size 0 = sparse zero block | §4 | ✅ | `read_data_block` |
 | 22 | fragment tail: frag table entry (start/size/unused) + frag_offset | §4/§7 | ✅ | `parses_fragment_tail` |

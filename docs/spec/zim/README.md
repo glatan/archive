@@ -26,7 +26,7 @@
 | 3 | path pointer list: entryCount × u64 offset → dirent | Path Pointer List | ✅ | `parse_dirent` |
 | 4 | Content entry: mimetype(2) + param_len(1) + namespace(1) + revision(4) + cluster(4) + blob(4) + path + title | Directory Entries | ✅ | `parses_basic_zim` |
 | 5 | Redirect entry (mimetype=0xffff): redirect_index 経由で target entry の content を解決 (多段リダイレクトは対象外、1 段のみ解決) | Directory Entries | ✅ | `resolves_redirect` |
-| 6 | deprecated entry (0xfffe linktarget / 0xfffd deleted) は skip | Directory Entries | ⚠️ | `MIMETYPE_LINKTARGET/DELETED` 実装済み (skip を検証する専用テストなし) |
+| 6 | deprecated entry (0xfffe linktarget / 0xfffd deleted) は skip | Directory Entries | ✅ | `skips_deprecated_linktarget_and_deleted_entries` |
 | 7 | エントリ名は `N/path` 形式 (namespace prefix + path) で公開 | Namespaces | ✅ | `C/index.html` 等 |
 
 ### Cluster
@@ -34,9 +34,9 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 8 | cluster info byte: 下位 4bit = compression (1:none / 4:xz(lzma2) / 5:zstd)、bit5 = extended offset | Clusters | ✅ | `parses_xz_cluster` / `test_zim_decode_zstd_cluster` |
-| 9 | extended (8B offset) cluster は major 6 のみ受理 | Clusters | ⚠️ | 実装済み (`extended cluster requires major version 6` エラー。正常/reject とも未テスト) |
+| 9 | extended (8B offset) cluster は major 6 のみ受理 | Clusters | ✅ | `rejects_extended_cluster_below_major6`, `parses_extended_cluster_major6` |
 | 10 | blob offset list: 先頭 offset / OFFSET_SIZE で entry 数を決定、連続 offset 差分が blob | Clusters | ✅ | `parses_multi_blob_cluster`。先頭 offset の OFFSET_SIZE アライメントも検査。cluster 終端は次クラスタ位置→checksumPos→input 末尾の順でフォールバック |
-| 11 | legacy compression id (2 zlib / 3 bzip2) → Unsupported | Clusters | ⚠️ | `rejects_bzip_cluster` (bzip2 のみ検証。zlib id は catch-all で暗黙カバー、専用テストなし) |
+| 11 | legacy compression id (2 zlib / 3 bzip2) → Unsupported | Clusters | ✅ | `rejects_bzip_cluster`, `rejects_zlib_cluster` |
 | 12 | bounds 検査 (pointer list / blob offset / truncation) | crate エラー規約 | ✅ | `rejects_truncated`, `rejects_blob_out_of_range` |
 
 ### 実ファイル検証

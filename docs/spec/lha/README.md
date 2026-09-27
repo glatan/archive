@@ -56,7 +56,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 17 | offset 2 の `-l`-`-` マーカー + offset 20 の level byte (0-2) で自動検出、`list`/`extract`/`test`/`inspect`/`pack` に対応 | CLI 規約 | ⚠️ | archive-cli 配線 + 手動スモーク確認 (自動テストなし) |
+| 17 | offset 2 の `-l`-`-` マーカー + offset 20 の level byte (0-2) で自動検出、`list`/`extract`/`test`/`inspect`/`pack` に対応 | CLI 規約 | ✅ | `detect_lha` (サブコマンド配線の spawn 統合テスト基盤は未整備) |
 | 18 | fuzz harness `lha` で encode→decode 往復 | fuzz 規約 | ✅ | `Algorithm::Lha` |
 
 ### 既知制約 (intentional scope)

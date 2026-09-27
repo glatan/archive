@@ -41,7 +41,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 13 | `RPMTAG_PAYLOADCOMPRESSOR` (tag 1125): gzip / bzip2 / lzma / xz / zstd / none を認識。tag 欠落時は gzip 既定 | format_v6.html + rpm 挙動 | ✅ | `payload_compressor` (bzip2/lzma 伸張経路は実装済み・個別テストなし) |
-| 14 | 未認識 compressor 名 → `Unsupported` | 同上 | ⚠️ | `payload_compressor` の `Unsupported` 分岐実装済み (専用テストなし) |
+| 14 | 未認識 compressor 名 → `Unsupported` | 同上 | ✅ | `rejects_unrecognized_payload_compressor` |
 | 15 | payload 伸張に output limit (bounded decode) を伝搬 | crate bounded-decode convention | ✅ | `bounded` ヘルパー |
 | 16 | v4/newc payload は `cpio` decoder で entry を公開 (newcrc `070702` も受理し CRC 検証は cpio 側に委譲) | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ✅ | `decodes_uncompressed_newc_payload` |
 | 17 | stripped payload: magic `07070X` + 8B hex file index、4B 整列、`fx == 0xffffffff` が trailer | rpm `lib/cpio.c` (rpm 独自形式、format_v6.html 参照) | ✅ | `parses_stripped_payload` |

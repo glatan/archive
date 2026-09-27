@@ -335,4 +335,26 @@ mod tests {
         assert_eq!(entries[0].digests["sha256"], "x");
         assert_eq!(entries[0].digests["md5"], "y");
     }
+
+    #[test]
+    fn unknown_keyword_ignored() {
+        // spec/mtree 要件14: unknown keywords are ignored and parsing continues.
+        let kw = parse_keywords(&["foo=bar", "size=42", "flags=uchg", "mode=600", "bogus"]);
+        let entry = entry_from("a.txt".to_string(), kw);
+        assert_eq!(entry.kind, MtreeKind::File);
+        assert_eq!(entry.size, Some(42));
+        assert_eq!(entry.mode, Some(0o600));
+        assert!(entry.digests.is_empty());
+
+        let text = "#mtree\n./a.txt foo=bar size=42 type=file uid=7 zzz=1 bogus\n./b.txt size=1\n";
+        let entries = decode(text.as_bytes()).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "a.txt");
+        assert_eq!(entries[0].kind, MtreeKind::File);
+        assert_eq!(entries[0].size, Some(42));
+        assert_eq!(entries[0].uid, Some(7));
+        assert!(entries[0].digests.is_empty());
+        assert_eq!(entries[1].name, "b.txt");
+        assert_eq!(entries[1].size, Some(1));
+    }
 }
