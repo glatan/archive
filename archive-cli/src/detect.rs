@@ -58,6 +58,7 @@ pub enum Format {
     Zx5,
     Vcdiff,
     Mppc,
+    Lzs,
     Lzxd,
     Cmpsc,
 }
@@ -116,6 +117,7 @@ pub enum CompressionFormat {
     Zx5,
     Vcdiff,
     Mppc,
+    Lzs,
     Lzxd,
     Cmpsc,
 }
@@ -179,6 +181,7 @@ impl core::fmt::Display for Format {
             Self::Zx5 => "zx5",
             Self::Vcdiff => "vcdiff",
             Self::Mppc => "mppc",
+            Self::Lzs => "lzs",
             Self::Lzxd => "lzxd",
             Self::Cmpsc => "cmpsc",
         };
@@ -248,6 +251,7 @@ impl From<CompressionFormat> for Format {
             CompressionFormat::Zx5 => Self::Zx5,
             CompressionFormat::Vcdiff => Self::Vcdiff,
             CompressionFormat::Mppc => Self::Mppc,
+            CompressionFormat::Lzs => Self::Lzs,
             CompressionFormat::Lzxd => Self::Lzxd,
             CompressionFormat::Cmpsc => Self::Cmpsc,
         }
@@ -443,6 +447,9 @@ pub fn scope_notes(format: Format) -> Vec<String> {
         ],
         Format::Mppc => vec![
             "mppc packets carry no magic; --format is required".to_owned(),
+        ],
+        Format::Lzs => vec![
+            "lzs streams carry no magic; --format is required".to_owned(),
         ],
         Format::ZstdSeekable => vec![
             "zstd-seekable streams auto-detect as zstd; selecting this format requires and validates the seek table".to_owned(),

@@ -188,6 +188,8 @@ pub mod zx5;
 #[cfg(feature = "vcdiff")]
 pub mod vcdiff;
 
+#[cfg(feature = "lzs")]
+pub mod lzs;
 /// MPPC compression/decompression (RFC 2118): packet-oriented LZ77 with an
 /// 8192-byte history, packet flags, and a 12-bit coherency count.
 #[cfg(feature = "mppc")]

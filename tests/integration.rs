@@ -69,6 +69,8 @@ use archive::compress::lzrw1a;
 use archive::compress::lzrw2;
 use archive::compress::lzrw3;
 use archive::compress::lzrw3a;
+#[cfg(feature = "lzs")]
+use archive::compress::lzs;
 use archive::compress::lzw;
 use archive::compress::lzxd;
 #[cfg(feature = "mppc")]
@@ -276,6 +278,9 @@ mod lzrw3_tests;
 #[path = "integration/lzrw3a.rs"]
 mod lzrw3a_tests;
 
+#[cfg(feature = "lzs")]
+#[path = "integration/lzs.rs"]
+mod lzs_tests;
 #[cfg(feature = "mppc")]
 #[path = "integration/mppc.rs"]
 mod mppc_tests;

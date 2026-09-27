@@ -61,6 +61,7 @@
 //! | `zx5` (default) | ZX5 raw codec |
 //! | `vcdiff` (default) | VCDIFF (RFC 3284) delta codec |
 //! | `mppc` (default) | MPPC (RFC 2118) packet codec |
+//! | `lzs` (default) | Stac LZS (RFC 2395) datagram codec |
 //! | `lzrw1` (default) | LZRW1 raw codec |
 //! | `lzrw1a` (default) | LZRW1-A raw codec |
 //! | `lzrw2` (default) | LZRW2 raw codec |
@@ -482,6 +483,7 @@ pub(crate) mod util;
     feature = "zx5",
     feature = "vcdiff",
     feature = "mppc",
+    feature = "lzs",
     feature = "lzxd",
     feature = "cmpsc"
 ))]

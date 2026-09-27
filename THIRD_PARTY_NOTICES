@@ -82,6 +82,34 @@ specifications or standards documents:
   Patent note: rdesktop's comments additionally reference the separate
   Stac/Hi/fn LZS patent family (now expired); MPPC's LZ77 token format
   is distinct from Stac LZS.
+- Stac LZS (RFC 2395, IP Payload Compression Using LZS / IPComp):
+  format specification RFC 2395 (informational; section 2.2 repeats the
+  ANSI X3.241-1994 bitstream grammar for informational purposes only).
+  The Rust implementation in src/compress/lzs.rs is spec-informed, with
+  no code copied. Test-time provenance: fixtures under
+  tests/fixtures/lzs/ were produced by this crate's own encoder and
+  cross-validated locally with the compcol LZS codec (MIT,
+  KarpelesLab); compcol was used only as a local encode/decode oracle
+  and no code was copied. The ANSI X3.241 standard document itself
+  (paywalled) was not obtained or consulted.
+  Patent note (expired): RFC 2395 section 1.3 states "Hi/fn, Inc. holds
+  patents on the LZS algorithm" and offers no-cost
+  reference-implementation licenses "for use in IPPCP, IPSec, TLS and
+  PPP applications", with source/object licenses "available on a
+  non-discriminatory basis" for other uses. This is a patent-royalty
+  statement, not an outright field-of-use prohibition (unlike
+  RFC 2118 section 1.1's MPPC restriction). Independent research
+  indicates the underlying Stac/Hi/fn LZS patent family (US 4,701,745;
+  5,016,009; 5,126,739; 5,146,221; 5,463,390 and related continuations,
+  filed 1985-1993) has expired: US 5,126,739's Google Patents record
+  shows "Expired - Fee Related" with anticipated expiration 2009-06-30,
+  and the Hi/fn LZS patents are reported to have lapsed for non-payment
+  of maintenance fees with a failed 2007 reinstatement attempt. This
+  crate is a general-purpose archive/compression library, not an
+  IPPCP/IPSec/TLS/PPP protocol implementation; this is recorded for
+  transparency and does not constitute legal advice. No formal
+  freedom-to-operate opinion or exhaustive patent family search was
+  performed.
 - Zstandard Seekable Format: format documentation v0.1.0 by Meta
   Platforms (contrib/seekable_format, permissive redistribution
   notice) and reference implementation (BSD/GPL dual license).
