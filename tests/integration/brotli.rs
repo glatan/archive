@@ -180,6 +180,53 @@ fn test_brotli_encode_system_decode() {
 
 #[cfg(feature = "brotli")]
 #[test]
+fn test_brotli_encode_lz77_system_decode() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    // Low-cardinality pseudo-random data interleaved with dictionary
+    // words: drives the LZ77 / context-modeling / multi-block encoder
+    // paths that a plain repeat() input does not reach.
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_brotli_lz77_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let archive_path = dir.join("lz77.br");
+    let mut input = Vec::new();
+    let mut s = 0x9E3779B97F4A7C15u64;
+    for _ in 0..40 {
+        input.extend_from_slice(b"the quick brown fox jumps over the lazy dog. ");
+        for _ in 0..64 {
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            input.push(b"abcdefgh"[(s >> 33) as usize & 7]);
+        }
+    }
+    let encoded = brotli::encode::encode(&input);
+    std::fs::write(&archive_path, &encoded).unwrap();
+
+    let result = Command::new("brotli")
+        .args(["-d", "-c", archive_path.to_str().unwrap()])
+        .output();
+
+    if let Ok(result) = result {
+        assert!(
+            result.status.success(),
+            "brotli decode failed: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(result.stdout, input);
+    }
+
+    let _ = std::fs::remove_file(&archive_path);
+    let _ = std::fs::remove_dir(&dir);
+}
+
+#[cfg(feature = "brotli")]
+#[test]
 fn test_brotli_encode_empty_system_decode() {
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -231,6 +278,23 @@ fn test_brotli_encode_multi_metablock_roundtrip() {
     let encoded = brotli::encode::encode(&input);
     let decoded = brotli::decode::decode(&encoded).unwrap();
     assert_eq!(decoded, input);
+}
+
+#[cfg(feature = "brotli")]
+#[test]
+fn test_brotli_encode_metablock_boundary_context() {
+    // The second metablock's first literal context is derived from
+    // the last plaintext byte of the previous metablock; the encoder
+    // must not reset it to zero.
+    let mut input = vec![0u8; 0x0100_0000];
+    for (i, b) in input.iter_mut().enumerate() {
+        *b = b"abcd"[i & 3];
+    }
+    for _ in 0..400 {
+        input.extend_from_slice(b"the quick brown fox jumps over the lazy dog. ");
+    }
+    let encoded = brotli::encode::encode(&input);
+    assert_eq!(brotli::decode::decode(&encoded).unwrap(), input);
 }
 
 #[cfg(feature = "brotli")]
