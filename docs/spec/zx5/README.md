@@ -33,7 +33,7 @@
 | 11 | new-offset: `*` bit (後続 `elias(len-1)` の先頭ビット) → `elias(MSB+1)` (v2 反転) → LSB 1 バイト。decode: `offset = msb*256 - byte` | README / dzx5.c `ahead_bit`/`backtrack` / compress.c | ✅ | `zx5_reference_vector_*` (統合) |
 | 12 | offset MSB=256 は EOF マーカ。EOF 時点で入力を消費しきること (余剰バイトはエラー) | dzx5.c EOF 検証 | ✅ | `zx5_rejects_malformed` (統合) |
 | 13 | new-offset の match 長は `elias + 1` (最小 2 バイト) | dzx5.c `length = elias+1` | ✅ | `zx5_reference_vector_*` (統合) |
-| 14 | 初期 last_offset1 = 1、last_offset2/3 = 0 (offset=0 の prev-offset コピーは無効として拒否) | zx5.h `INITIAL_OFFSET` / dzx5.c | ✅ | `zx5_reference_vector_rep_offset` (統合)、`rejects_zero_prev_offset` |
+| 14 | 初期 last_offset1 = 1、last_offset2/3 = 0 | zx5.h `INITIAL_OFFSET` / dzx5.c | ✅ | `zx5_reference_vector_rep_offset` (統合) |
 | 15 | エンコード可能な最大 offset は 65280 (`MAX_OFFSET_ZX5`) | zx5.c `MAX_OFFSET_ZX5` | ✅ | `decode_far_offset`、エンコーダ側で上限内のみ出力 |
 | 16 | 空入力は空出力に対応 (フォーマット上は空出力を表現不可; crate 内部規約として受理) | crate contract | ✅ | `empty_input` |
 
@@ -43,6 +43,7 @@
 |---|------|----------|------|----------------|
 | 17 | 切り詰め制御ビット / リテラル / LSB バイトの拒否 | dzx5.c truncated input | ✅ | `rejects_truncated`、`zx5_rejects_malformed` (統合) |
 | 18 | match offset が出力済みバイト数を超過する場合は拒否 | dzx5.c `write_bytes` 検証 | ✅ | `rejects_bad_offset` |
+| 18a | offset=0 の prev-offset コピーは無効として拒否 (参照実装は未定義動作寄りで明示拒否なし。crate 独自の防御的検証) | crate contract | ✅ | `rejects_zero_prev_offset` |
 | 19 | EOF 後の余剰バイトの拒否 | dzx5.c `input too long` | ✅ | `zx5_rejects_malformed` (統合) |
 | 20 | `decode_bounded` で出力上限を強制 | crate contract | ✅ | `bounded_decode` |
 
