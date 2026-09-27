@@ -37,33 +37,34 @@
 |---|------|----------|------|----------------|
 | 12 | スライディングウィンドウ 2048 バイト。datagram 毎に履歴をリセットするため、デコーダの出力そのものが履歴 | RFC 2395 §1.2, §2.1, §3 | ✅ | `roundtrip_varied`、`window_span_roundtrip` (統合) |
 | 13 | copy offset > 生成済み出力サイズは拒否 | RFC 2395 §2.2 + crate 防御 | ✅ | `offset_exceeds_history` |
-| 14 | copy offset > 2047 (11bit 表現可能上限) は拒否 | RFC 2395 §2.2 `<Offset>` | ✅ | `window_distance_cap` |
+| 14 | copy offset の wire 表現上限は short=127 (7bit) / long=2047 (11bit) で、超過値は表現不能。decode 側の追加上限チェックは到達不能のため不設置 | RFC 2395 §2.2 `<Offset>` | ✅ | `window_distance_cap` (encode 側距離上限 2047) |
 | 15 | エンコーダのマッチ距離上限は 2047 (11bit long form の最大値)。距離 2048 は表現不能のため符号化しない | RFC 2395 §2.2 `<Offset>` | ✅ | `window_distance_cap` |
+| 16 | 送信側は圧縮 datagram の送信毎に compressor を flush しなければならない (MUST)。one-shot `encode()` は全入力を必ず出力に含めるため設計上担保される | RFC 2395 §2.1 | ✅ | API 設計で担保 |
 
 ## マッチ長 / 防御的制約
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 16 | 最小マッチ長 2 (`00`) | RFC 2395 §2.2 `<Length>` | ✅ | `length_table_boundaries` |
-| 17 | 最大マッチ長は文法上 unbounded だが、単一マッチ 16MiB 超は破損/攻撃入力として拒否 (crate 側の sanity cap) | crate 判定 | ✅ | `truncated_match_length_chain` |
-| 18 | `decode_bounded` は `OutputLimitExceeded` で出力量を制限 | ✅ | `decode_bounded_limit` |
-| 19 | トークン列の途中切れ (offset/length の読み込み不足、nibble chain 未終端) は拒否 | ✅ | `missing_end_marker_is_error`、`truncated_match_length_chain` |
+| 17 | 最小マッチ長 2 (`00`) | RFC 2395 §2.2 `<Length>` | ✅ | `length_table_boundaries` |
+| 18 | 最大マッチ長は文法上 unbounded だが、単一マッチ 16MiB 超は破損/攻撃入力として拒否 (crate 側の sanity cap)。エンコーダは MAX_MATCH でマッチを分割するため自身の出力は常に decode 可能 | crate 判定 | ✅ | `rejects_match_length_above_cap`、`max_match_boundary_roundtrip` |
+| 19 | `decode_bounded` は `OutputLimitExceeded` で出力量を制限 | ✅ | `decode_bounded_limit` |
+| 20 | トークン列の途中切れ (offset/length の読み込み不足、nibble chain 未終端) は拒否 | ✅ | `missing_end_marker_is_error`、`truncated_match_length_chain` |
 
 ## API / 単一ショット
 
 | # | 要件 | 状態 | テスト名 / 備考 |
 |---|------|------|----------------|
-| 20 | `encode(input)` は end marker + `1` パディング付きの単一 compressed payload を返す。入力サイズ制限なし (window は 2048B で符号化される) | ✅ | `encode_decode_roundtrip` (統合) |
-| 21 | `decode(input)` は入力全体を 1 compressed payload として end marker までデコード | ✅ | fixture decode テスト |
-| 22 | 履歴は datagram 毎リセットのため stateful API は提供しない (RFC 2395 §3 の MUST reset に対応) | ✅ | API 設計で担保 |
+| 21 | `encode(input)` は end marker + `1` パディング付きの単一 compressed payload を返す。入力サイズ制限なし (window は 2048B、単一マッチは MAX_MATCH で分割) | ✅ | `encode_decode_roundtrip` (統合)、`max_match_boundary_roundtrip` |
+| 22 | `decode(input)` は入力全体を 1 compressed payload として end marker までデコード | ✅ | fixture decode テスト |
+| 23 | 履歴は datagram 毎リセットのため stateful API は提供しない (RFC 2395 §3 の MUST reset に対応) | ✅ | API 設計で担保 |
 
 ## 相互運用 / テスト資産
 
 | # | 内容 | 状態 |
 |---|------|------|
-| 23 | エンコード方向 interop: 本 crate エンコーダの出力を compcol (MIT, KarpelesLab) の LZS デコーダでデコードし 10 ケース全件一致 (empty/リテラルのみ/長マッチ/nibble chain/長距離 offset/ランダムデータ等) | ✅ (`.local/lzs_oracle/`) |
-| 24 | デコード方向 interop: compcol エンコーダの出力を本 crate でデコードし全件一致 | ✅ (`.local/lzs_oracle/`) |
-| 25 | fixture: `tests/fixtures/lzs/` に `*.lzs` + `*.expected` 10 組。全件本 crate エンコーダ生成 + compcol オラクル検証済み | ✅ |
+| 24 | エンコード方向 interop: 本 crate エンコーダの出力を compcol (MIT, KarpelesLab) の LZS デコーダでデコードし 10 ケース全件一致 (empty/リテラルのみ/長マッチ/nibble chain/長距離 offset/ランダムデータ等) | ✅ (`.local/lzs_oracle/`) |
+| 25 | デコード方向 interop: compcol エンコーダの出力を本 crate でデコードし全件一致 | ✅ (`.local/lzs_oracle/`) |
+| 26 | fixture: `tests/fixtures/lzs/` に `*.lzs` + `*.expected` 10 組。全件本 crate エンコーダ生成 + compcol オラクル検証済み | ✅ |
 
 ## Intentional scope / 既知制約
 
@@ -77,7 +78,7 @@
 
 RFC 2395 §1.3 は Hi/fn, Inc. が LZS アルゴリズムの特許を保有していた旨、および IPPCP/IPSec/TLS/PPP 用途に無償ライセンスを提供していた旨を記載する。これは MPPC (RFC 2118 §1.1) のような使用禁止型の field-of-use 条項ではなく、特許ロイヤルティに関する記述である。
 
-監査時の独立調査により、対象特許ファミリ (US 4,701,745 / 5,016,009 / 5,126,739 / 5,146,221 / 5,463,390 等、1985-1993 年出願) はすべて失効していることを確認した。US 5,126,739 は Google Patents 上で "Expired - Fee Related" (想定失効日 2009-06-30) と記載され、Hi/fn の LZS 特許群は維持費不払いにより失効し、2007 年の復活申請も失敗したと報告されている (Wikipedia "Lempel–Ziv–Stac" 記事)。2016 年以降、MIT ライセンスの独立実装 (例: `cmcqueen/lzs-compression`, `KarpelesLab/compcol`) が特許言及なしに公開されている実務的実態もこれを裏付ける。
+監査時の独立調査により、対象特許ファミリ (US 4,701,745 / 5,016,009 / 5,126,739 / 5,146,221 / 5,463,390 等、1985-1993 年出願) はすべて失効していることを確認した (各特許のステータスを Google Patents で個別確認)。ファミリの想定失効期間は概ね 2009-2012 年 (例: US 5,126,739 は "Expired - Fee Related"、想定失効日 2009-06-30)。また Hi/fn の LZS 特許群は維持費不払いにより失効し、2007 年の復活申請も失敗したと報告されている (Wikipedia "Lempel–Ziv–Stac"、[revision 1261421319](https://en.wikipedia.org/w/index.php?title=Lempel%E2%80%93Ziv%E2%80%93Stac&oldid=1261421319))。2016 年以降、MIT ライセンスの独立実装 (例: `cmcqueen/lzs-compression`, `KarpelesLab/compcol`) が特許言及なしに公開されている実務的実態もこれを裏付ける。
 
 本モジュールは一般用途の archive/compression ライブラリの codec として実装するものであり、IPPCP/IPSec/TLS/PPP プロトコルの実装ではない。これは透明性のための記録であり、法的助言ではない。網羅的な特許調査 (freedom-to-operate opinion) は実施していない。
 

@@ -101,10 +101,13 @@ specifications or standards documents:
   RFC 2118 section 1.1's MPPC restriction). Independent research
   indicates the underlying Stac/Hi/fn LZS patent family (US 4,701,745;
   5,016,009; 5,126,739; 5,146,221; 5,463,390 and related continuations,
-  filed 1985-1993) has expired: US 5,126,739's Google Patents record
-  shows "Expired - Fee Related" with anticipated expiration 2009-06-30,
-  and the Hi/fn LZS patents are reported to have lapsed for non-payment
-  of maintenance fees with a failed 2007 reinstatement attempt. This
+  filed 1985-1993) has expired (each patent's status was individually
+  confirmed via Google Patents): the family's anticipated-expiry window
+  spans approximately 2009-2012 (US 5,126,739, for example, shows
+  "Expired - Fee Related" with anticipated expiration 2009-06-30), and
+  the Hi/fn LZS patents are reported to have lapsed for non-payment of
+  maintenance fees with a failed 2007 reinstatement attempt (Wikipedia
+  "Lempel-Ziv-Stac", revision 1261421319). This
   crate is a general-purpose archive/compression library, not an
   IPPCP/IPSec/TLS/PPP protocol implementation; this is recorded for
   transparency and does not constitute legal advice. No formal

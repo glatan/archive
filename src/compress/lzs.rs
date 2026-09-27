@@ -33,7 +33,9 @@ pub const MIN_MATCH: usize = 2;
 
 /// Sanity cap on a single match length. The chained `1111` nibble form
 /// is open-ended, but a single match beyond 16 MiB is overwhelmingly
-/// likely to be a corrupt or adversarial stream.
+/// likely to be a corrupt or adversarial stream. The encoder splits
+/// longer runs into multiple match tokens so its own output always
+/// stays within this bound.
 const MAX_MATCH: usize = 1 << 24;
 
 struct Bits<'a> {
@@ -165,8 +167,14 @@ pub fn encode(input: &[u8]) -> Result<Vec<u8>, Error> {
             head[k] = produced as i32;
             if cand >= 0 {
                 let cp = cand as usize;
+                // Cap matches at MAX_MATCH so own output stays within
+                // the decoder's sanity bound; longer runs continue as
+                // a following match token.
                 let mut len = MIN_MATCH;
-                while produced + len < input.len() && input[cp + len] == input[produced + len] {
+                while produced + len < input.len()
+                    && len < MAX_MATCH
+                    && input[cp + len] == input[produced + len]
+                {
                     len += 1;
                 }
                 let off = produced - cp;
@@ -236,9 +244,6 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
         let len = read_length(&mut bits)?;
         if off > out.len() {
             return Err(Error::InvalidData("lzs: offset exceeds history"));
-        }
-        if off > MAX_OFFSET {
-            return Err(Error::InvalidData("lzs: offset exceeds window"));
         }
         if out.len() + len > max_output {
             return Err(Error::OutputLimitExceeded { limit: max_output });
@@ -379,6 +384,35 @@ mod tests {
         // cut off before the terminating nibble.
         let data = [0x20u8, 0xE0, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF];
         assert!(decode(&data).is_err());
+    }
+
+    #[test]
+    fn rejects_match_length_above_cap() {
+        // Literal 'A', copy off=1, then a '1111' nibble chain that runs
+        // past MAX_MATCH before the terminating nibble.
+        let mut w = BitWriter::new();
+        w.put(0, 1);
+        w.put(b'A' as u32, 8);
+        w.put(1, 1);
+        w.put(1, 1);
+        w.put(1, 7);
+        w.put(3, 2); // '11' '11': enter the nibble chain at len=8
+        w.put(3, 2);
+        for _ in 0..(MAX_MATCH / 15 + 2) {
+            w.put(0xF, 4);
+        }
+        w.put(0, 4);
+        w.put(0b110000000, 9);
+        assert!(decode(&w.finish()).is_err());
+    }
+
+    #[test]
+    fn max_match_boundary_roundtrip() {
+        // A single run longer than MAX_MATCH must be emitted as several
+        // match tokens so the decoder accepts its own output.
+        let input = alloc::vec![b'x'; MAX_MATCH + 1024];
+        let enc = encode(&input).unwrap();
+        assert_eq!(decode(&enc).unwrap(), input);
     }
 
     #[test]
