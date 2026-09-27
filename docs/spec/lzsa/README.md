@@ -23,7 +23,7 @@
 | 2 | Z bits != 0 は拒否。V は 0 (LZSA1) / 1 (LZSA2) のみ、他は拒否 | StreamFormat.md: traits byte | ✅ | `rejects_bad_signature` |
 | 3 | 各フレームは 3 バイトの圧縮ブロックサイズ DSZ (byte0-1 = bits0-15、byte2 bit0 = bit16) + DSZ バイトのブロックデータ | StreamFormat.md: frame | ✅ | `lzsa1_stream_reference_vector` (統合) |
 | 4 | DSZ byte2 の bit7 は uncompressed frame フラグ。設定時、ブロックデータをそのまま出力にコピー | StreamFormat.md: uncompressed flag | ✅ | `decode_stream_uncompressed_frame` |
-| 5 | DSZ byte2 の bits1-6 は reserved で非ゼロなら拒否 | StreamFormat.md | ⚠️ | 実装済み (`0x7e` マスク。専用テストなし) |
+| 5 | DSZ byte2 の bits1-6 は reserved で非ゼロなら拒否 | StreamFormat.md | ✅ | `rejects_reserved_dsz_bits` (v1/v2 両経路) |
 | 6 | DSZ == 0 の 3 バイトが EOD フレーム (ストリーム終端) | StreamFormat.md: EOD | ✅ | 全ストリームベクタで検証 |
 | 7 | フレームは最大 64KiB に展開。マッチオフセットは先行フレームの出力を参照可能 (ブロック間履歴) | StreamFormat.md | ✅ | `multi_frame_roundtrip` (統合、90000B) |
 
@@ -57,7 +57,7 @@
 | 21 | magic 欠損・3 バイト未満・フレームヘッダ/ブロック切り詰めの拒否 | StreamFormat.md | ✅ | `rejects_bad_signature`、`rejects_truncated` |
 | 22 | オフセット 0 または出力済みバイト数超過のマッチは拒否 | LZ77 規約 | ✅ | `rejects_truncated` / デコーダガード |
 | 23 | `decode_bounded` で出力上限を強制 (圧縮ブロック・verbatim フレーム双方) | crate contract | ✅ | `decode_bounded_enforces_limit` (統合) |
-| 24 | 拡張長フィールドのマーカー byte (LZSA1: 238/239/249/250、LZSA2: 232/233/238/239) の曖昧な扱いを参照実装の読みに一致させる | 参照 expand_block_v1.c / expand_block_v2.c | ⚠️ | 防御的実装済み (参照ベクタは該当 byte 値を生成しないため未テスト) |
+| 24 | 拡張長フィールドのマーカー byte (LZSA1: 238/239/249/250、LZSA2: 232/233/238/239) の曖昧な扱いを参照実装の読みに一致させる | 参照 expand_block_v1.c / expand_block_v2.c | ✅ | `lzsa1_defensive_marker_bytes`, `lzsa2_defensive_marker_bytes` (手組みブロックで各分岐を固定) |
 
 ## エンコード範囲 / 既知の制約
 
@@ -74,7 +74,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 31 | CLI は `lzsa` (v1) / `lzsa2` (v2) フォーマットで compress、ストリームの `7b 9e` magic で自動検出、raw ブロックは `--format` 必須 | crate CLI contract | ⚠️ | archive-cli 配線済み (lzsa 用 detect テストなし) |
+| 31 | CLI は `lzsa` (v1) / `lzsa2` (v2) フォーマットで compress、ストリームの `7b 9e` magic で自動検出、raw ブロックは `--format` 必須 | crate CLI contract | ✅ | `detect_lzsa` (detect 分岐を実装済み) |
 
 ## 出典 / 検証メモ
 

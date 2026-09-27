@@ -510,4 +510,38 @@ mod tests {
             Some(Format::Ar)
         );
     }
+
+    #[test]
+    fn detect_lzsa() {
+        // 7b 9e magic; traits byte selects the block level (v1 or v2).
+        assert_eq!(detect_format(&[0x7B, 0x9E, 0x00]), Some(Format::Lzsa));
+        assert_eq!(detect_format(&[0x7B, 0x9E, 0x20]), Some(Format::Lzsa));
+        assert_eq!(detect_format(&[0x7B, 0x9D, 0x00]), None);
+        // traits byte must have reserved bits clear and version <= 1.
+        assert_eq!(detect_format(&[0x7B, 0x9E, 0x01]), None);
+        assert_eq!(detect_format(&[0x7B, 0x9E, 0x40]), None);
+        // magic alone without a traits byte is not a stream.
+        assert_eq!(detect_format(&[0x7B, 0x9E]), None);
+    }
+
+    #[test]
+    fn detect_lha() {
+        // "-l?-" signature at offset 2 and level byte <= 2 at offset 20.
+        let mut d = *b"xx-lh0-.............\x00.";
+        assert_eq!(detect_format(&d), Some(Format::Lha));
+        d[20] = 3; // level 3 is out of range
+        assert_eq!(detect_format(&d), None);
+    }
+
+    #[test]
+    fn detect_arj() {
+        assert_eq!(detect_format(&[0x60, 0xEA, 0x00]), Some(Format::Arj));
+    }
+
+    #[test]
+    fn detect_arc() {
+        assert_eq!(detect_format(&[0x1A, 0x01]), Some(Format::Arc));
+        assert_eq!(detect_format(&[0x1A, 0x08]), Some(Format::Arc));
+        assert_eq!(detect_format(&[0x1A, 0x09]), None);
+    }
 }

@@ -312,6 +312,12 @@ mod tests {
             ns: u8,
             path: &'static str,
         },
+        /// Deprecated entry (`MIMETYPE_LINKTARGET` / `MIMETYPE_DELETED`).
+        Deprecated {
+            mimetype: u16,
+            ns: u8,
+            path: &'static str,
+        },
     }
 
     impl ZimBuilder {
@@ -358,6 +364,15 @@ mod tests {
                         dirent_buf.extend_from_slice(path.as_bytes());
                         dirent_buf.push(0);
                         dirent_buf.push(0);
+                    }
+                    DirentSpec::Deprecated { mimetype, ns, path } => {
+                        dirent_buf.extend_from_slice(&mimetype.to_le_bytes());
+                        dirent_buf.push(0); // param len
+                        dirent_buf.push(*ns);
+                        dirent_buf.extend_from_slice(&0u32.to_le_bytes()); // revision
+                        dirent_buf.extend_from_slice(path.as_bytes());
+                        dirent_buf.push(0);
+                        dirent_buf.push(0); // empty title
                     }
                 }
             }
@@ -419,6 +434,22 @@ mod tests {
             off += b.len();
         }
         out.extend_from_slice(&(off as u32).to_le_bytes());
+        for b in blobs {
+            out.extend_from_slice(b);
+        }
+        out
+    }
+
+    /// Extended (8-byte offset) stored cluster payload.
+    fn stored_cluster_extended(blobs: &[&[u8]]) -> Vec<u8> {
+        let n = blobs.len();
+        let mut out = Vec::new();
+        let mut off = (n + 1) * 8;
+        for b in blobs {
+            out.extend_from_slice(&(off as u64).to_le_bytes());
+            off += b.len();
+        }
+        out.extend_from_slice(&(off as u64).to_le_bytes());
         for b in blobs {
             out.extend_from_slice(b);
         }
@@ -537,6 +568,107 @@ mod tests {
         });
         b.clusters.push((3, stored_cluster(&[b"d"]))); // legacy bzip2 id
         assert!(matches!(decode(&b.build()), Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn rejects_zlib_cluster() {
+        let mut b = ZimBuilder::new();
+        b.entries.push(DirentSpec::Content {
+            cluster: 0,
+            blob: 0,
+            ns: b'C',
+            path: "x",
+        });
+        b.clusters.push((2, stored_cluster(&[b"d"]))); // legacy zlib id
+        assert!(matches!(decode(&b.build()), Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn skips_deprecated_linktarget_and_deleted_entries() {
+        let mut b = ZimBuilder::new();
+        b.entries.push(DirentSpec::Content {
+            cluster: 0,
+            blob: 0,
+            ns: b'C',
+            path: "first",
+        });
+        b.entries.push(DirentSpec::Deprecated {
+            mimetype: MIMETYPE_LINKTARGET,
+            ns: b'C',
+            path: "linktarget",
+        });
+        b.entries.push(DirentSpec::Content {
+            cluster: 0,
+            blob: 1,
+            ns: b'C',
+            path: "second",
+        });
+        b.entries.push(DirentSpec::Deprecated {
+            mimetype: MIMETYPE_DELETED,
+            ns: b'C',
+            path: "deleted",
+        });
+        // Redirect pointing at a deprecated entry is skipped as well.
+        b.entries.push(DirentSpec::Redirect {
+            index: 3,
+            ns: b'C',
+            path: "alias-to-deleted",
+        });
+        b.clusters
+            .push((CLUSTER_NONE, stored_cluster(&[b"one", b"two"])));
+        let entries = decode(&b.build()).unwrap();
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["C/first", "C/second"]);
+        assert_eq!(entries[0].data, b"one");
+        assert_eq!(entries[1].data, b"two");
+    }
+
+    #[test]
+    fn rejects_extended_cluster_below_major6() {
+        let mut b = ZimBuilder::new();
+        b.major = 5;
+        b.entries.push(DirentSpec::Content {
+            cluster: 0,
+            blob: 0,
+            ns: b'C',
+            path: "x",
+        });
+        b.clusters
+            .push((0x10 | CLUSTER_NONE, stored_cluster_extended(&[b"d"])));
+        match decode(&b.build()) {
+            Err(Error::InvalidData(msg)) => {
+                assert_eq!(msg, "zim: extended cluster requires major version 6")
+            }
+            other => panic!("unexpected result: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_extended_cluster_major6() {
+        let mut b = ZimBuilder::new();
+        b.major = 6;
+        b.entries.push(DirentSpec::Content {
+            cluster: 0,
+            blob: 0,
+            ns: b'C',
+            path: "a",
+        });
+        b.entries.push(DirentSpec::Content {
+            cluster: 0,
+            blob: 1,
+            ns: b'C',
+            path: "b",
+        });
+        b.clusters.push((
+            0x10 | CLUSTER_NONE,
+            stored_cluster_extended(&[b"extended one", b"extended two"]),
+        ));
+        let entries = decode(&b.build()).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "C/a");
+        assert_eq!(entries[0].data, b"extended one");
+        assert_eq!(entries[1].name, "C/b");
+        assert_eq!(entries[1].data, b"extended two");
     }
 
     #[test]

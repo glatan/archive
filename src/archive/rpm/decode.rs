@@ -840,6 +840,17 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unrecognized_payload_compressor() {
+        // spec/rpm 要件14: an unrecognized compressor name is Unsupported.
+        let rpm = build_rpm(&[], Some("bogus-compressor\0"));
+        let package = decode(&rpm).unwrap();
+        assert!(matches!(
+            package.payload_compressor(),
+            Err(Error::Unsupported(_))
+        ));
+    }
+
+    #[test]
     fn rejects_bad_lead_magic() {
         let mut rpm = build_rpm(&[], Some("none\0"));
         rpm[0] = 0;

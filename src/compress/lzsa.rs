@@ -870,4 +870,62 @@ mod tests {
         }
         rt(&tier);
     }
+
+    #[test]
+    fn rejects_reserved_dsz_bits() {
+        // StreamFormat: DSZ byte2 bits1-6 are reserved; nonzero is rejected.
+        for enc in [encode(b"hello"), encode_lzsa2(b"hello")] {
+            for bits in [0x02u8, 0x40, 0x7e] {
+                let mut s = enc.clone();
+                s[5] |= bits;
+                assert!(decode(&s).is_err(), "bits={bits:#04x}");
+            }
+            // bit0 (dsz bit16) and bit7 (uncompressed flag) are legal.
+            let s = enc;
+            assert!(decode(&s).is_ok());
+        }
+    }
+
+    #[test]
+    fn lzsa1_defensive_marker_bytes() {
+        // Marker bytes the reference encoder never emits (spec 24): the
+        // decoder still interprets them deterministically.
+        // lit-len marker 249 -> u16 LE literal length.
+        let mut b = vec![0x70, 249, 0x05, 0x00];
+        b.extend_from_slice(b"abcde");
+        b.extend_from_slice(&[0xff, 0x0f, 0x00, 238, 0x00, 0x00]);
+        assert_eq!(decode_lzsa1_block(&b).unwrap(), b"abcdeeee");
+        // lit-len marker 250 -> 256 + b2.
+        let mut b = vec![0x70, 250, 0x00];
+        b.extend_from_slice(&[0xabu8; 256]);
+        b.extend_from_slice(&[0xff, 0x0f, 0x00, 238, 0x00, 0x00]);
+        // match len3 dist1 appends 3 more -> 259 bytes
+        assert_eq!(decode_lzsa1_block(&b).unwrap(), vec![0xabu8; 259]);
+        // match-len marker 238 -> u16 LE match length (nonzero).
+        let b = [
+            0x1f, b'a', 0xff, 238, 0x05, 0x00, 0x0f, 0x00, 238, 0x00, 0x00,
+        ];
+        assert_eq!(decode_lzsa1_block(&b).unwrap(), b"aaaaaa");
+        // match-len marker 239 -> 256 + b2.
+        let b = [0x1f, b'a', 0xff, 239, 0x00, 0x0f, 0x00, 238, 0x00, 0x00];
+        assert_eq!(decode_lzsa1_block(&b).unwrap(), vec![b'a'; 257]);
+    }
+
+    #[test]
+    fn lzsa2_defensive_marker_bytes() {
+        // lit-len marker 238 is never emitted by the reference encoder;
+        // the decoder treats it as a literal length of 0.
+        // lit-len marker 239 -> u16 LE; match-len marker 233 -> u16 LE;
+        // match-len marker 232 -> EOD.
+        let b = [
+            0x48, b'a', 0xff, // lit1 'a', byte-offset dist1, len2 -> "aaa"
+            0x18, 0xfe, 0xee, // lit-ext nib + marker 238 -> 0 lit; dist3, len2
+            0x07, 0xff, 0xe9, 0x04, 0x00, // rep1; m7 nib15 + marker 233 -> len 4
+            0x07, 0xff, 0xe8, // rep1; m7 nib15 + marker 232 -> EOD
+        ];
+        assert_eq!(decode_lzsa2_block(&b).unwrap(), b"aaaaaaaaa");
+        // lit-len marker 239 -> u16 LE literal length (3).
+        let b = [0x1f, 0xfe, 0xef, 0x03, 0x00, b'x', b'y', b'z', 0xf0, 0xe8];
+        assert_eq!(decode_lzsa2_block(&b).unwrap(), b"xyz");
+    }
 }

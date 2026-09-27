@@ -96,9 +96,9 @@
 | [fastlz](fastlz/README.md) | fastlz.c 参照実装 (MIT) | 22 | 0 | 0 | 22 |
 | [zx0](zx0/README.md) | ZX0 v2 README (BSD-3) | 20 | 0 | 0 | 20 |
 | [lzrw1a](lzrw1a/README.md) | lzrw1-a.c 参照実装 (public domain) | 20 | 0 | 0 | 20 |
-| [lzsa](lzsa/README.md) | LZSA StreamFormat / BlockFormat_LZSA1/LZSA2 v1.4.1 | 28 | 3 | 0 | 31 |
-| [lzxd](lzxd/README.md) | [MS-PATCH] LZX DELTA (Microsoft Open Specifications) | 19 | 3 | 0 | 22 |
-| [cmpsc](cmpsc/README.md) | IBM z/Arch POP App.D / ESA/390 Data Compression + APPNOTE method 16 | 19 | 1 | 0 | 20 |
+| [lzsa](lzsa/README.md) | LZSA StreamFormat / BlockFormat_LZSA1/LZSA2 v1.4.1 | 31 | 0 | 0 | 31 |
+| [lzxd](lzxd/README.md) | [MS-PATCH] LZX DELTA (Microsoft Open Specifications) | 22 | 0 | 0 | 22 |
+| [cmpsc](cmpsc/README.md) | IBM z/Arch POP App.D / ESA/390 Data Compression + APPNOTE method 16 | 20 | 0 | 0 | 20 |
 | [rzip](rzip/README.md) | rzip `.rz` format (upstream 2.1) | 20 | 0 | 0 | 20 |
 | [lrzip](lrzip/README.md) | lrzip `.lrz` format (crate-local subset) | 37 | 0 | 0 | 37 |
 | [xz](xz/README.md) | xz-file-format.txt | 54 | 0 | 0 | 54 |
@@ -112,15 +112,15 @@
 | [cpio](cpio/README.md) | POSIX `odc` / SVR4 `newc`/`newcrc` | 35 | 0 | 0 | 35 |
 | [ar](ar/README.md) | IEEE Std 1003.1 / GNU ar / BSD ar | 26 | 0 | 0 | 26 |
 | [deb](deb/README.md) | deb(5) (dpkg) | 20 | 0 | 3 | 23 |
-| [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 23 | 1 | 3 | 27 |
-| [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 22 | 5 | 4 | 31 |
-| [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 14 | 6 | 5 | 25 |
-| [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 13 | 3 | 5 | 21 |
-| [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 18 | 1 | 3 | 22 |
-| [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 16 | 3 | 4 | 23 |
-| [lha](lha/README.md) | lha header documentation (apphead / lzh_note) | 17 | 1 | 3 | 21 |
-| [arj](arj/README.md) | ARJ technical note (ARJ 2.x) | 17 | 1 | 4 | 22 |
-| [arc](arc/README.md) | SEA ARC file format description | 13 | 1 | 3 | 17 |
+| [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 24 | 0 | 3 | 27 |
+| [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 26 | 0 | 5 | 31 |
+| [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 20 | 0 | 5 | 25 |
+| [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 16 | 0 | 5 | 21 |
+| [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 19 | 0 | 3 | 22 |
+| [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 19 | 0 | 4 | 23 |
+| [lha](lha/README.md) | lha header documentation (apphead / lzh_note) | 18 | 0 | 3 | 21 |
+| [arj](arj/README.md) | ARJ technical note (ARJ 2.x) | 18 | 0 | 4 | 22 |
+| [arc](arc/README.md) | SEA ARC file format description | 14 | 0 | 3 | 17 |
 | [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 150 | 0 | 3 | 153 |
 | [7z](sevenz/README.md) | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) | 120 | 0 | 0 | 120 |
 
@@ -134,9 +134,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1505 |
-| ⚠️ 部分実装 | 29 |
-| ❌ 未実装 | 40 |
+| ✅ 実装+テスト済み | 1533 |
+| ⚠️ 部分実装 | 0 |
+| ❌ 未実装 | 41 |
 | **合計** | **1574** |
 
-**全体カバー率**: 1505 / 1574 = **95.6%** (intentional exclusion 除外後: 1505 / 1534 = **98.1%**)
+**全体カバー率**: 1533 / 1574 = **97.4%** (intentional exclusion 除外後: 1533 / 1533 = **100%**)

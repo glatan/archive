@@ -799,3 +799,26 @@ fn lzxd_encode_decode_roundtrip() {
         assert_eq!(lzxd::decode(&c, W17, &[], data.len()).unwrap(), data);
     }
 }
+
+#[test]
+fn lzxd_rejects_match_crossing_chunk_boundary() {
+    // A match element must not extend output past the 32 KiB output-chunk
+    // boundary; [MS-PATCH] requires elements to be contained in a chunk.
+    let nsl = enc::nslots(W17);
+    let mut elems: Vec<Elem> = (0..32760u32).map(|i| Elem::Lit(i as u8)).collect();
+    elems.push(Elem::Match { len: 16, offset: 8 });
+    let exp_len: u32 = elems.iter().map(|e| e.produced()).sum::<usize>() as u32;
+    // Every literal byte value occurs, and len 16 uses length symbol 16-9.
+    let lits: Vec<usize> = (0..=255).collect();
+    let mset = vec![enc::match_elem_index(16, 8)];
+    let trees = enc::trees_for(&lits, &mset, &[7], &[], nsl);
+    let mut e = Enc::new(W17, None);
+    e.compressed(false, exp_len, &trees, &elems);
+    e.end_chunk();
+    match lzxd::decode(&e.out, W17, &[], exp_len as usize) {
+        Err(archive::error::Error::InvalidData(msg)) => {
+            assert_eq!(msg, "lzxd: match spans chunk boundary")
+        }
+        other => panic!("expected chunk-boundary error, got {other:?}"),
+    }
+}

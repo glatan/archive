@@ -150,6 +150,10 @@ pub fn expand(
 struct CmpEntry {
     /// Child count after adjusting for the "more children" case.
     cct: usize,
+    /// Examine bits for in-entry children (entry byte 0 bits 3-7, i.e.
+    /// mask 0x10 >> k for child k). Clear means the child is selected
+    /// without fetching its own entry; the match ends at the child.
+    ecb: u8,
     /// Additional-extension-character count (0-4/5).
     act: usize,
     /// Child characters stored in this entry.
@@ -176,6 +180,7 @@ fn cmp_entry(cdict: &[u8], entries: usize, index: usize) -> Result<CmpEntry, Err
         }
         return Ok(CmpEntry {
             cct: 0,
+            ecb: 0,
             act,
             ccs: [0; 5],
             cptr: 0,
@@ -195,6 +200,7 @@ fn cmp_entry(cdict: &[u8], entries: usize, index: usize) -> Result<CmpEntry, Err
         ccs[0] = e[3 + act];
         return Ok(CmpEntry {
             cct: 1,
+            ecb: e[0] & 0x1f,
             act,
             ccs,
             cptr,
@@ -218,6 +224,7 @@ fn cmp_entry(cdict: &[u8], entries: usize, index: usize) -> Result<CmpEntry, Err
     ccs[..cct].copy_from_slice(&e[3 + act..3 + act + cct]);
     Ok(CmpEntry {
         cct,
+        ecb: e[0] & 0x1f,
         act,
         ccs,
         cptr,
@@ -318,8 +325,18 @@ pub fn compress(cdict: &[u8], sym_size: u8, input: &[u8]) -> Result<Vec<u8>, Err
                 if e.ccs[k] != input[i] {
                     continue;
                 }
-                if let Some(next) = try_descend(cdict, dict_entries, e.cptr as usize + k, input, i)?
-                {
+                let child = e.cptr as usize + k;
+                if e.ecb & (0x10 >> k) == 0 {
+                    // Examine bit clear: the child is selected without
+                    // fetching its own entry and the match ends here.
+                    if child >= dict_entries {
+                        return Err(Error::InvalidData("cmpsc: child pointer out of range"));
+                    }
+                    parent = child;
+                    i += 1;
+                    break 'descend;
+                }
+                if let Some(next) = try_descend(cdict, dict_entries, child, input, i)? {
                     parent = next.0;
                     i = next.1;
                     continue 'descend;
@@ -463,19 +480,19 @@ mod tests {
         let mut ed = alphabet_expansion_dictionary(entries);
 
         // 'A' (65): CCT=2, CPTR=256, CCs 'B','X'.
-        cd[65 * ENTRY] = 2 << 5;
+        cd[65 * ENTRY] = (2 << 5) | 0x18; // X=1 for both children
         cd[65 * ENTRY + 1] = (256 >> 8) as u8;
         cd[65 * ENTRY + 2] = 0;
         cd[65 * ENTRY + 3] = b'B';
         cd[65 * ENTRY + 4] = b'X';
         // 256 "AB": CCT=1, CPTR=258, CC 'C'.
-        cd[256 * ENTRY] = 1 << 5;
+        cd[256 * ENTRY] = (1 << 5) | 0x10; // X=1 (examine child)
         cd[256 * ENTRY + 1] = (258 >> 8) as u8;
         cd[256 * ENTRY + 2] = (258 & 0xff) as u8;
         cd[256 * ENTRY + 3] = b'C';
         // 257 "AX", 258 "ABC": leaves (all zero).
         // 'S' (83): CCT=6 (5 in-entry children + SD), CPTR=259, CCs A-E.
-        cd[83 * ENTRY] = 6 << 5;
+        cd[83 * ENTRY] = (6 << 5) | 0x1f; // X=1 for all in-entry children
         cd[83 * ENTRY + 1] = (259 >> 8) as u8;
         cd[83 * ENTRY + 2] = (259 & 0xff) as u8;
         cd[83 * ENTRY + 3..83 * ENTRY + 8].copy_from_slice(b"ABCDE");
@@ -553,6 +570,28 @@ mod tests {
         let (cd, _) = test_dictionaries();
         let c = compress(&cd, 9, b"ABCSASD").unwrap();
         assert_eq!(c, pack9(&[258, 259, 262]));
+    }
+
+    #[test]
+    fn compress_respects_examine_bit() {
+        let (mut cd, _ed) = test_dictionaries();
+        // 'A' entry: examine only child 'B'; child 'X' keeps X=0 so it is
+        // selected without fetching its own entry.
+        cd[65 * ENTRY] = (2 << 5) | 0x10;
+        // "AX" (257) would have a deeper child "AXY" at 268, but X=0 on
+        // the 'A' side means that entry is never examined.
+        cd[257 * ENTRY] = (1 << 5) | 0x10;
+        cd[257 * ENTRY + 1] = (268 >> 8) as u8;
+        cd[257 * ENTRY + 2] = (268 & 0xff) as u8;
+        cd[257 * ENTRY + 3] = b'Y';
+        // "AXY": child 'X' is emitted as symbol 257 and the match ends;
+        // 'Y' starts a fresh match. 268 is never reached.
+        assert_eq!(
+            compress(&cd, 9, b"AXY").unwrap(),
+            pack9(&[257, b'Y' as u16])
+        );
+        // The examined child 'B' still descends to 258 "ABC".
+        assert_eq!(compress(&cd, 9, b"ABC").unwrap(), pack9(&[258]));
     }
 
     #[test]
