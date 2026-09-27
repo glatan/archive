@@ -67,7 +67,7 @@ const NOOP_ENTRY: Entry = Entry {
     mode: [0, 0],
 };
 
-/// Build the default code table (RFC 3284 Section 5.4 depiction).
+/// Build the default code table (RFC 3284 Section 5.6 depiction).
 fn default_table() -> [Entry; 256] {
     let mut t = [NOOP_ENTRY; 256];
 
@@ -249,6 +249,12 @@ impl<'a> WindowDecode<'a> {
                 if a >= here {
                     return Err(Error::InvalidData("vcdiff: COPY out of range"));
                 }
+                // RFC 3284 section 3: the copied substring must be entirely
+                // contained in either the source segment or the target
+                // window; reject copies spanning the boundary.
+                if a < self.source.len() && a + size > self.source.len() {
+                    return Err(Error::InvalidData("vcdiff: COPY spans boundary"));
+                }
                 for i in 0..size {
                     let p = a + i;
                     let b = if p < self.source.len() {
@@ -356,7 +362,8 @@ pub fn decode_bounded(source: &[u8], input: &[u8], max_output: usize) -> Result<
     if input.len() < 5 || input[..3] != MAGIC {
         return Err(Error::InvalidData("vcdiff: bad magic"));
     }
-    // Header4 is currently always zero; reserved for future version numbers.
+    // Header4 (input[3]) is currently always zero and is reserved for
+    // future version numbers; the value is not validated.
     let hdr = input[4];
     let mut pos = 5usize;
     if hdr & !(VCD_DECOMPRESS | VCD_CODETABLE | VCD_APPHEADER) != 0 {
@@ -744,5 +751,91 @@ mod tests {
             decode_bounded(&[], &d, 8),
             Err(Error::OutputLimitExceeded { .. })
         ));
+    }
+
+    /// Assemble a stream from a header and raw window bytes.
+    fn stream(windows: &[u8]) -> Vec<u8> {
+        let mut d = Vec::from(&[0xD6, 0xC3, 0xC4, 0, 0]);
+        d.extend_from_slice(windows);
+        d
+    }
+
+    #[test]
+    fn multi_window() {
+        // Concatenate the window portions of two one-window streams.
+        let d1 = encode(b"first ");
+        let d2 = encode(b"second");
+        let mut w = Vec::new();
+        w.extend_from_slice(&d1[5..]);
+        w.extend_from_slice(&d2[5..]);
+        assert_eq!(decode(&stream(&w)).unwrap(), b"first second");
+    }
+
+    #[test]
+    fn rejects_source_and_target_both_set() {
+        let mut d = encode(b"x");
+        d[5] = VCD_SOURCE | VCD_TARGET;
+        assert!(matches!(decode(&d), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn rejects_reserved_header_bits() {
+        let mut d = encode(b"x");
+        d[4] = 0x80;
+        assert!(matches!(decode(&d), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn rejects_section_length_mismatch() {
+        // Window claiming a data section longer than the delta body.
+        let enc: &[u8] = &[4, 0, 99, 1, 0, 0];
+        let mut d = stream(&[]);
+        d.push(0);
+        write_varint(&mut d, enc.len());
+        d.extend_from_slice(enc);
+        assert!(matches!(decode(&d), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn rejects_copy_spanning_source_boundary() {
+        // COPY addr 1 size 4 against a 3-byte source: spans S/T boundary.
+        let enc: &[u8] = &[
+            4, // target_len
+            0, // indicator
+            0, // data len
+            2, // inst len
+            1, // addr len
+            20, 4, // COPY mode0 size4
+            1, // addr 1
+        ];
+        let mut d = stream(&[]);
+        d.push(VCD_SOURCE);
+        d.push(3); // source segment size
+        d.push(0); // source position
+        write_varint(&mut d, enc.len());
+        d.extend_from_slice(enc);
+        assert!(matches!(
+            decode_with_source(b"abc", &d),
+            Err(Error::InvalidData(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_target_length_mismatch() {
+        // Declared target_len 8 but instructions only produce 4 bytes.
+        let enc: &[u8] = &[
+            8, // target_len
+            0, // indicator
+            4, // data len
+            1, // inst len
+            0, // addr len
+            b'a', b'b', b'c', b'd', // data
+            5,    // ADD size4
+        ];
+        let mut d = stream(&[]);
+        d.push(0);
+        write_varint(&mut d, enc.len());
+        d.extend_from_slice(enc);
+        assert!(matches!(decode(&d), Err(Error::InvalidData(_))));
     }
 }

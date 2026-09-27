@@ -21,12 +21,12 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 1 | 先頭 3 バイトは `0xD6 0xC3 0xC4` ('V','C','D' + MSB)。4 バイト目はバージョン (現在 0) で受理する | RFC 3284 §4.1 | ✅ | `vcdiff_rejects_malformed` (統合) |
+| 1 | 先頭 3 バイトは `0xD6 0xC3 0xC4` ('V','C','D' + MSB)。4 バイト目 (Header4) は将来のバージョン予約で、値は検査せず受理する | RFC 3284 §4.1 | ✅ | `vcdiff_rejects_malformed` (統合) |
 | 2 | Hdr_Indicator: `VCD_DECOMPRESS` / `VCD_CODETABLE` は Unsupported として拒否、未定義ビットは InvalidData | RFC 3284 §4.1 | ✅ | `rejects_unsupported_flags` |
 | 3 | 各ウィンドウは Win_Indicator + [source segment size + position] + delta encoding | RFC 3284 §4.2 | ✅ | `vcdiff_xdelta3_source_window` (統合) |
-| 4 | Win_Indicator の SOURCE/TARGET 両方同時指定は拒否、未定義ビットは拒否 | RFC 3284 §4.2 | ✅ | `vcdiff_rejects_malformed` (統合) |
+| 4 | Win_Indicator の SOURCE/TARGET 両方同時指定は拒否、未定義ビットは拒否 | RFC 3284 §4.2 | ✅ | `rejects_source_and_target_both_set`、`rejects_reserved_header_bits`、`vcdiff_rejects_malformed` (統合) |
 | 5 | `VCD_SOURCE` 指定時は source file の (position, size) 範囲を source セグメントとして使用。範囲外は拒否 | RFC 3284 §4.2 | ✅ | `vcdiff_xdelta3_*` (統合) |
-| 6 | delta encoding は「長さ varint」+「target length + Delta_Indicator + 3 セクション長 + 3 セクション」。長さ不一致・セクション長不整合は拒否 | RFC 3284 §4.3 | ✅ | `vcdiff_rejects_malformed` (統合) |
+| 6 | delta encoding は「長さ varint」+「target length + Delta_Indicator + 3 セクション長 + 3 セクション」。長さ不一致・セクション長不整合は拒否 | RFC 3284 §4.3 | ✅ | `rejects_section_length_mismatch`、`vcdiff_rejects_malformed` (統合) |
 | 7 | Delta_Indicator 非零 (セクション別二次圧縮) は Unsupported として拒否 | RFC 3284 §4.3 | ✅ | `rejects_unsupported_flags` |
 | 8 | 整数は base-128 varint (7bit/バイト、MSB 継続、上位桁先行) | RFC 3284 §2 | ✅ | 全ベクタ + roundtrip |
 
@@ -35,7 +35,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
 | 9 | 命令コードは 256 エントリのコードテーブルを索引し、1 エントリは最大 2 命令 (type, size, mode) を持つ。size=0 は別途 inst ストリームに varint で続く | RFC 3284 §6 | ✅ | `vcdiff_xdelta3_*` (統合) |
-| 10 | デフォルトコードテーブル: RUN(1) + ADD(18) + COPY 9 モード×16 (単独) + ペアエントリ 163-255 | RFC 3284 §5.4 depiction | ✅ | 同上 |
+| 10 | デフォルトコードテーブル: RUN(1) + ADD(18) + COPY 9 モード×16 (単独) + ペアエントリ 163-255 | RFC 3284 §5.6 depiction | ✅ | 同上 |
 | 11 | ADD: data セクションから size バイト転写、不足は拒否 | RFC 3284 §3 | ✅ | `rejects_copy_out_of_range` / malformed 系 |
 | 12 | RUN: data セクションの 1 バイトを size 回繰り返し | RFC 3284 §3 | ✅ | `roundtrip_no_source` |
 | 13 | COPY: アドレス `a` から size バイトを仮想空間 (source ++ 生成済み target) から前方 1 バイトずつ複写 (オーバーラップ可) | RFC 3284 §3 | ✅ | `roundtrip_self_copy` |
@@ -44,9 +44,9 @@
 | 16 | near モード (2..s_near+1): `near[m-2] + varint`。s_near=4 | RFC 3284 §5.3 | ✅ | `vcdiff_xdelta3_near_same_caches` (統合) |
 | 17 | same モード (s_near+2..s_near+s_same+1): `same[(m-(s_near+2))*256 + b]`、b は 1 バイト。s_same=3 | RFC 3284 §5.3 | ✅ | `vcdiff_xdelta3_near_same_caches` (統合) |
 | 18 | キャッシュ更新: COPY 処理ごとに near[next_slot]=addr・next_slot 巡回、same[addr % (s_same*256)]=addr。ウィンドウ先頭で全スロット 0 初期化 | RFC 3284 §5.1/5.2 | ✅ | `vcdiff_xdelta3_near_same_caches` (統合) |
-| 19 | ウィンドウ生成量が target length を超過/不足したら拒否 | RFC 3284 §6 | ✅ | `vcdiff_rejects_malformed` (統合) |
-| 20 | COPY アドレスが既生成範囲 (source ++ 生成済み target) を超える場合は拒否 | crate contract | ✅ | `rejects_copy_out_of_range` |
-| 21 | 複数ウィンドウ連接のサポート | RFC 3284 §4 | ✅ | decode ループ構造 (fixture は全件単一ウィンドウ) |
+| 19 | ウィンドウ生成量が target length を超過/不足したら拒否 | RFC 3284 §6 | ✅ | `rejects_target_length_mismatch`、`vcdiff_rejects_malformed` (統合) |
+| 20 | COPY アドレスが既生成範囲 (source ++ 生成済み target) を超える場合は拒否。加えて RFC §3 の表明に従い、S/T 境界を跨ぐ複写区間も拒否 | RFC 3284 §3 + crate contract | ✅ | `rejects_copy_out_of_range`、`rejects_copy_spanning_source_boundary` |
+| 21 | 複数ウィンドウ連接のサポート | RFC 3284 §4 | ✅ | `multi_window` (単体。fixture は全件単一ウィンドウ) |
 
 ## xdelta3 拡張の受理
 
@@ -84,3 +84,5 @@
 - `VCD_TARGET` / `VCD_CODETABLE` は参照実装 xdelta3 自身も `XD3_UNIMPLEMENTED` で拒否するため、本実装も Unsupported 拒否を intentional scope とする。`VCD_DECOMPRESS` (二次圧縮) も同様に Unsupported。
 - `VCD_APPHEADER` / `VCD_ADLER32` は RFC 3284 にはない xdelta3 拡張だが、実際の xdelta3 出力に恒常的に現れるため受理する (RFC が許容しない未割当ビットではなく、de-facto 拡張として扱う)。
 - ウィンドウ内 COPY は前方 1 バイト単位の複写として実装しており、RFC §3 が許可する「複写先と重なるオーバーラップ」を正しく扱う。
+- 特許メモ: RFC 3284 §14 の IPR 節に関連し、IETF Datatracker には AT&T による IPR disclosure #40 (draft-korn-vcdiff) が存在する。内容は HTTP/1.1 上のデータ転送用途に限定した RAND 的宣言で、汎用差分圧縮ライブラリとしての本実装への実務上の影響は小さいと判断するが、透明性のため記録する。
+- 参照ツールの範囲メモ: fixture 生成・動作確認に用いたのは .local/xdelta3_ref 内の xdelta3 (Apache-2.0) のみ。同リポジトリに含まれる xdelta1 系ソース (GPL-2.0) は参照・移植の対象外とする。

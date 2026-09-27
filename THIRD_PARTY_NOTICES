@@ -53,6 +53,13 @@ specifications or standards documents:
   running the reference xdelta3 3.2.0 encoder (Joshua MacDonald,
   Apache-2.0) locally; it was used only as a test-time fixture
   generator and no code was copied.
+  Patent note: an AT&T IPR disclosure (IETF Datatracker #40,
+  draft-korn-vcdiff) exists for VCDIFF; it is an RAND-style
+  declaration scoped to use for data transfer over HTTP/1.1, and
+  is recorded here for transparency. The locally built reference
+  tree (.local/xdelta3_ref) also contains xdelta1 sources under
+  GPL-2.0; only the xdelta3 (Apache-2.0) portion was consulted or
+  executed.
 - Zstandard Seekable Format: format documentation v0.1.0 by Meta
   Platforms (contrib/seekable_format, permissive redistribution
   notice) and reference implementation (BSD/GPL dual license).
