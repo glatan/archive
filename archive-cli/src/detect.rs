@@ -15,6 +15,8 @@ pub enum Format {
     Zim,
     Mtree,
     Warc,
+    #[value(name = "git-pack")]
+    GitPack,
     Lha,
     Arj,
     Arc,
@@ -75,6 +77,8 @@ pub enum ArchiveFormat {
     Lha,
     Arj,
     Arc,
+    #[value(name = "git-pack")]
+    GitPack,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -142,6 +146,7 @@ impl core::fmt::Display for Format {
             Self::Zim => "zim",
             Self::Mtree => "mtree",
             Self::Warc => "warc",
+            Self::GitPack => "git-pack",
             Self::Lha => "lha",
             Self::Arj => "arj",
             Self::Arc => "arc",
@@ -210,6 +215,7 @@ impl From<ArchiveFormat> for Format {
             ArchiveFormat::Lha => Self::Lha,
             ArchiveFormat::Arj => Self::Arj,
             ArchiveFormat::Arc => Self::Arc,
+            ArchiveFormat::GitPack => Self::GitPack,
         }
     }
 }
@@ -344,6 +350,9 @@ pub fn detect_format(input: &[u8]) -> Option<Format> {
     if input.starts_with(b"WARC/1.0\r\n") || input.starts_with(b"WARC/1.1\r\n") {
         return Some(Format::Warc);
     }
+    if input.len() >= 12 && input.starts_with(b"PACK") && input[4..8] == [0, 0, 0, 2] {
+        return Some(Format::GitPack);
+    }
     if input.starts_with(b"!<arch>\n") {
         return Some(Format::Ar);
     }
@@ -414,6 +423,9 @@ pub fn scope_notes(format: Format) -> Vec<String> {
         ],
         Format::Warc => vec![
             "warc support is read-only; .warc.gz must be decompressed as gzip first".to_owned(),
+        ],
+        Format::GitPack => vec![
+            "git-pack entries are named by hex object ID; pack writing stores all files as blobs without deltas".to_owned(),
         ],
         Format::Lha => vec![
             "lha support covers stored (-lh0-/-lhd-) entries only; LZH-compressed methods are rejected".to_owned(),
@@ -580,6 +592,17 @@ mod tests {
     #[test]
     fn detect_warc() {
         assert_eq!(detect_format(b"WARC/1.1\r\nrest"), Some(Format::Warc));
+    }
+
+    #[test]
+    fn detect_git_pack() {
+        let mut pack = b"PACK\x00\x00\x00\x02".to_vec();
+        pack.extend_from_slice(&[0; 16]);
+        assert_eq!(detect_format(&pack), Some(Format::GitPack));
+        // version 3 pack must not be detected
+        let mut v3 = pack.clone();
+        v3[7] = 3;
+        assert_ne!(detect_format(&v3), Some(Format::GitPack));
     }
 
     #[test]

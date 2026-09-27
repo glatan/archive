@@ -250,6 +250,7 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
         Algorithm::Mscab => None,
         Algorithm::Zim => None,
         Algorithm::Mtree => None,
+        Algorithm::GitPack => None,
         Algorithm::Warc => None,
         Algorithm::Lha => None,
         Algorithm::Arj => None,
