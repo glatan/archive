@@ -12,6 +12,7 @@
 |---|---|---|---|---|
 | forward / non-inverted | [ZX1 README](https://github.com/einar-saukas/ZX1) + `dzx1.c` (BSD-3) | ✅ | ✅ | |
 | backwards (`-b`) | [ZX1 README](https://github.com/einar-saukas/ZX1) | ❌ | ❌ | intentional scope |
+| prefix (`+N` skip) / suffix 圧縮 | [ZX1 README](https://github.com/einar-saukas/ZX1) "Advanced Features" | ❌ | ❌ | intentional scope (エンコーダ専用機能、ワイヤ形式に影響なし) |
 
 ## ストリーム構造
 
@@ -58,6 +59,6 @@
 
 - 参照実装 ZX1 v1.5 (Einar Saukas) は BSD 3-Clause。本実装は README のフォーマット記述と `dzx1.c` の動作解析から書かれた独立実装であり、コードの移植は行っていない。
 - 統合テストの `ZX1_*` は参照 C コンプレッサ (ZX1 v1.5) をローカルでコンパイルして生成した既知解答ベクタ (decode のみ検証): literal+match 混在、rep-offset、長マッチ連鎖、2 バイト offset 形式を含む。
-- backwards モード (`-b`、後方読み) は intentional scope 外。forward のみ。
+- backwards モード (`-b`、後方読み) は intentional scope 外。forward のみ。prefix/suffix 圧縮 (圧縮時に外部データを match 参照範囲にするエンコーダ機能) も intentional scope 外で、デコード形式には影響しない。
 - ZX1 は ZX Spectrum 等のレトロプラットフォーム向けに設計された codec で、ZX0 より伸張コードが小さい代わりに圧縮率がわずかに劣る設計。
 - 実装メモ: Elias gamma 値には `1 << 20` の安全性ガードを設けている (無制限増大する malformed 入力の DoS 防止。フォーマット定義ではなく実装追加の制限)。
