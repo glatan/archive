@@ -94,7 +94,7 @@
 | [LZ4](lz4/README.md) | LZ4 Frame/Block Format | 58 | 0 | 0 | 58 |
 | [LZO](lzo/README.md) | kernel `Documentation/lzo.txt` + lzop format | 39 | 0 | 0 | 39 |
 | [Snappy](snappy/README.md) | snappy format_description / framing_format | 35 | 0 | 0 | 35 |
-| [Brotli](brotli/README.md) | RFC 7932 | 51 | 0 | 0 | 51 |
+| [Brotli](brotli/README.md) | RFC 7932 | 52 | 0 | 0 | 52 |
 | [zlib](zlib/README.md) | RFC 1950 | 19 | 0 | 0 | 19 |
 | [xca](xca/README.md) | [MS-XCA] (Microsoft Open Specifications) | 40 | 0 | 0 | 40 |
 | [lzf](lzf/README.md) | liblzf `lzfP.h` / ning LZFFormat (de facto) | 20 | 0 | 0 | 20 |
@@ -151,9 +151,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1717 |
+| ✅ 実装+テスト済み | 1718 |
 | ⚠️ 部分実装 | 0 |
 | ❌ 未実装 | 41 |
-| **合計** | **1789** |
+| **合計** | **1790** |
 
-**全体カバー率**: 1717 / 1759 = **97.6%** (intentional exclusion 除外後: 1717 / 1718 = **100%**)
+**全体カバー率**: 1718 / 1760 = **97.6%** (intentional exclusion 除外後: 1718 / 1719 = **100%**)

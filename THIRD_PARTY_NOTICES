@@ -21,6 +21,15 @@ specifications or standards documents:
 - zlib: RFC 1950
 - zstd: RFC 8878
 - Brotli stream format: RFC 7932
+  - The encoder and decoder are spec-informed implementations written
+    against RFC 7932; no code was copied from the reference Brotli
+    implementation. Encoder features include LZ77 command generation,
+    literal context modeling, multi-block-type metablocks, simple and
+    complex prefix codes, and static dictionary references
+  - Patent/IPR note: Google has disclosed an IPR declaration for
+    RFC 7932 (https://datatracker.ietf.org/ipr/2396/); this
+    implementation follows the RFC directly and introduces no new
+    algorithmic extension
 - LZSA: format documentation (StreamFormat.md, BlockFormat_LZSA1.md,
   BlockFormat_LZSA2.md) and reference implementation by Emmanuel Marty
   et al. (zlib license; src/matchfinder.c is CC0). Where the written

@@ -149,6 +149,10 @@ pub fn encode_writer<W: std::io::Write>(input: &[u8], mut writer: W) -> std::io:
 // Strategy selection
 // ---------------------------------------------------------------------------
 
+// Emit one metablock using the first strategy (in fixed order:
+// literal-only, context-modeled LZ77, multi-block LZ77, single-block
+// LZ77) whose encoded size beats the uncompressed metablock size.
+// This is a first-match-wins policy, not a global minimum search.
 fn write_best_metablock(writer: &mut BitWriter, input: &[u8], start: usize) {
     let chunk = &input[start..(start + MAX_METABLOCK_LEN).min(input.len())];
     let stream_offset = start;
@@ -175,18 +179,21 @@ fn write_best_metablock(writer: &mut BitWriter, input: &[u8], start: usize) {
         .iter()
         .any(|c| matches!(c, Lz77Command::InsertCopy { .. }))
     {
+        // Strategy 2: Context modeling (LSB6) + LZ77
         if let Some((bits, tb)) = try_context_modeling_lz77(input, start, &cmds) {
             if tb < uncomp_bits {
                 writer.write_raw(&bits, tb);
                 return;
             }
         }
+        // Strategy 3: Multi-block-type (two literal block types) + LZ77
         if let Some((bits, tb)) = try_multi_block_lz77(chunk, &cmds) {
             if tb < uncomp_bits {
                 writer.write_raw(&bits, tb);
                 return;
             }
         }
+        // Strategy 4: Single-block LZ77
         if let Some((bits, tb)) = try_lz77_metablock(chunk, &cmds) {
             if tb < uncomp_bits {
                 writer.write_raw(&bits, tb);
