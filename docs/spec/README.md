@@ -2,65 +2,20 @@
 
 | 項目 | 内容 |
 |------|------|
-| この文書の位置づけ | 仕様準拠・共有実装・互換性メモ・テスト網羅状況・残存する制約・今後の優先方針の正本 |
+| この文書の位置づけ | 仕様準拠・共有実装・テスト網羅状況の集計・実装対象外形式・今後の優先方針の正本。個別フォーマットの要件・制約詳細は各 `docs/spec/<fmt>/` 側にのみ置く |
 | README との役割分担 | `README.md` は概要と導線のみを保持し、詳細の重複は持たない |
 | 要件表の粒度 | 可能な限り **どの仕様書のどの節・見出し・項目に対応するか** を辿れる粒度で記載する |
 | 節番号のない仕様書の参照方法 | 見出し名または用語名で参照する |
-| 分割ファイル | 各フォーマットの要件表は `docs/spec/` 配下のファイルに分割されている |
+| 分割ファイル | 各フォーマットの要件表は `docs/spec/<fmt>/` 配下に分割されている。index は `README.md`、バリアント/トピック別要件は子ファイル |
 
 ## 読み方
 
 | 項目 | 内容 |
 |------|------|
-| 準拠仕様 / 参照実装一覧 | 各形式で何を基準に実装・検証しているかの一覧 |
+| フォーマット別要件表 | 各形式の基準仕様・`docs/spec/<fmt>/` index への導線・集計の一覧。個別フォーマットの要件詳細は各ディレクトリ側にのみ置く |
 | 共有実装 | 複数形式で共有している codec / filter core の由来と責務の整理 |
-| 各フォーマット節 | `docs/spec/` 配下に 1 ファイル = 1 フォーマットで要件・仕様参照・テスト名を対応づける |
-
-## 準拠仕様 / 参照実装一覧
-
-| フォーマット | 仕様 | 備考 |
-|------------|------|------|
-| DEFLATE | RFC 1951 | テストベクターなし (仕様のみ) |
-| gzip | RFC 1952 | CRC32 は `util::crc32` で実装し、Appendix 8 の既知値は `test_crc32_known_vectors`、gzip trailer 検証は `test_valid_trailer_crc32_and_isize` / `test_crc32_mismatch` で固定 |
-| zstd | RFC 8878 | Appendix A に事前定義FSEテーブル全値、repeat offset例あり |
-| bzip2 | リファレンス実装 (bzip2 1.0.x, Julian Seward) | 正式なRFC/ISOなし。リファレンス実装がデファクト仕様 |
-| lzip | lzip マニュアル (https://www.nongnu.org/lzip/manual/lzip_manual.html) | LZMA (lc=3/lp=0/pb=2) + シンプルフレーミング |
-| `.lzma` | `lzma-file-format.txt` (tukaani-project/xz `doc/`, public domain) | 13B ヘッダ (properties + dict size + unpacked size) + 生 LZMA ストリーム。trailing data は reject |
-| LZW | ncompress (compress42.c) | 正式なRFC/ISOなし。Unix compress `.Z` フォーマットのデファクト標準 |
-| LZ4 | LZ4 フレームフォーマット仕様 / LZ4 ブロックフォーマット仕様 | ブロックフォーマット + フレームヘッダー + xxhash32 チェックサム + raw block API (frame なし) |
-| LZO | LZO1X-1 バイトコード + lzop ファイルフォーマット | Linux kernel Documentation/lzo.txt、lzop ヘッダー仕様 |
-| Brotli | RFC 7932 (2016) | decoder は §4-§11 の全必須セクションを実装。encoder は §9.1 stream header + §9.2 uncompressed/metadata/LZ77 compressed metablock (complex prefix codes, distance encoding, context modeling, static dictionary, multi-block-type) を提供 |
-| zlib | RFC 1950 | §2.2 CMF/FLG ヘッダー + raw DEFLATE payload + big-endian Adler-32 trailer |
-| Snappy | Google snappy `format_description.txt` (raw) + `framing_format.txt` (framed) | raw: varint preamble + 4 種タグ (literal/copy-1/copy-2/copy-4)。framed: stream identifier `sNaPpY` + chunk types 0x00/0x01/0x80-0xFE + masked CRC-32C (Castagnoli polynomial 0x1EDC6F41) |
-| ZPAQ | upstream ZPAQ / ZPAQL behavior + crate bounded contract | 正式標準ではなく、コンテキストミキシング + 算術符号化 + ZPAQL VM を current bounded contract で管理 |
-| rzip | upstream `rzip.samba.org` `.rz` | decoder は system `rzip` 生成 archive で相互運用確認済み。encoder は crate roundtrip 向け current container/token subset を提供し、current direct tests では text / binary / level-1 multi-chunk の `system rzip -d` interop まで確認済み |
-| lrzip | lrzip `.lrz` format (crate-local long-range match layer + 選択可能バックエンド) | 内部 long-range match finder は shared core を再利用しつつ、`.lrz` 側では variable-width match offset token を使う。current scope の system `lrzip` interop は direct tests で確認する |
-| xz | xz ファイルフォーマット仕様 (tukaani.org/xz/xz-file-format.txt) | LZMA2 + x86/PowerPC/IA64/SPARC/ARM/ARM-Thumb/ARM64/RISC-V BCJ + Delta フィルター、registry-backed custom filter、CRC-32/CRC-64/SHA-256 チェック、連結ストリーム対応 |
-| tar | POSIX.1-1988 UStar / GNU 拡張 / POSIX.1-2001 PAX | デコード: 全形式自動認識。エンコード: GNU/PAX モード選択可能 |
-| cpio | POSIX `odc` / SVR4 `newc` / `newcrc` | pathname/data 配置と簡易チェックサムまで実装 |
-| ar | IEEE Std 1003.1 / GNU ar / BSD ar | 共通: 8B マジック `!<arch>\n` + 60B 固定長ヘッダー (ar_name[16]/ar_date[12]/ar_uid[6]/ar_gid[6]/ar_mode[8]/ar_size[10]/ar_fmag[2])。GNU 拡張: `//` 文字列テーブル + `/offset` 参照。BSD 拡張: `#1/<len>` 名前埋め込み |
-| deb | deb(5) Debian binary package format (dpkg) | ar + 固定 member レイアウト (debian-binary / control.tar.* / data.tar.*)。member 圧縮: 無圧縮 / .gz / .xz / .zst / .bz2 / .lzma / .Z。read のみ (write は intentional scope 外) |
-| rpm | rpm.org Package Format (v4/v6) | 96B Lead + Signature/Header + payload。payload 圧縮: gzip / bzip2 / lzma / xz / zstd / none。payload 形式: cpio newc / stripped 07070X。read のみ (write・署名検証は intentional scope 外) |
-| squashfs | SquashFS 4.0 binary format (dr-emann.github.io/squashfs) | 96B superblock + metadata block (8KiB) 列 + fragment/ID/export table。compressor: gzip(zlib)/xz/lz4/zstd/lzo。lzma1 は非対応。read のみ |
-| mscab | MS-CAB Cabinet File Format | CFHEADER + CFFOLDER/CFFILE/CFDATA。compressor: NONE/MSZIP。Quantum/LZX/multi-cabinet は非対応。read のみ |
-| zim | openZIM ZIM file format (v5/v6) | 80B header + dirent + cluster。compressor: none/xz(lzma2)/zstd。extended cluster (8B offset) 対応。read のみ |
-| mtree | FreeBSD mtree(5) / libarchive mtree | 行指向テキスト manifest。/set・/unset、相対/full エントリ、8進エスケープ対応。コンテンツ非保持。read のみ |
-| warc | ISO 28500:2009 (WARC 1.0) / IIPC WARC 1.1 | version line + named-field + `Content-Length` block の record 列。LWS folding・拡張フィールド無視対応。`.warc.gz` は gzip 伸張後 decode。read のみ |
-| lha | lha header documentation (apphead / lzh_note) | header level 0/1/2、method `-lh0-` (stored) / `-lhd-` (dir) のみ。LZH 圧縮メソッドは非対応。write は level-0 のみ |
-| arj | ARJ technical note (ARJ 2.x) | `0x60 0xEA` signature + 30B 基本 header + CRC-32。method 0 (stored) / dir / label のみ。method 1-4・garbled は非対応。write は method-0 のみ |
-| arc | SEA ARC file format description | `0x1A` marker + method byte の member 列 (flat name、dir なし)。method 1/2 (stored) のみ。method 3+ は非対応。write は method-2 のみ |
-| xca | [MS-XCA] Xpress Compression Algorithm (Microsoft Open Specifications) | 3 バリアント: Plain LZ77 (32bit flag word + 13/3bit match word + nibble/byte/u16/u32 拡張長)、LZ77+Huffman (64KiB block + 512シンボル canonical Huffman + Pos1/Pos2/Pos 3ポインタビットストリーム)、LZNT1 (4KiB chunk + 位置依存 4-12bit displacement)。magic なし生コーデック |
-| lzf | liblzf format (lzfP.h コメント / ning compress LZFFormat) | ctrl byte セグメント: 0-31 リテラルラン (1-32B)、32+ マッチ (len 3-8 2B 形 / len 9-264 拡張 byte 付き 3B 形、offset 13bit)。magic なし生コーデック |
-| fastlz | FastLZ (fastlz.c リファレンス、MIT) | level 1/2 ストリーム (先頭バイト bit5 が L2 マーカー): ctrl<32 リテラル、len field+2 / field 7 で拡張 (L1: 1byte、L2: 0xff chain)、offset 13bit。L2 far match: u16 距離拡張 (8192-73727)。magic なし生コーデック |
-| zx0 | ZX0 v2 (Einar Saukas、BSD-3) | interleaved control-bit/data-byte ストリーム: literal `0`+elias / rep-offset `0`+elias / new-offset `1`+elias(msb,反転)+LSB7bit+elias(len-1)。offset 最大 32640。magic なし生コーデック |
-| lzrw1a | LZRW1-A (lzrw1-a.c リファレンス、public domain) | 4B copy flag (1=verbatim) + グループ列: 各 2B control word (bit i=item i、0=リテラル/1=コピー) + 最大16アイテム。コピーアイテム 2B: len 3-18、offset 1-4095。magic なし生コーデック |
-| lzsa | LZSA (emmanuel-marty/lzsa、StreamFormat/BlockFormat_LZSA1/LZSA2、zlib) | `7b 9e` magic + traits + 64KiB フレーム + EOD。LZSA1 `<O|LLL|MMMM>` / LZSA2 `<XYZ|LL|MMM>` (rep-match・nibble ストリーム)。raw ブロック (-r 形式) も対応 |
-| lzxd | [MS-PATCH] LZX DELTA (Microsoft Open Specifications) | u16le チャンク列 + MSB-first ビットストリーム。verbatim/aligned/uncompressed ブロック、R0-R2 反復オフセット、reference データ、E8 反転対応。encode は uncompressed ブロックのみ (intentional scope) |
-| cmpsc | IBM CMPSC 基本方式 (z/Arch POP App.D + ESA/390 Data Compression SA22-7208) / PKWARE APPNOTE method 16 | 固定長 index symbol (9-13bit) MSB-first。圧縮辞書 (format-0 sibling descriptor) + 展開辞書 (preceded/unpreceded entry)。symbol translation・order preservation・entropy encoding・format-1 SD は非対応 |
-| zip | APPNOTE.TXT 6.3.10 (PKWARE, 2024) | §4.3.7 Local File Header / §4.3.8 Data Descriptor / §4.3.12 Central Directory / §4.3.16 EOCD / §4.3.20-22 ZIP64 / §4.4.1 General Purpose Bit Flag (bit 0,3,11) / Compression method 0,1,2-5,6,8,12,14,93,95,98 / §4.5.2 Traditional PKZIP Encryption / WinZip AES-128/192/256 (extra field 0x9901) |
-| 7z | 7zFormat.txt (LZMA SDK 26.00) / Methods.txt | SignatureHeader (`37 7A BC AF 27 1C`) / StartHeader CRC / UINT64 VLI / Header property IDs 0x00-0x19 / Folder DAG with BindPair / Methods: Copy (0x00), LZMA (0x03 0x01 0x01), LZMA2 (0x21), PPMdH (0x03 0x04 0x01), Deflate (0x04 0x01 0x08), Deflate64 (0x04 0x01 0x09), BZip2 (0x04 0x02 0x02), x86/PowerPC/ARM/ARM-Thumb/SPARC/ARM64/RISC-V BCJ, Delta (0x03), BCJ2 (0x03 0x03 0x01 0x1B), Brotli (0x04 0xF7 0x11 0x01), 7zAES (0x06 0xF1 0x07 0x01) / timestamp metadata (ctime/atime/mtime) |
-
----
+| 各フォーマット節 | `docs/spec/<fmt>/` に 1 ディレクトリ = 1 フォーマットで要件・仕様参照・テスト名を対応づける |
+| 対応バリアント・仕様版 | 複数の規格・版・方言を持つフォーマットでは index `README.md` 冒頭のマトリクスで decode/encode の対応可否を一覧化する。バリアント表の行は集計対象外 (要件行は先頭列が `数字` or `数字+1文字` の ID を持つ行のみ) |
 
 ## 共有実装
 
@@ -88,22 +43,6 @@
 
 ---
 
-## 現在の intentional scope / 残存制約
-
-| 項目 | 現在の扱い | 補足 |
-|---|---|---|
-| `rzip` encode-side system interop | **intentional scope** | current direct tests では text / binary / level-1 multi-chunk の `system rzip -d` interop を確認済みだが、upstream option matrix 全体や未検証 payload 分布まで blanket parity は主張しない |
-| `lrzip` outer container parity | **intentional scope** | shared long-range match finder と supported backend subset は維持するが、outer `.lrz` framing の blanket upstream parity や未検証 option matrix 全体は未主張 |
-| `7z` complex graph writer | **intentional scope** | decode 側は supported single-output DAG subset を扱うが、writer 側の current scope は one-folder または two-folder の linear subset と linear 7zAES file-content / encoded-header write に留める。direct `system 7z` 根拠は baseline one-folder、one-folder / two-folder `PPMd`（encoded-header と encrypted / encrypted+encoded-header を含む）、two-folder encrypted / encoded-header / encrypted+encoded-header variants、one-folder / two-folder x86 `BCJ` / `Delta` combinations まで |
-| `xz` unregistered custom filter execution | **intentional scope** | application-defined custom filter ID は registry 登録済み codec（identity passthrough helper 含む）で実行できるが、未登録の filter は引き続き適用時に explicit unsupported とする |
-| `zip` extra field round-trip | **intentional scope** | 認識する extra field は 0x0001 (ZIP64)、0x9901 (WinZip AES)、0x000a (NTFS)、0x000d (UNIX)、0x5455 (extended timestamp)、0x7075 (Unicode Path)。他の extra field はパース時にスキップし、round-trip では保持しない |
-| `zip` multi-disk archives | **intentional scope** | 単一ディスクアーカイブのみ。分割/スパンアーカイブは `Unsupported` として reject |
-| `7z` IA64 BCJ encode | **intentional scope** | decode のみ対応。エンコーダーでは IA64 BCJ フィルターを生成しない |
-| `7z` Deflate64 (0x04 0x01 0x09) encode | **intentional scope** | decode のみ対応。crate に Deflate64 encoder がなく `SevenZMethod` にも公開しない |
-| `7z` empty-stream / empty-file / anti-item entries | **intentional scope** | system `7z` が空ファイルを格納する際に使用する empty-stream エントリー種別はデコーダーが対象外。kEmptyStream / kEmptyFile / kAnti プロパティを検出した時点で `Unsupported` を返す |
-| `lzw` / `lzw-bits9` — `ncompress` による空入力拒否 | **intentional scope** | `ncompress` (`compress`/`uncompress`) は空入力に対して exit status 2 で終了する外部ツール固有の動作。ライブラリ自体は空データを正常に処理する |
-| `lzw-bits9` — `compress -b 9` の非可逆 roundtrip | **intentional scope** | `ncompress -b 9` は一部の入力に対してロッシーな roundtrip を起こす外部ツール自身のバグ。ライブラリの encode/decode 実装には問題がない |
-
 ## 実装対象外フォーマット
 
 本 crate は **書面仕様・フォーマット文書を第一の実装情報源**とする。仕様書に未記載の挙動がある場合のみ、参照実装の動作観察を補助的に用いる（コードの複製は行わない。個別の出自は `THIRD_PARTY_NOTICES` を参照）。以下は仕様不在・ライセンス制約などにより実装対象外とした形式である。アルゴリズム内部の書面仕様が後日公開された場合は再評価する。
@@ -112,13 +51,7 @@
 |---|---|
 | RAR | unRAR ライセンスの制約により厳密な実装が困難。展開のみでも source-derived 実装の配布リスクを避けるため対象外 |
 | ACE | Public UnAce Licence が non-free（圧縮側開発禁止の field-of-use 制限を含む）。ACE 2.x の参照実装も事実上 proprietary `unace.dll` のみ |
-| CAB LZX (1997 文書版) | 公式文書に既知の誤記が複数あり、正誤判別の情報源が参照実装のソースコードにのみ存在するため厳密実装が不能 |
-| CAB Quantum | 圧縮本体の書面仕様が存在しない |
 | WIM / LZMS | 公式仕様なし。WIM 固有の LZX 変種と LZMS ソリッド圧縮の書面仕様が存在しない |
-| ZIP method 96 (JPEG) | APPNOTE は ID 割り当てのみで、実態は WinZip 独自の JPEG 再圧縮。書面仕様が非公式文書にのみ存在する |
-| ZIP method 97 (WavPack) | 公開文書はコンテナ・ブロックヘッダ層のみで、可逆圧縮コアの bit-level 仕様が存在しない |
-| ZIP method 16 Entropy Encoding 拡張 (z14〜) | 特許状況が未確認の新規要素。クラシック辞書ベースの CMPSC は実装済み (`compress::cmpsc`) |
-| ZIP method 7 (Tokenizing) | 仕様未公開 |
 | bzip3 | 公開文書はコンテナ層のみで、算術符号器・LZP・RLE の内部仕様が文書化されていない |
 | LZFSE / LZVN | 書面仕様が存在しない（BSD-3 参照実装が唯一の情報源） |
 | LZJB | 書面仕様が存在しない（CDDL 参照実装が唯一の情報源） |
@@ -127,9 +60,6 @@
 | UCL / NRV2B | 書面仕様が存在しない（upstream がドキュメント欠如を自認。GPL 参照実装のみ） |
 | Exomizer | 書面仕様が存在しない（usage 文書と decruncher ソースのみ） |
 | OpenZL | ワイヤーフォーマットの安定した書面仕様が存在しない（公開済みは SDDL 記述言語のみ、unstable 明記）。安定仕様公開で再評価 |
-| LHA/LZH 圧縮メソッド (`-lh1-`〜`-lh7-`, `-lzs-`/`-lz4-`/`-lz5-`, `-pm0-`/`-pm2-`) | 圧縮内部の書面仕様が存在しない。コンテナと `-lh0-` (store) は実装済み (`archive::lha`) |
-| ARJ method 1-4 | method 1-3 は仕様不在、method 4 は二次文書のみ。コンテナと method 0 は実装済み (`archive::arj`) |
-| ARC method 5-9 (Crunch/Squash) | ARC 固有の圧縮内部仕様の書面文書が存在しない。コンテナと method 1/2 は実装済み (`archive::arc`) |
 | ZOO | コンテナ・圧縮ともに書面仕様が存在しない |
 
 ---
@@ -138,8 +68,8 @@
 
 | 候補 | 狙い | 前提 |
 |---|---|---|
-| `zip` extra field round-trip 拡張 | 認識済み extra field の encode/decode 保持 | 0x000a, 0x000d, 0x5455, 0x7075 は対応済み |
-| `rzip` / `lrzip` interop 拡張 | system tool parity を encode 側にも広げる | 先に current subset と新規 claim の境界を direct interop test で固定する |
+| [zip](zip/README.md) extra field round-trip 拡張 | 認識済み extra field の encode/decode 保持 | 対応済み field の一覧は zip 側の要件表を参照 |
+| [rzip](rzip/README.md) / [lrzip](lrzip/README.md) interop 拡張 | system tool parity を encode 側にも広げる | 先に current subset と新規 claim の境界を direct interop test で固定する |
 
 ---
 
@@ -147,52 +77,52 @@
 
 ### 圧縮フォーマット
 
-| フォーマット | ファイル | ✅ | ⚠️ | ❌ | 合計 |
+| フォーマット | 基準仕様 | ✅ | ⚠️ | ❌ | 合計 |
 |---|---|---|---|---|---|
-| DEFLATE | [deflate.md](deflate.md) | 57 | 0 | 0 | 57 |
-| gzip | [gzip.md](gzip.md) | 40 | 0 | 0 | 40 |
-| zstd | [zstd.md](zstd.md) | 126 | 0 | 0 | 126 |
-| bzip2 | [bzip2.md](bzip2.md) | 68 | 0 | 0 | 68 |
-| lzip | [lzip.md](lzip.md) | 39 | 0 | 0 | 39 |
-| `.lzma` | [lzma_alone.md](lzma_alone.md) | 25 | 0 | 0 | 25 |
-| LZW | [lzw.md](lzw.md) | 21 | 0 | 0 | 21 |
-| LZ4 | [lz4.md](lz4.md) | 58 | 0 | 0 | 58 |
-| LZO | [lzo.md](lzo.md) | 39 | 0 | 0 | 39 |
-| Snappy | [snappy.md](snappy.md) | 35 | 0 | 0 | 35 |
-| Brotli | [brotli.md](brotli.md) | 51 | 0 | 0 | 51 |
-| zlib | [zlib.md](zlib.md) | 19 | 0 | 0 | 19 |
-| xca | [xca.md](xca.md) | 40 | 0 | 0 | 40 |
-| lzf | [lzf.md](lzf.md) | 20 | 0 | 0 | 20 |
-| fastlz | [fastlz.md](fastlz.md) | 22 | 0 | 0 | 22 |
-| zx0 | [zx0.md](zx0.md) | 20 | 0 | 0 | 20 |
-| lzrw1a | [lzrw1a.md](lzrw1a.md) | 20 | 0 | 0 | 20 |
-| lzsa | [lzsa.md](lzsa.md) | 28 | 3 | 0 | 31 |
-| lzxd | [lzxd.md](lzxd.md) | 19 | 3 | 0 | 22 |
-| cmpsc | [cmpsc.md](cmpsc.md) | 19 | 1 | 0 | 20 |
-| rzip | [rzip.md](rzip.md) | 20 | 0 | 0 | 20 |
-| lrzip | [lrzip.md](lrzip.md) | 37 | 0 | 0 | 37 |
-| xz | [xz.md](xz.md) | 54 | 0 | 0 | 54 |
-| ZPAQ | [zpaq.md](zpaq.md) | — | — | — | bounded contract |
+| [DEFLATE](deflate/README.md) | RFC 1951 | 57 | 0 | 0 | 57 |
+| [gzip](gzip/README.md) | RFC 1952 | 40 | 0 | 0 | 40 |
+| [zstd](zstd/README.md) | RFC 8878 | 126 | 0 | 0 | 126 |
+| [bzip2](bzip2/README.md) | bzip2 1.0.x 参照実装 (de facto) | 68 | 0 | 0 | 68 |
+| [lzip](lzip/README.md) | lzip マニュアル | 39 | 0 | 0 | 39 |
+| [`.lzma`](lzma_alone/README.md) | lzma-file-format.txt (tukaani/xz doc) | 25 | 0 | 0 | 25 |
+| [LZW](lzw/README.md) | ncompress `compress42.c` (de facto) | 21 | 0 | 0 | 21 |
+| [LZ4](lz4/README.md) | LZ4 Frame/Block Format | 58 | 0 | 0 | 58 |
+| [LZO](lzo/README.md) | kernel `Documentation/lzo.txt` + lzop format | 39 | 0 | 0 | 39 |
+| [Snappy](snappy/README.md) | snappy format_description / framing_format | 35 | 0 | 0 | 35 |
+| [Brotli](brotli/README.md) | RFC 7932 | 51 | 0 | 0 | 51 |
+| [zlib](zlib/README.md) | RFC 1950 | 19 | 0 | 0 | 19 |
+| [xca](xca/README.md) | [MS-XCA] (Microsoft Open Specifications) | 40 | 0 | 0 | 40 |
+| [lzf](lzf/README.md) | liblzf `lzfP.h` / ning LZFFormat (de facto) | 20 | 0 | 0 | 20 |
+| [fastlz](fastlz/README.md) | fastlz.c 参照実装 (MIT) | 22 | 0 | 0 | 22 |
+| [zx0](zx0/README.md) | ZX0 v2 README (BSD-3) | 20 | 0 | 0 | 20 |
+| [lzrw1a](lzrw1a/README.md) | lzrw1-a.c 参照実装 (public domain) | 20 | 0 | 0 | 20 |
+| [lzsa](lzsa/README.md) | LZSA StreamFormat / BlockFormat_LZSA1/LZSA2 v1.4.1 | 28 | 3 | 0 | 31 |
+| [lzxd](lzxd/README.md) | [MS-PATCH] LZX DELTA (Microsoft Open Specifications) | 19 | 3 | 0 | 22 |
+| [cmpsc](cmpsc/README.md) | IBM z/Arch POP App.D / ESA/390 Data Compression + APPNOTE method 16 | 19 | 1 | 0 | 20 |
+| [rzip](rzip/README.md) | rzip `.rz` format (upstream 2.1) | 20 | 0 | 0 | 20 |
+| [lrzip](lrzip/README.md) | lrzip `.lrz` format (crate-local subset) | 37 | 0 | 0 | 37 |
+| [xz](xz/README.md) | xz-file-format.txt | 54 | 0 | 0 | 54 |
+| [ZPAQ](zpaq/README.md) | ZPAQ Level 1/2 specification (zpaq206.pdf) + crate bounded contract (archive 層) | — | — | — | bounded contract |
 
 ### アーカイブフォーマット
 
-| フォーマット | ファイル | ✅ | ⚠️ | ❌ | 合計 |
+| フォーマット | 基準仕様 | ✅ | ⚠️ | ❌ | 合計 |
 |---|---|---|---|---|---|
-| tar | [tar.md](tar.md) | 59 | 0 | 0 | 59 |
-| cpio | [cpio.md](cpio.md) | 35 | 0 | 0 | 35 |
-| ar | [ar.md](ar.md) | 26 | 0 | 0 | 26 |
-| deb | [deb.md](deb.md) | 20 | 0 | 3 | 23 |
-| rpm | [rpm.md](rpm.md) | 23 | 1 | 3 | 27 |
-| squashfs | [squashfs.md](squashfs.md) | 22 | 5 | 4 | 31 |
-| mscab | [mscab.md](mscab.md) | 14 | 6 | 5 | 25 |
-| zim | [zim.md](zim.md) | 13 | 3 | 5 | 21 |
-| mtree | [mtree.md](mtree.md) | 18 | 1 | 3 | 22 |
-| warc | [warc.md](warc.md) | 16 | 3 | 4 | 23 |
-| lha | [lha.md](lha.md) | 17 | 1 | 3 | 21 |
-| arj | [arj.md](arj.md) | 17 | 1 | 4 | 22 |
-| arc | [arc.md](arc.md) | 13 | 1 | 3 | 17 |
-| ZIP | [zip.md](zip.md) | 150 | 0 | 3 | 153 |
-| 7z | [sevenz.md](sevenz.md) | 120 | 0 | 0 | 120 |
+| [tar](tar/README.md) | POSIX.1-1988 ustar / GNU tar / POSIX.1-2001 PAX | 59 | 0 | 0 | 59 |
+| [cpio](cpio/README.md) | POSIX `odc` / SVR4 `newc`/`newcrc` | 35 | 0 | 0 | 35 |
+| [ar](ar/README.md) | IEEE Std 1003.1 / GNU ar / BSD ar | 26 | 0 | 0 | 26 |
+| [deb](deb/README.md) | deb(5) (dpkg) | 20 | 0 | 3 | 23 |
+| [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 23 | 1 | 3 | 27 |
+| [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 22 | 5 | 4 | 31 |
+| [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 14 | 6 | 5 | 25 |
+| [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 13 | 3 | 5 | 21 |
+| [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 18 | 1 | 3 | 22 |
+| [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 16 | 3 | 4 | 23 |
+| [lha](lha/README.md) | lha header documentation (apphead / lzh_note) | 17 | 1 | 3 | 21 |
+| [arj](arj/README.md) | ARJ technical note (ARJ 2.x) | 17 | 1 | 4 | 22 |
+| [arc](arc/README.md) | SEA ARC file format description | 13 | 1 | 3 | 17 |
+| [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 150 | 0 | 3 | 153 |
+| [7z](sevenz/README.md) | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) | 120 | 0 | 0 | 120 |
 
 ### 共有コンポーネント
 

@@ -11,3 +11,4 @@ fuzz/corpus/*
 docs/spec/sources/*.txt
 docs/spec/sources/*.md
 docs/spec/sources/*.html
+docs/spec/sources/*.pdf

@@ -41,6 +41,14 @@ specifications or standards documents:
   test-side encoder and validated against libmspack's LZXD decoder
   (LGPL 2.1); libmspack is used only as a local test-time reference,
   not linked or distributed. No code was copied.
+  Patent note: [MS-PATCH] is published under the general Microsoft Open
+  Specifications IPR notice. It is NOT listed on the Open Specification
+  Promise (OSP) covered-specification list ([MS-DEVCENTLP], revised
+  2023-02-24), but the MIP Patent Map (checked 2026-01) lists no patents
+  or patent applications against [MS-PATCH]; it is registered under the
+  Interop PC Productivity Applications / Exchange Server protocols and
+  MCPP programs, so the MIP patent pledge applies to any non-mapped
+  claims. No enforcement history is known.
 - cmpsc: IBM z/Architecture Principles of Operation (SA22-7832)
   chapter 7 / appendix D and ESA/390 Data Compression (SA22-7208);
   the PKWARE APPNOTE.TXT method-16 container format. CMPSC test
@@ -48,6 +56,11 @@ specifications or standards documents:
   z/Architecture POP Appendix D layouts. SDL-Hercules-390/hyperion
   (QPL) was consulted only to confirm interpretation of the public
   specification; no code was copied.
+  Patent note: the CMPSC facility and its base dictionary scheme date
+  to 1990s ESA/390-era IBM technology; any original patents are
+  presumed expired, but no formal patent search was performed.
+  The PKWARE APPNOTE method-16 "IBM z/OS CMPSC Entropy Encoding"
+  variant is excluded from scope (patent status unverified).
 - LZF: format description in the `lzfP.h` header comments
   (Marc Alexander Lehmann, BSD-2-Clause) and the LZFFormat description
   (ning/compress wiki). `lzf_c.c` was consulted for behavior
@@ -71,7 +84,9 @@ specifications or standards documents:
   https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html)
 - rpm: rpm.org Package Format documentation (format_v6 / format_header /
   format_lead, https://rpm-software-management.github.io/rpm/manual/)
-  and rpm `lib/cpio.c` stripped payload behavior notes
+  and rpm `lib/cpio.c` (GPL-2.0-only) stripped payload behavior notes;
+  `lib/cpio.c` was read only to confirm structural facts — no code was
+  copied
 - squashfs: SquashFS binary format documentation
   (https://dr-emann.github.io/squashfs/squashfs.html, CC BY-SA 4.0).
   Test fixtures are produced by `mksquashfs` (squashfs-tools,
@@ -82,6 +97,14 @@ specifications or standards documents:
   https://learn.microsoft.com/openspecs/windows_protocols/ms-cab/).
   MSZIP payloads reuse the existing RFC 1951 DEFLATE decoder
   (`compress::deflate`); no new codec was ported.
+  Patent note: [MS-CAB] is published under the general Microsoft Open
+  Specifications IPR notice. It is NOT listed on the Open Specification
+  Promise (OSP) covered-specification list ([MS-DEVCENTLP], revised
+  2023-02-24), and [MS-CAB] does not appear in the MIP Patent Map
+  (checked 2026-01), so the MIP patent pledge status cannot be
+  confirmed per-specification. No enforcement history is known; the
+  implemented subset (container + MSZIP via RFC 1951 deflate) uses
+  techniques dating to 1995-1997.
 - xca: [MS-XCA] Xpress Compression Algorithm documentation
   (Microsoft Open Specifications,
   https://learn.microsoft.com/openspecs/windows_protocols/ms-xca/).
@@ -92,6 +115,14 @@ specifications or standards documents:
   no code copied, and GPLv3 section 13 permits combination with
   AGPLv3-licensed work. Other vectors are drawn from [MS-XCA]
   section 3 examples or are self-constructed.
+  Patent note: [MS-XCA] is published under the general Microsoft Open
+  Specifications IPR notice. It is NOT listed on the Open Specification
+  Promise (OSP) covered-specification list ([MS-DEVCENTLP], revised
+  2023-02-24), but the MIP Patent Map (checked 2026-01) lists no patents
+  or patent applications against [MS-XCA]; it is registered under the
+  MCPP-Legacy / WSPP / MIPP Windows protocols programs, so the MIP
+  patent pledge applies to any non-mapped claims. No enforcement
+  history is known.
 - zim: openZIM Wiki "ZIM file format" documentation
   (https://wiki.openzim.org/wiki/ZIM_file_format, CC BY-SA)
 - mtree: FreeBSD mtree(5) manual page
@@ -100,8 +131,10 @@ specifications or standards documents:
   against libarchive's `archive_read_support_format_mtree`
   (BSD 2-Clause); no code was copied. The `bsdtar` binary is invoked
   only as a test-time interoperability oracle.
-- warc: IIPC WARC 1.1 specification / ISO 28500:2009
-  (https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1/)
+- warc: IIPC WARC 1.1 specification
+  (https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1/).
+  WARC 1.0 conformance is referenced to ISO 28500:2009 by version number
+  only; the ISO standard text itself was not consulted
 - lha: lha header documentation (apphead / lzh_note) as distributed
   with GNU lha and documented at
   https://github.com/jca02266/lha/blob/master/apphead.txt.jp;
@@ -111,6 +144,9 @@ specifications or standards documents:
 - arc: SEA ARC file format description
   (wotsit.org "arc" format entry); member structure facts only,
   no code was copied.
+  Note: the lha/arj/arc sources above are community-maintained format
+  documents rather than official vendor specifications, and are treated
+  as de facto format definitions.
   For lha/arj/arc interoperability checks the `bsdtar` (libarchive,
   BSD 2-Clause) and `7z` binaries are invoked only as local test-time
   oracles; they are not linked or distributed.
@@ -164,6 +200,7 @@ against de facto reference behavior:
 
 - bzip2
   - Reference: bzip2 1.0.x reference implementation by Julian Seward
+    (BSD-style "bzip2 and libbzip2 License")
   - Repository scope: Rust reimplementation of the format and algorithm
     behavior; no upstream bzip2 source files are bundled in this repository
 
@@ -173,31 +210,45 @@ against de facto reference behavior:
     format behavior
 
 - LZO / lzop
-  - Reference: Linux kernel `Documentation/lzo.txt` (LZO1X bytecodes) and
-    lzop source (`lzop.h`, `p_lzo.c`) for the lzop file format
+  - Reference: Linux kernel `Documentation/lzo.txt` (LZO1X bytecodes,
+    shipped under GPL-2.0-only as part of the kernel tree) and lzop
+    source (`lzop.h`, `p_lzo.c`, GPL-2.0-or-later, Markus Oberhumer)
+    for the lzop file format
   - Repository scope: Rust implementation of LZO1X-1 block compression and
-    the lzop framing format
+    the lzop framing format; format facts only, no code was copied
 
 - rzip
   - Reference: upstream `rzip.samba.org` `.rz` container and chunk semantics
+    (Andrew Tridgell, GPL-2.0-or-later); the upstream source was read only
+    to confirm format facts — no GPL-licensed source is bundled or copied
   - Repository scope: Rust implementation of the upstream container shape and
     token/chunk behavior
   - Provenance note: the long-range matching and chunk logic are implemented in
     Rust for this repository and are not shipped as upstream C source files
 
 - lrzip
-  - Reference: lrzip framing plus the crate's upstream-faithful shared rzip
-    token/chunk layer
+  - Reference: lrzip framing (Con Kolivas et al., GPL-2.0-or-later) plus
+    the crate's upstream-faithful shared rzip token/chunk layer;
+    upstream source was read only to confirm format facts — no
+    GPL-licensed source is bundled or copied
   - Repository scope: Rust implementation of the crate's supported `.lrz`
     subset and backend wiring
 
 - BCJ filters (x86, PowerPC, IA64, SPARC, ARM, ARM-Thumb, ARM64, RISC-V)
-  - Reference behavior: xz / 7-Zip / liblzma style branch/call/jump conversion
-  - Repository scope: Rust implementations validated against known vectors and
+  - Reference: xz / 7-Zip / liblzma branch/call/jump conversion filters;
+    liblzma is public domain
+  - Provenance: ported — the Rust code is an algorithmic transliteration
+    of liblzma's public-domain `simple/` filters (function structure,
+    constants, and helper logic are carried over). Compatible with
+    AGPL-3.0 because liblzma is dedicated to the public domain.
+  - Repository scope: implementations validated against known vectors and
     expected filter semantics for all supported architectures
 
 - Delta filter
-  - Reference behavior: xz / 7-Zip style byte-wise delta (distance 1..=256)
+  - Reference: xz / 7-Zip style byte-wise delta (distance 1..=256);
+    liblzma is public domain
+  - Provenance: ported — algorithmic transliteration of liblzma's
+    public-domain `delta_encode`/`delta_decode` logic
   - Repository scope: Rust implementation validated against known vectors
 
 - ZIP Method 10 (PKWARE DCL Implode) (`src/archive/zip/dcl_implode.rs`)
@@ -222,12 +273,17 @@ against de facto reference behavior:
     `no_std + alloc` style and 7z method integration
 
 - ZPAQ (`src/compress/zpaq/**`, `src/archive/zpaq/**`)
-  - Reference: Matt Mahoney's ZPAQ format, context-mixing model, and ZPAQL VM
-  - Licensing note: upstream materials are commonly presented as public-domain
-    or similarly permissive source material; confirm exact upstream notice when
-    refreshing references or importing assets
+  - Reference: Matt Mahoney's ZPAQ format, context-mixing model, and ZPAQL
+    VM (`zpaq`/`libzpaq`, released to the public domain; the bundled
+    upstream `libdivsufsort-lite` component is MIT). The low-level codec
+    follows the official specification: "ZPAQ Level 1 and Level 2"
+    (zpaq206.pdf, https://mattmahoney.net/dc/zpaq206.pdf)
+  - Patent note: upstream explicitly states the format is "not encumbered
+    by any patents or pending patents" and that all past versions were
+    published to establish prior art (zpaq.html)
   - Repository scope: Rust implementation of a low-level single-payload codec
-    plus a multi-entry archive layer with crate-local journaling
+    plus a multi-entry archive layer with crate-local journaling;
+    upstream v6.x journaling format compatibility is not claimed
 
 
 4. Bundled tables and static assets
@@ -236,9 +292,10 @@ against de facto reference behavior:
 - Brotli dictionary-related tables (`src/compress/brotli/dictionary.rs`)
   - Scope: static dictionary lookup tables, transforms, and affix data used by
     the Brotli decoder
-  - Intended provenance: RFC 7932 Brotli static dictionary semantics together
-    with the corresponding upstream Brotli dictionary structure used to realize
-    those semantics in code and data
+  - Provenance: RFC 7932 Appendix A static dictionary data and transform
+    semantics, realized using the upstream Brotli (MIT license)
+    dictionary structure; table values are specification material, not
+    copied source code
   - Maintenance note: if these tables are ever regenerated or replaced, keep
     their provenance documented alongside the source update
 
@@ -262,7 +319,11 @@ against de facto reference behavior:
   - Adler-32 (`adler32.rs`): clean-room Rust
   - XXH32/XXH64 (`xxhash.rs`): clean-room Rust implementation of xxHash
   - BitReader (`bitreader.rs`): clean-room Rust LSB-first bit reader
-  - Range coder (`range_coder.rs`): clean-room Rust range coder for LZMA/PPMd
+  - Range coder (`range_coder.rs`): clean-room Rust range coder used by
+    LZMA; the PPMd7 codec uses its own dedicated range coder under
+    `src/compress/ppmd/` (see section 3)
+  - Bounded output helper (`bounded.rs`): clean-room Rust
+    decompression-bomb size-limit check; no upstream reference
   - Scope: all are self-contained implementations with no upstream C/C++ source
     bundled. Validated against published test vectors or reference outputs.
 

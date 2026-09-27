@@ -11,7 +11,7 @@ description: "仕様・実装・テスト・docs/spec の突合監査"
 ## 検証チェーン
 
 ```
-仕様書 (RFC/APPNOTE等) → docs/spec/*.md → src/ コード → テスト
+仕様書 (RFC/APPNOTE等) → docs/spec/<format>/ → src/ コード → テスト
          Step 2a               Step 2b          Step 2b
 ```
 
@@ -28,8 +28,8 @@ Step 2b が「spec に載っているのにコードに存在しない実装」�
 
 ## Step 1: 対象の列挙
 
-1. 引数が `all` → 全 `docs/spec/*.md` を対象
-2. 単一フォーマット → `docs/spec/<format>.md` のみ
+1. 引数が `all` → 全 `docs/spec/<format>/` ディレクトリを対象
+2. 単一フォーマット → `docs/spec/<format>/` のみ
 3. 対象ファイルの現在の ✅/⚠️/❌ 件数を集計して表示
 
 ## Step 2a: 仕様書 → spec の網羅性検証
@@ -52,11 +52,11 @@ Step 2b が「spec に載っているのにコードに存在しない実装」�
 仕様書を読んだら:
 1. **セクション/節の一覧**を抽出 (例: RFC 1951 なら §3.2.1-§3.2.7)
 2. 各セクションの **MUST / SHALL / REQUIRED** 要件を列挙
-3. `docs/spec/<format>.md` に対応する行があるか照合
+3. `docs/spec/<format>/` 内 (index `README.md` または子ファイル) に対応する行があるか照合
 4. 対応行がない要件 → **仕様欠落候補**として報告
 
 仕様書が取得できないフォーマット (bzip2, LZW, LZO, rzip, lrzip, tar, cpio, ar, sevenz, zpaq) は:
-- `docs/spec/<format>.md` の「基準仕様」「仕様参照」列から逆引きで妥当性を検証
+- `docs/spec/<format>/` 内の「基準仕様」「仕様参照」列から逆引きで妥当性を検証
 - コードのコメントに引用されている仕様要件が spec に反映されているか確認
 
 ### 並行実行
@@ -96,10 +96,12 @@ Step 2a と同じ `@spec-researcher` が続けて実施 (または別 agent で�
 
 集計の正確性を検証:
 ```sh
-for f in docs/spec/*.md; do
-  ok=$(grep -cF '| ✅ |' "$f")
-  warn=$(grep -cF '| ⚠️ |' "$f")
-  no=$(grep -cF '| ❌ |' "$f")
+for f in docs/spec/*/README.md docs/spec/*/*.md; do
+  [ -f "$f" ] || continue
+  case "$f" in docs/spec/sources/*) continue;; esac
+  ok=$(awk -F'|' '/^\|[[:space:]]*[0-9]+[[:space:]]*\|/ && /\| ✅ \|/' "$f" | wc -l)
+  warn=$(awk -F'|' '/^\|[[:space:]]*[0-9]+[[:space:]]*\|/ && /\| ⚠️ \|/' "$f" | wc -l)
+  no=$(awk -F'|' '/^\|[[:space:]]*[0-9]+[[:space:]]*\|/ && /\| ❌ \|/' "$f" | wc -l)
   echo "$f: ✅=$ok ⚠️=$warn ❌=$no"
 done
 ```
