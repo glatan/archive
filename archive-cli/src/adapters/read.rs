@@ -709,6 +709,12 @@ fn decode_items(
             compress_formats::vcdiff::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
+        Format::Mppc => decode_single_payload(
+            path,
+            input,
+            compress_formats::mppc::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
         Format::Lzxd => decode_single_payload(
             path,
             input,

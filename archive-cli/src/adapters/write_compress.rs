@@ -218,6 +218,12 @@ pub fn compress_input(command: CompressCommand) -> Result<(), CliError> {
             reject_unexpected_backend(command.backend.as_deref(), "vcdiff")?;
             compress::vcdiff::encode(&input)
         }
+        CompressionFormat::Mppc => {
+            reject_unexpected_level(command.level, "mppc")?;
+            reject_unexpected_backend(command.backend.as_deref(), "mppc")?;
+            compress::mppc::encode(&input)
+                .map_err(|error| CliError::from_archive_error(error, false))?
+        }
         CompressionFormat::Lzxd => {
             reject_unexpected_level(command.level, "lzxd")?;
             reject_unexpected_backend(command.backend.as_deref(), "lzxd")?;

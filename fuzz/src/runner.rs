@@ -420,6 +420,13 @@ fn run_iteration(
 }
 
 fn execute_case(algo: Algorithm, pattern: TestPattern, data: &[u8]) -> Result<TestOutcome, String> {
+    // MPPC is a packet codec: one packet carries at most 8192 bytes of
+    // payload, so cap the input instead of misrepresenting larger inputs.
+    let data = if algo == Algorithm::Mppc {
+        &data[..data.len().min(8192)]
+    } else {
+        data
+    };
     let fingerprint = checksum::fingerprint(data);
     let started = Instant::now();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

@@ -527,6 +527,15 @@ pub fn extract_input(
             compress_formats::vcdiff::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
+        Format::Mppc => extract_single_payload(
+            input_path,
+            &base_dir,
+            format,
+            selected_paths,
+            overwrite,
+            compress_formats::mppc::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
         Format::Lzxd => extract_single_payload(
             input_path,
             &base_dir,
