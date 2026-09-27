@@ -99,6 +99,7 @@
 | [lzf](lzf/README.md) | liblzf `lzfP.h` / ning LZFFormat (de facto) | 20 | 0 | 0 | 20 |
 | [fastlz](fastlz/README.md) | fastlz.c 参照実装 (MIT) | 22 | 0 | 0 | 22 |
 | [zx0](zx0/README.md) | ZX0 v2 README (BSD-3) | 20 | 0 | 0 | 20 |
+| [zx1](zx1/README.md) | ZX1 README (BSD-3) | 21 | 0 | 0 | 21 |
 | [lzrw1](lzrw1/README.md) | lzrw1.c 参照実装 (public domain) | 21 | 0 | 0 | 21 |
 | [lzrw1a](lzrw1a/README.md) | lzrw1-a.c 参照実装 (public domain) | 20 | 0 | 0 | 20 |
 | [lzrw2](lzrw2/README.md) | lzrw2.c 参照実装 (public domain) | 22 | 0 | 0 | 22 |
@@ -142,9 +143,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1622 |
+| ✅ 実装+テスト済み | 1643 |
 | ⚠️ 部分実装 | 0 |
 | ❌ 未実装 | 41 |
-| **合計** | **1663** |
+| **合計** | **1684** |
 
-**全体カバー率**: 1622 / 1663 = **97.5%** (intentional exclusion 除外後: 1622 / 1622 = **100%**)
+**全体カバー率**: 1643 / 1684 = **97.6%** (intentional exclusion 除外後: 1643 / 1643 = **100%**)
