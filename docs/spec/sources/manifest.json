@@ -546,6 +546,14 @@
    "version": "git v2.51.0 Documentation",
    "url": "https://raw.githubusercontent.com/git/git/v2.51.0/Documentation/gitformat-pack.adoc",
    "filename": "gitformat-pack.adoc"
+  },
+  {
+   "id": "xarformat",
+   "format": "xar",
+   "title": "xarformat - Format of a xar archive (xar project wiki)",
+   "version": "mackyle/xar wiki (pinned fetch)",
+   "url": "https://raw.githubusercontent.com/wiki/mackyle/xar/xarformat.wiki",
+   "filename": "xarformat.wiki"
   }
  ],
  "no_url_available": [

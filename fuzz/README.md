@@ -140,6 +140,7 @@ external tool が必要な pattern は `#[ignore]` 付きの placeholder とし�
 | mtree | `mtree` |
 | warc | `warc` |
 | git-pack | `git-pack`, `pack` |
+| xar | `xar` |
 | xca | `xpress`, `xpress-huff`, `lznt1` |
 | lzf | `lzf` |
 | fastlz | `fastlz` |

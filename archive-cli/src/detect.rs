@@ -17,6 +17,7 @@ pub enum Format {
     Warc,
     #[value(name = "git-pack")]
     GitPack,
+    Xar,
     Lha,
     Arj,
     Arc,
@@ -79,6 +80,7 @@ pub enum ArchiveFormat {
     Arc,
     #[value(name = "git-pack")]
     GitPack,
+    Xar,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -147,6 +149,7 @@ impl core::fmt::Display for Format {
             Self::Mtree => "mtree",
             Self::Warc => "warc",
             Self::GitPack => "git-pack",
+            Self::Xar => "xar",
             Self::Lha => "lha",
             Self::Arj => "arj",
             Self::Arc => "arc",
@@ -216,6 +219,7 @@ impl From<ArchiveFormat> for Format {
             ArchiveFormat::Arj => Self::Arj,
             ArchiveFormat::Arc => Self::Arc,
             ArchiveFormat::GitPack => Self::GitPack,
+            ArchiveFormat::Xar => Self::Xar,
         }
     }
 }
@@ -353,6 +357,9 @@ pub fn detect_format(input: &[u8]) -> Option<Format> {
     if input.len() >= 12 && input.starts_with(b"PACK") && input[4..8] == [0, 0, 0, 2] {
         return Some(Format::GitPack);
     }
+    if input.starts_with(b"xar!") {
+        return Some(Format::Xar);
+    }
     if input.starts_with(b"!<arch>\n") {
         return Some(Format::Ar);
     }
@@ -426,6 +433,9 @@ pub fn scope_notes(format: Format) -> Vec<String> {
         ],
         Format::GitPack => vec![
             "git-pack entries are named by hex object ID; pack writing stores all files as blobs without deltas".to_owned(),
+        ],
+        Format::Xar => vec![
+            "xar file data supports stored and gzip (zlib) encodings; extended attributes and signatures are ignored".to_owned(),
         ],
         Format::Lha => vec![
             "lha support covers stored (-lh0-/-lhd-) entries only; LZH-compressed methods are rejected".to_owned(),
@@ -603,6 +613,14 @@ mod tests {
         let mut v3 = pack.clone();
         v3[7] = 3;
         assert_ne!(detect_format(&v3), Some(Format::GitPack));
+    }
+
+    #[test]
+    fn detect_xar() {
+        assert_eq!(
+            detect_format(b"xar!\x00\x1c\x00\x01rest"),
+            Some(Format::Xar)
+        );
     }
 
     #[test]

@@ -9,8 +9,8 @@
 //! `"fuzz_test"` is packed/unpacked as the archive payload.
 
 use archive::archive::{
-    ar, arc, arj, cpio, deb, git_pack, lha, mscab, mtree, rpm, sevenz, squashfs, tar, warc, zim,
-    zip,
+    ar, arc, arj, cpio, deb, git_pack, lha, mscab, mtree, rpm, sevenz, squashfs, tar, warc, xar,
+    zim, zip,
 };
 use archive::compress::*;
 use archive::error::Error;
@@ -94,6 +94,7 @@ pub enum Algorithm {
     Mtree,
     Warc,
     GitPack,
+    Xar,
     Lha,
     Arj,
     Arc,
@@ -286,6 +287,7 @@ impl Algorithm {
             Algorithm::Mtree => "mtree",
             Algorithm::Warc => "warc",
             Algorithm::GitPack => "git-pack",
+            Algorithm::Xar => "xar",
             Algorithm::Lha => "lha",
             Algorithm::Arj => "arj",
             Algorithm::Arc => "arc",
@@ -385,6 +387,7 @@ impl Algorithm {
             "mtree" => Some(Algorithm::Mtree),
             "warc" => Some(Algorithm::Warc),
             "git-pack" | "pack" => Some(Algorithm::GitPack),
+            "xar" => Some(Algorithm::Xar),
             "lha" | "lzh" => Some(Algorithm::Lha),
             "arj" => Some(Algorithm::Arj),
             "arc" => Some(Algorithm::Arc),
@@ -518,6 +521,11 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
         Algorithm::GitPack => {
             let mut enc = git_pack::encode::GitPackEncoder::new();
             enc.add_object(git_pack::ObjectType::Blob, data);
+            enc.finish()
+        }
+        Algorithm::Xar => {
+            let mut enc = xar::encode::XarEncoder::new();
+            enc.add_file("fuzz_test", data);
             enc.finish()
         }
         Algorithm::Warc => warc_fixture(data),
@@ -744,6 +752,13 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| {
                 archive::traits::ArchiveEntry::data(&e).to_vec()
             }))
+        }
+        Algorithm::Xar => {
+            let entries = xar::decode::decode(data)?;
+            Ok(entries
+                .into_iter()
+                .find(|e| !e.is_dir)
+                .map_or(Vec::new(), |e| e.data))
         }
         Algorithm::Warc => {
             let entries = warc::decode::decode(data)?;

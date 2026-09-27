@@ -461,6 +461,19 @@ fn self_pattern_body(algo: Algorithm) -> String {
             "    assert_eq!(entries[0].data, input);\n"
         )
         .to_string(),
+        Algorithm::Xar => concat!(
+            "    let mut e = archive::archive::xar::encode::XarEncoder::new();
+",
+            "    e.add_file(\"fuzz_test\", input);
+",
+            "    let encoded = e.finish();
+",
+            "    let entries = archive::archive::xar::decode::decode(&encoded).unwrap();
+",
+            "    assert_eq!(entries[0].data, input);
+"
+        )
+        .to_string(),
         Algorithm::GitPack => concat!(
             "    let mut e = archive::archive::git_pack::encode::GitPackEncoder::new();
 ",

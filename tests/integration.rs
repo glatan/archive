@@ -38,7 +38,8 @@
     feature = "vcdiff",
     feature = "lzxd",
     feature = "cmpsc",
-    feature = "git-pack"
+    feature = "git-pack",
+    feature = "xar"
 ))]
 
 use archive::archive::ar;
@@ -284,6 +285,9 @@ mod lzrw3a_tests;
 #[cfg(feature = "git-pack")]
 #[path = "integration/git_pack.rs"]
 mod git_pack_tests;
+#[cfg(feature = "xar")]
+#[path = "integration/xar.rs"]
+mod xar_tests;
 
 #[cfg(feature = "lzs")]
 #[path = "integration/lzs.rs"]

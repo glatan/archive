@@ -364,6 +364,45 @@ fn decode_items(
                     .collect(),
             ))
         }
+        Format::Xar => {
+            let entries = archive_formats::xar::decode::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?;
+            Ok((
+                ContentKind::Archive,
+                entries
+                    .into_iter()
+                    .map(|entry| {
+                        let mut extra = vec![format!("type={}", entry.file_type)];
+                        if let Some(m) = &entry.mtime {
+                            extra.push(format!("mtime={m}"));
+                        }
+                        DecodedItem {
+                            payload: if entry.is_dir {
+                                None
+                            } else {
+                                Some(entry.data.clone())
+                            },
+                            summary: EntrySummary {
+                                path: entry.name.clone(),
+                                kind: if entry.is_dir {
+                                    "directory".to_owned()
+                                } else {
+                                    "file".to_owned()
+                                },
+                                size: Some(entry.data.len() as u64),
+                                compressed_size: None,
+                                mtime: None,
+                                mode: entry
+                                    .mode
+                                    .as_deref()
+                                    .and_then(|m| u32::from_str_radix(m, 8).ok()),
+                                extra,
+                            },
+                        }
+                    })
+                    .collect(),
+            ))
+        }
         Format::GitPack => {
             let entries = archive_formats::git_pack::decode::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?;
