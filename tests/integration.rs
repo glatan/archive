@@ -33,6 +33,7 @@
     feature = "lzsa",
     feature = "zx0",
     feature = "zx1",
+    feature = "zx2",
     feature = "lzxd",
     feature = "cmpsc"
 ))]
@@ -77,6 +78,7 @@ use archive::compress::zlib;
 use archive::compress::zstd;
 use archive::compress::zx0;
 use archive::compress::zx1;
+use archive::compress::zx2;
 
 // ============================================================
 // 7z tests
@@ -277,6 +279,8 @@ mod tar_tests;
 mod zx0_tests;
 #[path = "integration/zx1.rs"]
 mod zx1_tests;
+#[path = "integration/zx2.rs"]
+mod zx2_tests;
 
 #[path = "integration/xca.rs"]
 mod xca_tests;

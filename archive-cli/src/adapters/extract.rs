@@ -491,6 +491,15 @@ pub fn extract_input(
             compress_formats::zx1::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
+        Format::Zx2 => extract_single_payload(
+            input_path,
+            &base_dir,
+            format,
+            selected_paths,
+            overwrite,
+            compress_formats::zx2::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
         Format::Lzxd => extract_single_payload(
             input_path,
             &base_dir,
