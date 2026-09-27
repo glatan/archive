@@ -42,6 +42,14 @@
       "filename": "rfc8878.txt"
     },
     {
+      "id": "zstd-seekable-format",
+      "format": "zstd-seekable",
+      "title": "Zstandard Seekable Format",
+      "version": "0.1.0 (contrib/seekable_format, git dev)",
+      "url": "https://raw.githubusercontent.com/facebook/zstd/dev/contrib/seekable_format/zstd_seekable_compression_format.md",
+      "filename": "zstd_seekable_compression_format.md"
+    },
+    {
       "id": "appnote",
       "format": "zip",
       "title": "APPNOTE.TXT - .ZIP File Format Specification",
@@ -515,7 +523,10 @@
       "title": "bzip2 reference implementation",
       "version": "1.0.8",
       "note": "正式な仕様書なし。リファレンス実装がデファクト仕様。非公式逆解析仕様は sources/bzip2-format_dsnet.pdf にスナップショット済み",
-      "reference_url": ["https://www.sourceware.org/bzip2/", "https://www.sourceware.org/bzip2/manual/manual.html"]
+      "reference_url": [
+        "https://www.sourceware.org/bzip2/",
+        "https://www.sourceware.org/bzip2/manual/manual.html"
+      ]
     },
     {
       "id": "lzop-format",
@@ -539,7 +550,11 @@
       "title": "rzip .rz format",
       "version": "rzip 2.1",
       "note": "rzip.samba.org (現在 503)。ソースコードが仕様。Debian ミラー: sources.debian.org/src/rzip/2.1-5",
-      "reference_url": ["https://rzip.samba.org/", "https://sources.debian.org/src/rzip/2.1-5/", "https://manpages.debian.org/unstable/rzip/rzip.1.en.html"]
+      "reference_url": [
+        "https://rzip.samba.org/",
+        "https://sources.debian.org/src/rzip/2.1-5/",
+        "https://manpages.debian.org/unstable/rzip/rzip.1.en.html"
+      ]
     },
     {
       "id": "sa22-7208",
@@ -563,7 +578,10 @@
       "title": "lzrw1-a.c 'DEFINITION OF COMPRESSED FILE FORMAT'",
       "version": "LZRW1-A (Ross N. Williams, 1991)",
       "note": "仕様はソース内コメントに同梱 (public domain)。sources/lzrw1-a.c・lzrw1-a.txt にスナップショット済み",
-      "reference_url": ["http://www.ross.net/compression/lzrw1a.html", "https://ftp.funet.fi/pub/misc/compression/"]
+      "reference_url": [
+        "http://www.ross.net/compression/lzrw1a.html",
+        "https://ftp.funet.fi/pub/misc/compression/"
+      ]
     },
     {
       "id": "lzf-reference",
@@ -571,7 +589,10 @@
       "title": "liblzf lzf_c.c / lzf_d.c format description",
       "version": "liblzf 3.6",
       "note": "正式な仕様書なし。ソース内コメントがデファクト仕様 (BSD-2)。sources/liblzf_lzf_c.c にスナップショット済み",
-      "reference_url": ["http://cvs.schmorp.de/liblzf/", "https://github.com/nemequ/liblzf"]
+      "reference_url": [
+        "http://cvs.schmorp.de/liblzf/",
+        "https://github.com/nemequ/liblzf"
+      ]
     },
     {
       "id": "lha-format",
@@ -579,7 +600,10 @@
       "title": "LHA header format (level 0/1/2)",
       "version": "de facto (jLHA notes 等)",
       "note": "正式標準なし。LHa for UNIX の header.doc.md は sources/lha_header.doc.md にスナップショット済み。apphead / lzh_note 原本はアーカイブサイト散在",
-      "reference_url": ["https://github.com/jca02266/lha/blob/master/header.doc.md", "http://justsolve.archiveteam.org/wiki/LHarc"]
+      "reference_url": [
+        "https://github.com/jca02266/lha/blob/master/header.doc.md",
+        "http://justsolve.archiveteam.org/wiki/LHarc"
+      ]
     },
     {
       "id": "arj-format",

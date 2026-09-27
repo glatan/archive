@@ -86,6 +86,7 @@
 | [DEFLATE](deflate/README.md) | RFC 1951 | 57 | 0 | 0 | 57 |
 | [gzip](gzip/README.md) | RFC 1952 | 40 | 0 | 0 | 40 |
 | [zstd](zstd/README.md) | RFC 8878 | 126 | 0 | 0 | 126 |
+| [zstd-seekable](zstd-seekable/README.md) | Zstandard Seekable Format v0.1.0 | 23 | 0 | 0 | 23 |
 | [bzip2](bzip2/README.md) | bzip2 1.0.x 参照実装 (de facto) | 68 | 0 | 0 | 68 |
 | [lzip](lzip/README.md) | lzip マニュアル | 39 | 0 | 0 | 39 |
 | [`.lzma`](lzma_alone/README.md) | lzma-file-format.txt (tukaani/xz doc) | 25 | 0 | 0 | 25 |
@@ -145,9 +146,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1687 |
+| ✅ 実装+テスト済み | 1710 |
 | ⚠️ 部分実装 | 0 |
 | ❌ 未実装 | 41 |
-| **合計** | **1728** |
+| **合計** | **1751** |
 
-**全体カバー率**: 1687 / 1728 = **97.6%** (intentional exclusion 除外後: 1687 / 1687 = **100%**)
+**全体カバー率**: 1710 / 1751 = **97.6%** (intentional exclusion 除外後: 1710 / 1710 = **100%**)

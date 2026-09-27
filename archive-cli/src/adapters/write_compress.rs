@@ -88,6 +88,11 @@ pub fn compress_input(command: CompressCommand) -> Result<(), CliError> {
             reject_unexpected_backend(command.backend.as_deref(), "zstd")?;
             compress::zstd::encode::encode(&input)
         }
+        CompressionFormat::ZstdSeekable => {
+            reject_unexpected_level(command.level, "zstd-seekable")?;
+            reject_unexpected_backend(command.backend.as_deref(), "zstd-seekable")?;
+            compress::zstd::seekable::encode(&input, compress::zstd::seekable::DEFAULT_FRAME_SIZE)
+        }
         CompressionFormat::Lzip => {
             reject_unexpected_level(command.level, "lzip")?;
             reject_unexpected_backend(command.backend.as_deref(), "lzip")?;

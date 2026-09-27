@@ -52,6 +52,13 @@
 - `zstd_large.zst`
   - `zstd_large.txt` を zstd で圧縮したもの
 
+- `seekable_text.bin` / `seekable_text.zst`
+  - 元データは `line NNNNNN of the quick brown fox sample` を 900 行連結した 37800 バイトのテキスト
+  - `.zst` は参照ツール `contrib/seekable_format/examples/seekable_compression` (frame size 4096, Checksum_Flag=1) で生成した seekable zstd ストリーム
+- `seekable_bin.bin` / `seekable_bin.zst`
+  - 元データは `i*i mod 7919` (u32 LE) を 6000 個連結した 24000 バイトのバイナリ
+  - `.zst` は同ツール (frame size 8192, Checksum_Flag=1) で生成
+
 ### `tar/`
 
 - `single_file.tar`

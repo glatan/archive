@@ -26,6 +26,7 @@ pub enum Algorithm {
     ZstdFast,
     ZstdBest,
     ZstdNoChecksum,
+    ZstdSeekable,
     Bzip2,
     Bzip2Fast,
     Bzip2Best,
@@ -119,6 +120,7 @@ impl Algorithm {
         Algorithm::ZstdFast,
         Algorithm::ZstdBest,
         Algorithm::ZstdNoChecksum,
+        Algorithm::ZstdSeekable,
         Algorithm::Bzip2,
         Algorithm::Bzip2Fast,
         Algorithm::Bzip2Best,
@@ -209,6 +211,7 @@ impl Algorithm {
             Algorithm::ZstdFast => "zstd-fast",
             Algorithm::ZstdBest => "zstd-best",
             Algorithm::ZstdNoChecksum => "zstd-nochecksum",
+            Algorithm::ZstdSeekable => "zstd-seekable",
             Algorithm::Bzip2 => "bzip2",
             Algorithm::Bzip2Fast => "bzip2-fast",
             Algorithm::Bzip2Best => "bzip2-best",
@@ -303,6 +306,7 @@ impl Algorithm {
             "zstd-fast" => Some(Algorithm::ZstdFast),
             "zstd-best" => Some(Algorithm::ZstdBest),
             "zstd-nochecksum" => Some(Algorithm::ZstdNoChecksum),
+            "zstd-seekable" => Some(Algorithm::ZstdSeekable),
             "bzip2" => Some(Algorithm::Bzip2),
             "bzip2-fast" => Some(Algorithm::Bzip2Fast),
             "bzip2-best" => Some(Algorithm::Bzip2Best),
@@ -406,6 +410,8 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
             data,
             &zstd::encode::EncodeOptions { checksum: false },
         ),
+        // Small frames so multi-frame streams are exercised on modest inputs.
+        Algorithm::ZstdSeekable => zstd::seekable::encode(data, 64 * 1024),
         Algorithm::Bzip2 => bzip2::encode::encode(data),
         Algorithm::Bzip2Fast => bzip2::encode::encode_with_level(data, 1),
         Algorithm::Bzip2Best => bzip2::encode::encode_with_level(data, 9),
@@ -627,6 +633,7 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
         Algorithm::Zstd | Algorithm::ZstdFast | Algorithm::ZstdBest | Algorithm::ZstdNoChecksum => {
             zstd::decode::decode(data)
         }
+        Algorithm::ZstdSeekable => zstd::seekable::decode(data),
         Algorithm::Bzip2 | Algorithm::Bzip2Fast | Algorithm::Bzip2Best => {
             bzip2::decode::decode(data)
         }

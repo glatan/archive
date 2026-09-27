@@ -565,6 +565,12 @@ fn decode_items(
             compress_formats::zstd::decode::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
+        Format::ZstdSeekable => decode_single_payload(
+            path,
+            input,
+            compress_formats::zstd::seekable::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
         Format::Bzip2 => decode_single_payload(
             path,
             input,
