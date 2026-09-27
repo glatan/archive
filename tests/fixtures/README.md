@@ -27,6 +27,15 @@
   - `repeated.txt` を gzip で圧縮したもの
   - 繰り返しパターンに対する圧縮系テストに使う
 
+### `brotli/`
+
+- `signed_context_mode_q10.br`
+  - `(i * 7 + 19) % 256` で生成した 256 バイトを system `brotli -q 10` で圧縮したもの
+  - context 計算バグ（p1/p2 取り違え）の回帰用（ツール不要）
+- `utf8_context_table_q5.br`
+  - `(i * 73 + 19) % 256` で生成した 512 バイトを system `brotli -q 5` で圧縮したもの
+  - UTF-8 context table バグの回帰用（ツール不要）
+
 ### `zstd/`
 
 - `zstd_hello.txt`
@@ -117,13 +126,21 @@
   - crate 側 decode が system `zstd` 出力を正しく読めるかの回帰用
 - `lzip_original_compress_1.bin`
   - fuzz で残したバイナリ入力
-  - system `lzip -c` に流し、その出力を crate 側で decode する回帰に使う
-- `xz_original_compress_1.bin`
+- `lzip_original_compress_1.lz`
+  - 上の `.bin` を system `lzip -c` で圧縮した対応データ
+  - crate 側 decode が system `lzip` 出力を正しく読めるかの回帰用（ツール不要）
+- `xz_original_compress_1.bin` / `xz_original_compress_2.bin` / `xz_original_compress_3.bin`
   - fuzz で残したバイナリ入力
-  - system `xz -c` に流し、その出力を crate 側で decode する回帰に使う
+- `xz_original_compress_1.xz` / `xz_original_compress_2.xz`
+  - 対応する `.bin` を system `xz -c` で圧縮した対応データ
+  - crate 側 decode の回帰用（ツール不要）
+- `xz_original_compress_3.xz`
+  - `xz_original_compress_3.bin` を system `xz -0 -c` で圧縮した対応データ
+  - dict_size=256KiB の non-reset chunk 継続（dict boundary）を含むストリームの回帰用（ツール不要）
 - `xz_original_decompress_1.bin`
   - fuzz で残した ASCII 寄りの入力
   - crate 側で xz encode した結果を system `xz -dc` で展開できるかの回帰に使う
+  - ツール不在時は self-roundtrip のみ検証する
 
 ### 命名規則メモ
 

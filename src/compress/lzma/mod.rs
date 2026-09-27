@@ -409,9 +409,13 @@ pub(crate) fn lzma_decode_with_props_and_size(
 
 /// Decode an LZMA stream with an explicit property tuple, output size, and seed history.
 ///
-/// `history` seeds the dictionary window with the most recent bytes retained from
-/// a preceding container chunk. The returned vector contains only the bytes
-/// decoded from `data`, not the seed history.
+/// `history` seeds the dictionary window and must contain the *entire* output
+/// produced since the last dictionary reset — not just the trailing
+/// `dict_size` bytes. Position-dependent contexts (pos_state, literal lp
+/// bits) count uncompressed bytes since the reset, and the absolute position
+/// is derived from `history.len()`; a trimmed history desynchronizes the
+/// range coder. The returned vector contains only the bytes decoded from
+/// `data`, not the seed history.
 pub(crate) fn lzma_decode_with_props_and_size_and_history(
     data: &[u8],
     dict_size: u32,
@@ -430,6 +434,9 @@ pub(crate) fn lzma_decode_with_props_and_size_and_history(
     )
 }
 
+/// Variant of [`lzma_decode_with_props_and_size_and_history`] that reuses the
+/// range-coder models across chunk calls. `history` must likewise contain the
+/// entire output since the last dictionary reset.
 pub(crate) fn lzma_decode_with_props_and_size_and_history_and_state(
     data: &[u8],
     dict_size: u32,
@@ -465,6 +472,10 @@ fn lzma_decode_impl(
 
     let dict_size = dict_size as usize;
     let history_len = history.len().min(dict_size);
+    // `output` only keeps the tail of `history`, but position contexts
+    // (pos_state / literal lp bits) count uncompressed bytes since the last
+    // dictionary reset, so index math must use the untrimmed position.
+    let pos_base = history.len() - history_len;
     let mut output = Vec::with_capacity(history_len + expected_size.unwrap_or(0));
     output.extend_from_slice(&history[history.len().saturating_sub(history_len)..]);
 
@@ -487,7 +498,7 @@ fn lzma_decode_impl(
             }
         }
 
-        let pos_state = output.len() & props.pos_state_mask();
+        let pos_state = (pos_base + output.len()) & props.pos_state_mask();
 
         if rc.decode_bit(&mut model.is_match[state][pos_state])? == 0 {
             // ── Literal ──
@@ -496,7 +507,7 @@ fn lzma_decode_impl(
             } else {
                 output[output.len() - 1]
             };
-            let ctx = get_literal_context(prev_byte, output.len(), props);
+            let ctx = get_literal_context(prev_byte, pos_base + output.len(), props);
             let is_mc = !state_is_literal(state);
             let match_byte = if is_mc && !output.is_empty() && (rep0 as usize) < output.len() {
                 output[output.len() - 1 - rep0 as usize]

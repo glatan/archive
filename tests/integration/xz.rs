@@ -135,96 +135,56 @@ fn test_xz_decode_system_encoded() {
 #[test]
 fn test_xz_decode_system_compressed_fuzz_regression() {
     let input = include_bytes!("../fixtures/fuzz/xz_original_compress_1.bin");
+    // Captured `xz -c` output; the regression check does not require the
+    // system tool.
+    let encoded = include_bytes!("../fixtures/fuzz/xz_original_compress_1.xz");
+    assert_eq!(xz::decode::decode(encoded).unwrap(), input);
 
-    let mut child = match std::process::Command::new("xz")
-        .args(["-c"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
-        Err(e) => panic!("Failed to run xz: {e}"),
-    };
-
-    {
-        use std::io::Write;
-        child.stdin.as_mut().unwrap().write_all(input).unwrap();
+    if let Some(live) = xz_system_compress_with_args(&["-c"], input) {
+        assert_eq!(xz::decode::decode(&live).unwrap(), input);
     }
-
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "system xz compress failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let decoded = xz::decode::decode(&output.stdout).unwrap();
-    assert_eq!(decoded, input);
 }
 
 #[test]
 fn test_xz_decode_system_compressed_fuzz_regression_multichunk_state() {
     let input = include_bytes!("../fixtures/fuzz/xz_original_compress_2.bin");
+    // Captured `xz -c` output; the regression check does not require the
+    // system tool.
+    let encoded = include_bytes!("../fixtures/fuzz/xz_original_compress_2.xz");
+    assert_eq!(xz::decode::decode(encoded).unwrap(), input);
 
-    let mut child = match std::process::Command::new("xz")
-        .args(["-c"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
-        Err(e) => panic!("Failed to run xz: {e}"),
-    };
-
-    {
-        use std::io::Write;
-        child.stdin.as_mut().unwrap().write_all(input).unwrap();
+    if let Some(live) = xz_system_compress_with_args(&["-c"], input) {
+        assert_eq!(xz::decode::decode(&live).unwrap(), input);
     }
+}
 
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "system xz compress failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+#[test]
+fn test_xz_decode_system_compressed_dict_boundary_fuzz_regression() {
+    // `xz -0` (dict_size=256 KiB) emits non-reset LZMA2 chunks whose
+    // cumulative output exceeds dict_size; history trimming must not shift
+    // the position context.
+    let input = include_bytes!("../fixtures/fuzz/xz_original_compress_3.bin");
+    // Captured `xz -0 -c` output; the regression check does not require the
+    // system tool.
+    let encoded = include_bytes!("../fixtures/fuzz/xz_original_compress_3.xz");
+    assert_eq!(xz::decode::decode(encoded).unwrap(), input);
 
-    let decoded = xz::decode::decode(&output.stdout).unwrap();
-    assert_eq!(decoded, input);
+    if let Some(live) = xz_system_compress_with_args(&["-0", "-c"], input) {
+        assert_eq!(xz::decode::decode(&live).unwrap(), input);
+    }
 }
 
 #[test]
 fn test_xz_encode_system_decode_fuzz_regression() {
     let input = include_bytes!("../fixtures/fuzz/xz_original_decompress_1.bin");
     let encoded = xz::encode::encode(input);
+    // Our own decoder must always accept the encoder output.
+    assert_eq!(xz::decode::decode(&encoded).unwrap(), input);
 
-    let mut child = match std::process::Command::new("xz")
-        .args(["-dc"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
-        Err(e) => panic!("Failed to run xz: {e}"),
-    };
-
-    {
-        use std::io::Write;
-        child.stdin.as_mut().unwrap().write_all(&encoded).unwrap();
+    // Additionally verify with system xz when it is installed.
+    if let Some(decoded) = xz_system_decode(&encoded) {
+        assert_eq!(decoded, input);
     }
-
-    let output = child.wait_with_output().unwrap();
-    assert!(
-        output.status.success(),
-        "system xz decode failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(output.stdout, input);
 }
 
 #[test]

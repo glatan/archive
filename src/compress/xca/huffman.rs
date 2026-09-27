@@ -145,6 +145,29 @@ fn decode_block(
 
     let mut reader = BitReader::new(input, *pos)?;
     let block_end = out.len() + BLOCK_SIZE;
+    // If a trailing symbol 256 is reinterpreted as a match but decoding
+    // ahead then fails, it was really EOF after all: some encoders leave
+    // non-zero padding bits after the final symbol. `eof_fallback` holds
+    // the `out` length to restore in that case.
+    let mut eof_fallback: Option<usize> = None;
+
+    macro_rules! or_eof {
+        ($e:expr) => {
+            match $e {
+                Ok(v) => v,
+                Err(err) => {
+                    if let Some(len) = eof_fallback {
+                        if expected.is_none_or(|n| len >= n) {
+                            out.truncate(len);
+                            *pos = reader.pos;
+                            return Ok(true);
+                        }
+                    }
+                    return Err(err);
+                }
+            }
+        };
+    }
 
     loop {
         if out.len() >= block_end {
@@ -152,7 +175,7 @@ fn decode_block(
             return Ok(false); // continue with next block
         }
         let sym = table[(reader.bits >> 17) as usize] as usize;
-        reader.consume(lengths[sym] as i32)?;
+        or_eof!(reader.consume(lengths[sym] as i32));
         if sym < 256 {
             if out.len() >= max_output {
                 return Err(Error::OutputLimitExceeded { limit: max_output });
@@ -160,40 +183,56 @@ fn decode_block(
             out.push(sym as u8);
             continue;
         }
-        if sym == EOF_SYMBOL && reader.pos >= input.len() && expected.is_none_or(|n| out.len() >= n)
-        {
-            *pos = reader.pos;
-            return Ok(true);
+        // Symbol 256 doubles as a (len=3, dist=1) match; it is only EOF
+        // when no real bits remain after it. The encoder zero-pads the
+        // tail, so any set bit in the register means more symbols follow.
+        if sym == EOF_SYMBOL && reader.pos >= input.len() {
+            if reader.bits == 0 && expected.is_none_or(|n| out.len() >= n) {
+                *pos = reader.pos;
+                return Ok(true);
+            }
+            eof_fallback = Some(out.len());
         }
         // Match symbol (or misplaced EOF with output incomplete).
-        let m = sym - 256;
-        let mut len = m % 16;
-        let off_bits = m / 16;
-        if len == 15 {
-            len = reader.read_u8()? as usize;
-            if len == 255 {
-                len = reader.read_u16()? as usize;
-                if len < 15 {
-                    return Err(Error::InvalidData("xpress-huff: invalid length escape"));
-                }
-                len -= 15;
-            }
-            len += 15;
-        }
-        len += 3;
-        let offset = reader.take(off_bits as i32)? as usize + (1usize << off_bits);
-        if offset > out.len() {
-            return Err(Error::InvalidData("xpress-huff: match offset before start"));
-        }
-        if out.len() + len > max_output {
-            return Err(Error::OutputLimitExceeded { limit: max_output });
-        }
-        let start = out.len() - offset;
-        for i in 0..len {
-            let b = out[start + i];
-            out.push(b);
-        }
+        or_eof!(read_match(&mut reader, out, sym, max_output));
     }
+}
+
+/// Apply a match symbol (257–511, or 256 interpreted as len=3/dist=1) to `out`.
+fn read_match(
+    reader: &mut BitReader,
+    out: &mut Vec<u8>,
+    sym: usize,
+    max_output: usize,
+) -> Result<(), Error> {
+    let m = sym - 256;
+    let mut len = m % 16;
+    let off_bits = m / 16;
+    if len == 15 {
+        len = reader.read_u8()? as usize;
+        if len == 255 {
+            len = reader.read_u16()? as usize;
+            if len < 15 {
+                return Err(Error::InvalidData("xpress-huff: invalid length escape"));
+            }
+            len -= 15;
+        }
+        len += 15;
+    }
+    len += 3;
+    let offset = reader.take(off_bits as i32)? as usize + (1usize << off_bits);
+    if offset > out.len() {
+        return Err(Error::InvalidData("xpress-huff: match offset before start"));
+    }
+    if out.len() + len > max_output {
+        return Err(Error::OutputLimitExceeded { limit: max_output });
+    }
+    let start = out.len() - offset;
+    for i in 0..len {
+        let b = out[start + i];
+        out.push(b);
+    }
+    Ok(())
 }
 
 /// Decode an LZ77+Huffman stream of unknown decompressed size.
@@ -597,6 +636,10 @@ mod tests {
         rt(b"abcdefghijklmnopqrstuvwxyz");
         rt(&[0u8; 70000]); // crosses a block boundary
         rt(b"abcabcabcabcabcabcabcabcabcabcabc");
+        // Symbol 256 is both EOF and a (len=3, dist=1) match: four zero
+        // bytes encode as literal + match-256 + EOF, so the decoder must
+        // not treat a mid-stream 256 as end of data.
+        rt(&[0u8; 4]);
         let mut big = Vec::new();
         for i in 0..50000u32 {
             big.extend_from_slice(&i.to_le_bytes());
@@ -668,5 +711,38 @@ mod tests {
             decode_bounded(&enc, 100),
             Err(Error::OutputLimitExceeded { .. })
         ));
+    }
+
+    #[test]
+    fn stress_roundtrip() {
+        let mut seed = 0x12345u64;
+        let mut next = || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            seed >> 33
+        };
+        for n in 0..=512usize {
+            rt(&vec![0u8; n]);
+            let v: Vec<u8> = (0..n).map(|_| (next() & 0xff) as u8).collect();
+            rt(&v);
+            let v: Vec<u8> = (0..n).map(|_| (next() % 4) as u8).collect();
+            rt(&v);
+        }
+    }
+
+    #[test]
+    fn tolerates_nonzero_trailing_padding() {
+        // Encoders that leave non-zero bits after the final symbol (instead
+        // of zero-padding the tail) put garbage in the register when the
+        // EOF symbol is consumed. Decoding ahead then fails on the truncated
+        // tail, and the trailing 256 must still be accepted as EOF.
+        let data = b"hello hello hello hello hello";
+        let mut enc = encode(data);
+        // The trailing zero word sits just before the final emit word.
+        let n = enc.len();
+        enc[n - 2] = 0x01;
+        assert_eq!(decode(&enc).unwrap(), data);
+        assert_eq!(decode_with_size(&enc, data.len()).unwrap(), data);
     }
 }

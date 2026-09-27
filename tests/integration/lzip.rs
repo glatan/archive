@@ -100,6 +100,12 @@ fn test_lzip_decode_system_compressed_fuzz_regression() {
     use std::process::Command;
 
     let input = include_bytes!("../fixtures/fuzz/lzip_original_compress_1.bin");
+    // Captured `lzip -c` output; the regression check does not require the
+    // system tool.
+    let compressed = include_bytes!("../fixtures/fuzz/lzip_original_compress_1.lz");
+    let decoded = lzip::decode::decode(compressed).unwrap();
+    assert_eq!(decoded, input);
+
     let mut child = match Command::new("lzip")
         .args(["-c"])
         .stdin(std::process::Stdio::piped())

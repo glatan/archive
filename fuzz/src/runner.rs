@@ -15,7 +15,7 @@ use crate::report::{self, FailureInfo, Stats, TestPattern};
 use rand::RngExt;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, hash_map::Entry};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::thread;
@@ -70,6 +70,8 @@ const MIN_RUNTIME_ORACLE_MS: u128 = 2_000;
 const RUNTIME_SIZE_DIVISOR: usize = 32;
 const MAX_ENCODED_SIZE_MULTIPLIER: usize = 128;
 const MAX_ENCODED_SIZE_ABSOLUTE: usize = 16 * 1024 * 1024;
+/// Upper bound on wall-clock time spent minimizing a single failure input.
+const MINIMIZE_BUDGET: Duration = Duration::from_secs(120);
 
 pub fn run(config: &RunConfig) -> Stats {
     let available_tools = external::check_available_tools();
@@ -283,7 +285,7 @@ fn run_iteration(
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
                         .record_failure(pattern);
-                    handle_failure_artifact(state, stats, elapsed, &info);
+                    handle_failure_artifact(state, stats, elapsed, &info, false);
                     continue;
                 }
                 report::log_progress(
@@ -331,14 +333,68 @@ fn run_iteration(
 
                 let original_size = data.len();
                 let original_signature = report::failure_signature(algo, pattern, &error_str);
-                let minimized = minimizer::minimize_failure(data, |candidate| {
-                    reproduces_signature(algo, pattern, candidate, &original_signature)
-                });
+                // Atomically claim the signature bucket so a duplicate
+                // failure — including one raised by another job — skips
+                // minimization. The entry stays at 0 until the artifact for
+                // this occurrence is recorded below.
+                let duplicate_count = {
+                    let mut buckets = state
+                        .failure_buckets
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    match buckets.entry(original_signature.clone()) {
+                        Entry::Occupied(mut entry) => {
+                            *entry.get_mut() += 1;
+                            Some(*entry.get())
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(0);
+                            None
+                        }
+                    }
+                };
+                if let Some(count) = duplicate_count {
+                    report::log_progress_status(
+                        algo,
+                        pattern,
+                        iteration,
+                        data.len(),
+                        elapsed,
+                        state.duration_secs,
+                        "DUP",
+                    );
+                    eprintln!(
+                        "       ↳ duplicate failure bucket count={count} signature={original_signature}"
+                    );
+                    let mut stats = stats.lock().unwrap_or_else(|e| e.into_inner());
+                    stats.record_failure(pattern);
+                    stats.record_duplicate(pattern);
+                    continue;
+                }
+
+                let minimized = minimizer::minimize_failure(
+                    data,
+                    |candidate| reproduces_signature(algo, pattern, candidate, &original_signature),
+                    MINIMIZE_BUDGET,
+                );
                 let minimized_error = execute_case(algo, pattern, &minimized)
                     .err()
-                    .unwrap_or(error_str.clone());
+                    .unwrap_or_else(|| error_str.clone());
                 let minimized_signature =
                     report::failure_signature(algo, pattern, &minimized_error);
+                // The claim covers `minimized_signature` only if minimization
+                // preserved the signature; otherwise release the placeholder
+                // so the real signature is bucketed on its own.
+                let claimed = minimized_signature == original_signature;
+                if !claimed {
+                    let mut buckets = state
+                        .failure_buckets
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    if buckets.get(&original_signature) == Some(&0) {
+                        buckets.remove(&original_signature);
+                    }
+                }
                 let fingerprint = checksum::fingerprint(&minimized);
                 let info = FailureInfo {
                     algo,
@@ -357,7 +413,7 @@ fn run_iteration(
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .record_failure(pattern);
-                handle_failure_artifact(state, stats, elapsed, &info);
+                handle_failure_artifact(state, stats, elapsed, &info, claimed);
             }
         }
     }
@@ -455,7 +511,7 @@ fn run_special_cases(state: &RunState, stats: &Mutex<Stats>, iteration: &mut u64
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
                         .record_failure(TestPattern::Self_);
-                    handle_failure_artifact(state, stats, elapsed, &info);
+                    handle_failure_artifact(state, stats, elapsed, &info, false);
                 }
                 Err(error) => {
                     report::log_progress_status(
@@ -484,7 +540,7 @@ fn run_special_cases(state: &RunState, stats: &Mutex<Stats>, iteration: &mut u64
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
                         .record_failure(TestPattern::Self_);
-                    handle_failure_artifact(state, stats, elapsed, &info);
+                    handle_failure_artifact(state, stats, elapsed, &info, false);
                 }
             }
             *iteration += 1;
@@ -548,6 +604,7 @@ fn handle_failure_artifact(
     stats: &Mutex<Stats>,
     elapsed: u64,
     info: &FailureInfo,
+    claimed: bool,
 ) {
     let duplicate_count = {
         let mut buckets = state
@@ -559,7 +616,10 @@ fn handle_failure_artifact(
         *count
     };
 
-    if duplicate_count == 1 {
+    // A claimed signature belongs to this occurrence: duplicate counts may
+    // already have been recorded while minimization was in flight, but the
+    // artifact must still be saved here.
+    if claimed || duplicate_count == 1 {
         report::emit_failure_json(info);
         report::save_failure(&state.run_dir, info);
         let label = format!(
@@ -714,9 +774,18 @@ fn run_single_test(
         TestPattern::Self_ => {
             let encoded = algorithms::encode_with(algo, data);
             let encoded_size = encoded.len();
-            algorithms::decode_with(algo, &encoded)
-                .map(|decoded| (decoded, encoded_size))
-                .map_err(|e| format!("{e}"))
+            // mtree is a metadata-only manifest: the generated spec carries
+            // no payload, so verify it decodes and echo the input back as
+            // the round-trip result.
+            if algo == Algorithm::Mtree {
+                algorithms::decode_with(algo, &encoded)
+                    .map(|_| (data.to_vec(), encoded_size))
+                    .map_err(|e| format!("{e}"))
+            } else {
+                algorithms::decode_with(algo, &encoded)
+                    .map(|decoded| (decoded, encoded_size))
+                    .map_err(|e| format!("{e}"))
+            }
         }
         TestPattern::OriginalCompress => {
             let compressed = external::compress(algo, data)?;
@@ -914,9 +983,9 @@ mod tests {
 
         let stats = Mutex::new(Stats::default());
         stats.lock().unwrap().record_failure(TestPattern::Self_);
-        handle_failure_artifact(&state, &stats, 0, &info);
+        handle_failure_artifact(&state, &stats, 0, &info, false);
         stats.lock().unwrap().record_failure(TestPattern::Self_);
-        handle_failure_artifact(&state, &stats, 0, &info);
+        handle_failure_artifact(&state, &stats, 0, &info, false);
 
         let json_count = std::fs::read_dir(&tmp)
             .unwrap()
