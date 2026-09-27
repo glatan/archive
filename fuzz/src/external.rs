@@ -262,6 +262,7 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
         // interop is not wired, matching the other raw codecs.
         Algorithm::Vcdiff => None,
         Algorithm::Mppc => None,
+        Algorithm::Lzs => None,
         Algorithm::ZstdSeekable => None,
         Algorithm::Lzsa | Algorithm::Lzsa2 => None,
         Algorithm::Lzrw1 | Algorithm::Lzrw1a => None,

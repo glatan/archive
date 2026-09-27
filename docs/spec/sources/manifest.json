@@ -58,6 +58,14 @@
    "filename": "rfc2118.txt"
   },
   {
+   "id": "rfc2395",
+   "format": "lzs",
+   "title": "IP Payload Compression Using LZS",
+   "version": "RFC 2395 (December 1998)",
+   "url": "https://www.rfc-editor.org/rfc/rfc2395.txt",
+   "filename": "rfc2395.txt"
+  },
+  {
    "id": "zstd-seekable-format",
    "format": "zstd-seekable",
    "title": "Zstandard Seekable Format",
