@@ -70,12 +70,18 @@ specifications or standards documents:
   copied. FreeRDP's mppc.c (Apache-2.0) and rdesktop's mppc.c were
   consulted for behavioral semantics only (e.g. that uncompressed
   packets do not update the history).
-  Patent note: RFC 2118 section 1.1 contains a licensing statement
-  restricting MPPC use to products implementing PPP for the purpose of
-  interoperation; this is recorded here for transparency and does not
-  constitute advice. rdesktop's comments additionally reference the
-  separate Stac/Hi/fn LZS patent family (now expired); MPPC's LZ77
-  token format is distinct from Stac LZS.
+  Licensing statement note (not a patent): RFC 2118 section 1.1
+  contains an explicit field-of-use statement: "MPPC can only be used
+  in products that implement the Point to Point Protocol AND for the
+  sole purpose of interoperating with other MPPC and Point to Point
+  Protocol implementations." This crate is a general-purpose archive/
+  compression library, not a PPP implementation, and ships the codec
+  standalone via the library API, archive-cli --format mppc, and the
+  fuzz harness; readers should be aware of that tension. This is
+  recorded for transparency and does not constitute legal advice.
+  Patent note: rdesktop's comments additionally reference the separate
+  Stac/Hi/fn LZS patent family (now expired); MPPC's LZ77 token format
+  is distinct from Stac LZS.
 - Zstandard Seekable Format: format documentation v0.1.0 by Meta
   Platforms (contrib/seekable_format, permissive redistribution
   notice) and reference implementation (BSD/GPL dual license).

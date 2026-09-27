@@ -2,7 +2,7 @@
 //!
 //! MPPC is an LZ77 variant with an 8192-byte history buffer, designed for
 //! compressing PPP datagrams one packet at a time. Each packet carries a
-//! flags nibble and a 12-bit coherency count (RFC 2118 section 3):
+//! flags nibble and a 12-bit coherency count (RFC 2118 section 3.1):
 //!
 //! ```text
 //! |A|B|C|D|   Coherency Count (12 bits)   | Compressed Data ...
@@ -15,7 +15,7 @@
 //!   is uncompressed data (which still updates the history).
 //! - `D` (`0x1`): reserved, must be zero.
 //!
-//! The token stream is packed MSB-first (RFC 2118 section 4.2.2):
+//! The token stream is packed MSB-first (RFC 2118 section 4.2):
 //!
 //! - literal `< 0x80`: the byte itself; literal `>= 0x80`: `10` + 7 bits.
 //! - copy offset: `<64` -> `1111` + 6 bits, `64..=319` -> `1110` + 8 bits of
@@ -257,7 +257,7 @@ impl Decoder {
                 self.emit(&mut out, b, max_output)?;
                 continue;
             }
-            // Copy token: leading bits '11', then the offset prefix.
+            // Copy token: leading bits '11', then the offset prefix (RFC 2118 section 4.2.1).
             let off = if bits.get()? == 1 {
                 if bits.get()? == 1 {
                     bits.get_bits(6)? as usize // '1111' + 6 bits: 1..=63
@@ -658,5 +658,40 @@ mod tests {
         data.extend_from_slice(b"0123456789"); // offset ~480 (class 320+)
         let packet = encode(&data).unwrap();
         assert_eq!(decode(&packet).unwrap(), data);
+    }
+
+    #[test]
+    fn rejects_history_overflow() {
+        // FLUSHED|COMPRESSED packet producing 8193 bytes: literal 'A',
+        // copy(off=1, len=8191), literal 'B'. The sender must set FRONT
+        // instead of overflowing the history buffer.
+        let mut w = BitWriter::new();
+        put_literal(&mut w, b'A');
+        put_offset(&mut w, 1);
+        put_length(&mut w, 8191);
+        put_literal(&mut w, b'B');
+        let mut packet = vec![0xA0u8, 0x00];
+        packet.extend_from_slice(&w.finish());
+        match decode(&packet) {
+            Err(Error::InvalidData(m)) if m.contains("history overflow") => {}
+            other => panic!("expected history overflow, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_bad_length_class() {
+        // Length class with k > 11 leading ones (more than the 8191
+        // maximum) must be rejected.
+        let mut w = BitWriter::new();
+        put_literal(&mut w, b'A');
+        put_offset(&mut w, 1);
+        w.put(0xFFF, 12); // 12 leading ones -> k = 12
+        w.put(0, 1);
+        let mut packet = vec![0xA0u8, 0x00];
+        packet.extend_from_slice(&w.finish());
+        match decode(&packet) {
+            Err(Error::InvalidData(m)) if m.contains("bad match length") => {}
+            other => panic!("expected bad match length, got {other:?}"),
+        }
     }
 }
