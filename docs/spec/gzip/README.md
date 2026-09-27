@@ -2,6 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
+| 基準仕様 | [RFC 1952](https://www.rfc-editor.org/rfc/rfc1952.txt) — GZIP file format specification version 4.3 (ローカルスナップショット: `docs/spec/sources/rfc1952.txt`) |
 | 仕様メモ | 仕様にテストベクターは含まれないが、Appendix 8 に CRC32 リファレンス実装 (ポリノミアル `0xEDB88320`) がある |
 
 ### テスト対象要件と網羅状況

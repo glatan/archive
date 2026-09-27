@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | LZ4 フレームフォーマット仕様 (https://github.com/lz4/lz4/blob/dev/doc/lz4_Frame_format.md) |
+| 基準仕様 | [LZ4 Frame Format spec 1.6.2](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Frame_format.md) / [LZ4 Block Format spec 1.3.1](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) (lz4 v1.9.4 `doc/` ピン留め、ローカルスナップショット: `docs/spec/sources/lz4_frame_format_1.6.2.md` / `lz4_block_format_1.3.1.md`) |
 
 ## 対応バリアント・仕様版
 

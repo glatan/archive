@@ -2,6 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
+| 基準仕様 | upstream rzip 2.1 (Andrew Tridgell) の `.rz` container。ソースコードが規範。upstream site (`rzip.samba.org`) は現在 503 で到達不能のため Debian ミラーを参照: [ソース rzip 2.1-5](https://sources.debian.org/src/rzip/2.1-5/)、[rzip(1) man page](https://manpages.debian.org/unstable/rzip/rzip.1.en.html) (CLI 仕様) |
 | current scope | decoder は upstream `rzip.samba.org` `.rz` container の 24-byte file header、2-stream chunk multiplex、raw / bzip2 stream payloadを対象にする。encoder は同 subset の crate roundtrip と、text / binary / level-1 multi-chunk payload に対する system `rzip -d` 相互運用を提供する |
 | intentional scope | upstream option matrix 全体や未検証 payload 分布までの blanket parity は主張しない (encode-side system interop は検証済み subset に限定) |
 | token layer | long-range match tokenization は shared `rzip` core として `lrzip` でも再利用する |

@@ -1,5 +1,9 @@
 # cpio (`odc` / SVR4 `newc` / `newcrc`)
 
+| 項目 | 内容 |
+|------|------|
+| 基準仕様 | [POSIX.1-2001 cpio/pax](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/pax.html) (`odc`)。SVR4 `newc` / `newcrc` は [FreeBSD `cpio(5)` man page](https://man.freebsd.org/cgi/man.cgi?cpio(5)) 等の de facto 記述に準拠 (ローカルスナップショット: `docs/spec/sources/posix_pax_9699919799.html` / `cpio_5_freebsd.html`) |
+
 ## 対応バリアント・仕様版
 
 | バリアント | 仕様根拠 | decode | encode | 備考 |

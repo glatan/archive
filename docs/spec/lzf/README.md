@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 形式概要 | Marc Lehmann の liblzf が使用する raw LZ77 ストリーム。コンテナヘッダ・magic・チェックサムを持たない制御バイト列 |
-| 基準仕様 | liblzf ソース内フォーマット記述 (`lzfP.h` / `lzf_c.c`、Marc Alexander Lehmann、BSD license) + ning/compress `LZFFormat` ドキュメント |
+| 基準仕様 | [liblzf](http://cvs.schmorp.de/liblzf/) ソース内フォーマット記述 ([`lzf_c.c`](https://github.com/nemequ/liblzf/blob/master/lzf_c.c) 冒頭コメント / `lzfP.h`、Marc Alexander Lehmann、BSD license、GitHub mirror: [nemequ/liblzf](https://github.com/nemequ/liblzf)) + [ning/compress](https://github.com/ning/compress) `LZFFormat` ドキュメント。ローカルスナップショット: `docs/spec/sources/liblzf_lzf_c.c` |
 | 実装 | `archive::compress::lzf` (decode / decode_bounded / encode)。仕様記述からの pure-Rust 実装 |
 
 ## ストリーム構造

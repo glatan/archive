@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 形式概要 | IBM CMPSC (Compression Call) 命令の基本方式。静的辞書を使う LZ78 系で、圧縮出力は固定長 index symbol (9-13bit、辞書エントリ数 512/1K/2K/4K/8K に対応) の MSB-first 連結 |
-| 基準仕様 | z/Architecture Principles of Operation (SA22-7832-12) Chapter 7 COMPRESSION CALL + Appendix D "Compression Call Facility"。辞書フォーマット自体は IBM ESA/390 Data Compression (SA22-7208) が正本。コンテナは PKWARE APPNOTE.TXT §5.17 (method 16) |
+| 基準仕様 | [z/Architecture Principles of Operation (SA22-7832-12)](https://publibfp.boulder.ibm.com/epubs/pdf/a227832c.pdf) Chapter 7 COMPRESSION CALL + Appendix D "Compression Call Facility"。辞書フォーマット自体は IBM [ESA/390 Data Compression (SA22-7208)](https://www.ibm.com/resources/publications/OutputPubsDetails?PubID=SA22720801) (BKMGR softcopy) が正本。コンテナは PKWARE [APPNOTE.TXT](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) §5.17 (method 16)。補助解説: [Hercules README.CMPSC.md](https://github.com/SDL-Hercules-390/hyperion/blob/master/readme/README.CMPSC.md)。ローカルスナップショット: `docs/spec/sources/sa22-7832-12.pdf` |
 | 実装 | `archive::compress::cmpsc` (expand / compress / decode / encode)。pure-Rust 実装 |
 
 ## スコープ
@@ -56,9 +56,9 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 18 | `compress` は caller 提供の圧縮辞書 (format-0 SD のみ) で unordered comparison を行う。辞書生成 (キャリブレーション) は scope 外 | — | ✅ | `cmpsc_compress_expand_roundtrip` (統合) |
-| 19 | `encode` は alphabet-only 辞書の method-16 ストリームを出力 (1 byte = 1 index symbol、非圧縮)。LZXD uncompressed encoder と同じく往復・相互運用検証用 (intentional scope) | — | ✅ | `cmpsc_method16_roundtrip` (統合) |
-| 20 | CLI `cmpsc` format は method-16 コンテナのみ扱う。生の index symbol 列は辞書・symsize が out-of-band なので自動検出しない | — | ✅ | `archive compress cmpsc` / `extract --format cmpsc` |
+| 18 | `compress` は caller 提供の圧縮辞書 (format-0 SD のみ) で unordered comparison を行う。辞書生成 (キャリブレーション) は scope 外 | crate-local | ✅ | `cmpsc_compress_expand_roundtrip` (統合) |
+| 19 | `encode` は alphabet-only 辞書の method-16 ストリームを出力 (1 byte = 1 index symbol、非圧縮)。LZXD uncompressed encoder と同じく往復・相互運用検証用 (intentional scope) | crate-local | ✅ | `cmpsc_method16_roundtrip` (統合) |
+| 20 | CLI `cmpsc` format は method-16 コンテナのみ扱う。生の index symbol 列は辞書・symsize が out-of-band なので自動検出しない | crate-local | ✅ | `archive compress cmpsc` / `extract --format cmpsc` |
 
 ## ライセンス / 出自
 

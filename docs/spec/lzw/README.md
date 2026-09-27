@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | 正式な RFC はなく、`ncompress` (`compress42.c`) のデファクト標準に準拠 |
+| 基準仕様 | [`ncompress`](https://github.com/vapier/ncompress) ([`compress42.c` @ ncompress-4.2.4](https://github.com/vapier/ncompress/blob/ncompress-4.2.4/compress42.c)、Unlicense、ローカルスナップショット: `docs/spec/sources/ncompress_4.2.4_compress42.c`) のデファクト標準に準拠 |
 
 ### テスト対象要件と網羅状況
 

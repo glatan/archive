@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | IIPC WARC 1.1 仕様 (実際の参照ソース)。WARC 1.0 側は ISO 28500:2009 の版番号参照のみで、規格本文は未参照 |
+| 基準仕様 | [IIPC WARC 1.1 仕様](https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1/) (実際の参照ソース、ローカルスナップショット: `docs/spec/sources/warc_1.1.html`)。WARC 1.0 側は ISO 28500:2009 の版番号参照のみで、規格本文は未参照 |
 | 形式概要 | `version-line CRLF *(named-field CRLF) CRLF block CRLF CRLF` の繰り返し。version-line は `WARC/1.0` / `WARC/1.1`。named-field は `token ":" SP* value` (LWS folding あり)。block は `Content-Length` octet |
 | 実装範囲 | **read のみ** (write は intentional scope 外)。`.warc.gz` は gzip として伸張してから decode する |
 

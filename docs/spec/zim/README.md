@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | openZIM Wiki "ZIM file format" (wiki.openzim.org) |
+| 基準仕様 | openZIM Wiki "[ZIM file format](https://wiki.openzim.org/wiki/ZIM_file_format)" (ローカルスナップショット: `docs/spec/sources/zim_file_format.html`) |
 | 形式概要 | 80B header + MIME list + path/title pointer list + dirent + cluster pointer list + blob cluster |
 | 実装範囲 | **read のみ** (write / MIME メタデータ / title index / archive checksum 検証は intentional scope 外) |
 
@@ -57,7 +57,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 17 | write / encode | — | ❌ | read-only reader として設計 |
+| 17 | write / encode | crate-local | ❌ | read-only reader として設計 |
 | 18 | archive MD5 checksum 検証 | Header checksumPos | ❌ | パースのみ (検証は行わない) |
 | 19 | title pointer list / fulltext index の検索 API | Title Pointer List | ❌ | archive listing/extract には path index のみ使用 |
 | 20 | MIME type メタデータの公開 | MIME Type List | ❌ | コンテンツ種別は `ArchiveEntry` に含めない |

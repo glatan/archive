@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | RFC 7932 (2016) — Brotli Compressed Data Format |
+| 基準仕様 | [RFC 7932](https://www.rfc-editor.org/rfc/rfc7932.txt) (2016) — Brotli Compressed Data Format (ローカルスナップショット: `docs/spec/sources/rfc7932.txt`) |
 | decoder scope | §4-§11 の全必須デコードパス (prefix codes, distances, insert/copy lengths, context modeling, static dictionary, sliding window) を実装 |
 | public encoder scope | §9.1 stream header + §9.2 の uncompressed metablock / metadata metablock / LZ77 compressed metablock (insert+copy command, complex/simple prefix codes, distance encoding, context modeling, static dictionary usage, multi-block-type) を提供 |
 

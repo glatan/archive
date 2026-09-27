@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | FreeBSD `mtree(5)` man page + libarchive `archive_read_support_format_mtree` 挙動 |
+| 基準仕様 | [mtree(5) man page](https://man.freebsd.org/cgi/man.cgi?mtree(5)) (FreeBSD、ローカルスナップショット: `docs/spec/sources/mtree_5_freebsd.html`) + libarchive [`archive_read_support_format_mtree.c`](https://github.com/libarchive/libarchive/blob/master/libarchive/archive_read_support_format_mtree.c) 挙動 |
 | 形式概要 | 行指向テキスト。`#`コメント/`#mtree` signature、`/set`・`/unset`、相対・full path エントリ、`..` でディレクトリ遡上 |
 | 実装範囲 | **read のみ**。ファイル内容を持たないマニフェスト形式のため `ArchiveEntry::data` は常に空 |
 
@@ -58,6 +58,6 @@
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 20 | write / encode | — | ❌ | read-only parser として設計 |
+| 20 | write / encode | crate-local | ❌ | read-only parser として設計 |
 | 21 | `contents=`/`ignore`/`nochange`/`flags`/`cksum`/`nlink` のセマンティクス適用 | Keywords | ❌ | キーワードは受理するが属性検証ツールとしての意味解釈は対象外 |
 | 22 | digest の実ファイル照合 | Keywords | ❌ | mtree はファイルシステム監査用であり、本ライブラリは manifest の構造パースのみ |

@@ -2,6 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
+| 基準仕様 | [RFC 1951](https://www.rfc-editor.org/rfc/rfc1951.txt) — DEFLATE Compressed Data Format Specification version 1.3 (ローカルスナップショット: `docs/spec/sources/rfc1951.txt`) |
 | 仕様メモ | 仕様にテストベクターは含まれず、ハフマン符号構築例 (bit lengths `[3,3,3,3,3,2,4,4]`) が主要な具体例 |
 
 ### テスト対象要件と網羅状況

@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | 正式な RFC はなく、POSIX.1-2001 / IEEE Std 1003.1 の tar ヘッダー仕様に準拠 |
+| 基準仕様 | [POSIX.1-2001 / IEEE Std 1003.1](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/pax.html) の tar ヘッダー仕様および [GNU tar manual "Formats"](https://www.gnu.org/software/tar/manual/html_node/Formats.html) に準拠 (ローカルスナップショット: `docs/spec/sources/posix_pax_9699919799.html` / `gnu_tar_formats.html`) |
 | current scope | decoder は UStar / GNU 拡張 / PAX 拡張を自動認識し、encoder は GNU モード (デフォルト) と PAX モードを選択可能 |
 
 ## 対応バリアント・仕様版

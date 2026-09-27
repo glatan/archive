@@ -217,6 +217,175 @@
       "note": "低レイヤ codec (ZPAQL VM / predictor component / block・model 構造) の公式仕様。crate-local archive/journaling 層は対象外のため bounded contract と併用",
       "url": "https://mattmahoney.net/dc/zpaq206.pdf",
       "filename": "zpaq206.pdf"
+    },
+    {
+      "id": "ms-patch-pdf",
+      "format": "lzxd",
+      "title": "[MS-PATCH] LZX DELTA Compression and Decompression",
+      "version": "rev 14.1 (2025-08-19)",
+      "url": "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-PATCH/%5bMS-PATCH%5d-250819.pdf",
+      "filename": "ms-patch_14.1_250819.pdf"
+    },
+    {
+      "id": "ms-cab-pdf",
+      "format": "mscab",
+      "title": "[MS-CAB] Cabinet File Format",
+      "version": "2011-03-04 (Open Specifications PDF)",
+      "url": "https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf",
+      "filename": "ms-cab_20110304.pdf"
+    },
+    {
+      "id": "ms-xca-pdf",
+      "format": "xca",
+      "title": "[MS-XCA] Xpress Compression Algorithm",
+      "version": "rev 10.0 (2024-04-23)",
+      "url": "https://winprotocoldocs-bhdugrdyduf5h2e4.b02.azurefd.net/MS-XCA/%5bMS-XCA%5d-240423.pdf",
+      "filename": "ms-xca_10.0_240423.pdf"
+    },
+    {
+      "id": "7z-format-txt",
+      "format": "sevenz",
+      "title": "7zFormat.txt",
+      "version": "ip7z/7zip main (LZMA SDK 26.00 同梱文書相当)",
+      "url": "https://raw.githubusercontent.com/ip7z/7zip/main/DOC/7zFormat.txt",
+      "filename": "7zformat.txt"
+    },
+    {
+      "id": "7z-methods-txt",
+      "format": "sevenz",
+      "title": "Methods.txt",
+      "version": "ip7z/7zip main (LZMA SDK 26.00 同梱文書相当)",
+      "url": "https://raw.githubusercontent.com/ip7z/7zip/main/DOC/Methods.txt",
+      "filename": "7z_methods.txt"
+    },
+    {
+      "id": "ncompress-compress42",
+      "format": "lzw",
+      "title": "ncompress compress42.c (de facto spec、フォーマット記述はソース内コメント)",
+      "version": "ncompress-4.2.4",
+      "url": "https://raw.githubusercontent.com/vapier/ncompress/ncompress-4.2.4/compress42.c",
+      "filename": "ncompress_4.2.4_compress42.c"
+    },
+    {
+      "id": "bzip2-format-dsnet",
+      "format": "bzip2",
+      "title": "BZIP2: Format Specification (Joe Tsai、非公式逆解析文書)",
+      "version": "dsnet/compress master",
+      "note": "非公式。bzip2-1.0.6 参照実装からの逆解析。一次情報源は引き続き参照実装",
+      "url": "https://raw.githubusercontent.com/dsnet/compress/master/doc/bzip2-format.pdf",
+      "filename": "bzip2-format_dsnet.pdf"
+    },
+    {
+      "id": "lrzip-magic-header",
+      "format": "lrzip",
+      "title": "lrzip doc/magic.header.txt (.lrz file format)",
+      "version": "ckolivas/lrzip master",
+      "url": "https://raw.githubusercontent.com/ckolivas/lrzip/master/doc/magic.header.txt",
+      "filename": "lrzip_magic.header.txt"
+    },
+    {
+      "id": "lha-header-doc",
+      "format": "lha",
+      "title": "LHa for UNIX header.doc (level 0/1/2 + extended header、英語版)",
+      "version": "jca02266/lha master",
+      "url": "https://raw.githubusercontent.com/jca02266/lha/master/header.doc.md",
+      "filename": "lha_header.doc.md"
+    },
+    {
+      "id": "lzrw1a-source",
+      "format": "lzrw1a",
+      "title": "lzrw1-a.c ('DEFINITION OF COMPRESSED FILE FORMAT' 節がフォーマット記述)",
+      "version": "LZRW1-A (Ross N. Williams, 1991、funet mirror)",
+      "url": "https://ftp.funet.fi/pub/misc/compression/lzrw1-a.c",
+      "filename": "lzrw1-a.c"
+    },
+    {
+      "id": "lzrw1a-notes",
+      "format": "lzrw1a",
+      "title": "lzrw1-a.txt (release/format notes)",
+      "version": "LZRW1-A (1991、funet mirror)",
+      "url": "https://ftp.funet.fi/pub/misc/compression/lzrw1-a.txt",
+      "filename": "lzrw1-a.txt"
+    },
+    {
+      "id": "liblzf-source",
+      "format": "lzf",
+      "title": "liblzf lzf_c.c (フォーマット記述は冒頭コメント)",
+      "version": "nemequ/liblzf master (liblzf 3.x CVS mirror)",
+      "url": "https://raw.githubusercontent.com/nemequ/liblzf/master/lzf_c.c",
+      "filename": "liblzf_lzf_c.c"
+    },
+    {
+      "id": "fastlz-source",
+      "format": "fastlz",
+      "title": "fastlz.c (de facto spec、MIT)",
+      "version": "ariya/FastLZ master",
+      "url": "https://raw.githubusercontent.com/ariya/FastLZ/master/fastlz.c",
+      "filename": "fastlz.c"
+    },
+    {
+      "id": "linux-lzo-doc",
+      "format": "lzo",
+      "title": "Linux kernel Documentation/staging/lzo.rst (LZO1X byte code format)",
+      "version": "torvalds/linux master",
+      "url": "https://raw.githubusercontent.com/torvalds/linux/master/Documentation/staging/lzo.rst",
+      "filename": "linux_lzo.rst"
+    },
+    {
+      "id": "arc-format-corion",
+      "format": "arc",
+      "title": "The ARC Archive File Format (wotsit 'arc' entry の fileformat.info mirror)",
+      "version": "fileformat.info mirror (unstable)",
+      "url": "https://www.fileformat.info/format/arc/corion.htm",
+      "filename": "arc_format_corion.htm"
+    },
+    {
+      "id": "posix-pax",
+      "format": "tar/cpio",
+      "title": "POSIX.1-2017 pax — extended tar/ustar & cpio formats",
+      "version": "IEEE Std 1003.1-2017 (onlinepubs 9699919799)",
+      "url": "https://pubs.opengroup.org/onlinepubs/9699919799/utilities/pax.html",
+      "filename": "posix_pax_9699919799.html"
+    },
+    {
+      "id": "gnu-tar-formats",
+      "format": "tar",
+      "title": "GNU tar manual: Controlling Archive Format / Formats",
+      "version": "GNU tar manual (unstable)",
+      "url": "https://www.gnu.org/software/tar/manual/html_node/Formats.html",
+      "filename": "gnu_tar_formats.html"
+    },
+    {
+      "id": "cpio-5-freebsd",
+      "format": "cpio",
+      "title": "cpio(5) — FreeBSD man page (newc/crc format)",
+      "version": "FreeBSD man page",
+      "url": "https://man.freebsd.org/cgi/man.cgi?cpio(5)",
+      "filename": "cpio_5_freebsd.html"
+    },
+    {
+      "id": "posix-ar",
+      "format": "ar",
+      "title": "POSIX.1-2017 ar utility (archive format notes)",
+      "version": "IEEE Std 1003.1-2017",
+      "url": "https://pubs.opengroup.org/onlinepubs/9699919799/utilities/ar.html",
+      "filename": "posix_ar_9699919799.html"
+    },
+    {
+      "id": "ar-5-freebsd",
+      "format": "ar",
+      "title": "ar(5) — FreeBSD man page (archive format)",
+      "version": "FreeBSD man page",
+      "url": "https://man.freebsd.org/cgi/man.cgi?ar(5)",
+      "filename": "ar_5_freebsd.html"
+    },
+    {
+      "id": "zarch-pop-12",
+      "format": "cmpsc",
+      "title": "z/Architecture Principles of Operation",
+      "version": "SA22-7832-12 (Thirteenth Edition, 2019-09)",
+      "url": "https://publibfp.boulder.ibm.com/epubs/pdf/a227832c.pdf",
+      "filename": "sa22-7832-12.pdf"
     }
   ],
   "no_url_available": [
@@ -225,133 +394,88 @@
       "format": "bzip2",
       "title": "bzip2 reference implementation",
       "version": "1.0.8",
-      "note": "正式な仕様書なし。リファレンス実装がデファクト仕様"
+      "note": "正式な仕様書なし。リファレンス実装がデファクト仕様。非公式逆解析仕様は sources/bzip2-format_dsnet.pdf にスナップショット済み",
+      "reference_url": ["https://www.sourceware.org/bzip2/", "https://www.sourceware.org/bzip2/manual/manual.html"]
     },
     {
-      "id": "7z-format",
-      "format": "sevenz",
-      "title": "7zFormat.txt + Methods.txt",
-      "version": "LZMA SDK 26.00",
-      "note": "LZMA SDK アーカイブ内に同梱。DOC/7zFormat.txt, DOC/Methods.txt"
-    },
-    {
-      "id": "lzo-kernel",
+      "id": "lzop-format",
       "format": "lzo",
-      "title": "Linux kernel Documentation/lzo.txt + lzop format",
-      "version": "kernel 6.x",
-      "note": "LZO1X-1 バイトコード仕様。lzop ファイルフォーマットは lzop ソースコード参照"
+      "title": "lzop file format (lzop.h / p_lzo.c)",
+      "version": "lzop 1.x",
+      "note": "lzop コンテナ層の書面仕様なし。ソースコードが規範。LZO1X バイトコード仕様は sources/linux_lzo.rst にスナップショット済み",
+      "reference_url": "https://www.lzop.org/"
     },
     {
       "id": "lzw-ncompress",
       "format": "lzw",
       "title": "ncompress (compress42.c)",
       "version": "4.2.4",
-      "note": "正式な仕様書なし。Unix compress .Z フォーマットのデファクト標準"
+      "note": "正式な仕様書なし。Unix compress .Z フォーマットのデファクト標準。参照実装は sources/ncompress_4.2.4_compress42.c にスナップショット済み",
+      "reference_url": "https://github.com/vapier/ncompress"
     },
     {
       "id": "rzip-format",
       "format": "rzip",
       "title": "rzip .rz format",
       "version": "rzip 2.1",
-      "note": "rzip.samba.org。ソースコードが仕様"
+      "note": "rzip.samba.org (現在 503)。ソースコードが仕様。Debian ミラー: sources.debian.org/src/rzip/2.1-5",
+      "reference_url": ["https://rzip.samba.org/", "https://sources.debian.org/src/rzip/2.1-5/", "https://manpages.debian.org/unstable/rzip/rzip.1.en.html"]
     },
     {
-      "id": "lrzip-format",
-      "format": "lrzip",
-      "title": "lrzip .lrz format",
-      "version": "lrzip 0.651",
-      "note": "ソースコードが仕様"
-    },
-    {
-      "id": "tar-posix",
-      "format": "tar",
-      "title": "POSIX.1-1988 UStar / GNU 拡張 / POSIX.1-2001 PAX",
-      "version": "IEEE Std 1003.1-2017",
-      "note": "有償仕様書。GNU tar / POSIX 仕様のドラフトから参照"
-    },
-    {
-      "id": "cpio-posix",
-      "format": "cpio",
-      "title": "POSIX odc / SVR4 newc / newcrc",
-      "version": "IEEE Std 1003.1-2017",
-      "note": "有償仕様書。man cpio(5) / SVR4 ソースから参照"
-    },
-    {
-      "id": "ar-posix",
-      "format": "ar",
-      "title": "IEEE Std 1003.1 / GNU ar / BSD ar",
-      "version": "IEEE Std 1003.1-2017",
-      "note": "有償仕様書。man ar(5) / binutils ソースから参照"
-    },
-    {
-      "id": "ms-patch",
-      "format": "lzxd",
-      "title": "[MS-PATCH] LZX DELTA Compression and Decompression",
-      "version": "Microsoft Open Specifications 2025-08-19",
-      "note": "learn.microsoft.com で公開 (HTML/PDF)。固定テキスト URL がなく fetch 対象外"
-    },
-    {
-      "id": "ms-xca",
-      "format": "xca",
-      "title": "[MS-XCA] Xpress Compression Algorithm",
-      "version": "Microsoft Open Specifications",
-      "note": "learn.microsoft.com / MicrosoftDocs/open_specs の複数 markdown に分割。単一ファイル URL なし"
-    },
-    {
-      "id": "ms-cab",
-      "format": "mscab",
-      "title": "[MS-CAB] Cabinet File Format",
-      "version": "Microsoft Open Specifications",
-      "note": "同上。sectioned markdown で単一ファイル URL なし"
-    },
-    {
-      "id": "cmpsc-pop",
+      "id": "sa22-7208",
       "format": "cmpsc",
-      "title": "z/Architecture Principles of Operation (SA22-7832) + ESA/390 Data Compression (SA22-7208)",
-      "version": "SA22-7832-12 / SA22-7208-03",
-      "note": "IBM publib の大型 PDF (BKMGR 専用含む)。直 fetch 可能なテキスト URL なし"
+      "title": "IBM ESA/390 Data Compression (SA22-7208)",
+      "version": "SA22-7208-03",
+      "note": "IBM Publications の BKMGR softcopy 形式のみで直 fetch 可能なテキスト/PDF URL なし (BookManager リーダー経由)。POP SA22-7832-12 は sources/sa22-7832-12.pdf にスナップショット済み",
+      "reference_url": "https://www.ibm.com/resources/publications/OutputPubsDetails?PubID=SA22720801"
     },
     {
       "id": "fastlz-reference",
       "format": "fastlz",
       "title": "fastlz.c (Ariya Hidayat)",
       "version": "fastlz 2007-11-06",
-      "note": "正式な仕様書なし。参照実装ソースがデファクト仕様 (MIT)"
+      "note": "正式な仕様書なし。参照実装ソースがデファクト仕様 (MIT)。sources/fastlz.c にスナップショット済み",
+      "reference_url": "https://github.com/ariya/FastLZ"
     },
     {
       "id": "lzrw1a-reference",
       "format": "lzrw1a",
       "title": "lzrw1-a.c 'DEFINITION OF COMPRESSED FILE FORMAT'",
       "version": "LZRW1-A (Ross N. Williams, 1991)",
-      "note": "仕様はソース内コメントに同梱。安定 URL なし (public domain)"
+      "note": "仕様はソース内コメントに同梱 (public domain)。sources/lzrw1-a.c・lzrw1-a.txt にスナップショット済み",
+      "reference_url": ["http://www.ross.net/compression/lzrw1a.html", "https://ftp.funet.fi/pub/misc/compression/"]
     },
     {
       "id": "lzf-reference",
       "format": "lzf",
       "title": "liblzf lzf_c.c / lzf_d.c format description",
       "version": "liblzf 3.6",
-      "note": "正式な仕様書なし。ソース内コメントがデファクト仕様 (BSD-2)"
+      "note": "正式な仕様書なし。ソース内コメントがデファクト仕様 (BSD-2)。sources/liblzf_lzf_c.c にスナップショット済み",
+      "reference_url": ["http://cvs.schmorp.de/liblzf/", "https://github.com/nemequ/liblzf"]
     },
     {
       "id": "lha-format",
       "format": "lha",
       "title": "LHA header format (level 0/1/2)",
       "version": "de facto (jLHA notes 等)",
-      "note": "正式標準なし。GNU LHA ドキュメント・lha-for-unix の note 記述を参照 (コード複製なし)"
+      "note": "正式標準なし。LHa for UNIX の header.doc.md は sources/lha_header.doc.md にスナップショット済み。apphead / lzh_note 原本はアーカイブサイト散在",
+      "reference_url": ["https://github.com/jca02266/lha/blob/master/header.doc.md", "http://justsolve.archiveteam.org/wiki/LHarc"]
     },
     {
       "id": "arj-format",
       "format": "arj",
       "title": "ARJ archive format / TECHNOTE.ARJ",
       "version": "ARJ 2.x de facto",
-      "note": "正式標準なし。TECHNOTE.ARJ (ARJ 配布物同梱) 相当の記述を参照"
+      "note": "正式標準なし。TECHNOTE.TXT (ARJ/UNARJ 配布物同梱) 相当の記述を参照。安定な単一ファイル URL なし",
+      "reference_url": "http://fileformats.archiveteam.org/wiki/ARJ"
     },
     {
       "id": "arc-format",
       "format": "arc",
       "title": "ARC file format (System Enhancement Associates)",
       "version": "ARC 5.x/6.x de facto",
-      "note": "正式標準なし。arc file format の古い文書類を参照"
+      "note": "正式標準なし。wotsit 'arc' entry の fileformat.info mirror を sources/arc_format_corion.htm にスナップショット済み",
+      "reference_url": "https://www.fileformat.info/format/arc/corion.htm"
     }
   ]
 }

@@ -2,20 +2,20 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | [MS-CAB] Cabinet File Format (Microsoft Open Specifications) |
+| 基準仕様 | [[MS-CAB]](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) Cabinet File Format (Microsoft Open Specifications、2011-03-04 版 PDF。HTML 版: <https://learn.microsoft.com/en-us/previous-versions/bb417343(v=msdn.10)>、ローカルスナップショット: `docs/spec/sources/ms-cab_20110304.pdf`) |
 | 形式概要 | CFHEADER + CFFOLDER 配列 + CFFILE 配列 + CFDATA ブロック列。フォルダ単位で圧縮 |
 | 実装範囲 | **read のみ** (write / Quantum / LZX / multi-cabinet set は intentional scope 外) |
 
-参照: <https://learn.microsoft.com/openspecs/windows_protocols/ms-cab/>
+参照: <https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf>
 
 ## 対応バリアント・仕様版
 
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
-| compression NONE | [MS-CAB](https://learn.microsoft.com/openspecs/windows_protocols/ms-cab/) | ✅ | — | read のみ (write は intentional scope 外) |
-| compression MSZIP | [MS-CAB](https://learn.microsoft.com/openspecs/windows_protocols/ms-cab/) + [RFC 1951](https://www.rfc-editor.org/rfc/rfc1951.txt) | ✅ | — | `compress::deflate` 再利用 |
-| compression Quantum / LZX | [MS-CAB](https://learn.microsoft.com/openspecs/windows_protocols/ms-cab/) | ❌ | — | intentional scope (1997 文書版 LZX の誤記・Quantum 仕様不在) |
-| multi-cabinet set | [MS-CAB](https://learn.microsoft.com/openspecs/windows_protocols/ms-cab/) | ❌ | — | 単一キャビネットのみ |
+| compression NONE | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) | ✅ | — | read のみ (write は intentional scope 外) |
+| compression MSZIP | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) + [RFC 1951](https://www.rfc-editor.org/rfc/rfc1951.txt) | ✅ | — | `compress::deflate` 再利用 |
+| compression Quantum / LZX | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) | ❌ | — | intentional scope (1997 文書版 LZX の誤記・Quantum 仕様不在) |
+| multi-cabinet set | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) | ❌ | — | 単一キャビネットのみ |
 
 ### ヘッダ / エントリ構造
 
@@ -66,7 +66,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 21 | write / encode | — | ❌ | read-only reader として設計 |
+| 21 | write / encode | crate-local | ❌ | read-only reader として設計 |
 | 22 | tcompTYPE_QUANTUM (2) | MS-CAB §3.1 | ❌ | Quantum codec の厳密仕様が MS-CAB 内に完結しない (cf. 対象外フォーマット一覧) |
 | 23 | tcompTYPE_LZX (3) | MS-CAB §3.1 | ❌ | CAB 用 LZX は公開文書の既知誤記を正誤判定できず厳密実装不能 (同上) |
 | 24 | multi-cabinet set (.set / disk spanning) | MS-CAB §2.1, §2.3 | ❌ | 他キャビネットのデータが必要なため単一ファイル reader では再構成不能 |

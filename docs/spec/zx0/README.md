@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 形式概要 | Einar Saukas の ZX0 v2 が使用する raw LZ77 ストリーム。制御ビット列とデータバイトがインターリーブする形式で、8bit CPU での高速伸張に最適化されている。magic・コンテナヘッダ・チェックサムは持たない |
-| 基準仕様 | README "File Format" + 参照実装 `dzx0.c` / `compress.c` (Einar Saukas, BSD 3-Clause) |
+| 基準仕様 | [ZX0 README](https://github.com/einar-saukas/ZX0) "File Format" (ローカルスナップショット: `docs/spec/sources/zx0_README_v2.2.md`) + 参照実装 `dzx0.c` / `compress.c` (Einar Saukas, BSD 3-Clause) |
 | 実装 | `archive::compress::zx0` (decode / decode_bounded / encode)。pure-Rust 実装 |
 
 ## 対応バリアント・仕様版

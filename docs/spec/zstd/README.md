@@ -2,6 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
+| 基準仕様 | [RFC 8878](https://www.rfc-editor.org/rfc/rfc8878.txt) — Zstandard Compression and the 'application/zstd' Media Type (ローカルスナップショット: `docs/spec/sources/rfc8878.txt`) |
 | 仕様メモ | Appendix A に事前定義 FSE デコードテーブル (全ステート値)、§3.1.1.5 に repeat offset の動作例テーブルがある |
 | public encoder の current scope | Raw/RLE/Compressed block path、frame header/checksum、dictionary ID metadata まで |
 | `cfg(test)` 下の内部実装 | public encoder は predefined FSE/Huffman ベースの compressed block path を使う。custom FSE table 生成・比較の regression helper 群は引き続き `cfg(test)` 下の内部検証用実装 |

@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 形式概要 | Emmanuel Marty らの LZSA。ストリーム形式 (`7b 9e` magic + traits + 64KiB フレーム列 + EOD フレーム) と、LZSA1 / LZSA2 という 2 種類のブロックフォーマットから構成される |
-| 基準仕様 | `emmanuel-marty/lzsa` リポジトリの `StreamFormat.md` / `BlockFormat_LZSA1.md` / `BlockFormat_LZSA2.md` (v1.4.1)。参照実装は zlib license (`src/matchfinder.c` のみ CC0) |
+| 基準仕様 | [`emmanuel-marty/lzsa`](https://github.com/emmanuel-marty/lzsa) リポジトリの [`StreamFormat.md`](https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/StreamFormat.md) / [`BlockFormat_LZSA1.md`](https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/BlockFormat_LZSA1.md) / [`BlockFormat_LZSA2.md`](https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/BlockFormat_LZSA2.md) (v1.4.1、ローカルスナップショット: `docs/spec/sources/lzsa_*_1.4.1.md`)。参照実装は zlib license (`src/matchfinder.c` のみ CC0) |
 | 実装 | `archive::compress::lzsa` (decode / decode_bounded / decode_lzsa1_block / decode_lzsa2_block / encode / encode_lzsa2)。pure-Rust 実装 |
 
 ## 対応バリアント・仕様版
