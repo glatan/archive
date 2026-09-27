@@ -226,6 +226,14 @@
       "filename": "zx2_README_v1.1.md"
     },
     {
+      "id": "zx5-readme",
+      "format": "zx5",
+      "title": "ZX5 README 'File Format'",
+      "version": "ZX5 v2.0 (git main、タグなし)",
+      "url": "https://raw.githubusercontent.com/einar-saukas/ZX5/main/README.md",
+      "filename": "zx5_README_v2.0.md"
+    },
+    {
       "id": "zpaq-format",
       "format": "zpaq",
       "title": "ZPAQ Level 1 and Level 2 specification",

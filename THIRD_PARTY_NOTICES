@@ -42,6 +42,10 @@ specifications or standards documents:
   Known-answer decode vectors in tests/integration/zx2.rs were
   produced by running the reference compressor (ZX2 v1.1)
   locally; no code was copied.
+- ZX5: format and implementation by Einar Saukas (BSD 3-Clause).
+  Known-answer decode vectors in tests/integration/zx5.rs were
+  produced by running the reference compressor (ZX5 v2.0)
+  locally; no code was copied.
 - lzxd: [MS-PATCH] LZX DELTA Compression and Decompression
   (Microsoft Open Specifications,
   https://learn.microsoft.com/openspecs/exchange_server_protocols/ms-patch).

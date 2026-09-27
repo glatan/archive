@@ -180,6 +180,10 @@ pub mod zx1;
 #[cfg(feature = "zx2")]
 pub mod zx2;
 
+/// ZX5 compression and decompression.
+#[cfg(feature = "zx5")]
+pub mod zx5;
+
 #[cfg(feature = "cmpsc")]
 pub mod cmpsc;
 /// LZX DELTA decompression ([MS-PATCH]): delta-compressed streams with

@@ -691,6 +691,12 @@ fn decode_items(
             compress_formats::zx2::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
+        Format::Zx5 => decode_single_payload(
+            path,
+            input,
+            compress_formats::zx5::decode(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
         Format::Lzxd => decode_single_payload(
             path,
             input,

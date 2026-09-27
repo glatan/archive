@@ -34,6 +34,7 @@
     feature = "zx0",
     feature = "zx1",
     feature = "zx2",
+    feature = "zx5",
     feature = "lzxd",
     feature = "cmpsc"
 ))]
@@ -79,6 +80,7 @@ use archive::compress::zstd;
 use archive::compress::zx0;
 use archive::compress::zx1;
 use archive::compress::zx2;
+use archive::compress::zx5;
 
 // ============================================================
 // 7z tests
@@ -281,6 +283,8 @@ mod zx0_tests;
 mod zx1_tests;
 #[path = "integration/zx2.rs"]
 mod zx2_tests;
+#[path = "integration/zx5.rs"]
+mod zx5_tests;
 
 #[path = "integration/xca.rs"]
 mod xca_tests;
