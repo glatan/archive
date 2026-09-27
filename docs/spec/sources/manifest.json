@@ -30,6 +30,7 @@
    "format": "brotli",
    "title": "Brotli Compressed Data Format",
    "version": "RFC 7932 (July 2016)",
+   "note": "Primary normative source; published errata checked at https://www.rfc-editor.org/errata/rfc7932",
    "url": "https://www.rfc-editor.org/rfc/rfc7932.txt",
    "filename": "rfc7932.txt"
   },

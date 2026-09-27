@@ -1,6 +1,6 @@
-// LZ77 strategies are structurally complete but the compressed metablock
-// bitstream path is disabled pending validation of the complex prefix code
-// writer in the full metablock context. The code is kept for future enabling.
+// LZ77 compressed metablock strategies: context modeling, multi-block-type,
+// and single-block. Each is tried in order and used when it beats the
+// uncompressed representation.
 //! Brotli encoder with LZ77 matching, static dictionary, multi-block-type,
 //! and context modeling support.
 //!
@@ -110,10 +110,10 @@ struct EncodedCommand {
 pub fn encode(input: &[u8]) -> Vec<u8> {
     let mut writer = BitWriter::new();
     writer.write_bits(0, 1);
-    let mut stream_offset: usize = 0;
-    for chunk in input.chunks(MAX_METABLOCK_LEN) {
-        write_best_metablock(&mut writer, chunk, stream_offset);
-        stream_offset += chunk.len();
+    let mut start = 0usize;
+    while start < input.len() {
+        write_best_metablock(&mut writer, input, start);
+        start += MAX_METABLOCK_LEN.min(input.len() - start);
     }
     writer.write_bits(1, 1);
     writer.write_bits(1, 1);
@@ -127,10 +127,10 @@ pub fn encode_with_metadata(input: &[u8], metadata: &[u8]) -> Vec<u8> {
     if !metadata.is_empty() {
         write_metadata_metablock(&mut writer, metadata);
     }
-    let mut stream_offset: usize = 0;
-    for chunk in input.chunks(MAX_METABLOCK_LEN) {
-        write_best_metablock(&mut writer, chunk, stream_offset);
-        stream_offset += chunk.len();
+    let mut start = 0usize;
+    while start < input.len() {
+        write_best_metablock(&mut writer, input, start);
+        start += MAX_METABLOCK_LEN.min(input.len() - start);
     }
     writer.write_bits(1, 1);
     writer.write_bits(1, 1);
@@ -149,7 +149,13 @@ pub fn encode_writer<W: std::io::Write>(input: &[u8], mut writer: W) -> std::io:
 // Strategy selection
 // ---------------------------------------------------------------------------
 
-fn write_best_metablock(writer: &mut BitWriter, chunk: &[u8], stream_offset: usize) {
+// Emit one metablock using the first strategy (in fixed order:
+// literal-only, context-modeled LZ77, multi-block LZ77, single-block
+// LZ77) whose encoded size beats the uncompressed metablock size.
+// This is a first-match-wins policy, not a global minimum search.
+fn write_best_metablock(writer: &mut BitWriter, input: &[u8], start: usize) {
+    let chunk = &input[start..(start + MAX_METABLOCK_LEN).min(input.len())];
+    let stream_offset = start;
     let uncompressed_size = 4 + chunk.len();
 
     let uncomp_bits = uncompressed_size * 8;
@@ -166,12 +172,35 @@ fn write_best_metablock(writer: &mut BitWriter, chunk: &[u8], stream_offset: usi
         }
     }
 
-    // LZ77 strategies are implemented but currently disabled pending
-    // resolution of a bitstream encoding issue in the complex prefix
-    // code path. The code for context modeling, multi-block, and
-    // single-block LZ77 is present and structurally complete.
-    let _ = stream_offset;
-    let _ = uncomp_bits;
+    // LZ77 command generation (match finder + dictionary index) is
+    // shared across the compressed strategies.
+    let cmds = generate_lz77_commands(chunk, stream_offset);
+    if cmds
+        .iter()
+        .any(|c| matches!(c, Lz77Command::InsertCopy { .. }))
+    {
+        // Strategy 2: Context modeling (LSB6) + LZ77
+        if let Some((bits, tb)) = try_context_modeling_lz77(input, start, &cmds) {
+            if tb < uncomp_bits {
+                writer.write_raw(&bits, tb);
+                return;
+            }
+        }
+        // Strategy 3: Multi-block-type (two literal block types) + LZ77
+        if let Some((bits, tb)) = try_multi_block_lz77(chunk, &cmds) {
+            if tb < uncomp_bits {
+                writer.write_raw(&bits, tb);
+                return;
+            }
+        }
+        // Strategy 4: Single-block LZ77
+        if let Some((bits, tb)) = try_lz77_metablock(chunk, &cmds) {
+            if tb < uncomp_bits {
+                writer.write_raw(&bits, tb);
+                return;
+            }
+        }
+    }
 
     // Strategy 5: Uncompressed fallback
     writer.write_bits(0, 1);
@@ -214,6 +243,7 @@ fn generate_lz77_commands(input: &[u8], stream_offset: usize) -> Vec<Lz77Command
     let mut pos = 0usize;
     let mut hash_table = vec![u32::MAX; HASH_TABLE_SIZE];
     let mut pending_literals: Vec<u8> = Vec::new();
+    let dict_index = build_dict_index();
 
     while pos + MIN_MATCH_LEN <= input.len() {
         let hash = hash4(&input[pos..]);
@@ -238,9 +268,15 @@ fn generate_lz77_commands(input: &[u8], stream_offset: usize) -> Vec<Lz77Command
             }
         }
 
+        // The decoder resolves dictionary references against
+        // min(output_len, window_size); the stream declares
+        // WBITS=16, so the window is 2^16 - 16 = MAX_DISTANCE.
         if best_len < 6
-            && let Some((dict_len, dict_dist)) =
-                find_dictionary_match(&input[pos..], pos + stream_offset)
+            && let Some((dict_len, dict_dist)) = find_dictionary_match(
+                &input[pos..],
+                (pos + stream_offset).min(MAX_DISTANCE),
+                &dict_index,
+            )
         {
             if dict_len > best_len {
                 best_len = dict_len;
@@ -299,36 +335,77 @@ fn count_match(a: &[u8], b: &[u8], max_len: usize) -> usize {
 // Static dictionary matching
 // ---------------------------------------------------------------------------
 
-pub(super) fn find_dictionary_match(input: &[u8], max_distance: usize) -> Option<(usize, usize)> {
-    if input.len() < MIN_MATCH_LEN {
-        return None;
-    }
-    let max_word_len = input.len().min(24);
-    for word_len in (MIN_MATCH_LEN..=max_word_len).rev() {
+/// Chained hash index over the static dictionary, built once per
+/// metablock so per-position lookups stay O(chain length) instead of
+/// scanning every word.
+struct DictIndex {
+    head: Vec<u32>,
+    next: Vec<u32>,
+    /// Packed `word_len << 20 | word_idx` entries.
+    entry: Vec<u32>,
+}
+
+const DICT_HASH_SIZE: usize = 1 << 17;
+
+fn build_dict_index() -> DictIndex {
+    let mut head = vec![u32::MAX; DICT_HASH_SIZE];
+    let mut next = Vec::new();
+    let mut entry = Vec::new();
+    for word_len in MIN_MATCH_LEN..=24usize {
         let shift = SIZE_BITS_BY_LENGTH[word_len];
         if shift == 0 {
             continue;
         }
         let num_words = 1usize << shift;
         let base_offset = OFFSETS_BY_LENGTH[word_len];
-        let candidate = &input[..word_len];
         for word_idx in 0..num_words {
             let dict_offset = base_offset + word_idx * word_len;
             if dict_offset + word_len > DICTIONARY_DATA.len() {
                 break;
             }
-            let word = &DICTIONARY_DATA[dict_offset..dict_offset + word_len];
-            if word == candidate {
-                let transform_idx = 2;
-                let address = word_idx | (transform_idx << shift);
-                let distance = max_distance + 1 + address;
-                if encode_distance(distance).is_some() {
-                    return Some((word_len, distance));
-                }
+            let h = hash4(&DICTIONARY_DATA[dict_offset..]) & (DICT_HASH_SIZE - 1);
+            entry.push(((word_len as u32) << 20) | word_idx as u32);
+            next.push(head[h]);
+            head[h] = entry.len() as u32 - 1;
+        }
+    }
+    DictIndex { head, next, entry }
+}
+
+fn find_dictionary_match(
+    input: &[u8],
+    max_distance: usize,
+    index: &DictIndex,
+) -> Option<(usize, usize)> {
+    if input.len() < MIN_MATCH_LEN {
+        return None;
+    }
+    let h = hash4(input) & (DICT_HASH_SIZE - 1);
+    let mut e = index.head[h];
+    let mut best: Option<(usize, usize)> = None;
+    while e != u32::MAX {
+        let packed = index.entry[e as usize];
+        e = index.next[e as usize];
+        let word_len = (packed >> 20) as usize;
+        if word_len > input.len() {
+            continue;
+        }
+        if best.is_some_and(|(l, _)| l >= word_len) {
+            continue;
+        }
+        let word_idx = (packed & 0xF_FFFF) as usize;
+        let dict_offset = OFFSETS_BY_LENGTH[word_len] + word_idx * word_len;
+        if DICTIONARY_DATA[dict_offset..dict_offset + word_len] == input[..word_len] {
+            // Transform 0 is the identity transform; other transforms
+            // change the emitted length, which must match the decoded
+            // dictionary output exactly.
+            let distance = max_distance + 1 + word_idx;
+            if encode_distance(distance).is_some() {
+                best = Some((word_len, distance));
             }
         }
     }
-    None
+    best
 }
 
 // ---------------------------------------------------------------------------
@@ -526,6 +603,18 @@ fn fix_kraft(depths: &mut [u8], max_bits: u8) {
 
 fn build_codebook_from_lengths(code_lengths: &[u8]) -> Vec<Option<(u32, u8)>> {
     let sz = code_lengths.len();
+    // A code with a single non-zero length is a singleton prefix
+    // code: the decoder consumes zero bits per symbol (RFC 7932
+    // §3.4), so the emitted code must be zero bits too.
+    if code_lengths.iter().filter(|&&l| l != 0).count() == 1 {
+        let mut cb = vec![None; sz];
+        for (i, &l) in code_lengths.iter().enumerate() {
+            if l > 0 {
+                cb[i] = Some((0, 0));
+            }
+        }
+        return cb;
+    }
     let max_bits = code_lengths.iter().copied().max().unwrap_or(0);
     if max_bits == 0 {
         let mut cb = vec![None; sz];
@@ -637,10 +726,20 @@ fn write_complex_prefix_code(writer: &mut BitWriter, code_lengths: &[u8]) {
         }
     }
 
+    // RFC 7932 §3.5: the decoder stops reading code lengths once the
+    // code is complete (kraft space exhausted) or all symbols are
+    // covered. Emit only up to the same point — trailing symbols
+    // would desync the stream.
     let cl_cb = build_codebook_from_lengths(&cl_cl);
+    let mut space = 32768i64;
     for &len in code_lengths.iter() {
-        if let Some((bits, nbits)) = cl_cb[len as usize] {
-            writer.write_bits(bits, nbits);
+        let (bits, nbits) = cl_cb[len as usize].unwrap_or((0, 0));
+        writer.write_bits(bits, nbits);
+        if len != 0 {
+            space -= 32768 >> len;
+            if space == 0 {
+                break;
+            }
         }
     }
 }
@@ -701,8 +800,8 @@ fn write_small_code_length(writer: &mut BitWriter, value: u8) {
         0 => writer.write_bits(0b00, 2),
         4 => writer.write_bits(0b01, 2),
         3 => writer.write_bits(0b10, 2),
-        2 => writer.write_bits(0b110, 3),
-        1 => writer.write_bits(0b1110, 4),
+        2 => writer.write_bits(0b011, 3),
+        1 => writer.write_bits(0b0111, 4),
         5 => writer.write_bits(0b1111, 4),
         _ => writer.write_bits(0b1111, 4),
     }
@@ -768,15 +867,8 @@ fn find_block_length_symbol(length: usize) -> Option<(usize, u32, u8)> {
 // Single-block LZ77
 // ---------------------------------------------------------------------------
 
-fn try_lz77_metablock(chunk: &[u8], stream_offset: usize) -> Option<(Vec<u8>, usize)> {
-    let commands = generate_lz77_commands(chunk, stream_offset);
-    if !commands
-        .iter()
-        .any(|c| matches!(c, Lz77Command::InsertCopy { .. }))
-    {
-        return None;
-    }
-    write_lz77_single_block(chunk, &commands)
+fn try_lz77_metablock(chunk: &[u8], commands: &[Lz77Command]) -> Option<(Vec<u8>, usize)> {
+    write_lz77_single_block(chunk, commands)
 }
 
 fn encode_commands(
@@ -896,8 +988,11 @@ fn write_cmd_data(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_cmd_data_ctx(
     w: &mut BitWriter,
+    input: &[u8],
+    start: usize,
     cmds: &[Lz77Command],
     enc: &[EncodedCommand],
     lcbs: &[Vec<Option<(u32, u8)>>],
@@ -905,7 +1000,7 @@ fn write_cmd_data_ctx(
     dcb: &[Option<(u32, u8)>],
     cmap: &[u8],
 ) {
-    let mut sim: Vec<u8> = Vec::new();
+    let mut out = start;
     for (cmd, e) in cmds.iter().zip(enc.iter()) {
         let lits = match cmd {
             Lz77Command::InsertCopy { literals, .. } | Lz77Command::InsertOnly { literals } => {
@@ -918,35 +1013,29 @@ fn write_cmd_data_ctx(
         w.write_bits(e.insert_extra, e.insert_extra_bits);
         w.write_bits(e.copy_extra, e.copy_extra_bits);
         for &l in lits {
-            let p1 = sim.last().copied().unwrap_or(0);
+            // The decoder derives the literal context from the last
+            // produced byte; produced plaintext equals `input`.
+            let p1 = if out == 0 { 0 } else { input[out - 1] };
             let ci = (p1 & 0x3F) as usize;
             let ti = cmap[ci] as usize;
             if let Some((b, n)) = lcbs[ti][l as usize] {
                 w.write_bits(b, n);
             }
-            sim.push(l);
+            out += 1;
         }
         if e.has_distance {
             if let Some((b, n)) = dcb[e.distance_code as usize] {
                 w.write_bits(b, n);
             }
             w.write_bits(e.distance_extra, e.distance_extra_bits);
-            if let Lz77Command::InsertCopy {
-                distance, copy_len, ..
-            } = cmd
-            {
-                if *distance <= sim.len() {
-                    for _ in 0..*copy_len {
-                        let s = sim.len() - distance;
-                        let b = sim[s];
-                        sim.push(b);
-                    }
-                }
+            if let Lz77Command::InsertCopy { copy_len, .. } = cmd {
+                out += copy_len;
             }
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_cmd_data_bt(
     w: &mut BitWriter,
     cmds: &[Lz77Command],
@@ -955,8 +1044,11 @@ fn write_cmd_data_bt(
     ccb: &[Option<(u32, u8)>],
     dcb: &[Option<(u32, u8)>],
     mid: usize,
+    blcb: &[Option<(u32, u8)>],
+    second_len: (usize, u32, u8),
 ) {
     let mut lp = 0usize;
+    let mut switched = false;
     for (cmd, e) in cmds.iter().zip(enc.iter()) {
         let lits = match cmd {
             Lz77Command::InsertCopy { literals, .. } | Lz77Command::InsertOnly { literals } => {
@@ -969,7 +1061,22 @@ fn write_cmd_data_bt(
         w.write_bits(e.insert_extra, e.insert_extra_bits);
         w.write_bits(e.copy_extra, e.copy_extra_bits);
         for &l in lits {
-            let ti = if lp < mid { 0 } else { 1 };
+            // The literal block type counts literals only. The decoder
+            // consumes the block switch lazily, immediately before
+            // reading literal `mid` and after the enclosing command's
+            // symbol and extra bits, so emit it at that exact point.
+            if lp == mid && !switched {
+                // The block-type tree is a singleton prefix code, so
+                // the type code itself emits zero bits; only the
+                // block-length code and its extra bits are written.
+                let (bs, be, beb) = second_len;
+                if let Some((b, n)) = blcb[bs] {
+                    w.write_bits(b, n);
+                }
+                w.write_bits(be, beb);
+                switched = true;
+            }
+            let ti = usize::from(lp >= mid);
             if let Some((b, n)) = lcbs[ti][l as usize] {
                 w.write_bits(b, n);
             }
@@ -980,26 +1087,15 @@ fn write_cmd_data_bt(
                 w.write_bits(b, n);
             }
             w.write_bits(e.distance_extra, e.distance_extra_bits);
-            if let Lz77Command::InsertCopy { copy_len, .. } = cmd {
-                lp += copy_len;
-            }
         }
     }
 }
-
 // ---------------------------------------------------------------------------
 // Multi-block-type
 // ---------------------------------------------------------------------------
 
-fn try_multi_block_lz77(chunk: &[u8], stream_offset: usize) -> Option<(Vec<u8>, usize)> {
-    let cmds = generate_lz77_commands(chunk, stream_offset);
-    if !cmds
-        .iter()
-        .any(|c| matches!(c, Lz77Command::InsertCopy { .. }))
-    {
-        return None;
-    }
-    write_multi_block(chunk, &cmds)
+fn try_multi_block_lz77(chunk: &[u8], cmds: &[Lz77Command]) -> Option<(Vec<u8>, usize)> {
+    write_multi_block(chunk, cmds)
 }
 
 fn write_multi_block(chunk: &[u8], cmds: &[Lz77Command]) -> Option<(Vec<u8>, usize)> {
@@ -1041,7 +1137,6 @@ fn write_multi_block(chunk: &[u8], cmds: &[Lz77Command]) -> Option<(Vec<u8>, usi
                 cf[s as usize] += 1;
                 let (dc, de, dnb) = encode_distance(*distance)?;
                 df[dc as usize] += 1;
-                lp += copy_len;
                 enc.push(EncodedCommand {
                     command_symbol: s,
                     insert_extra: ie,
@@ -1092,7 +1187,7 @@ fn write_multi_block(chunk: &[u8], cmds: &[Lz77Command]) -> Option<(Vec<u8>, usi
     let dcb = build_codebook_from_lengths(&dcl);
     let rem = total_lits.saturating_sub(mid);
     let (bs0, be0, beb0) = find_block_length_symbol(mid.max(1)).unwrap_or((25, 0, 24));
-    let (bs1, _be1, _beb1) = find_block_length_symbol(rem.max(1)).unwrap_or((25, 0, 24));
+    let (bs1, be1, beb1) = find_block_length_symbol(rem.max(1)).unwrap_or((25, 0, 24));
     let mut w = BitWriter::new();
     w.write_bits(0, 1);
     write_metablock_len(&mut w, len);
@@ -1109,11 +1204,15 @@ fn write_multi_block(chunk: &[u8], cmds: &[Lz77Command]) -> Option<(Vec<u8>, usi
         };
         write_simple_prefix_code(&mut w, &syms, alphabet_bits(26), None);
     }
-    if bs0 != bs1 {
+    let mut blcb = vec![None; 26];
+    if bs0 == bs1 {
+        // singleton block-length tree: zero bits per symbol
+        blcb[bs0] = Some((0, 0));
+    } else {
         let mut cl = vec![0u8; 26];
         cl[bs0] = 1;
         cl[bs1] = 1;
-        let blcb = build_codebook_from_lengths(&cl);
+        blcb = build_codebook_from_lengths(&cl);
         if let Some((b, n)) = blcb[bs0] {
             w.write_bits(b, n);
         }
@@ -1133,7 +1232,17 @@ fn write_multi_block(chunk: &[u8], cmds: &[Lz77Command]) -> Option<(Vec<u8>, usi
     write_prefix_code(&mut w, &lcl1, alphabet_bits(256));
     write_prefix_code(&mut w, &ccl, alphabet_bits(704));
     write_prefix_code(&mut w, &dcl, alphabet_bits(DISTANCE_ALPHABET_SIZE));
-    write_cmd_data_bt(&mut w, cmds, &enc, &[lcb0, lcb1], &ccb, &dcb, mid);
+    write_cmd_data_bt(
+        &mut w,
+        cmds,
+        &enc,
+        &[lcb0, lcb1],
+        &ccb,
+        &dcb,
+        mid,
+        &blcb,
+        (bs1, be1, beb1),
+    );
     let tb = w.total_bits;
     Some((w.finish(), tb))
 }
@@ -1142,26 +1251,28 @@ fn write_multi_block(chunk: &[u8], cmds: &[Lz77Command]) -> Option<(Vec<u8>, usi
 // Context modeling
 // ---------------------------------------------------------------------------
 
-fn try_context_modeling_lz77(chunk: &[u8], stream_offset: usize) -> Option<(Vec<u8>, usize)> {
-    let cmds = generate_lz77_commands(chunk, stream_offset);
-    if !cmds
-        .iter()
-        .any(|c| matches!(c, Lz77Command::InsertCopy { .. }))
-    {
-        return None;
-    }
-    write_ctx_model(chunk, &cmds)
+fn try_context_modeling_lz77(
+    input: &[u8],
+    start: usize,
+    cmds: &[Lz77Command],
+) -> Option<(Vec<u8>, usize)> {
+    write_ctx_model(input, start, cmds)
 }
 
-fn write_ctx_model(chunk: &[u8], cmds: &[Lz77Command]) -> Option<(Vec<u8>, usize)> {
+fn write_ctx_model(input: &[u8], start: usize, cmds: &[Lz77Command]) -> Option<(Vec<u8>, usize)> {
+    let chunk = &input[start..start + (input.len() - start).min(MAX_METABLOCK_LEN)];
     let len = chunk.len();
     let mut lf0 = vec![0u32; 256];
     let mut lf1 = vec![0u32; 256];
     let mut cf = vec![0u32; 704];
     let mut df = vec![0u32; DISTANCE_ALPHABET_SIZE];
-    let mut pb: u8 = 0;
+    // `out` tracks the absolute output position. The produced
+    // plaintext equals `input`, so the literal context byte is
+    // `input[out - 1]`; this keeps the encoder's context identical
+    // to the decoder's across metablock boundaries, backward
+    // copies, and dictionary references.
+    let mut out = start;
     let mut enc: Vec<EncodedCommand> = Vec::with_capacity(cmds.len());
-    let mut sim: Vec<u8> = Vec::new();
     for cmd in cmds {
         match cmd {
             Lz77Command::InsertCopy {
@@ -1170,27 +1281,20 @@ fn write_ctx_model(chunk: &[u8], cmds: &[Lz77Command]) -> Option<(Vec<u8>, usize
                 distance,
             } => {
                 for &l in literals.iter() {
-                    let ci = (pb & 0x3F) as usize;
+                    let p1 = if out == 0 { 0 } else { input[out - 1] };
+                    let ci = (p1 & 0x3F) as usize;
                     if ci < 32 {
                         lf0[l as usize] += 1;
                     } else {
                         lf1[l as usize] += 1;
                     }
-                    pb = l;
-                    sim.push(l);
+                    out += 1;
                 }
                 let (s, ie, ieb, ce, ceb) = find_command_symbol(literals.len(), *copy_len)?;
                 cf[s as usize] += 1;
                 let (dc, de, dnb) = encode_distance(*distance)?;
                 df[dc as usize] += 1;
-                if *distance <= sim.len() {
-                    for _ in 0..*copy_len {
-                        let src = sim.len() - distance;
-                        let b = sim[src];
-                        sim.push(b);
-                        pb = b;
-                    }
-                }
+                out += copy_len;
                 enc.push(EncodedCommand {
                     command_symbol: s,
                     insert_extra: ie,
@@ -1205,14 +1309,14 @@ fn write_ctx_model(chunk: &[u8], cmds: &[Lz77Command]) -> Option<(Vec<u8>, usize
             }
             Lz77Command::InsertOnly { literals } => {
                 for &l in literals.iter() {
-                    let ci = (pb & 0x3F) as usize;
+                    let p1 = if out == 0 { 0 } else { input[out - 1] };
+                    let ci = (p1 & 0x3F) as usize;
                     if ci < 32 {
                         lf0[l as usize] += 1;
                     } else {
                         lf1[l as usize] += 1;
                     }
-                    pb = l;
-                    sim.push(l);
+                    out += 1;
                 }
                 let (s, ie, ieb, ceb) = find_insert_only_command(literals.len())?;
                 cf[s as usize] += 1;
@@ -1259,7 +1363,17 @@ fn write_ctx_model(chunk: &[u8], cmds: &[Lz77Command]) -> Option<(Vec<u8>, usize
     write_prefix_code(&mut w, &lcl1, alphabet_bits(256));
     write_prefix_code(&mut w, &ccl, alphabet_bits(704));
     write_prefix_code(&mut w, &dcl, alphabet_bits(DISTANCE_ALPHABET_SIZE));
-    write_cmd_data_ctx(&mut w, cmds, &enc, &[lcb0, lcb1], &ccb, &dcb, &cmap);
+    write_cmd_data_ctx(
+        &mut w,
+        input,
+        start,
+        cmds,
+        &enc,
+        &[lcb0, lcb1],
+        &ccb,
+        &dcb,
+        &cmap,
+    );
     let tb = w.total_bits;
     Some((w.finish(), tb))
 }
@@ -1610,9 +1724,7 @@ mod tests {
         let encoded = encode(&input);
         let decoded = decode::decode(&encoded).unwrap();
         assert_eq!(decoded, input);
-        // Note: LZ77 compression is not yet enabled, so the output may be
-        // larger than optimal.  Once the LZ77 bitstream encoder is fully
-        // validated, an additional size assertion can be added here.
+        assert!(encoded.len() < input.len() / 2);
     }
 
     #[test]
@@ -1648,6 +1760,93 @@ mod tests {
         for _ in 0..50 {
             input.extend_from_slice(b"hello world ");
             input.extend_from_slice(b"12345 67890 ");
+        }
+        let encoded = encode(&input);
+        assert_eq!(decode::decode(&encoded).unwrap(), input);
+    }
+
+    /// Wrap a single encoded metablock (`bits`, `total_bits`) in a
+    /// complete Brotli stream (default window + trailing empty
+    /// last metablock), mirroring the framing in [`encode`].
+    fn metablock_stream(bits: &[u8], total_bits: usize) -> Vec<u8> {
+        let mut w = BitWriter::new();
+        w.write_bits(0, 1);
+        w.write_raw(bits, total_bits);
+        w.write_bits(1, 1);
+        w.write_bits(1, 1);
+        w.finish()
+    }
+
+    /// Deterministic low-cardinality pseudo-random data: exercises
+    /// the LZ77 match finder while producing enough inserted
+    /// literals to cross literal block boundaries.
+    fn low_cardinality_data(len: usize, seed: u64) -> Vec<u8> {
+        let mut v = Vec::with_capacity(len);
+        let mut s = seed;
+        while v.len() < len {
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            v.push(b"abcdefgh"[(s >> 33) as usize & 7]);
+        }
+        v
+    }
+
+    #[test]
+    fn test_single_block_lz77_path_produces_valid_stream() {
+        let mut input = Vec::new();
+        for _ in 0..50 {
+            input.extend_from_slice(b"the quick brown fox jumps over the lazy dog. ");
+            input.extend_from_slice(&low_cardinality_data(32, 9));
+        }
+        let cmds = generate_lz77_commands(&input, 0);
+        let (bits, tb) = try_lz77_metablock(&input, &cmds).expect("lz77 metablock");
+        let stream = metablock_stream(&bits, tb);
+        assert_eq!(decode::decode(&stream).unwrap(), input);
+    }
+
+    #[test]
+    fn test_multi_block_lz77_path_produces_valid_stream() {
+        // Low-cardinality data crosses the literal block boundary
+        // mid-stream; several seeds cover the boundary landing both
+        // inside a command's literal run and at a command boundary
+        // (the latter previously desynced the bitstream).
+        let mut seen = 0;
+        for seed in 1..=6u64 {
+            let input = low_cardinality_data(8000, seed);
+            let cmds = generate_lz77_commands(&input, 0);
+            if let Some((bits, tb)) = try_multi_block_lz77(&input, &cmds) {
+                let stream = metablock_stream(&bits, tb);
+                assert_eq!(decode::decode(&stream).unwrap(), input);
+                seen += 1;
+            }
+        }
+        assert!(seen > 0, "multi-block path was not exercised");
+    }
+
+    #[test]
+    fn test_context_modeling_lz77_path_produces_valid_stream() {
+        // Dictionary words force dictionary copies whose produced
+        // bytes must feed back into the simulated literal context.
+        let mut input = Vec::new();
+        for _ in 0..30 {
+            input.extend_from_slice(b"the of and in to for a that with from ");
+            input.extend_from_slice(&low_cardinality_data(48, 5));
+        }
+        let cmds = generate_lz77_commands(&input, 0);
+        let (bits, tb) = try_context_modeling_lz77(&input, 0, &cmds).expect("ctx metablock");
+        let stream = metablock_stream(&bits, tb);
+        assert_eq!(decode::decode(&stream).unwrap(), input);
+    }
+
+    #[test]
+    fn test_encode_output_is_stable_across_strategies() {
+        // Mixed input exercising the strategy chain end-to-end.
+        let mut input = Vec::new();
+        for _ in 0..20 {
+            input.extend_from_slice(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+            input.extend_from_slice(&low_cardinality_data(96, 3));
+            input.extend_from_slice(b"the of and in to for ");
         }
         let encoded = encode(&input);
         assert_eq!(decode::decode(&encoded).unwrap(), input);

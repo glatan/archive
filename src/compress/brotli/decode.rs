@@ -56,6 +56,9 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
                     &mut recent_distances,
                 )?;
                 if is_last {
+                    // RFC 7932 §9.3: unused bits in the last byte
+                    // must be zero.
+                    reader.align_to_byte_if_zero()?;
                     break;
                 }
             }
@@ -270,6 +273,11 @@ fn parse_window_bits(reader: &mut BitReader<'_>) -> Result<u8, Error> {
     }
 
     let n = reader.read_bits(3)? as u8;
+    // RFC 7932 §9.1: the bit pattern yielding WBITS=9 is reserved
+    // and must not be used; valid small-window values are 10-15.
+    if n == 1 {
+        return Err(Error::InvalidData("brotli: invalid window bits"));
+    }
     if n != 0 {
         return Ok(8 + n);
     }
@@ -1051,7 +1059,8 @@ mod tests {
         // switched literal block length = 2
         push_bits(&mut bits, 1, 2);
 
-        align_zero(&mut bits);
+        // The metablock ends mid-byte; `bits_to_bytes` pads the
+        // remaining bits with zeros as required by RFC 7932 section 9.3.
         bits_to_bytes(&bits)
     }
 
@@ -1079,6 +1088,28 @@ mod tests {
     fn test_parse_window_bits_extended() {
         let mut reader = BitReader::new(&[0x03]);
         assert_eq!(parse_window_bits(&mut reader).unwrap(), 18);
+    }
+
+    #[test]
+    fn test_parse_window_bits_rejects_reserved_pattern() {
+        // RFC 7932 section 9.1: the bit pattern for WBITS=9 is reserved
+        // and must not be used (bits: 1, then 000, then 001).
+        let mut reader = BitReader::new(&[0x11]);
+        assert!(matches!(
+            parse_window_bits(&mut reader),
+            Err(Error::InvalidData(_))
+        ));
+    }
+
+    #[test]
+    fn test_last_metablock_rejects_nonzero_trailing_padding() {
+        // RFC 7932 section 9.3: unused bits in the last byte must be
+        // zero. The block-switch stream ends with one padding bit.
+        let mut stream = build_literal_block_switch_stream();
+        let last = stream.last_mut().unwrap();
+        assert_eq!(*last & 0x80, 0, "test stream must end mid-byte");
+        *last |= 0x80;
+        assert!(matches!(decode(&stream), Err(Error::InvalidData(_))));
     }
 
     #[test]
