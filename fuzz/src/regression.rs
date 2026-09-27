@@ -252,6 +252,10 @@ fn self_pattern_body(algo: Algorithm) -> String {
             "archive::compress::zx2::encode(input)",
             "archive::compress::zx2::decode(&encoded).unwrap()",
         ),
+        Algorithm::Zx5 => roundtrip_body(
+            "archive::compress::zx5::encode(input)",
+            "archive::compress::zx5::decode(&encoded).unwrap()",
+        ),
         Algorithm::Lzsa => roundtrip_body(
             "archive::compress::lzsa::encode(input)",
             "archive::compress::lzsa::decode(&encoded).unwrap()",

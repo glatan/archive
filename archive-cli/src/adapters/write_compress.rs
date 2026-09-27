@@ -203,6 +203,11 @@ pub fn compress_input(command: CompressCommand) -> Result<(), CliError> {
             reject_unexpected_backend(command.backend.as_deref(), "zx2")?;
             compress::zx2::encode(&input)
         }
+        CompressionFormat::Zx5 => {
+            reject_unexpected_level(command.level, "zx5")?;
+            reject_unexpected_backend(command.backend.as_deref(), "zx5")?;
+            compress::zx5::encode(&input)
+        }
         CompressionFormat::Lzxd => {
             reject_unexpected_level(command.level, "lzxd")?;
             reject_unexpected_backend(command.backend.as_deref(), "lzxd")?;
