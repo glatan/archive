@@ -1,0 +1,748 @@
+//! VCDIFF delta compression (RFC 3284).
+//!
+//! A VCDIFF stream encodes a target file as a sequence of windows, each of
+//! which is described by ADD (literal), RUN (repeated byte), and COPY (match
+//! into the source window or the already-produced target window)
+//! instructions. COPY addresses may be coded absolutely (VCD_SELF),
+//! relative to the current position (VCD_HERE), or against the near/same
+//! address caches defined by the format.
+//!
+//! Intentional scope (matching the reference xdelta3 implementation, which
+//! also leaves these unimplemented):
+//!
+//! - `VCD_TARGET` source windows (source segment taken from the previously
+//!   decoded target file) are rejected.
+//! - `VCD_CODETABLE` application-defined code tables are rejected; only the
+//!   default code table (`s_near = 4`, `s_same = 3`) is supported.
+//! - `VCD_DECOMPRESS` secondary compression of the data/instruction/address
+//!   sections is rejected.
+//! - `VCD_APPHEADER` (`0x04`, an xdelta3 extension carrying application
+//!   metadata) is accepted and skipped for interoperability.
+//!
+//! Encoding always produces uncompressed-section, default-table streams: a
+//! single window per call, `VCD_SOURCE` when a source is supplied, single
+//! (non-paired) instructions only.
+
+use alloc::vec;
+use alloc::vec::Vec;
+
+use crate::error::Error;
+
+const MAGIC: [u8; 3] = [0xD6, 0xC3, 0xC4];
+
+const VCD_DECOMPRESS: u8 = 0x01;
+const VCD_CODETABLE: u8 = 0x02;
+const VCD_APPHEADER: u8 = 0x04;
+
+const VCD_SOURCE: u8 = 0x01;
+const VCD_TARGET: u8 = 0x02;
+/// xdelta3 extension: the window carries a big-endian Adler-32 checksum of
+/// the decoded target window after the three section lengths.
+const VCD_ADLER32: u8 = 0x04;
+
+const I_NOOP: u8 = 0;
+const I_ADD: u8 = 1;
+const I_RUN: u8 = 2;
+const I_COPY: u8 = 3;
+
+const S_NEAR: usize = 4;
+const S_SAME: usize = 3;
+const N_MODES: usize = 2 + S_NEAR + S_SAME;
+
+const MIN_MATCH: usize = 4;
+
+/// One entry of the instruction code table: up to two instructions, each a
+/// (type, size, mode) triple. A zero size means the size is coded separately
+/// in the instructions stream.
+#[derive(Clone, Copy)]
+struct Entry {
+    inst: [u8; 2],
+    size: [u8; 2],
+    mode: [u8; 2],
+}
+
+const NOOP_ENTRY: Entry = Entry {
+    inst: [I_NOOP, I_NOOP],
+    size: [0, 0],
+    mode: [0, 0],
+};
+
+/// Build the default code table (RFC 3284 Section 5.4 depiction).
+fn default_table() -> [Entry; 256] {
+    let mut t = [NOOP_ENTRY; 256];
+
+    // Line 1: RUN, size coded separately.
+    t[0].inst[0] = I_RUN;
+
+    // Line 2: ADD 0,[1,17] -> indices 1..=18.
+    for (i, e) in t.iter_mut().enumerate().take(19).skip(1) {
+        e.inst[0] = I_ADD;
+        e.size[0] = if i == 1 { 0 } else { (i - 1) as u8 };
+    }
+
+    // Lines 3..=11: COPY 0,[4,18] with mode 0..=8.
+    // 16 entries per mode: index 19+16*m is size 0, then sizes 4..=18.
+    for m in 0..N_MODES {
+        for s in 0..16usize {
+            let e = &mut t[19 + 16 * m + s];
+            e.inst[0] = I_COPY;
+            e.size[0] = if s == 0 { 0 } else { (s + 3) as u8 };
+            e.mode[0] = m as u8;
+        }
+    }
+
+    // Lines 12..=17: ADD [1,4] + COPY [4,6], mode 0..=5.
+    // 12 entries per mode starting at 163+12*m; outer loop is the ADD size.
+    for m in 0..6usize {
+        for a in 1..=4usize {
+            for c in 0..3usize {
+                let e = &mut t[163 + 12 * m + (a - 1) * 3 + c];
+                e.inst = [I_ADD, I_COPY];
+                e.size = [a as u8, (4 + c) as u8];
+                e.mode[1] = m as u8;
+            }
+        }
+    }
+
+    // Lines 18..=20: ADD [1,4] + COPY 4, mode 6..=8.
+    for m in 6..=8usize {
+        for a in 1..=4usize {
+            let e = &mut t[235 + (m - 6) * 4 + (a - 1)];
+            e.inst = [I_ADD, I_COPY];
+            e.size = [a as u8, 4];
+            e.mode[1] = m as u8;
+        }
+    }
+
+    // Line 21: COPY 4 with mode 0..=8, then ADD 1.
+    for m in 0..N_MODES {
+        let e = &mut t[247 + m];
+        e.inst = [I_COPY, I_ADD];
+        e.size = [4, 1];
+        e.mode[0] = m as u8;
+    }
+
+    t
+}
+
+fn read_varint(input: &[u8], pos: &mut usize) -> Result<usize, Error> {
+    let mut v: usize = 0;
+    loop {
+        let b = *input
+            .get(*pos)
+            .ok_or(Error::InvalidData("vcdiff: truncated varint"))?;
+        *pos += 1;
+        v = v
+            .checked_shl(7)
+            .and_then(|v| v.checked_add((b & 0x7F) as usize))
+            .ok_or(Error::InvalidData("vcdiff: varint overflow"))?;
+        if b & 0x80 == 0 {
+            return Ok(v);
+        }
+    }
+}
+
+fn write_varint(out: &mut Vec<u8>, mut v: usize) {
+    let mut buf = [0u8; 10];
+    let mut n = 0;
+    loop {
+        buf[n] = (v & 0x7F) as u8;
+        v >>= 7;
+        n += 1;
+        if v == 0 {
+            break;
+        }
+    }
+    for i in (0..n).rev() {
+        out.push(buf[i] | if i == 0 { 0 } else { 0x80 });
+    }
+}
+
+/// Address caches, initialized per target window (RFC 3284 Section 5.2).
+struct Cache {
+    near: [usize; S_NEAR],
+    next_slot: usize,
+    same: [usize; S_SAME * 256],
+}
+
+impl Cache {
+    fn new() -> Self {
+        Self {
+            near: [0; S_NEAR],
+            next_slot: 0,
+            same: [0; S_SAME * 256],
+        }
+    }
+
+    fn update(&mut self, addr: usize) {
+        self.near[self.next_slot] = addr;
+        self.next_slot = (self.next_slot + 1) % S_NEAR;
+        self.same[addr % (S_SAME * 256)] = addr;
+    }
+}
+
+struct WindowDecode<'a> {
+    source: &'a [u8],
+    data: &'a [u8],
+    inst: &'a [u8],
+    addr: &'a [u8],
+    out: Vec<u8>,
+    dpos: usize,
+    ipos: usize,
+    apos: usize,
+    cache: Cache,
+}
+
+impl<'a> WindowDecode<'a> {
+    fn exec(&mut self, inst_type: u8, size_code: u8, mode: u8) -> Result<(), Error> {
+        if inst_type == I_NOOP {
+            return Ok(());
+        }
+        let size = if size_code == 0 {
+            read_varint(self.inst, &mut self.ipos)?
+        } else {
+            size_code as usize
+        };
+        match inst_type {
+            I_ADD => {
+                let end = self
+                    .dpos
+                    .checked_add(size)
+                    .ok_or(Error::InvalidData("vcdiff: ADD size overflow"))?;
+                if end > self.data.len() {
+                    return Err(Error::InvalidData("vcdiff: ADD out of data"));
+                }
+                self.out.extend_from_slice(&self.data[self.dpos..end]);
+                self.dpos = end;
+            }
+            I_RUN => {
+                let b = *self
+                    .data
+                    .get(self.dpos)
+                    .ok_or(Error::InvalidData("vcdiff: RUN out of data"))?;
+                self.dpos += 1;
+                self.out.resize(self.out.len() + size, b);
+            }
+            I_COPY => {
+                let here = self.source.len() + self.out.len();
+                let a = match mode as usize {
+                    0 => read_varint(self.addr, &mut self.apos)?,
+                    1 => {
+                        let d = read_varint(self.addr, &mut self.apos)?;
+                        here.checked_sub(d)
+                            .ok_or(Error::InvalidData("vcdiff: HERE underflow"))?
+                    }
+                    m if (2..2 + S_NEAR).contains(&m) => self.cache.near[m - 2]
+                        .checked_add(read_varint(self.addr, &mut self.apos)?)
+                        .ok_or(Error::InvalidData("vcdiff: near address overflow"))?,
+                    m if (2 + S_NEAR..2 + S_NEAR + S_SAME).contains(&m) => {
+                        let b = *self
+                            .addr
+                            .get(self.apos)
+                            .ok_or(Error::InvalidData("vcdiff: truncated address"))?;
+                        self.apos += 1;
+                        self.cache.same[(m - 2 - S_NEAR) * 256 + b as usize]
+                    }
+                    _ => return Err(Error::InvalidData("vcdiff: bad address mode")),
+                };
+                self.cache.update(a);
+                if a >= here {
+                    return Err(Error::InvalidData("vcdiff: COPY out of range"));
+                }
+                for i in 0..size {
+                    let p = a + i;
+                    let b = if p < self.source.len() {
+                        self.source[p]
+                    } else {
+                        self.out[p - self.source.len()]
+                    };
+                    self.out.push(b);
+                }
+            }
+            _ => return Err(Error::InvalidData("vcdiff: bad instruction")),
+        }
+        Ok(())
+    }
+}
+
+/// Decode one window's "delta encoding" body (RFC 3284 Section 4.3):
+/// target length, indicator, three section lengths, then the data,
+/// instructions, and addresses sections.
+fn decode_window(
+    source: &[u8],
+    enc: &[u8],
+    table: &[Entry; 256],
+    max_output: usize,
+    checksum: Option<u32>,
+) -> Result<Vec<u8>, Error> {
+    let mut pos = 0usize;
+    let target_len = read_varint(enc, &mut pos)?;
+    if target_len > max_output {
+        return Err(Error::OutputLimitExceeded { limit: max_output });
+    }
+    let indicator = *enc
+        .get(pos)
+        .ok_or(Error::InvalidData("vcdiff: truncated window"))?;
+    pos += 1;
+    if indicator != 0 {
+        return Err(Error::Unsupported("vcdiff: secondary-compressed sections"));
+    }
+    let data_len = read_varint(enc, &mut pos)?;
+    let inst_len = read_varint(enc, &mut pos)?;
+    let addr_len = read_varint(enc, &mut pos)?;
+    if checksum.is_some() {
+        pos = pos
+            .checked_add(4)
+            .ok_or(Error::InvalidData("vcdiff: bad section lengths"))?;
+    }
+    let end = pos
+        .checked_add(data_len)
+        .and_then(|p| p.checked_add(inst_len))
+        .and_then(|p| p.checked_add(addr_len))
+        .ok_or(Error::InvalidData("vcdiff: bad section lengths"))?;
+    if end != enc.len() {
+        return Err(Error::InvalidData("vcdiff: bad section lengths"));
+    }
+    let data = &enc[pos..pos + data_len];
+    let inst = &enc[pos + data_len..pos + data_len + inst_len];
+    let addr = &enc[pos + data_len + inst_len..];
+
+    let mut w = WindowDecode {
+        source,
+        data,
+        inst,
+        addr,
+        out: Vec::with_capacity(target_len.min(1 << 20)),
+        dpos: 0,
+        ipos: 0,
+        apos: 0,
+        cache: Cache::new(),
+    };
+
+    while w.ipos < inst.len() {
+        let e = &table[w.inst[w.ipos] as usize];
+        w.ipos += 1;
+        w.exec(e.inst[0], e.size[0], e.mode[0])?;
+        w.exec(e.inst[1], e.size[1], e.mode[1])?;
+        if w.out.len() > target_len {
+            return Err(Error::InvalidData("vcdiff: window overflow"));
+        }
+    }
+    if w.out.len() != target_len {
+        return Err(Error::InvalidData("vcdiff: target length mismatch"));
+    }
+    if let Some(expected) = checksum {
+        let actual = crate::util::adler32::adler32(&w.out);
+        if actual != expected {
+            return Err(Error::ChecksumMismatch { expected, actual });
+        }
+    }
+    Ok(w.out)
+}
+
+/// Decode a VCDIFF stream with an empty source.
+pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_with_source(&[], input)
+}
+
+/// Decode a VCDIFF stream against `source`.
+pub fn decode_with_source(source: &[u8], input: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_bounded(source, input, usize::MAX)
+}
+
+/// Decode a VCDIFF stream against `source`, bounding total output size.
+pub fn decode_bounded(source: &[u8], input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
+    let table = default_table();
+    if input.len() < 5 || input[..3] != MAGIC {
+        return Err(Error::InvalidData("vcdiff: bad magic"));
+    }
+    // Header4 is currently always zero; reserved for future version numbers.
+    let hdr = input[4];
+    let mut pos = 5usize;
+    if hdr & !(VCD_DECOMPRESS | VCD_CODETABLE | VCD_APPHEADER) != 0 {
+        return Err(Error::InvalidData("vcdiff: bad header flags"));
+    }
+    if hdr & VCD_DECOMPRESS != 0 {
+        return Err(Error::Unsupported("vcdiff: secondary compressor"));
+    }
+    if hdr & VCD_CODETABLE != 0 {
+        return Err(Error::Unsupported("vcdiff: custom code table"));
+    }
+    if hdr & VCD_APPHEADER != 0 {
+        let len = read_varint(input, &mut pos)?;
+        let end = pos
+            .checked_add(len)
+            .ok_or(Error::InvalidData("vcdiff: truncated appheader"))?;
+        if end > input.len() {
+            return Err(Error::InvalidData("vcdiff: truncated appheader"));
+        }
+        pos = end;
+    }
+
+    let mut out = Vec::new();
+    while pos < input.len() {
+        let win = input[pos];
+        pos += 1;
+        if win & !(VCD_SOURCE | VCD_TARGET | VCD_ADLER32) != 0
+            || win & (VCD_SOURCE | VCD_TARGET) == VCD_SOURCE | VCD_TARGET
+        {
+            return Err(Error::InvalidData("vcdiff: bad window flags"));
+        }
+        let seg: &[u8] = if win & VCD_SOURCE != 0 {
+            let size = read_varint(input, &mut pos)?;
+            let sp = read_varint(input, &mut pos)?;
+            let end = sp
+                .checked_add(size)
+                .ok_or(Error::InvalidData("vcdiff: source position overflow"))?;
+            source
+                .get(sp..end)
+                .ok_or(Error::InvalidData("vcdiff: source out of range"))?
+        } else if win & VCD_TARGET != 0 {
+            return Err(Error::Unsupported("vcdiff: VCD_TARGET window"));
+        } else {
+            &[]
+        };
+        let delta_len = read_varint(input, &mut pos)?;
+        let end = pos
+            .checked_add(delta_len)
+            .ok_or(Error::InvalidData("vcdiff: delta length overflow"))?;
+        let enc = input
+            .get(pos..end)
+            .ok_or(Error::InvalidData("vcdiff: truncated window"))?;
+        pos = end;
+        // The checksum sits after the three section lengths; find it by
+        // skipping the header integers of the delta body.
+        let checksum = if win & VCD_ADLER32 != 0 {
+            let mut p = 0usize;
+            let _ = read_varint(enc, &mut p)?; // target length
+            if p >= enc.len() {
+                return Err(Error::InvalidData("vcdiff: truncated window"));
+            }
+            p += 1; // delta indicator
+            let _ = read_varint(enc, &mut p)?;
+            let _ = read_varint(enc, &mut p)?;
+            let _ = read_varint(enc, &mut p)?;
+            let end = p
+                .checked_add(4)
+                .ok_or(Error::InvalidData("vcdiff: truncated checksum"))?;
+            let b = enc
+                .get(p..end)
+                .ok_or(Error::InvalidData("vcdiff: truncated checksum"))?;
+            Some(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+        } else {
+            None
+        };
+        let window = decode_window(
+            seg,
+            enc,
+            &table,
+            max_output.saturating_sub(out.len()),
+            checksum,
+        )?;
+        out.extend_from_slice(&window);
+    }
+    Ok(out)
+}
+
+/// Byte at virtual address `p` in the `source ++ target` address space.
+fn byte_at(source: &[u8], target: &[u8], p: usize) -> u8 {
+    if p < source.len() {
+        source[p]
+    } else {
+        target[p - source.len()]
+    }
+}
+
+struct Encoder<'a> {
+    source: &'a [u8],
+    data: Vec<u8>,
+    inst: Vec<u8>,
+    addr: Vec<u8>,
+    cache: Cache,
+    produced: usize,
+}
+
+impl<'a> Encoder<'a> {
+    fn push_add(&mut self, lit: &[u8]) {
+        if lit.is_empty() {
+            return;
+        }
+        self.data.extend_from_slice(lit);
+        self.produced += lit.len();
+        if lit.len() <= 17 {
+            self.inst.push((1 + lit.len()) as u8);
+        } else {
+            self.inst.push(1);
+            write_varint(&mut self.inst, lit.len());
+        }
+    }
+
+    fn push_run(&mut self, byte: u8, size: usize) {
+        self.data.push(byte);
+        self.produced += size;
+        self.inst.push(0);
+        write_varint(&mut self.inst, size);
+    }
+
+    fn push_copy(&mut self, addr: usize, size: usize) {
+        let here = self.source.len() + self.produced;
+        let (mode, coded) = self.encode_addr(addr, here);
+        if (MIN_MATCH..=18).contains(&size) {
+            self.inst.push((19 + 16 * mode + size - 3) as u8);
+        } else {
+            self.inst.push((19 + 16 * mode) as u8);
+            write_varint(&mut self.inst, size);
+        }
+        if mode >= 2 + S_NEAR {
+            self.addr.push(coded as u8);
+        } else {
+            write_varint(&mut self.addr, coded);
+        }
+        self.produced += size;
+    }
+
+    /// Pick the smallest coded address per RFC 3284 Section 5.4
+    /// `addr_encode`, then update the caches.
+    fn encode_addr(&mut self, addr: usize, here: usize) -> (usize, usize) {
+        let mut bestd = addr;
+        let mut bestm = 0usize;
+        if here - addr < bestd {
+            bestd = here - addr;
+            bestm = 1;
+        }
+        for (i, &n) in self.cache.near.iter().enumerate() {
+            if addr >= n && addr - n < bestd {
+                bestd = addr - n;
+                bestm = i + 2;
+            }
+        }
+        let d = addr % (S_SAME * 256);
+        if self.cache.same[d] == addr {
+            bestd = d % 256;
+            bestm = S_NEAR + 2 + d / 256;
+        }
+        self.cache.update(addr);
+        (bestm, bestd)
+    }
+}
+
+/// Encode `target` as a VCDIFF delta against `source`.
+///
+/// Produces a single-window stream using the default code table with no
+/// secondary compression.
+pub fn encode_with_source(source: &[u8], target: &[u8]) -> Vec<u8> {
+    let src_len = source.len();
+    let mut head = vec![-1i32; 1 << 16];
+    let hash = |b: &[u8]| -> usize {
+        let v = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+        (v.wrapping_mul(0x9E37_79B1) >> 16) as usize
+    };
+    // Index the whole source up front (source addresses always precede the
+    // target window).
+    for p in 0..src_len.saturating_sub(MIN_MATCH - 1) {
+        head[hash(&source[p..])] = p as i32;
+    }
+
+    let mut e = Encoder {
+        source,
+        data: Vec::new(),
+        inst: Vec::new(),
+        addr: Vec::new(),
+        cache: Cache::new(),
+        produced: 0,
+    };
+
+    let mut lit_start = 0usize;
+    let mut t = 0usize;
+    while t < target.len() {
+        // Detect a run of a repeated byte first.
+        let mut run = 1usize;
+        while t + run < target.len() && target[t + run] == target[t] {
+            run += 1;
+        }
+        if run >= MIN_MATCH {
+            e.push_add(&target[lit_start..t]);
+            e.push_run(target[t], run);
+            t += run;
+            lit_start = t;
+            continue;
+        }
+
+        // Find a match of at least MIN_MATCH bytes. Match addresses index
+        // into the source ++ produced-target virtual space, so only
+        // positions strictly before src_len + t are legal.
+        let abs = src_len + t;
+        let mut best: Option<(usize, usize)> = None;
+        if t + MIN_MATCH <= target.len() {
+            let cand = head[hash(&target[t..])];
+            head[hash(&target[t..])] = abs as i32;
+            if cand >= 0 {
+                let c = cand as usize;
+                debug_assert!(c < abs);
+                let mut len = 0usize;
+                while t + len < target.len() && byte_at(source, target, c + len) == target[t + len]
+                {
+                    len += 1;
+                }
+                if len >= MIN_MATCH {
+                    best = Some((c, len));
+                }
+            }
+        }
+
+        if let Some((c, len)) = best {
+            e.push_add(&target[lit_start..t]);
+            e.push_copy(c, len);
+            // Index produced positions inside the match for later matches.
+            for p in t..t + len {
+                if p + MIN_MATCH <= target.len() {
+                    head[hash(&target[p..])] = (src_len + p) as i32;
+                }
+            }
+            t += len;
+            lit_start = t;
+        } else {
+            t += 1;
+        }
+    }
+    e.push_add(&target[lit_start..]);
+
+    // Assemble the window.
+    let mut enc = Vec::new();
+    write_varint(&mut enc, target.len());
+    enc.push(0); // Delta_Indicator: uncompressed sections
+    write_varint(&mut enc, e.data.len());
+    write_varint(&mut enc, e.inst.len());
+    write_varint(&mut enc, e.addr.len());
+    enc.extend_from_slice(&e.data);
+    enc.extend_from_slice(&e.inst);
+    enc.extend_from_slice(&e.addr);
+
+    let mut out = Vec::with_capacity(enc.len() + 16);
+    out.extend_from_slice(&MAGIC);
+    out.push(0); // Header4: version 0
+    out.push(0); // Hdr_Indicator: no optional fields
+    if src_len > 0 {
+        out.push(VCD_SOURCE);
+        write_varint(&mut out, src_len);
+        write_varint(&mut out, 0); // source segment position
+    } else {
+        out.push(0);
+    }
+    write_varint(&mut out, enc.len());
+    out.extend_from_slice(&enc);
+    out
+}
+
+/// Encode `target` as a standalone VCDIFF stream (empty source).
+pub fn encode(target: &[u8]) -> Vec<u8> {
+    encode_with_source(&[], target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rt(src: &[u8], tgt: &[u8]) {
+        let d = encode_with_source(src, tgt);
+        assert_eq!(decode_with_source(src, &d).unwrap(), tgt);
+    }
+
+    #[test]
+    fn roundtrip_no_source() {
+        rt(b"", b"hello world, hello vcdiff!");
+        rt(b"", &[0u8; 64]);
+        rt(b"", &[]);
+    }
+
+    #[test]
+    fn roundtrip_with_source() {
+        rt(
+            b"The quick brown fox jumps over the lazy dog",
+            b"The quick brown fox leaps over the lazy dog!!",
+        );
+        rt(b"aaaaaaaaaaaaaaaaaaaa", b"aaaa bbbb aaaa cccc aaaaaaaa");
+    }
+
+    #[test]
+    fn roundtrip_self_copy() {
+        // Match into already-produced target (overlap, period 3).
+        rt(b"", b"abcabcabcabcabcabcabcabc");
+    }
+
+    #[test]
+    fn rejects_bad_magic() {
+        assert!(matches!(decode(b"not a delta"), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn rejects_truncated() {
+        let d = encode(b"some data to truncate");
+        for cut in 0..d.len() {
+            let _ = decode(&d[..cut]); // must not panic
+        }
+        assert!(decode(&d[..d.len() - 1]).is_err());
+    }
+
+    #[test]
+    fn rejects_unsupported_flags() {
+        let mut d = encode(b"x");
+        // VCD_DECOMPRESS
+        d[4] = 1;
+        assert!(matches!(decode(&d), Err(Error::Unsupported(_))));
+        // VCD_CODETABLE
+        d[4] = 2;
+        assert!(matches!(decode(&d), Err(Error::Unsupported(_))));
+        // VCD_TARGET window
+        let mut d = encode(b"x");
+        d[5] = 2;
+        assert!(matches!(decode(&d), Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn rejects_copy_out_of_range() {
+        // COPY addr beyond produced data.
+        let mut d = encode(b"abc");
+        // locate window, flip inst section to COPY self addr 99:
+        // easier: craft by hand
+        let _ = &mut d;
+        // header(5) win_ind(1) delta_len(1): window enc =
+        //   target_len(1) ind(1) dl(1) il(1) al(1) data inst addr
+        let enc: &[u8] = &[
+            4, // target_len
+            0, // indicator
+            0, // data len
+            2, // inst len
+            1, // addr len
+            20, 4,  // COPY mode0 size4
+            99, // addr
+        ];
+        let mut d2 = Vec::new();
+        d2.extend_from_slice(&[0xD6, 0xC3, 0xC4, 0, 0, 0, enc.len() as u8]);
+        d2.extend_from_slice(enc);
+        assert!(matches!(decode(&d2), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn appheader_skipped() {
+        let mut d = encode(b"payload!");
+        // insert appheader flag + len + data
+        d[4] = VCD_APPHEADER;
+        let mut d2 = Vec::new();
+        d2.extend_from_slice(&d[..5]);
+        d2.push(3);
+        d2.extend_from_slice(b"xyz");
+        d2.extend_from_slice(&d[5..]);
+        assert_eq!(decode(&d2).unwrap(), b"payload!");
+    }
+
+    #[test]
+    fn bounded_decode() {
+        let d = encode(b"0123456789abcdef");
+        assert_eq!(decode_bounded(&[], &d, 16).unwrap(), b"0123456789abcdef");
+        assert!(matches!(
+            decode_bounded(&[], &d, 8),
+            Err(Error::OutputLimitExceeded { .. })
+        ));
+    }
+}

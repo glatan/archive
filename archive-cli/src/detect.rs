@@ -56,6 +56,7 @@ pub enum Format {
     Zx1,
     Zx2,
     Zx5,
+    Vcdiff,
     Lzxd,
     Cmpsc,
 }
@@ -112,6 +113,7 @@ pub enum CompressionFormat {
     Zx1,
     Zx2,
     Zx5,
+    Vcdiff,
     Lzxd,
     Cmpsc,
 }
@@ -173,6 +175,7 @@ impl core::fmt::Display for Format {
             Self::Zx1 => "zx1",
             Self::Zx2 => "zx2",
             Self::Zx5 => "zx5",
+            Self::Vcdiff => "vcdiff",
             Self::Lzxd => "lzxd",
             Self::Cmpsc => "cmpsc",
         };
@@ -240,6 +243,7 @@ impl From<CompressionFormat> for Format {
             CompressionFormat::Zx1 => Self::Zx1,
             CompressionFormat::Zx2 => Self::Zx2,
             CompressionFormat::Zx5 => Self::Zx5,
+            CompressionFormat::Vcdiff => Self::Vcdiff,
             CompressionFormat::Lzxd => Self::Lzxd,
             CompressionFormat::Cmpsc => Self::Cmpsc,
         }
@@ -278,6 +282,9 @@ pub fn detect_format(input: &[u8]) -> Option<Format> {
     }
     if input.starts_with(&[0x28, 0xB5, 0x2F, 0xFD]) {
         return Some(Format::Zstd);
+    }
+    if input.starts_with(&[0xD6, 0xC3, 0xC4]) {
+        return Some(Format::Vcdiff);
     }
     if input.starts_with(&[0x04, 0x22, 0x4D, 0x18]) {
         return Some(Format::Lz4);

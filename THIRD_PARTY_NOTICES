@@ -46,6 +46,13 @@ specifications or standards documents:
   Known-answer decode vectors in tests/integration/zx5.rs were
   produced by running the reference compressor (ZX5 v2.0)
   locally; no code was copied.
+- VCDIFF (RFC 3284): format specification by Korn, MacDonald,
+  Mogul, and Vo. The Rust implementation in src/compress/vcdiff.rs
+  is spec-informed, with no code copied. Known-answer decode
+  vectors in tests/fixtures/vcdiff/*_xdelta3.vcd were produced by
+  running the reference xdelta3 3.2.0 encoder (Joshua MacDonald,
+  Apache-2.0) locally; it was used only as a test-time fixture
+  generator and no code was copied.
 - Zstandard Seekable Format: format documentation v0.1.0 by Meta
   Platforms (contrib/seekable_format, permissive redistribution
   notice) and reference implementation (BSD/GPL dual license).

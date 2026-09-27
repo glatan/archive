@@ -35,6 +35,7 @@
     feature = "zx1",
     feature = "zx2",
     feature = "zx5",
+    feature = "vcdiff",
     feature = "lzxd",
     feature = "cmpsc"
 ))]
@@ -73,6 +74,7 @@ use archive::compress::lzxd;
 #[cfg(feature = "rzip")]
 use archive::compress::rzip;
 use archive::compress::snappy;
+use archive::compress::vcdiff;
 use archive::compress::xca;
 use archive::compress::xz;
 use archive::compress::zlib;
@@ -277,6 +279,8 @@ mod lzrw3a_tests;
 mod mtree_tests;
 #[path = "integration/tar.rs"]
 mod tar_tests;
+#[path = "integration/vcdiff.rs"]
+mod vcdiff_tests;
 #[path = "integration/zx0.rs"]
 mod zx0_tests;
 #[path = "integration/zx1.rs"]

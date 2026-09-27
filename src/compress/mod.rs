@@ -184,6 +184,10 @@ pub mod zx2;
 #[cfg(feature = "zx5")]
 pub mod zx5;
 
+/// VCDIFF delta compression/decompression (RFC 3284).
+#[cfg(feature = "vcdiff")]
+pub mod vcdiff;
+
 #[cfg(feature = "cmpsc")]
 pub mod cmpsc;
 /// LZX DELTA decompression ([MS-PATCH]): delta-compressed streams with
