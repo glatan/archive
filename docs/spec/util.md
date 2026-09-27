@@ -1,5 +1,25 @@
 # ユーティリティ
 
+## 参照仕様一覧
+
+| 参照名 | 出典 |
+|---|---|
+| ISO 3309 / ITU-T V.42 | [ITU-T V.42](https://www.itu.int/rec/T-REC-V.42) (CRC polynomial は §8.1.2.6.2) |
+| RFC 1950 (zlib/Adler-32) | [rfc1950.txt](https://www.rfc-editor.org/rfc/rfc1950.txt) |
+| RFC 1952 (gzip/CRC-32) | [rfc1952.txt](https://www.rfc-editor.org/rfc/rfc1952.txt) Appendix 8 |
+| RFC 1321 (MD5) | [rfc1321.txt](https://www.rfc-editor.org/rfc/rfc1321.txt) (ローカルスナップショット: `docs/spec/sources/rfc1321.txt`) |
+| RFC 2268 (RC2) | [rfc2268.txt](https://www.rfc-editor.org/rfc/rfc2268.txt) |
+| RFC 2315 (PKCS#7) | [rfc2315.txt](https://www.rfc-editor.org/rfc/rfc2315.txt) |
+| FIPS 180-3 / 180-4 (SHA-1 / SHA-256) | [NIST.FIPS.180-4.pdf](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf) (180-3 は 180-4 に統合・廃止) |
+| FIPS 197 (AES) | [NIST.FIPS.197-upd1.pdf](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf) |
+| FIPS 46-3 (DES/3DES) | [fips46-3.pdf](https://csrc.nist.gov/files/pubs/fips/46-3/final/docs/fips46-3.pdf) (withdrawn) |
+| RC4 | de facto standard。参考: [RFC 4345](https://www.rfc-editor.org/rfc/rfc4345.txt) (SSH arcfour 記述) |
+| ECMA-182 (CRC-64) | [ECMA-182 1st edition PDF](https://ecma-international.org/wp-content/uploads/ECMA-182_1st_edition_december_1992.pdf) |
+| xxHash reference algorithm | [xxHash spec](https://github.com/Cyan4973/xxHash/blob/dev/doc/xxhash_spec.md) |
+| WinZip AES spec | [WinZip AES Encryption](https://www.winzip.com/en/support/aes-encryption/) |
+| 7z Methods.txt | [Methods.txt](https://raw.githubusercontent.com/ip7z/7zip/main/DOC/Methods.txt) (LZMA SDK 同梱) |
+| Snappy framing / LZ4 frame / xz-file-format.txt | `docs/spec/<fmt>/README.md` 参照 |
+
 ### CRC32 (ISO 3309 / ITU-T V.42)
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |

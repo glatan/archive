@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | 正式な RFC/ISO 仕様は存在せず、Julian Seward 作の bzip2 リファレンス実装 (1.0.x) と付属マニュアル、およびソースコード (`compress.c`, `decompress.c`, `huffman.c`, `bzlib.h`) をデファクト仕様として扱う |
+| 基準仕様 | Julian Seward 作の [bzip2](https://www.sourceware.org/bzip2/) リファレンス実装 (1.0.x) と[付属マニュアル](https://www.sourceware.org/bzip2/manual/manual.html)、およびソースコード (`compress.c`, `decompress.c`, `huffman.c`, `bzlib.h`) をデファクト仕様として扱う。補助: [BZIP2 Format Specification (Joe Tsai)](https://raw.githubusercontent.com/dsnet/compress/master/doc/bzip2-format.pdf) (bzip2-1.0.6 からの非公式逆解析文書、ローカルスナップショット: `docs/spec/sources/bzip2-format_dsnet.pdf`) |
 
 ### ストリームフォーマット
 

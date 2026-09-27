@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) |
+| 基準仕様 | [`7zFormat.txt`](https://raw.githubusercontent.com/ip7z/7zip/main/DOC/7zFormat.txt) / [`Methods.txt`](https://raw.githubusercontent.com/ip7z/7zip/main/DOC/Methods.txt) ([LZMA SDK](https://www.7-zip.org/sdk.html) 26.00 同梱文書、GitHub mirror: ip7z/7zip。ローカルスナップショット: `docs/spec/sources/7zformat.txt` / `7z_methods.txt`) |
 | current scope | multi-folder decode (supported single-output DAG subset)、one/two-folder linear writer、supported codec/filter chain (LZMA2, LZMA, PPMdH, Copy, Deflate, Deflate64 (decode-only), BZip2 + x86/PowerPC/ARM/ARM-Thumb/SPARC/ARM64/RISC-V BCJ, Delta, BCJ2, Brotli) + 7zAES file-content / encoded-header encrypt + timestamp metadata (ctime/atime/mtime) |
 | intentional exclusion | non-linear DAG writer (3+ folder)、empty-stream/directory/anti-item entries、external stream/folder lists、IA64 BCJ encode、Deflate64 encode |
 

@@ -2,6 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
+| 基準仕様 | [RFC 1950](https://www.rfc-editor.org/rfc/rfc1950.txt) — ZLIB Compressed Data Format Specification version 3.3 (ローカルスナップショット: `docs/spec/sources/rfc1950.txt`) |
 | current scope | RFC 1950 の zlib wrapper として、2-byte header (`CMF`/`FLG`)・raw DEFLATE payload・big-endian Adler-32 trailer を対象にする |
 
 ### テスト対象要件と網羅状況

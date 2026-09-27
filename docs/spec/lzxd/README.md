@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 形式概要 | Microsoft LZX DELTA (LZXD)。差分パッチ圧縮用の LZX バリアントで、呼び出し側が与える reference データを subject データの前方に論理前置し、マッチオフセットが reference 側へも遡及できる |
-| 基準仕様 | [MS-PATCH] LZX DELTA Compression and Decompression (Microsoft Open Specifications、2025-08-19 版) |
+| 基準仕様 | [[MS-PATCH]](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-patch/) LZX DELTA Compression and Decompression (Microsoft Open Specifications、2025-08-19 rev 14.1 版、[版固定 PDF](https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-PATCH/%5bMS-PATCH%5d-250819.pdf)、ローカルスナップショット: `docs/spec/sources/ms-patch_14.1_250819.pdf`) |
 | 実装 | `archive::compress::lzxd` (decode / decode_all / encode)。pure-Rust 実装 |
 
 ## ストリーム構造
@@ -46,7 +46,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
 | 21 | `encode` は uncompressed ブロックのみからなる合法ストリームを出力する (uncompressed チャンク = 生データ + R=(1,1,1) 維持)。Huffman 符号化ブロックの生成は **intentional scope** 外 | [MS-PATCH] 2.3.2.1 | ✅ | `uncompressed_roundtrip` / `lzxd_encode_decode_roundtrip` (統合) |
-| 22 | エンコーダは reference データ・E8 変換を出力しない (常に E8=0)。decode 側は両方対応 (intentional scope) | — | ✅ | 上記テストで検証 |
+| 22 | エンコーダは reference データ・E8 変換を出力しない (常に E8=0)。decode 側は両方対応 (intentional scope) | crate-local | ✅ | 上記テストで検証 |
 
 ## テスト / 相互運用
 

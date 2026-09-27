@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | ARJ technical note (ARJ 2.x file format description) |
+| 基準仕様 | ARJ technical note `TECHNOTE.TXT` (ARJ/UNARJ 配布物同梱、ARJ 2.x file format description)。所在: [Just Solve Wiki: ARJ](http://fileformats.archiveteam.org/wiki/ARJ) (安定した単一ファイル URL なし) |
 | 形式概要 | `0x60 0xEA` + `u16le header size` の header ブロック列 (0 = end)。基本 header は 30B 固定 + NUL 終端 filename/comment + u32 header CRC + u16 ext size。main header の後に file header 列と data が続く |
 | 実装範囲 | **method 0 (stored) + file type 3 (directory) / 4 (label)** のみ read。write は method-0 のみ。method 1-4 圧縮・garbled (password) エントリは intentional scope 外 |
 

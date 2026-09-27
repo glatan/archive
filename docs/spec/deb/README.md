@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | deb(5) — dpkg パッケージフォーマット (Debian マニュアルページ) |
+| 基準仕様 | [deb(5)](https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html) — dpkg パッケージフォーマット (Debian マニュアルページ、ローカルスナップショット: `docs/spec/sources/deb_5_unstable.html`) |
 | 形式概要 | `ar` アーカイブ + 固定 member レイアウト: `debian-binary` / `control.tar.*` / `data.tar.*` |
 | 実装範囲 | **read のみ** (write は intentional scope 外) |
 
@@ -60,7 +60,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 21 | `.deb` の write (encoder) | — | ❌ | read-only scope (intentional)。生成は `ar`+`tar`+codec の組み合わせで代替可能 |
+| 21 | `.deb` の write (encoder) | crate-local | ❌ | read-only scope (intentional)。生成は `ar`+`tar`+codec の組み合わせで代替可能 |
 | 22 | `debian-binary` 2 行目以降・`control` ファイルの deb822 セマンティクス | deb(5) / deb-control(5) | ❌ | コンテナレイヤの責務外 (intentional)。`control_entries()` で生ファイルは取得可能 |
 | 23 | `data.tar` 内の filesystem セマンティクス (conffiles, maintainer scripts) | [deb(5)](https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html) | ❌ | パッケージマネージャ層の責務 (intentional) |
 

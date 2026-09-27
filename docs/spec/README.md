@@ -7,6 +7,7 @@
 | 要件表の粒度 | 可能な限り **どの仕様書のどの節・見出し・項目に対応するか** を辿れる粒度で記載する |
 | 節番号のない仕様書の参照方法 | 見出し名または用語名で参照する |
 | 分割ファイル | 各フォーマットの要件表は `docs/spec/<fmt>/` 配下に分割されている。index は `README.md`、バリアント/トピック別要件は子ファイル |
+| 仕様出典の URL | 各 `docs/spec/<fmt>/README.md` の「基準仕様」行に canonical URL を記載する。`docs/spec/sources/` には `manifest.json` でピン留めした版のローカルスナップショットを置く (`make fetch-spec-sources` で取得、ダウンロード物は gitignore)。fetch 不可の出典は manifest の `no_url_available` に `reference_url` で記録する |
 
 ## 読み方
 

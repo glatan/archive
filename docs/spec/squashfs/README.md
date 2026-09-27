@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | SquashFS binary format documentation (dr-emann.github.io/squashfs、SquashFS 4.0) |
+| 基準仕様 | [SquashFS binary format documentation](https://dr-emann.github.io/squashfs/squashfs.html) (SquashFS 4.0、コミュニティ逆解析文書 = de facto 仕様、ローカルスナップショット: `docs/spec/sources/squashfs_4.0.html`) |
 | 形式概要 | 96B superblock + metadata block 列 (inode/dir table) + lookup table (fragment/ID を実読み、export/xattr は境界計算のみ) + data block |
 | 実装範囲 | **read のみ** (write は intentional scope 外) |
 
@@ -74,7 +74,7 @@ mksquashfs 生成イメージとの相互運用はテストで確認済み。
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 28 | `.squashfs` write (encoder) | — | ❌ | read-only scope (intentional) |
+| 28 | `.squashfs` write (encoder) | crate-local | ❌ | read-only scope (intentional) |
 | 29 | LZMA1 (compressor id 2) payload の伸張 | §2.4 | ❌ | upstream deprecated。`Unsupported` を返す (intentional) |
 | 30 | xattr / export table の展開 | §8/§10 | ❌ | メタデータ解析は layout 検証まで。xattr 値の公開は intentional scope 外 |
-| 31 | filesystem セマンティクス (デバイス node 作成、パーミッション適用) | — | ❌ | 抽出は name/content 列挙まで (intentional) |
+| 31 | filesystem セマンティクス (デバイス node 作成、パーミッション適用) | crate-local | ❌ | 抽出は name/content 列挙まで (intentional) |

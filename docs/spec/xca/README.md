@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 形式概要 | Microsoft Xpress Compression Algorithms の 3 バリアント: Plain LZ77 ("Xpress", `COMPRESSION_FORMAT_XPRESS`)、LZ77+Huffman ("Xpress Huffman", `COMPRESSION_FORMAT_XPRESS_HUFF`)、LZNT1 (`COMPRESSION_FORMAT_LZNT1`) |
-| 基準仕様 | [MS-XCA] Xpress Compression Algorithm (Microsoft Open Specifications, <https://learn.microsoft.com/openspecs/windows_protocols/ms-xca/>) |
+| 基準仕様 | [MS-XCA] Xpress Compression Algorithm (Microsoft Open Specifications, <https://learn.microsoft.com/openspecs/windows_protocols/ms-xca/>、rev 10.0 版固定 PDF: <https://winprotocoldocs-bhdugrdyduf5h2e4.b02.azurefd.net/MS-XCA/%5bMS-XCA%5d-240423.pdf>。ローカルスナップショット: `docs/spec/sources/ms-xca_10.0_240423.pdf`) |
 | 実装 | `archive::compress::xca::{lz77, huffman, lznt1}`。仕様書のみからの pure-Rust 実装。サードパーティコードの移植なし |
 
 MS-XCA のストリームはコンテナヘッダや magic を持たない生コーデック列であり、

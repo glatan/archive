@@ -2,8 +2,8 @@
 
 | 項目 | 内容 |
 |------|------|
-| LZO1X 基準仕様 | [Linux kernel `Documentation/lzo.txt`](https://docs.kernel.org/staging/lzo.html) |
-| lzop 基準仕様 | lzop ソースコード (`lzop.h` / `p_lzo.c`) をデファクト仕様として扱う |
+| LZO1X 基準仕様 | [Linux kernel `Documentation/staging/lzo.rst`](https://docs.kernel.org/staging/lzo.html) (ローカルスナップショット: `docs/spec/sources/linux_lzo.rst`) |
+| lzop 基準仕様 | [lzop](https://www.lzop.org/) ソースコード (`lzop.h` / `p_lzo.c`) をデファクト仕様として扱う |
 
 ## 対応バリアント・仕様版
 

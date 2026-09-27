@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | ARC file format description (System Enhancement Associates / wotsit "arc" entry) |
+| 基準仕様 | ARC file format description (System Enhancement Associates / wotsit "arc" entry、[fileformat.info mirror](https://www.fileformat.info/format/arc/corion.htm)、ローカルスナップショット: `docs/spec/sources/arc_format_corion.htm`) |
 | 形式概要 | 各 member は `0x1A` + method byte で開始、method 0 で終端。name は 13B NUL 埋めの flat 名 (directory 概念なし) |
 | 実装範囲 | **method 1 (obsolete unpacked) / method 2 (stored)** のみ read。write は method-2 のみ。method 3 (packed/RLE)・4 (squeezed)・5-8 (crunched/crushed/distilled) 以降は intentional scope 外 |
 

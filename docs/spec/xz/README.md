@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | xz ファイルフォーマット仕様 (https://tukaani.org/xz/xz-file-format.txt) |
+| 基準仕様 | [xz ファイルフォーマット仕様 1.1.0](https://tukaani.org/xz/xz-file-format.txt) (2022-12-11 版、ローカルスナップショット: `docs/spec/sources/xz-file-format-1.1.0.txt`) |
 
 ## 対応バリアント・仕様版
 

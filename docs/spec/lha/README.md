@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | lha header documentation (apphead / lzh_note、GNU lha 系資料) |
+| 基準仕様 | lha header documentation (apphead / lzh_note、GNU lha 系資料)。実参照: [LHa for UNIX `header.doc.md`](https://github.com/jca02266/lha/blob/master/header.doc.md) ([jca02266/lha](https://github.com/jca02266/lha)) + [Just Solve Wiki: LHarc](http://justsolve.archiveteam.org/wiki/LHarc)。ローカルスナップショット: `docs/spec/sources/lha_header.doc.md` |
 | 形式概要 | `[u8/u16 header size][checksum?][method 5B][packed u32][orig u32][time u32][attr u8][level u8](level 別フィールド)[ext headers][data]` のエントリ列。終端は header size = 0 |
 | 実装範囲 | level 0/1/2 の **`-lh0-` (stored) / `-lhd-` (directory)** のみ read。write は level-0 `-lh0-` のみ。LZH 系圧縮メソッド (`-lh1-` 〜 `-lh7-`、`-lzs-`、`-lz4-`、`-pm0-` 等) は intentional scope 外 |
 

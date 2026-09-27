@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 形式概要 | LZMA アルゴリズムに固定パラメータ (`lc=3`, `lp=0`, `pb=2`) を使用し、6バイトヘッダー + LZMA ストリーム + 20バイトトレーラーで構成される |
-| 基準仕様 | lzip マニュアル (https://www.nongnu.org/lzip/manual/lzip_manual.html) |
+| 基準仕様 | [lzip manual 1.24.1](https://www.nongnu.org/lzip/manual/lzip_manual.html) "File format" (ローカルスナップショット: `docs/spec/sources/lzip_manual_1.24.1.html`) |
 
 ### ストリームフォーマット
 

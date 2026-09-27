@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | rpm.org Package Format documentation (`format_v6.html` / `format_header.html` / `format_lead.html`) + rpm `lib/cpio.c` (stripped payload 挙動) |
+| 基準仕様 | rpm.org Package Format documentation ([`format_v6.html`](https://rpm-software-management.github.io/rpm/manual/format_v6.html) / [`format_header.html`](https://rpm-software-management.github.io/rpm/manual/format_header.html) / [`format_lead.html`](https://rpm-software-management.github.io/rpm/manual/format_lead.html)、ローカルスナップショット: `docs/spec/sources/rpm_format_*.html`) + rpm `lib/cpio.c` (stripped payload 挙動) |
 | 形式概要 | 96B Lead + Signature header + 8B パディング + Header + 圧縮 payload (cpio `newc` / stripped `07070X`) |
 | 実装範囲 | **read のみ** (write / 署名検証は intentional scope 外) |
 
@@ -67,6 +67,6 @@
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 25 | `.rpm` の write (encoder) | — | ❌ | read-only scope (intentional) |
+| 25 | `.rpm` の write (encoder) | crate-local | ❌ | read-only scope (intentional) |
 | 26 | OpenPGP 署名検証・payload/header digest 検証 | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ❌ | 暗号検証はコンテナレイヤの責務外 (intentional)。tag 値は API 経由で参照可能 |
 | 27 | RPMTAG のパッケージ管理セマンティクス (依存関係・scriptlet・ファイル属性の install 意味) | rpm tags | ❌ | パッケージマネージャ層の責務 (intentional)。生 tag は `header.get_*` で取得可能 |

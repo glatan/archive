@@ -2,14 +2,14 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | IEEE Std 1003.1 (POSIX) ar 形式 / GNU ar 拡張 / BSD ar 拡張 |
+| 基準仕様 | [IEEE Std 1003.1](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/ar.html) (POSIX) ar 形式 / [GNU ar](https://sourceware.org/binutils/docs/binutils/ar.html) 拡張 / [BSD ar](https://man.freebsd.org/cgi/man.cgi?ar(5)) 拡張 (ローカルスナップショット: `docs/spec/sources/posix_ar_9699919799.html` / `ar_5_freebsd.html`) |
 | 形式概要 | 8B グローバルヘッダー + 60B 固定長メンバーヘッダー × N。圧縮なし、チェックサムなし |
 
 ## 対応バリアント・仕様版
 
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
-| POSIX 共通 (60B 固定長メンバーヘッダ) | [IEEE Std 1003.1](https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/ar.h.html) | ✅ | ✅ | 短い名前のみ |
+| POSIX 共通 (60B 固定長メンバーヘッダ) | [IEEE Std 1003.1](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/ar.html) | ✅ | ✅ | 短い名前のみ |
 | GNU 拡張 (`//` 文字列テーブル、`/offset`、`/<n>`) | [GNU ar](https://sourceware.org/binutils/docs/binutils/ar.html) | ✅ | ✅ | 長い名前の既定エンコード |
 | GNU thin (`!<thin>\n`) | [GNU ar](https://sourceware.org/binutils/docs/binutils/ar.html) | ✅ | ❌ | thin archive の生成は非対応 |
 | BSD 拡張 (`#1/<len>` 名前埋め込み) | [BSD ar](https://man.freebsd.org/cgi/man.cgi?ar(5)) | ✅ | ✅ | 16文字超 or スペース含有名 |

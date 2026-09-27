@@ -10,5 +10,8 @@ fuzz/corpus/*
 # 仕様書キャッシュ (manifest.json はバージョン管理、ダウンロード済みファイルは除外)
 docs/spec/sources/*.txt
 docs/spec/sources/*.md
+docs/spec/sources/*.htm
 docs/spec/sources/*.html
 docs/spec/sources/*.pdf
+docs/spec/sources/*.c
+docs/spec/sources/*.rst
