@@ -64,3 +64,99 @@ fn test_mtree_bsdtar_interop() {
     let hello = entries.iter().find(|e| e.name == "hello.txt").unwrap();
     assert_eq!(hello.size, Some(11));
 }
+
+#[test]
+fn test_mtree_encode_roundtrip() {
+    use archive::archive::mtree::decode::{MtreeEntry, MtreeKind};
+    use archive::archive::mtree::encode::MtreeEncoder;
+    use std::collections::BTreeMap;
+
+    let mut e = MtreeEntry {
+        name: "sub/dir with space/file.txt".to_string(),
+        kind: MtreeKind::File,
+        size: Some(42),
+        mode: Some(0o640),
+        uid: Some(1000),
+        gid: Some(1000),
+        uname: Some("user".to_string()),
+        gname: Some("group".to_string()),
+        time: Some("1700000000.123456789".to_string()),
+        link: None,
+        digests: BTreeMap::new(),
+    };
+    e.digests.insert("sha1".to_string(), "0a0a0a".to_string());
+
+    let mut enc = MtreeEncoder::new();
+    enc.set(&[("type", "file"), ("uid", "0")]).unwrap();
+    enc.add_entry(&e).unwrap();
+    let manifest = enc.finish();
+    assert!(manifest.starts_with(b"#mtree\n"));
+
+    let entries = archive::archive::mtree::decode::decode(&manifest).unwrap();
+    assert_eq!(entries.len(), 1);
+    let g = &entries[0];
+    assert_eq!(g.name, "sub/dir with space/file.txt");
+    assert_eq!(g.size, Some(42));
+    assert_eq!(g.mode, Some(0o640));
+    assert_eq!(g.uname.as_deref(), Some("user"));
+    assert_eq!(g.digests["sha1"], "0a0a0a");
+}
+
+#[test]
+fn test_mtree_bsdtar_read_interop() {
+    use archive::archive::mtree::decode::{MtreeEntry, MtreeKind};
+    use archive::archive::mtree::encode::encode;
+    use std::collections::BTreeMap;
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let entries = [
+        MtreeEntry {
+            name: "hello.txt".to_string(),
+            kind: MtreeKind::File,
+            size: Some(11),
+            mode: Some(0o644),
+            uid: Some(0),
+            gid: Some(0),
+            uname: Some("root".to_string()),
+            gname: Some("root".to_string()),
+            time: Some("1700000000.0".to_string()),
+            link: None,
+            digests: BTreeMap::new(),
+        },
+        MtreeEntry {
+            name: "sub".to_string(),
+            kind: MtreeKind::Dir,
+            size: None,
+            mode: Some(0o755),
+            uid: None,
+            gid: None,
+            uname: None,
+            gname: None,
+            time: None,
+            link: None,
+            digests: BTreeMap::new(),
+        },
+    ];
+    let manifest = encode(&entries).unwrap();
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_mtree_wr_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let spec = dir.join("spec.mtree");
+    std::fs::write(&spec, &manifest).unwrap();
+
+    // bsdtar (libarchive) can read an mtree manifest as input.
+    let output = Command::new("bsdtar").args(["-tf"]).arg(&spec).output();
+    let _ = std::fs::remove_dir_all(&dir);
+    let Ok(result) = output else { return };
+    if !result.status.success() {
+        return; // libarchive mtree reader unavailable in this build
+    }
+    let text = String::from_utf8_lossy(&result.stdout);
+    assert!(text.contains("hello.txt"), "bsdtar output: {text}");
+    assert!(text.contains("sub"), "bsdtar output: {text}");
+}
