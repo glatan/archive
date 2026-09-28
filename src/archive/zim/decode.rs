@@ -29,6 +29,14 @@ pub struct ZimEntry {
     pub name: String,
     /// Uncompressed entry contents.
     pub data: Vec<u8>,
+    /// MIME type string from the archive's MIME type list; empty for
+    /// redirect entries (which carry no MIME index on the wire).
+    pub mime_type: String,
+    /// Entry title (the dirent title field, falling back to the bare
+    /// path when the stored title is empty, per the ZIM spec).
+    pub title: String,
+    /// Index of this entry's dirent in archive order.
+    index: u32,
 }
 
 impl crate::traits::ArchiveEntry for ZimEntry {
@@ -50,7 +58,13 @@ struct Dirent {
     redirect: Option<u32>,
     /// Skip this entry entirely (deprecated linktarget/deleted).
     skip: bool,
+    /// MIME type list index (content entries only).
+    mime_idx: u16,
     name: String,
+    /// Path without the namespace prefix (title fallback).
+    bare_path: String,
+    /// Dirent title field (may be empty).
+    title: String,
 }
 
 fn le_u16(data: &[u8], off: usize) -> Result<u16, Error> {
@@ -96,37 +110,48 @@ fn parse_dirent(input: &[u8], pos: usize) -> Result<Dirent, Error> {
         .get(pos + 3)
         .ok_or(Error::InvalidData("zim: truncated dirent"))?;
 
+    let empty = || Dirent {
+        cluster: 0,
+        blob: 0,
+        redirect: None,
+        skip: true,
+        mime_idx: 0,
+        name: String::new(),
+        bare_path: String::new(),
+        title: String::new(),
+    };
+
     if mimetype == MIMETYPE_LINKTARGET || mimetype == MIMETYPE_DELETED {
-        return Ok(Dirent {
-            cluster: 0,
-            blob: 0,
-            redirect: None,
-            skip: true,
-            name: String::new(),
-        });
+        return Ok(empty());
     }
 
     if mimetype == MIMETYPE_REDIRECT {
         let redirect = le_u32(input, pos + 8)?;
-        let (path, _) = read_asciiz(input, pos + 12)?;
+        let (path, next) = read_asciiz(input, pos + 12)?;
+        let (title, _) = read_asciiz(input, next).unwrap_or_default();
         return Ok(Dirent {
-            cluster: 0,
-            blob: 0,
             redirect: Some(redirect),
             skip: false,
             name: format!("{}/{}", namespace as char, path),
+            bare_path: path,
+            title,
+            ..empty()
         });
     }
 
     let cluster = le_u32(input, pos + 8)?;
     let blob = le_u32(input, pos + 12)?;
-    let (path, _) = read_asciiz(input, pos + 16)?;
+    let (path, next) = read_asciiz(input, pos + 16)?;
+    let (title, _) = read_asciiz(input, next).unwrap_or_default();
     Ok(Dirent {
         cluster,
         blob,
-        redirect: None,
         skip: false,
+        mime_idx: mimetype,
         name: format!("{}/{}", namespace as char, path),
+        bare_path: path,
+        title,
+        ..empty()
     })
 }
 
@@ -238,8 +263,26 @@ pub fn decode(input: &[u8]) -> Result<Vec<ZimEntry>, Error> {
     let entry_count = le_u32(input, 24)? as usize;
     let cluster_count = le_u32(input, 28)? as usize;
     let path_ptr_pos = le_u64(input, 32)? as usize;
+    let _title_ptr_pos = le_u64(input, 40)? as usize;
     let cluster_ptr_pos = le_u64(input, 48)? as usize;
+    let mime_list_pos = le_u64(input, 56)? as usize;
     let checksum_pos = le_u64(input, 72)? as usize;
+
+    // MIME type list: ASCIIZ sequence ending with an empty string.
+    let mut mime_list = Vec::new();
+    {
+        let mut mpos = mime_list_pos;
+        loop {
+            let (m, next) = read_asciiz(input, mpos)?;
+            if m.is_empty() {
+                break;
+            }
+            mime_list.push(m);
+            mpos = next;
+        }
+    }
+    let mime_type_of =
+        |idx: u16| -> String { mime_list.get(idx as usize).cloned().unwrap_or_default() };
 
     let cluster_ptr_end = cluster_ptr_pos
         .checked_add(cluster_count * 8)
@@ -282,6 +325,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<ZimEntry>, Error> {
         if d.skip {
             continue;
         }
+        let index = i as u32;
         let resolved = if let Some(target) = d.redirect {
             let idx = target as usize;
             dirents
@@ -308,6 +352,17 @@ pub fn decode(input: &[u8]) -> Result<Vec<ZimEntry>, Error> {
         entries.push(ZimEntry {
             name: d.name.clone(),
             data,
+            index,
+            mime_type: if d.redirect.is_some() {
+                String::new()
+            } else {
+                mime_type_of(d.mime_idx)
+            },
+            title: if d.title.is_empty() {
+                d.bare_path.clone()
+            } else {
+                d.title.clone()
+            },
         });
     }
 
@@ -320,6 +375,32 @@ pub fn decode(input: &[u8]) -> Result<Vec<ZimEntry>, Error> {
     {
         return Err(Error::InvalidData("zim: archive checksum mismatch"));
     }
+    Ok(entries)
+}
+
+/// Decode a ZIM archive into a list of entries ordered by the
+/// archive's title pointer list (title-sorted dirent indices).
+///
+/// When the title pointer list is absent or malformed, entries keep
+/// the default path order returned by [`decode`].
+pub fn decode_title_order(input: &[u8]) -> Result<Vec<ZimEntry>, Error> {
+    let mut entries = decode(input)?;
+    if input.len() < 80 {
+        return Ok(entries);
+    }
+    let entry_count = le_u32(input, 24)? as usize;
+    let title_ptr_pos = le_u64(input, 40)? as usize;
+    let end = title_ptr_pos.saturating_add(entry_count * 4);
+    if title_ptr_pos == 0 || end > input.len() {
+        return Ok(entries);
+    }
+    // rank[dirent index] = position in the title-sorted order.
+    let mut rank = alloc::collections::BTreeMap::new();
+    for i in 0..entry_count {
+        let idx = le_u32(input, title_ptr_pos + i * 4)?;
+        rank.insert(idx, i as u32);
+    }
+    entries.sort_by_key(|e| rank.get(&e.index).copied().unwrap_or(u32::MAX));
     Ok(entries)
 }
 
@@ -336,6 +417,14 @@ mod tests {
         entries: Vec<DirentSpec>,
         /// (compression info byte, raw cluster payload)
         clusters: Vec<(u8, Vec<u8>)>,
+        /// Extra MIME list entries after the default "text/html".
+        extra_mimes: Vec<&'static str>,
+        /// dirent index -> stored title (empty = fallback to path).
+        titles: alloc::collections::BTreeMap<usize, &'static str>,
+        /// dirent index -> MIME list index (default 0).
+        mime_idx: alloc::collections::BTreeMap<usize, u16>,
+        /// title pointer list override (u32 dirent indices).
+        title_ptrs: Option<Vec<u32>>,
     }
 
     enum DirentSpec {
@@ -364,18 +453,27 @@ mod tests {
                 major: 5,
                 entries: Vec::new(),
                 clusters: Vec::new(),
+                extra_mimes: Vec::new(),
+                titles: alloc::collections::BTreeMap::new(),
+                mime_idx: alloc::collections::BTreeMap::new(),
+                title_ptrs: None,
             }
         }
 
         fn build(&self) -> Vec<u8> {
             let mut mime = Vec::new();
             mime.extend_from_slice(b"text/html\0");
+            for m in &self.extra_mimes {
+                mime.extend_from_slice(m.as_bytes());
+                mime.push(0);
+            }
             mime.push(0); // terminator
 
             let mut dirent_buf = Vec::new();
             let mut dirent_offsets = Vec::new();
-            for e in &self.entries {
+            for (ei, e) in self.entries.iter().enumerate() {
                 dirent_offsets.push(dirent_buf.len());
+                let title = self.titles.get(&ei).copied().unwrap_or("");
                 match e {
                     DirentSpec::Content {
                         cluster,
@@ -383,7 +481,8 @@ mod tests {
                         ns,
                         path,
                     } => {
-                        dirent_buf.extend_from_slice(&0u16.to_le_bytes()); // mimetype idx 0
+                        let mi = self.mime_idx.get(&ei).copied().unwrap_or(0);
+                        dirent_buf.extend_from_slice(&mi.to_le_bytes());
                         dirent_buf.push(0); // param len
                         dirent_buf.push(*ns);
                         dirent_buf.extend_from_slice(&0u32.to_le_bytes()); // revision
@@ -391,7 +490,8 @@ mod tests {
                         dirent_buf.extend_from_slice(&blob.to_le_bytes());
                         dirent_buf.extend_from_slice(path.as_bytes());
                         dirent_buf.push(0);
-                        dirent_buf.push(0); // empty title
+                        dirent_buf.extend_from_slice(title.as_bytes());
+                        dirent_buf.push(0);
                     }
                     DirentSpec::Redirect { index, ns, path } => {
                         dirent_buf.extend_from_slice(&0xffffu16.to_le_bytes());
@@ -401,6 +501,7 @@ mod tests {
                         dirent_buf.extend_from_slice(&index.to_le_bytes());
                         dirent_buf.extend_from_slice(path.as_bytes());
                         dirent_buf.push(0);
+                        dirent_buf.extend_from_slice(title.as_bytes());
                         dirent_buf.push(0);
                     }
                     DirentSpec::Deprecated { mimetype, ns, path } => {
@@ -455,7 +556,16 @@ mod tests {
             out.extend_from_slice(&mime);
             out.extend_from_slice(&dirent_buf);
             out.extend_from_slice(&path_ptrs);
-            out.extend_from_slice(&vec![0u8; self.entries.len() * 4]); // title ptrs (unused)
+            match &self.title_ptrs {
+                Some(ptrs) => {
+                    for &i in ptrs {
+                        out.extend_from_slice(&i.to_le_bytes());
+                    }
+                }
+                None => {
+                    out.extend_from_slice(&vec![0u8; self.entries.len() * 4]); // unused
+                }
+            }
             out.extend_from_slice(&cluster_ptrs);
             out.extend_from_slice(&cluster_area);
             out
@@ -564,6 +674,7 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[1].name, "C/alias");
         assert_eq!(entries[1].data, b"content");
+        assert_eq!(entries[1].mime_type, "");
     }
 
     #[test]
@@ -808,5 +919,102 @@ mod tests {
             decode_parts(&[&data]).unwrap().len(),
             decode(&data).unwrap().len()
         );
+    }
+    #[test]
+    fn exposes_mime_type_and_title() {
+        let mut b = ZimBuilder::new();
+        b.extra_mimes.push("text/plain");
+        b.entries.push(DirentSpec::Content {
+            cluster: 0,
+            blob: 0,
+            ns: b'C',
+            path: "index.html",
+        });
+        b.entries.push(DirentSpec::Content {
+            cluster: 0,
+            blob: 1,
+            ns: b'C',
+            path: "note.txt",
+        });
+        b.mime_idx.insert(1, 1);
+        b.titles.insert(0, "The Index");
+        b.clusters.push((1, stored_cluster(&[b"<html>", b"note"])));
+        let entries = decode(&b.build()).unwrap();
+        assert_eq!(entries[0].mime_type, "text/html");
+        assert_eq!(entries[0].title, "The Index");
+        assert_eq!(entries[1].mime_type, "text/plain");
+        // Empty title falls back to the bare path.
+        assert_eq!(entries[1].title, "note.txt");
+    }
+
+    #[test]
+    fn title_order_uses_title_pointer_list() {
+        let mut b = ZimBuilder::new();
+        for (i, p) in ["aaa", "zzz", "mmm"].iter().enumerate() {
+            b.entries.push(DirentSpec::Content {
+                cluster: 0,
+                blob: i as u32,
+                ns: b'C',
+                path: p,
+            });
+        }
+        // Title order: zzz's title "AA" sorts first, mmm "BB" second.
+        b.titles.insert(1, "AA");
+        b.titles.insert(2, "BB");
+        b.title_ptrs = Some(vec![1, 2, 0]);
+        b.clusters.push((1, stored_cluster(&[b"a", b"z", b"m"])));
+        let data = b.build();
+        let by_title = decode_title_order(&data).unwrap();
+        assert_eq!(
+            by_title.iter().map(|e| e.name()).collect::<Vec<_>>(),
+            vec!["C/zzz", "C/mmm", "C/aaa"]
+        );
+        // Path order is unchanged for decode().
+        let by_path = decode(&data).unwrap();
+        assert_eq!(
+            by_path.iter().map(|e| e.name()).collect::<Vec<_>>(),
+            vec!["C/aaa", "C/zzz", "C/mmm"]
+        );
+        // Absent title list keeps path order.
+        b.title_ptrs = None;
+        let data2 = b.build();
+        let e = decode_title_order(&data2).unwrap();
+        assert_eq!(e[0].name(), "C/aaa");
+    }
+
+    #[test]
+    fn title_order_falls_back_on_invalid_list() {
+        let mut b = ZimBuilder::new();
+        for (i, p) in ["bbb", "aaa", "ccc"].iter().enumerate() {
+            b.entries.push(DirentSpec::Content {
+                cluster: 0,
+                blob: i as u32,
+                ns: b'C',
+                path: p,
+            });
+        }
+        b.clusters
+            .push((CLUSTER_NONE, stored_cluster(&[b"b", b"a", b"c"])));
+        b.title_ptrs = Some(vec![2, 0, 1]);
+
+        let built = b.build();
+        let path_order: Vec<_> = decode(&built)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name().to_string())
+            .collect();
+
+        // titlePtrPos = 0 (absent): path order.
+        let mut absent = b.build();
+        absent[40..48].copy_from_slice(&0u64.to_le_bytes());
+        let e = decode_title_order(&absent).unwrap();
+        assert_eq!(e.iter().map(|e| e.name()).collect::<Vec<_>>(), path_order);
+
+        // titlePtrPos out of range: path order.
+        let mut oob = b.build();
+        let oob_pos = (oob.len() + 8) as u64;
+        oob[40..48].copy_from_slice(&oob_pos.to_le_bytes());
+        let e = decode_title_order(&oob).unwrap();
+        assert_eq!(e.iter().map(|e| e.name()).collect::<Vec<_>>(), path_order);
     }
 }
