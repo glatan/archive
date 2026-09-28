@@ -118,7 +118,7 @@
 | [cpio](cpio/README.md) | POSIX `odc` / SVR4 `newc`/`newcrc`/`bin` | 42 | 1 | 0 | 43 |
 | [ar](ar/README.md) | IEEE Std 1003.1 / GNU ar / BSD ar | 26 | 0 | 0 | 26 |
 | [deb](deb/README.md) | deb(5) (dpkg) | 25 | 0 | 2 | 27 |
-| [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 32 | 0 | 3 | 35 |
+| [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 33 | 0 | 2 | 35 |
 | [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 36 | 0 | 6 | 42 |
 | [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 22 | 0 | 5 | 27 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 21 | 0 | 4 | 25 |
@@ -142,9 +142,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1855 |
+| ✅ 実装+テスト済み | 1856 |
 | ⚠️ 部分実装 | 2 |
-| ❌ 未実装 | 50 |
+| ❌ 未実装 | 49 |
 | **合計** | **1907** |
 
-**全体カバー率**: 1855 / 1906 = **97.3%** (intentional exclusion 除外後: 1855 / 1857 = **99.9%**)
+**全体カバー率**: 1856 / 1906 = **97.4%** (intentional exclusion 除外後: 1856 / 1858 = **99.9%**)

@@ -5,12 +5,13 @@
 //! defined by the rpm.org file format documentation), and a compressed
 //! payload. The payload is a cpio `newc` archive for v4 packages, or the
 //! RPM-specific stripped cpio variant (magic `07070X`, file index only) for
-//! v6 packages and v4 packages containing files >= 4 GB.
+//! v6 packages and v4 packages containing files exceeding the 32-bit
+//! `FILESIZES` range.
 //!
 //! [`decode`] reads Lead/Signature/Header plus gzip/bzip2/lzma/xz/zstd/
 //! uncompressed `newc` or stripped payloads. [`encode`] writes packages
-//! (`newc` payload, all six compressors). Cryptographic signature
-//! verification and stripped-payload writing are intentionally out of scope.
+//! (`newc` or stripped `07070X` payload, all six compressors).
+//! Cryptographic signature verification is intentionally out of scope.
 
 use alloc::vec::Vec;
 

@@ -355,3 +355,59 @@ fn test_rpm_encode_read_by_bsdtar() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A stripped (`07070X`) payload package built by the crate decodes
+/// back through `payload_entries` and is accepted by bsdtar when it
+/// understands the stripped cpio variant.
+#[test]
+fn test_rpm_stripped_encoder_roundtrip_and_bsdtar() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let mut enc = rpm::encode::RpmEncoder::new()
+        .lead_name("stripdemo-2.0-1")
+        .unwrap()
+        .name("stripdemo")
+        .version("2.0")
+        .release("1")
+        .stripped_payload();
+    enc.add_file("usr/bin/stripdemo", b"#!/bin/sh\necho stripped\n");
+    enc.add_file("usr/share/doc/readme", b"stripped payload readme");
+    let bytes = enc.finish().unwrap();
+
+    let pkg = rpm::decode::decode(&bytes).unwrap();
+    let entries = pkg.payload_entries().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].name, "usr/bin/stripdemo");
+    assert_eq!(entries[0].file_index, Some(0));
+    assert_eq!(entries[1].name, "usr/share/doc/readme");
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_rpm_stripped_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rpm_path = dir.join("stripped.rpm");
+    std::fs::write(&rpm_path, &bytes).unwrap();
+
+    let output = Command::new("bsdtar")
+        .args(["-xOf"])
+        .arg(&rpm_path)
+        .output();
+    // bsdtar without stripped-cpio support simply fails; that is
+    // tolerated (decoder roundtrip above is the oracle).
+    if let Ok(result) = output
+        && result.status.success()
+    {
+        assert!(
+            result
+                .stdout
+                .windows(b"echo stripped".len())
+                .any(|w| w == b"echo stripped"),
+            "bsdtar output missing stripped payload: {}",
+            String::from_utf8_lossy(&result.stdout)
+        );
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
