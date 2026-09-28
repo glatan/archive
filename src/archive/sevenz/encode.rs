@@ -104,6 +104,7 @@ pub struct SevenZEncoder {
     password: Option<Vec<u8>>,
     encoded_header: bool,
     two_folder_split: Option<usize>,
+    folder_splits: Option<Vec<usize>>,
     entries: Vec<SevenZEntry>,
 }
 
@@ -116,6 +117,7 @@ impl SevenZEncoder {
             password: None,
             encoded_header: false,
             two_folder_split: None,
+            folder_splits: None,
             entries: Vec::new(),
         }
     }
@@ -145,6 +147,18 @@ impl SevenZEncoder {
     /// configuration for both folders.
     pub const fn set_two_folder_split(&mut self, split_at: usize) {
         self.two_folder_split = Some(split_at);
+    }
+
+    /// Split file-content streams into `splits.len() + 1` solid folders at
+    /// the given entry indices.
+    ///
+    /// `splits` must be strictly increasing and each point must divide the
+    /// entry list into non-empty groups (validated at finish). Overrides
+    /// [`set_two_folder_split`](Self::set_two_folder_split). All folders
+    /// share the same method/filter/password configuration.
+    pub fn set_folder_splits(&mut self, splits: &[usize]) {
+        self.folder_splits = Some(splits.to_vec());
+        self.two_folder_split = None;
     }
 
     /// Enable linear 7zAES file-content encryption using a UTF-16LE password.
@@ -186,7 +200,8 @@ impl SevenZEncoder {
             &self.filters,
             self.password.as_deref(),
             self.encoded_header,
-            self.two_folder_split,
+            self.folder_splits
+                .or(self.two_folder_split.map(|s| alloc::vec![s])),
         )?;
 
         let next_header_offset = packed.len() as u64;
@@ -227,20 +242,30 @@ fn build_archive_body(
     filters: &[SevenZFilter],
     password: Option<&[u8]>,
     encoded_header: bool,
-    two_folder_split: Option<usize>,
+    folder_splits: Option<Vec<usize>>,
 ) -> Result<ArchiveBody, Error> {
     let mut packed = Vec::new();
     let main_streams = if entries.is_empty() {
         None
-    } else if let Some(split_at) = two_folder_split {
-        if split_at == 0 || split_at >= entries.len() {
-            return Err(Error::InvalidData(
-                "7z: two-folder split must divide entries into two non-empty folders",
-            ));
+    } else if let Some(splits) = folder_splits {
+        // Validate strictly-increasing interior split points.
+        let mut prev = 0usize;
+        for &s in &splits {
+            if s <= prev || s >= entries.len() {
+                return Err(Error::InvalidData(
+                    "7z: folder splits must be strictly increasing and divide entries into non-empty folders",
+                ));
+            }
+            prev = s;
         }
-        let mut streams = Vec::with_capacity(2);
+        let mut bounds = Vec::with_capacity(splits.len() + 2);
+        bounds.push(0);
+        bounds.extend_from_slice(&splits);
+        bounds.push(entries.len());
+        let mut streams = Vec::with_capacity(splits.len() + 1);
         let mut pack_pos = 0u64;
-        for folder_entries in [&entries[..split_at], &entries[split_at..]] {
+        for w in bounds.windows(2) {
+            let folder_entries = &entries[w[0]..w[1]];
             let solid_data = concatenate_entries(folder_entries)?;
             let stream = encode_payload_as_stream(
                 &solid_data,
@@ -1646,12 +1671,48 @@ mod tests {
         let mut encoder = SevenZEncoder::new();
         encoder.set_two_folder_split(0);
         encoder.add_file("alpha.txt", b"alpha");
-        assert!(matches!(
-            encoder.finish(),
-            Err(Error::InvalidData(
-                "7z: two-folder split must divide entries into two non-empty folders"
-            ))
-        ));
+        assert!(matches!(encoder.finish(), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn test_encode_multi_folder_roundtrip() {
+        let mut encoder = SevenZEncoder::new();
+        encoder.set_method(SevenZMethod::Copy);
+        for i in 0..7 {
+            encoder.add_file(&alloc::format!("f{i}.txt"), &[b'0' + i as u8; 64]);
+        }
+        // Three solid folders: [0..2), [2..5), [5..7).
+        encoder.set_folder_splits(&[2, 5]);
+        let archive = encoder.finish().unwrap();
+        let entries = decode(&archive).unwrap();
+        assert_eq!(entries.len(), 7);
+        for (i, e) in entries.iter().enumerate() {
+            assert_eq!(e.data, vec![b'0' + i as u8; 64]);
+        }
+    }
+
+    #[test]
+    fn test_folder_splits_validation() {
+        let mut encoder = SevenZEncoder::new();
+        encoder.set_folder_splits(&[3, 1]); // not increasing
+        for i in 0..4 {
+            encoder.add_file(&alloc::format!("f{i}"), b"x");
+        }
+        assert!(encoder.finish().is_err());
+
+        let mut encoder = SevenZEncoder::new();
+        encoder.set_folder_splits(&[4]); // empty tail folder
+        for i in 0..4 {
+            encoder.add_file(&alloc::format!("f{i}"), b"x");
+        }
+        assert!(encoder.finish().is_err());
+
+        let mut encoder = SevenZEncoder::new();
+        encoder.set_folder_splits(&[0, 2]); // empty head folder
+        for i in 0..4 {
+            encoder.add_file(&alloc::format!("f{i}"), b"x");
+        }
+        assert!(encoder.finish().is_err());
     }
 
     #[test]
