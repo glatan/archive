@@ -8,7 +8,7 @@ allowed-tools:
   - exec
   - webfetch
   - web_search
-model: sonnet
+model: swe-2
 ---
 
 ライセンス・権利関係を調査する読み取り専用エージェント。共通ルールは `.agents/README.md` を参照。
