@@ -44,6 +44,9 @@ pub mod squashfs;
 #[cfg(feature = "mscab")]
 pub mod mscab;
 
+#[cfg(feature = "mscfb")]
+pub mod mscfb;
+
 /// ZIM (`.zim`) archive read support.
 #[cfg(feature = "zim")]
 pub mod zim;

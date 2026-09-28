@@ -619,6 +619,14 @@
       "version": "RFC 1741 (December 1994)",
       "url": "https://www.rfc-editor.org/rfc/rfc1741.txt",
       "filename": "rfc1741.txt"
+    },
+    {
+      "id": "ms-cfb-20210625",
+      "format": "mscfb",
+      "title": "[MS-CFB]: Compound File Binary File Format",
+      "version": "v20210625 (12.0)",
+      "url": "https://winprotocoldocs-bhdugrdyduf5h2e4.b02.azurefd.net/MS-CFB/%5bMS-CFB%5d-210625.pdf",
+      "filename": "MS-CFB.pdf"
     }
   ],
   "no_url_available": [

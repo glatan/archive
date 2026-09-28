@@ -4,6 +4,7 @@
     feature = "rpm",
     feature = "squashfs",
     feature = "mscab",
+    feature = "mscfb",
     feature = "zim",
     feature = "mtree",
     feature = "cpio",
@@ -52,6 +53,8 @@ use archive::archive::cpio;
 use archive::archive::deb;
 #[cfg(feature = "git-pack")]
 use archive::archive::git_pack;
+#[cfg(feature = "mscfb")]
+use archive::archive::mscfb;
 use archive::archive::rpm;
 #[cfg(feature = "sevenz")]
 use archive::archive::sevenz;
@@ -265,6 +268,9 @@ mod squashfs_tests;
 #[cfg(feature = "mscab")]
 #[path = "integration/mscab.rs"]
 mod mscab_tests;
+#[cfg(feature = "mscfb")]
+#[path = "integration/mscfb.rs"]
+mod mscfb_tests;
 
 #[path = "integration/fastlz.rs"]
 mod fastlz_tests;

@@ -322,6 +322,12 @@ specifications or standards documents:
   implementation written independently from the spec text is used
   only as a local test-time interoperability oracle; it is not
   linked or distributed.
+- mscfb: [MS-CFB] Compound File Binary File Format v20210625
+  (Microsoft Open Specifications). Spec-informed implementation;
+  no code was copied. An independently written Python reference
+  generator (built directly against [MS-CFB] section 2) is used
+  only as a local test-time interoperability oracle; it is not
+  linked or distributed.
 - binhex: "BinHex 4.0 Definition" (Peter N Lewis, Aug 1991) and
   RFC 1741 Appendix A. Spec-informed implementation; no code was
   copied. CPython `binascii.crc_hqx` (PSF License) and an
