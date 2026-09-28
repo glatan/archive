@@ -43,6 +43,9 @@ pub mod squashfs;
 #[cfg(feature = "cramfs")]
 pub mod cramfs;
 
+#[cfg(feature = "romfs")]
+pub mod romfs;
+
 /// Microsoft Cabinet (`.cab`) archive read support.
 #[cfg(feature = "mscab")]
 pub mod mscab;

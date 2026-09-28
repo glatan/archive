@@ -58,6 +58,8 @@ use archive::archive::deb;
 use archive::archive::git_pack;
 #[cfg(feature = "mscfb")]
 use archive::archive::mscfb;
+#[cfg(feature = "romfs")]
+use archive::archive::romfs;
 use archive::archive::rpm;
 #[cfg(feature = "sevenz")]
 use archive::archive::sevenz;
@@ -258,6 +260,9 @@ mod lzma_alone_tests;
 mod lzo_tests;
 #[path = "integration/lzw.rs"]
 mod lzw_tests;
+#[cfg(feature = "romfs")]
+#[path = "integration/romfs.rs"]
+mod romfs_tests;
 #[path = "integration/rpm.rs"]
 mod rpm_tests;
 #[cfg(feature = "rzip")]

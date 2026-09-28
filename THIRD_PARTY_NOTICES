@@ -328,6 +328,13 @@ specifications or standards documents:
   no code was copied. `mkfs.cramfs`/`fsck.cramfs` (util-linux,
   GPL-2.0+) are used only as test-time interoperability oracles
   inside the test container; they are not linked or distributed.
+- romfs: Linux kernel romfs documentation
+  (Documentation/filesystems/romfs.rst; GPL-2.0 with
+  Linux-syscall-note). Spec-informed implementation; no code was
+  copied. `genromfs` 0.5.2 (GPL-2.0+, Jan T Zimmerman / Janos
+  Farkas) was built from source and used only to produce the
+  checked-in test fixture `tests/fixtures/romfs/genromfs.romfs`;
+  it is not linked or distributed.
 - mscfb: [MS-CFB] Compound File Binary File Format v20210625
   (Microsoft Open Specifications). Spec-informed implementation;
   no code was copied. An independently written Python reference

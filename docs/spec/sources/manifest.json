@@ -651,6 +651,14 @@
       "version": "linux master (fetched 2026-09)",
       "url": "https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/cramfs_fs.h",
       "filename": "cramfs_fs.h"
+    },
+    {
+      "id": "linux-romfs-doc",
+      "format": "romfs",
+      "title": "Linux kernel Documentation/filesystems/romfs.rst",
+      "version": "linux master (fetched 2026-09)",
+      "url": "https://raw.githubusercontent.com/torvalds/linux/master/Documentation/filesystems/romfs.rst",
+      "filename": "romfs.rst"
     }
   ],
   "no_url_available": [
