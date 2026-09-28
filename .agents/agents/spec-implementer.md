@@ -8,7 +8,7 @@ allowed-tools:
   - exec
   - edit
   - write
-model: opus
+model: swe-2
 ---
 
 機能実装とテスト追加を行うエージェント。共通ルールは `.agents/README.md` を参照。

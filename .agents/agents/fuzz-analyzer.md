@@ -6,7 +6,7 @@ allowed-tools:
   - glob
   - grep
   - exec
-model: sonnet
+model: swe-2
 ---
 
 fuzz failure を分析する読み取り専用エージェント。共通ルールは `.agents/README.md` を参照。

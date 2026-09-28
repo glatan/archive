@@ -23,10 +23,10 @@ archive crate の開発を支援する agent と skill の定義。
 
 | Agent | Model | 種別 | 責務 |
 |-------|-------|------|------|
-| [spec-researcher](agents/spec-researcher.md) | sonnet | 読み取り専用 | 仕様と実装の突合調査 |
-| [spec-implementer](agents/spec-implementer.md) | opus | 書き込み | コード実装・テスト追加 |
-| [license-auditor](agents/license-auditor.md) | sonnet | 読み取り専用 | ライセンス・権利関係の調査 |
-| [fuzz-analyzer](agents/fuzz-analyzer.md) | sonnet | 読み取り専用 | fuzz failure の分析・分類 |
+| [spec-researcher](agents/spec-researcher.md) | swe-2 | 読み取り専用 | 仕様と実装の突合調査 |
+| [spec-implementer](agents/spec-implementer.md) | swe-2 | 書き込み | コード実装・テスト追加 |
+| [license-auditor](agents/license-auditor.md) | swe-2 | 読み取り専用 | ライセンス・権利関係の調査 |
+| [fuzz-analyzer](agents/fuzz-analyzer.md) | swe-2 | 読み取り専用 | fuzz failure の分析・分類 |
 
 ## Skill 一覧
 
