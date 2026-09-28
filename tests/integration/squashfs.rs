@@ -147,3 +147,68 @@ fn test_squashfs_encoder_unsquashfs_extract() {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+#[test]
+fn test_squashfs_encoder_symlink_fragments_ids() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let mut enc = squashfs::encode::SquashfsEncoder::new()
+        .with_block_size(4096)
+        .with_fragments();
+    let tail_a: Vec<u8> = (0..5000u32).map(|i| (i % 11) as u8).collect();
+    enc.add_file("a.bin", &tail_a);
+    enc.add_file_owned("owned.bin", b"owned", 1000, 200);
+    enc.add_symlink("link", "/a.bin");
+    let image = enc.finish().unwrap();
+
+    // internal roundtrip
+    let decoded = squashfs::decode::decode(&image).unwrap();
+    assert_eq!(
+        decoded
+            .entries
+            .iter()
+            .find(|e| e.name == "a.bin")
+            .unwrap()
+            .data,
+        tail_a
+    );
+    assert_eq!(
+        decoded
+            .entries
+            .iter()
+            .find(|e| e.name == "link")
+            .unwrap()
+            .data,
+        b"/a.bin"
+    );
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_sqfs_ext_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let image_path = dir.join("ext.sqfs");
+    std::fs::write(&image_path, &image).unwrap();
+    let dest = dir.join("out");
+
+    let output = Command::new("unsquashfs")
+        .arg("-d")
+        .arg(&dest)
+        .arg("-no-progress")
+        .arg(&image_path)
+        .output();
+    if let Ok(result) = output {
+        assert!(
+            result.status.success(),
+            "unsquashfs failed: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(std::fs::read(dest.join("a.bin")).unwrap(), tail_a);
+        // unsquashfs materializes the symlink; verify its target.
+        let target = std::fs::read_link(dest.join("link")).unwrap();
+        assert_eq!(target, std::path::Path::new("/a.bin"));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
