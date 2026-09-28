@@ -19,6 +19,11 @@ const FLAG_RESERVE_PRESENT: u16 = 0x0004;
 const COMPRESS_NONE: u16 = 0;
 const COMPRESS_MSZIP: u16 = 1;
 
+/// `iFolder` values reserved for files spanning cabinets (MS-CAB §2.3).
+const IFOLD_CONTINUED_FROM_PREV: usize = 0xfffd;
+const IFOLD_CONTINUED_TO_NEXT: usize = 0xfffe;
+const IFOLD_CONTINUED_PREV_AND_NEXT: usize = 0xffff;
+
 /// MSZIP data blocks carry at most a 32KiB history window.
 const MSZIP_WINDOW: usize = 32 * 1024;
 
@@ -99,11 +104,24 @@ pub(crate) fn checksum(data: &[u8], seed: u32) -> u32 {
     sum
 }
 
+/// Decompress one CFFOLDER fragment into `stream`.
+///
+/// `logical_start` is the offset in `stream` where the containing
+/// logical folder began (used as the MSZIP dictionary boundary, so a
+/// fragment continued from a previous cabinet shares history).
+///
+/// `pending` carries the compressed prefix of a CFDATA block split
+/// across cabinets: per MS-CAB §2.4 a trailing CFDATA with
+/// `cbUncomp == 0` continues in the first CFDATA of the next
+/// cabinet's folder fragment, which reports the total size.
 fn decompress_folder(
     input: &[u8],
     folder: &Folder,
     cb_cfdata_reserve: usize,
-) -> Result<Vec<u8>, Error> {
+    logical_start: usize,
+    stream: &mut Vec<u8>,
+    pending: &mut Vec<u8>,
+) -> Result<(), Error> {
     let comp_type = folder.type_compress & 0x00ff;
     if comp_type != COMPRESS_NONE && comp_type != COMPRESS_MSZIP {
         return Err(Error::Unsupported(
@@ -112,7 +130,6 @@ fn decompress_folder(
     }
 
     let mut off = folder.coff_cab_start;
-    let mut out = Vec::new();
     for _ in 0..folder.c_cfdata {
         let csum = le_u32(input, off)?;
         let cb_data = le_u16(input, off + 4)? as usize;
@@ -131,33 +148,97 @@ fn decompress_folder(
             }
         }
 
+        let data = if cb_uncomp == 0 {
+            // Split block: buffer the compressed prefix; the matching
+            // tail arrives in the next cabinet's fragment.
+            pending.extend_from_slice(block);
+            off = data_start + cb_data;
+            continue;
+        } else if pending.is_empty() {
+            alloc::borrow::Cow::Borrowed(block)
+        } else {
+            let mut full = Vec::with_capacity(pending.len() + block.len());
+            full.extend_from_slice(pending);
+            full.extend_from_slice(block);
+            pending.clear();
+            alloc::borrow::Cow::Owned(full)
+        };
+
         match comp_type {
             COMPRESS_NONE => {
-                if cb_data != cb_uncomp {
+                if data.len() != cb_uncomp {
                     return Err(Error::InvalidData("mscab: stored block size mismatch"));
                 }
-                out.extend_from_slice(block);
+                stream.extend_from_slice(&data[..]);
             }
             COMPRESS_MSZIP => {
-                if block.len() < 2 || &block[..2] != b"CK" {
+                if data.len() < 2 || &data[..2] != b"CK" {
                     return Err(Error::InvalidData("mscab: bad MSZIP block signature"));
                 }
-                let dict_start = out.len().saturating_sub(MSZIP_WINDOW);
-                let decoded = deflate::decode::decode_with_dict(&block[2..], &out[dict_start..])?;
+                let dict_start = stream.len().saturating_sub(MSZIP_WINDOW).max(logical_start);
+                let decoded = deflate::decode::decode_with_dict(&data[2..], &stream[dict_start..])?;
                 if decoded.len() != cb_uncomp {
                     return Err(Error::InvalidData("mscab: MSZIP block size mismatch"));
                 }
-                out.extend_from_slice(&decoded);
+                stream.extend_from_slice(&decoded);
             }
             _ => unreachable!(),
         }
         off = data_start + cb_data;
     }
-    Ok(out)
+    Ok(())
+}
+
+/// A cabinet member with its structures parsed; folder data is
+/// decompressed later so continuation fragments can chain across
+/// the members of a cabinet set.
+struct ParsedCab<'a> {
+    input: &'a [u8],
+    set_id: u16,
+    i_cabinet: u16,
+    cb_cfdata_reserve: usize,
+    folders: Vec<Folder>,
+    files: Vec<FileRec>,
 }
 
 /// Decode an MSCAB archive into a list of entries.
 pub fn decode(input: &[u8]) -> Result<Vec<MscabEntry>, Error> {
+    let cab = parse_cabinet(input)?;
+    extract_cabs(&[&cab])
+}
+
+/// Decode a multi-cabinet set (`disk1.cab`, `disk2.cab`, ...) into a
+/// list of entries (MS-CAB §2.1 cabinet set).
+///
+/// Each supplied slice is one complete cabinet file in set order;
+/// `CFHEADER.iCabinet` must match the slice index and `setID` must be
+/// identical across members. Files whose `iFolder` is one of the
+/// continuation sentinels (§2.3 `0xFFFD`-`0xFFFF`) are resolved
+/// across member boundaries: folder fragments chain into one
+/// uncompressed stream, and a CFDATA block split mid-record
+/// (`cbUncomp == 0` tail) is reassembled from the next member.
+/// A file that begins before the first supplied member is rejected.
+pub fn decode_parts(parts: &[&[u8]]) -> Result<Vec<MscabEntry>, Error> {
+    if parts.is_empty() || parts.iter().any(|p| p.is_empty()) {
+        return Err(Error::InvalidData("mscab: empty cabinet part"));
+    }
+    let mut cabs: Vec<ParsedCab<'_>> = Vec::with_capacity(parts.len());
+    for (i, p) in parts.iter().enumerate() {
+        let cab = parse_cabinet(p)?;
+        if cab.i_cabinet != i as u16 {
+            return Err(Error::InvalidData("mscab: cabinet index mismatch"));
+        }
+        if let Some(first) = cabs.first()
+            && cab.set_id != first.set_id
+        {
+            return Err(Error::InvalidData("mscab: set id mismatch"));
+        }
+        cabs.push(cab);
+    }
+    extract_cabs(&cabs.iter().collect::<Vec<_>>())
+}
+
+fn parse_cabinet(input: &[u8]) -> Result<ParsedCab<'_>, Error> {
     if input.len() < 36 {
         return Err(Error::InvalidData("mscab: input too short"));
     }
@@ -172,6 +253,8 @@ pub fn decode(input: &[u8]) -> Result<Vec<MscabEntry>, Error> {
     let c_folders = le_u16(input, 26)? as usize;
     let c_files = le_u16(input, 28)? as usize;
     let flags = le_u16(input, 30)?;
+    let set_id = le_u16(input, 32)?;
+    let i_cabinet = le_u16(input, 34)?;
 
     if version_major != 1 || version_minor > 3 {
         return Err(Error::InvalidData("mscab: unsupported version"));
@@ -227,12 +310,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<MscabEntry>, Error> {
         let i_folder = le_u16(input, foff + 8)? as usize;
         let _attribs = le_u16(input, foff + 14)?;
         let (name, next) = read_asciiz(input, foff + 16)?;
-        if i_folder >= 0xfffd {
-            return Err(Error::Unsupported(
-                "mscab: multi-cabinet file spanning is not supported",
-            ));
-        }
-        if i_folder >= c_folders && cb_file > 0 {
+        if i_folder < 0xfffd && i_folder >= c_folders && cb_file > 0 {
             return Err(Error::InvalidData("mscab: folder index out of range"));
         }
         files.push(FileRec {
@@ -244,36 +322,130 @@ pub fn decode(input: &[u8]) -> Result<Vec<MscabEntry>, Error> {
         foff = next;
     }
 
-    let mut folder_data = Vec::with_capacity(c_folders);
-    for f in &folders {
-        folder_data.push(decompress_folder(input, f, cb_cfdata_reserve)?);
+    Ok(ParsedCab {
+        input,
+        set_id,
+        i_cabinet,
+        cb_cfdata_reserve,
+        folders,
+        files,
+    })
+}
+
+/// Extract all files of a cabinet set (single member for
+/// [`decode`]). Folder fragments chain into one uncompressed stream;
+/// file `uoffFolderStart` values are offsets into their logical
+/// folder, so spanning files are sliced directly out of the stream.
+fn extract_cabs(cabs: &[&ParsedCab<'_>]) -> Result<Vec<MscabEntry>, Error> {
+    let multi = cabs.len() > 1;
+
+    // Per §2.3, entries for files continued from the previous cabinet
+    // come first and bind folder index 0 as a continuation fragment
+    // of the previous cabinet's last folder.
+    let mut continues = alloc::vec![false; cabs.len()];
+    if multi {
+        for (k, cab) in cabs.iter().enumerate().skip(1) {
+            continues[k] = cab.files.iter().any(|f| {
+                f.i_folder == IFOLD_CONTINUED_FROM_PREV
+                    || f.i_folder == IFOLD_CONTINUED_PREV_AND_NEXT
+            });
+        }
     }
 
-    let mut entries = Vec::with_capacity(files.len());
-    for f in &files {
-        let mut data = Vec::with_capacity(f.cb_file);
-        let mut pos = f.uoff_folder_start;
-        let mut fi = f.i_folder;
-        while data.len() < f.cb_file {
-            let folder = folder_data
-                .get(fi)
-                .ok_or(Error::InvalidData("mscab: file data overruns folders"))?;
-            if pos > folder.len() {
-                return Err(Error::InvalidData("mscab: file offset out of range"));
+    let mut stream = Vec::new();
+    let mut folder_base: Vec<Vec<usize>> = Vec::with_capacity(cabs.len());
+    let mut pending: Vec<u8> = Vec::new();
+    let mut cur_logical = 0usize;
+    let mut prev_type = u16::MAX;
+    for (k, cab) in cabs.iter().enumerate() {
+        let mut bases = Vec::with_capacity(cab.folders.len());
+        for (i, folder) in cab.folders.iter().enumerate() {
+            let cont = i == 0 && continues[k];
+            if !cont {
+                if !pending.is_empty() {
+                    return Err(Error::InvalidData(
+                        "mscab: split CFDATA without continuation",
+                    ));
+                }
+                cur_logical = stream.len();
+            } else if folder.type_compress != prev_type {
+                // MS-CAB §2.2: typeCompress may vary between folders
+                // but not between fragments of one continued folder.
+                return Err(Error::InvalidData(
+                    "mscab: continuation folder compression type mismatch",
+                ));
             }
-            let avail = &folder[pos..];
-            let need = f.cb_file - data.len();
-            let take = avail.len().min(need);
-            data.extend_from_slice(&avail[..take]);
-            if take < need {
-                fi += 1;
-                pos = 0;
+            prev_type = folder.type_compress;
+            bases.push(cur_logical);
+            decompress_folder(
+                cab.input,
+                folder,
+                cab.cb_cfdata_reserve,
+                cur_logical,
+                &mut stream,
+                &mut pending,
+            )?;
+        }
+        folder_base.push(bases);
+    }
+    if !pending.is_empty() {
+        return Err(Error::InvalidData("mscab: truncated split CFDATA"));
+    }
+
+    // Files continued from a previous cabinet are already emitted by
+    // the earlier member's split entry; skip their duplicate records.
+    let mut seen: Vec<(String, usize)> = Vec::new();
+    let mut entries = Vec::new();
+    for (k, cab) in cabs.iter().enumerate() {
+        for f in &cab.files {
+            match f.i_folder {
+                IFOLD_CONTINUED_FROM_PREV | IFOLD_CONTINUED_PREV_AND_NEXT => {
+                    if seen.iter().any(|(n, c)| n == &f.name && *c == f.cb_file) {
+                        continue;
+                    }
+                    return Err(Error::Unsupported(
+                        "mscab: file begins in a missing earlier cabinet",
+                    ));
+                }
+                ifolder => {
+                    if !multi && ifolder >= 0xfffd {
+                        return Err(Error::Unsupported(
+                            "mscab: multi-cabinet file spanning is not supported",
+                        ));
+                    }
+                    let frag = if ifolder == IFOLD_CONTINUED_TO_NEXT {
+                        // §2.3: index is actually cFolders - 1.
+                        if cab.folders.is_empty() {
+                            return Err(Error::InvalidData("mscab: split file without folder"));
+                        }
+                        cab.folders.len() - 1
+                    } else {
+                        ifolder
+                    };
+                    if f.cb_file == 0 {
+                        entries.push(MscabEntry {
+                            name: f.name.clone(),
+                            data: Vec::new(),
+                        });
+                        seen.push((f.name.clone(), 0));
+                        continue;
+                    }
+                    let base = folder_base[k]
+                        .get(frag)
+                        .ok_or(Error::InvalidData("mscab: folder index out of range"))?;
+                    let pos = base + f.uoff_folder_start;
+                    let end = pos + f.cb_file;
+                    if end > stream.len() {
+                        return Err(Error::InvalidData("mscab: file data overruns folders"));
+                    }
+                    entries.push(MscabEntry {
+                        name: f.name.clone(),
+                        data: stream[pos..end].to_vec(),
+                    });
+                    seen.push((f.name.clone(), f.cb_file));
+                }
             }
         }
-        entries.push(MscabEntry {
-            name: f.name.clone(),
-            data,
-        });
     }
     Ok(entries)
 }
@@ -817,5 +989,204 @@ mod tests {
         assert_invalid(decode(&cab), "mscab: MSZIP block size mismatch");
         cab[off + 6..off + 8].copy_from_slice(&15u16.to_le_bytes());
         assert_invalid(decode(&cab), "mscab: MSZIP block size mismatch");
+    }
+
+    /// Build a two-cabinet set: `first` carries folder data + file
+    /// records for `a` and `b` (b split to next), `second` carries the
+    /// continuation fragment + the continued record for `b`.
+    fn split_cab_set() -> (Vec<u8>, Vec<u8>) {
+        let mut first = CabBuilder::new();
+        first.set_id = 7;
+        first.i_cabinet = 0;
+        first.flags = FLAG_NEXT_CABINET;
+        first
+            .folders
+            .push((COMPRESS_NONE, vec![b"AAAABBBB".to_vec()]));
+        first.files.push((4, 0, 0, "a.txt".into()));
+        first.files.push((8, 4, 0xfffe, "b.txt".into()));
+        let cab0 = first.build();
+
+        let mut second = CabBuilder::new();
+        second.set_id = 7;
+        second.i_cabinet = 1;
+        second.flags = FLAG_PREV_CABINET;
+        second.folders.push((COMPRESS_NONE, vec![b"CCCC".to_vec()]));
+        second.files.push((8, 4, 0xfffd, "b.txt".into()));
+        let cab1 = second.build();
+        (cab0, cab1)
+    }
+
+    #[test]
+    fn decode_parts_split_file() {
+        let (cab0, cab1) = split_cab_set();
+        let entries = decode_parts(&[&cab0, &cab1]).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name(), "a.txt");
+        assert_eq!(entries[0].data(), b"AAAA");
+        assert_eq!(entries[1].name(), "b.txt");
+        assert_eq!(entries[1].data(), b"BBBBCCCC");
+        // The first member alone still reports spanning as unsupported.
+        assert!(matches!(decode(&cab0), Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn decode_parts_set_id_mismatch() {
+        let (cab0, mut cab1) = split_cab_set();
+        // setID field sits at header offset 32.
+        cab1[32..34].copy_from_slice(&9u16.to_le_bytes());
+        assert!(matches!(
+            decode_parts(&[&cab0, &cab1]),
+            Err(Error::InvalidData(_))
+        ));
+    }
+
+    #[test]
+    fn decode_parts_index_mismatch() {
+        let (cab0, mut cab1) = split_cab_set();
+        // iCabinet field sits at header offset 34.
+        cab1[34..36].copy_from_slice(&5u16.to_le_bytes());
+        assert!(matches!(
+            decode_parts(&[&cab0, &cab1]),
+            Err(Error::InvalidData(_))
+        ));
+    }
+
+    #[test]
+    fn decode_parts_missing_earlier_member() {
+        // A cabinet whose first file is a continuation but which is
+        // supplied as member 0: the file's beginning is unavailable.
+        let mut b = CabBuilder::new();
+        b.flags = FLAG_PREV_CABINET;
+        b.folders.push((COMPRESS_NONE, vec![b"tail".to_vec()]));
+        b.files.push((9, 0, 0xfffd, "big.bin".into()));
+        let cab = b.build();
+        assert!(matches!(decode_parts(&[&cab]), Err(Error::Unsupported(_))));
+    }
+
+    /// Patch the `cbUncomp` field of folder `folder_idx`'s first
+    /// CFDATA record in a built cabinet.
+    fn patch_cbuncomp(cab: &mut [u8], folder_idx: usize, value: u16) {
+        let flags = u16::from_le_bytes(cab[30..32].try_into().unwrap());
+        let mut off = 36usize;
+        if flags & FLAG_RESERVE_PRESENT != 0 {
+            off += 4 + u16::from_le_bytes(cab[36..38].try_into().unwrap()) as usize;
+        }
+        for flag in [FLAG_PREV_CABINET, FLAG_NEXT_CABINET] {
+            if flags & flag != 0 {
+                for _ in 0..2 {
+                    while cab[off] != 0 {
+                        off += 1;
+                    }
+                    off += 1;
+                }
+            }
+        }
+        let coff = u32::from_le_bytes(
+            cab[off + folder_idx * 8..off + folder_idx * 8 + 4]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        cab[coff + 6..coff + 8].copy_from_slice(&value.to_le_bytes());
+    }
+
+    #[test]
+    fn decode_parts_cfdata_block_split() {
+        // A CFDATA record itself split across the boundary: the first
+        // member's block reports cbUncomp == 0 and the next member's
+        // first CFDATA reports the total (MS-CAB §2.4).
+        let mut first = CabBuilder::new();
+        first.i_cabinet = 0;
+        first.flags = FLAG_NEXT_CABINET;
+        first
+            .folders
+            .push((COMPRESS_NONE, vec![b"AAAA012345".to_vec()]));
+        first.files.push((4, 0, 0, "a.txt".into()));
+        first.files.push((10, 4, 0xfffe, "b.txt".into()));
+        let mut cab0 = first.build();
+
+        let mut second = CabBuilder::new();
+        second.i_cabinet = 1;
+        second.flags = FLAG_PREV_CABINET;
+        second.folders.push((COMPRESS_NONE, vec![b"6789".to_vec()]));
+        second.files.push((10, 4, 0xfffd, "b.txt".into()));
+        let mut cab1 = second.build();
+
+        patch_cbuncomp(&mut cab0, 0, 0);
+        patch_cbuncomp(&mut cab1, 0, 14);
+
+        let entries = decode_parts(&[&cab0, &cab1]).unwrap();
+        assert_eq!(entries[0].data(), b"AAAA");
+        assert_eq!(entries[1].data(), b"0123456789");
+    }
+
+    #[test]
+    fn decode_parts_rejects_empty() {
+        assert!(matches!(decode_parts(&[]), Err(Error::InvalidData(_))));
+        assert!(matches!(
+            decode_parts(&[&[0x4d; 4], &[]]),
+            Err(Error::InvalidData(_))
+        ));
+        // A lone member parses exactly like decode().
+        let (cab0, _) = split_cab_set();
+        let via_decode = decode(&cab0);
+        let via_parts = decode_parts(&[&cab0]);
+        assert_eq!(via_decode.is_err(), via_parts.is_err());
+    }
+
+    #[test]
+    fn decode_parts_three_member_chain() {
+        // Middle member is a pure continuation fragment: cFolders=1
+        // and only CONTINUED records, chained prev+next (0xFFFF).
+        let mut first = CabBuilder::new();
+        first.set_id = 3;
+        first.i_cabinet = 0;
+        first.flags = FLAG_NEXT_CABINET;
+        first.folders.push((COMPRESS_NONE, vec![b"head".to_vec()]));
+        first.files.push((12, 0, 0xfffe, "big.bin".into()));
+
+        let mut middle = CabBuilder::new();
+        middle.set_id = 3;
+        middle.i_cabinet = 1;
+        middle.flags = FLAG_PREV_CABINET | FLAG_NEXT_CABINET;
+        middle.folders.push((COMPRESS_NONE, vec![b"body".to_vec()]));
+        middle.files.push((12, 0, 0xffff, "big.bin".into()));
+
+        let mut last = CabBuilder::new();
+        last.set_id = 3;
+        last.i_cabinet = 2;
+        last.flags = FLAG_PREV_CABINET;
+        last.folders.push((COMPRESS_NONE, vec![b"tail".to_vec()]));
+        last.files.push((12, 0, 0xfffd, "big.bin".into()));
+
+        let (c0, c1, c2) = (first.build(), middle.build(), last.build());
+        let entries = decode_parts(&[&c0, &c1, &c2]).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].data(), b"headbodytail");
+    }
+
+    #[test]
+    fn decode_parts_continued_type_mismatch() {
+        // A continuation fragment must keep the original folder's
+        // compression type (MS-CAB §2.2).
+        let mut first = CabBuilder::new();
+        first.i_cabinet = 0;
+        first.flags = FLAG_NEXT_CABINET;
+        first.folders.push((COMPRESS_NONE, vec![b"head".to_vec()]));
+        first.files.push((8, 0, 0xfffe, "x.bin".into()));
+
+        let mut second = CabBuilder::new();
+        second.i_cabinet = 1;
+        second.flags = FLAG_PREV_CABINET;
+        // Continuation fragment wrongly claims MSZIP (the payload
+        // itself is a valid block so the type check is what fails).
+        let tail = deflate::encode::encode(b"tail", deflate::encode::Level::Default);
+        second.folders.push((COMPRESS_MSZIP, vec![tail]));
+        second.files.push((8, 0, 0xfffd, "x.bin".into()));
+
+        let (c0, c1) = (first.build(), second.build());
+        assert!(matches!(
+            decode_parts(&[&c0, &c1]),
+            Err(Error::InvalidData(_))
+        ));
     }
 }
