@@ -383,6 +383,60 @@ fn test_sevenz_two_folder_system_extract_compat() {
 
 #[cfg(feature = "sevenz")]
 #[test]
+fn test_sevenz_multi_folder_system_extract_compat() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let Some(cmd) = sevenz_binary() else {
+        return;
+    };
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_sevenz_multi_folder_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let archive_path = dir.join("multi-folder.7z");
+
+    let mut encoder = sevenz::encode::SevenZEncoder::new();
+    encoder.set_method(sevenz::encode::SevenZMethod::Copy);
+    encoder.add_file("f0.txt", b"folder one");
+    encoder.add_file("f1.txt", b"folder two");
+    encoder.add_file("f2.txt", b"folder three");
+    encoder.add_file("f3.txt", b"folder four");
+    // Three solid folders: [0], [1], [2,3].
+    encoder.set_folder_splits(&[1, 2]);
+    let archive = encoder.finish().unwrap();
+    std::fs::write(&archive_path, &archive).unwrap();
+
+    let listed = Command::new(cmd)
+        .args(["l", archive_path.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        listed.status.success(),
+        "{cmd} l failed: {}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+
+    let extracted = Command::new(cmd)
+        .args(["e", "-so", archive_path.to_str().unwrap(), "f3.txt"])
+        .output()
+        .unwrap();
+    assert!(
+        extracted.status.success(),
+        "{cmd} e -so failed: {}",
+        String::from_utf8_lossy(&extracted.stderr)
+    );
+    assert_eq!(extracted.stdout, b"folder four");
+
+    let _ = std::fs::remove_file(&archive_path);
+    let _ = std::fs::remove_dir(&dir);
+}
+
+#[cfg(feature = "sevenz")]
+#[test]
 fn test_sevenz_two_folder_encrypted_system_extract_compat() {
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};

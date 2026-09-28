@@ -3,8 +3,8 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [`7zFormat.txt`](https://raw.githubusercontent.com/ip7z/7zip/main/DOC/7zFormat.txt) / [`Methods.txt`](https://raw.githubusercontent.com/ip7z/7zip/main/DOC/Methods.txt) ([LZMA SDK](https://www.7-zip.org/sdk.html) 26.00 同梱文書、GitHub mirror: ip7z/7zip。ローカルスナップショット: `docs/spec/sources/7zformat.txt` / `7z_methods.txt`) |
-| current scope | multi-folder decode (supported single-output DAG subset)、one/two-folder linear writer、supported codec/filter chain (LZMA2, LZMA, PPMdH, Copy, Deflate, Deflate64, BZip2 + x86/PowerPC/ARM/ARM-Thumb/SPARC/ARM64/RISC-V BCJ, Delta, BCJ2, Brotli) + 7zAES file-content / encoded-header encrypt + timestamp metadata (ctime/atime/mtime) |
-| intentional exclusion | non-linear DAG writer (3+ folder)、empty-stream/directory/anti-item entries、external stream/folder lists、IA64 BCJ encode、Deflate64 拡張域 encode (code 285 / 64KB distance) |
+| current scope | multi-folder decode (supported single-output DAG subset)、multi-folder linear writer (arbitrary split points)、supported codec/filter chain (LZMA2, LZMA, PPMdH, Copy, Deflate, Deflate64, BZip2 + x86/PowerPC/ARM/ARM-Thumb/SPARC/ARM64/RISC-V BCJ, Delta, BCJ2, Brotli) + 7zAES file-content / encoded-header encrypt + timestamp metadata (ctime/atime/mtime) |
+| intentional exclusion | folder 間で stream を共有する non-linear DAG writer、empty-stream/directory/anti-item entries、external stream/folder lists、IA64 BCJ encode、Deflate64 拡張域 encode (code 285 / 64KB distance) |
 
 ## 対応バリアント・仕様版
 
@@ -15,7 +15,7 @@
 | codec: Deflate64 | [Methods.txt](https://www.7-zip.org/sdk.html) + [APPNOTE §5.6](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) + Info-ZIP de facto | ✅ | ✅ | encode は DEFLATE 互換 subset (match<=257, 32KB window; code 285 / dist 30-31 は未使用) |
 | filter: x86/PowerPC/ARM/ARM-Thumb/SPARC/ARM64/RISC-V BCJ、Delta、BCJ2 | [Methods.txt](https://www.7-zip.org/sdk.html) | ✅ | ✅ (IA64 BCJ encode のみ ❌) | |
 | 7zAES-256 (file content + encoded header) | [Methods.txt](https://www.7-zip.org/sdk.html) | ✅ | ✅ | |
-| non-linear DAG writer (3+ folder) | [7zFormat.txt](https://www.7-zip.org/sdk.html) | — | ❌ | writer は 1-2 folder linear のみ |
+| multi-folder writer (任意分割点) | [7zFormat.txt](https://www.7-zip.org/sdk.html) | — | ✅ | folder 間 stream 共有の non-linear DAG は依然 scope 外 |
 
 状態マーカー: ✅ 実装+テスト済み / ⚠️ 部分実装 / ❌ 未実装
 
@@ -217,13 +217,13 @@
 |---|---------|---------|------|----------------|
 | 88 | SignatureHeader + StartHeader write (signature, version, CRCs) | 7zFormat.txt: SignatureHeader | ✅ | `SevenZEncoder::finish()` |
 | 89 | One-folder writer: linear coder chain | 7zFormat.txt: Folder / CodersInfo | ✅ | `SevenZEncoder` roundtrip tests, `test_sevenz_encode_system_extract_compat` |
-| 90 | Two-folder writer: configurable split point | 7zFormat.txt: Folder / CodersInfo | ✅ | `test_encode_two_folder_copy_roundtrip`, `test_sevenz_two_folder_system_extract_compat` |
+| 90 | Multi-folder writer: arbitrary split points (`set_two_folder_split` / `set_folder_splits`) | 7zFormat.txt: Folder / CodersInfo | ✅ | `test_encode_two_folder_copy_roundtrip`, `test_sevenz_two_folder_system_extract_compat`, `test_encode_multi_folder_roundtrip`, `test_sevenz_multi_folder_system_extract_compat` |
 | 91 | Encoded-header write (header → LZMA2 compressed) | 7zFormat.txt: EncodedHeader / PackInfo | ✅ | `test_encode_encoded_header_roundtrip`, `test_sevenz_encoded_header_roundtrip_and_system_extract` |
 | 92 | Encrypted encoded-header write (7zAES + encoded-header) | 7zFormat.txt: EncodedHeader / Methods.txt: 7zAES | ✅ | `test_encode_encrypted_encoded_header_roundtrip`, `test_sevenz_encrypted_encoded_header_roundtrip_and_system_extract` |
 | 93 | 7zAES file-content encryption write | Methods.txt: 7zAES / 7zFormat.txt: Folder | ✅ | `test_encode_encrypted_roundtrip`, `test_sevenz_encrypted_archive_system_extract_compat` |
 | 94 | Filter chains: x86 BCJ + compression, Delta + compression | Methods.txt + 7zFormat.txt | ✅ | `test_encode_delta_and_bcj_roundtrip`, `test_sevenz_x86_bcj_filter_system_extract_compat`, `test_sevenz_delta_filter_system_extract_compat` |
 | 95 | Two-folder x PPMd / BCJ / Delta x encrypted / encoded-header combinations | 7zFormat.txt + Methods.txt | ✅ | 32+ two-folder variant tests |
-| 96 | Two-folder split validation (non-empty folders) | 7zFormat.txt: Folder | ✅ | `test_two_folder_split_requires_two_non_empty_folders` |
+| 96 | Folder split validation (non-empty, strictly increasing) | 7zFormat.txt: Folder | ✅ | `test_two_folder_split_requires_two_non_empty_folders`, `test_folder_splits_validation` |
 | 97 | Empty archive write | 7zFormat.txt | ✅ | `test_encode_empty_archive`, `test_sevenz_empty_archive_roundtrip_and_system_list` |
 
 ---
