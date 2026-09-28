@@ -120,7 +120,7 @@
 | [deb](deb/README.md) | deb(5) (dpkg) | 25 | 0 | 2 | 27 |
 | [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 33 | 0 | 2 | 35 |
 | [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 36 | 0 | 6 | 42 |
-| [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 22 | 0 | 5 | 27 |
+| [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 23 | 0 | 4 | 27 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 21 | 0 | 4 | 25 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
 | [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 24 | 0 | 5 | 29 |
@@ -142,9 +142,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1856 |
+| ✅ 実装+テスト済み | 1857 |
 | ⚠️ 部分実装 | 2 |
 | ❌ 未実装 | 49 |
 | **合計** | **1907** |
 
-**全体カバー率**: 1856 / 1906 = **97.4%** (intentional exclusion 除外後: 1856 / 1858 = **99.9%**)
+**全体カバー率**: 1857 / 1907 = **97.4%** (intentional exclusion 除外後: 1857 / 1859 = **99.9%**)
