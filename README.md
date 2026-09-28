@@ -50,7 +50,7 @@ README は概要と導線だけを持ちます。仕様準拠、互換性メモ�
 | アーカイブ | zim | ✅ | ✅ |
 | アーカイブ | mtree (manifest、read) | ✅ | — |
 | アーカイブ | warc (read) | ✅ | — |
-| アーカイブ | git pack (pack/idx v2) | ✅ | ✅ |
+| アーカイブ | git pack (pack/idx v1-v3) | ✅ | ✅ |
 | アーカイブ | xar | ✅ | ✅ |
 | アーカイブ | lha/lzh (store のみ) | ✅ | ✅ |
 | アーカイブ | arj (store のみ) | ✅ | ✅ |

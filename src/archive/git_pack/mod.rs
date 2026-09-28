@@ -6,8 +6,12 @@
 //! pack checksum (SHA-1 for v2, SHA-256 for v3). Deltas are resolved
 //! in memory, including chained and (within the same pack) ref-delta
 //! bases; thin packs are rejected. The v2 index (`.idx`) can be read
-//! and written, and the legacy v1 index can be read; `.rev`,
-//! `.mtimes`, multi-pack-index, and SHA-256 pack/idx writing are
+//! and written for both hash algorithms (SHA-256 via
+//! [`decode::decode_idx_v2_sha256`]), and the legacy v1 index can be
+//! read and written (v1 writing is SHA-1-only). `encode` emits v2
+//! packs by default and v3/SHA-256 packs via
+//! [`encode::GitPackEncoder::new_sha256`]. `.rev`, `.mtimes`,
+//! multi-pack-index, and repository-layer SHA-256 integration are
 //! out of scope.
 //!
 //! Entries are exposed as [`GitPackEntry`] values whose name is the
