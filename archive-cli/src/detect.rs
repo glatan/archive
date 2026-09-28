@@ -426,13 +426,13 @@ pub fn scope_notes(format: Format) -> Vec<String> {
             "mscab write covers single-cabinet NONE/MSZIP; Quantum/LZX folders and multi-cabinet sets are unsupported".to_owned(),
         ],
         Format::Zim => vec![
-            "zim support is read-only; entry names include the ZIM namespace prefix".to_owned(),
+            "zim write produces v5 single-cluster archives; entry names include the ZIM namespace prefix".to_owned(),
         ],
         Format::Mtree => vec![
             "mtree is a manifest format; entries carry metadata only, no file content".to_owned(),
         ],
         Format::Warc => vec![
-            "warc support is read-only; .warc.gz must be decompressed as gzip first".to_owned(),
+            ".warc.gz must be decompressed as gzip first".to_owned(),
         ],
         Format::GitPack => vec![
             "git-pack entries are named by hex object ID; pack writing stores all files as blobs without deltas".to_owned(),
