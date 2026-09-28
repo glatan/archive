@@ -193,6 +193,27 @@ fn extract_blob(
         .ok_or(Error::InvalidData("zim: blob offset out of range"))
 }
 
+/// Decode a split ZIM archive (`.zimaa`, `.zimab`, ...) into a list
+/// of entries. Only the first part carries the header; the parts are
+/// byte-concatenated and decoded as a single archive.
+///
+/// Returns [`Error::InvalidData`] when `parts` is empty or any part
+/// after the first is empty.
+pub fn decode_parts(parts: &[&[u8]]) -> Result<Vec<ZimEntry>, Error> {
+    if parts.is_empty() || parts.iter().any(|p| p.is_empty()) {
+        return Err(Error::InvalidData("zim: empty part"));
+    }
+    if parts.len() == 1 {
+        return decode(parts[0]);
+    }
+    let total: usize = parts.iter().map(|p| p.len()).sum();
+    let mut input = Vec::with_capacity(total);
+    for p in parts {
+        input.extend_from_slice(p);
+    }
+    decode(&input)
+}
+
 /// Decode a ZIM archive into a list of entries.
 ///
 /// Redirect entries are resolved to their target's content.
@@ -305,6 +326,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<ZimEntry>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::traits::ArchiveEntry;
     use alloc::vec;
     use alloc::vec::Vec;
 
@@ -751,5 +773,40 @@ mod tests {
         let n = data.len();
         data[n - 18] ^= 0xff; // inside the cluster, before the digest
         assert!(decode(&data).is_err());
+    }
+    #[test]
+    fn split_parts_roundtrip() {
+        let mut enc = crate::archive::zim::encode::ZimEncoder::new();
+        enc.add_file("index.html", b"<html>split</html>");
+        enc.add_file("a.txt", b"split me");
+        let data = enc.finish().unwrap();
+        let whole = decode(&data).unwrap();
+        // Split at awkward boundaries (inside header / mid-entry).
+        let a = data.len() / 3;
+        let bnd = 2 * data.len() / 3;
+        let parts = [&data[..a], &data[a..bnd], &data[bnd..]];
+        let entries = decode_parts(&parts).unwrap();
+        assert_eq!(entries.len(), whole.len());
+        for (e, w) in entries.iter().zip(whole.iter()) {
+            assert_eq!(e.name(), w.name());
+            assert_eq!(e.data(), w.data());
+        }
+    }
+
+    #[test]
+    fn split_parts_rejects_empty() {
+        let mut enc = crate::archive::zim::encode::ZimEncoder::new();
+        enc.add_file("x", b"1");
+        let data = enc.finish().unwrap();
+        assert!(matches!(decode_parts(&[]), Err(Error::InvalidData(_))));
+        assert!(matches!(
+            decode_parts(&[&data[..10], &[]]),
+            Err(Error::InvalidData(_))
+        ));
+        // Single part behaves like decode().
+        assert_eq!(
+            decode_parts(&[&data]).unwrap().len(),
+            decode(&data).unwrap().len()
+        );
     }
 }
