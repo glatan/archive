@@ -132,7 +132,7 @@
 | [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 20 | 0 | 5 | 25 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 16 | 0 | 5 | 21 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 19 | 0 | 3 | 22 |
-| [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 19 | 0 | 4 | 23 |
+| [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 24 | 0 | 3 | 27 |
 | [lha](lha/README.md) | lha header documentation (apphead / lzh_note) | 21 | 0 | 2 | 23 |
 | [arj](arj/README.md) | ARJ technical note (ARJ 2.x) | 18 | 0 | 4 | 22 |
 | [arc](arc/README.md) | SEA ARC file format description | 14 | 0 | 3 | 17 |
@@ -151,9 +151,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1721 |
+| ✅ 実装+テスト済み | 1726 |
 | ⚠️ 部分実装 | 1 |
-| ❌ 未実装 | 39 |
-| **合計** | **1794** |
+| ❌ 未実装 | 38 |
+| **合計** | **1798** |
 
-**全体カバー率**: 1721 / 1764 = **97.6%** (intentional exclusion 除外後: 1721 / 1724 = **99.8%**)
+**全体カバー率**: 1726 / 1768 = **97.6%** (intentional exclusion 除外後: 1726 / 1728 = **99.9%**)

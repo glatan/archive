@@ -78,7 +78,7 @@
 //! | `mscab` (default) | Microsoft Cabinet (`.cab`) read support (MSZIP/stored) |
 //! | `zim` (default) | ZIM archive (`.zim`) read support |
 //! | `mtree` (default) | mtree(5) manifest read support |
-//! | `warc` (default) | WARC (`.warc`) record read support |
+//! | `warc` (default) | WARC (`.warc`) record read/write support |
 //! | `git-pack` (default) | Git pack (`pack-*.pack`/`pack-*.idx`) read/write support |
 //! | `xar` (default) | XAR (`.xar`) archive read/write support |
 //! | `lha` (default) | LHA/LZH archive support (store methods; header levels 0-2) |
