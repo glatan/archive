@@ -75,7 +75,7 @@
 //! | `deb` (default) | Debian binary package (`.deb`) read/write support |
 //! | `rpm` (default) | RPM package (`.rpm`) read/write support |
 //! | `squashfs` (default) | SquashFS image read support |
-//! | `mscab` (default) | Microsoft Cabinet (`.cab`) read support (MSZIP/stored) |
+//! | `mscab` (default) | Microsoft Cabinet (`.cab`) read/write support (MSZIP/stored) |
 //! | `zim` (default) | ZIM archive (`.zim`) read support |
 //! | `mtree` (default) | mtree(5) manifest read/write support |
 //! | `warc` (default) | WARC (`.warc`) record read/write support |

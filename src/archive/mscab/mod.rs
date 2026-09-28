@@ -13,6 +13,7 @@ use crate::error::Error;
 
 /// Microsoft Cabinet archive decoding.
 pub mod decode;
+pub mod encode;
 
 /// Codec struct for trait-based MSCAB decode operations.
 pub struct MscabCodec;
