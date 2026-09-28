@@ -156,7 +156,7 @@
 | 85 | file name: forward slash のみ、drive letter 不可 | §4.4.17.1 | ✅ | エンコーダーでバックスラッシュ、ドライブレター、パストラバーサル reject。`test_path_validation_*` |
 | 86 | file name: NULL 終端ではない (length field で管理) | §4.4.17 | ✅ | length-based parsing |
 | 87 | ZIP64: offset 0xFFFFFFFF → extra field 0x0001 参照 | §4.4.16 | ✅ | `test_force_zip64_roundtrip` |
-| 88 | ZIP64: disk 0xFFFF → extra field 0x0001 参照 | §4.4.13 | ❌ | multi-disk 未対応 (intentional) |
+| 88 | ZIP64: disk 0xFFFF → extra field 0x0001 参照 | §4.4.13 | ❌ | ZIP64 extra の disk-start override は未実装 (`decode_parts` は 16-bit `disk_start` フィールドのみ解決、0xFFFF sentinel は `Unsupported`) |
 | 89 | internal file attributes bit 0 (ASCII text marker) | §4.4.14 | ✅ | `ZipEntry::internal_attributes` で公開 (bit 解釈はアプリケーション側) |
 | 90 | external file attributes (host-system dependent) | §4.4.15 | ✅ | `ZipEntry::external_attributes` で公開、任意値 write 可能 |
 | 150 | encode 時の auto-ZIP64 promotion (field overflow → 0xFFFF/0xFFFFFFFF 設定) | §4.4.1.4 | ✅ | `needs_zip64_entry()` で自動判定 |
@@ -168,8 +168,8 @@
 
 | # | 仕様要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|---------|---------|------|----------------|
-| 125 | Multi-disk / split archive | §8 | ✅ | `decode_parts(&[&[u8]])` / `decode_parts_with_password_bytes` が segment を連結して decode (disk 数と EOCD/ZIP64 disk フィールドの整合を検証、PKZIP spanning signature 0x08074b50 を受理)。`split_parts_roundtrip`, `split_parts_disk_count_mismatch`, `split_parts_rejects_empty_and_accepts_single`, `split_parts_spanning_signature_tolerated` |
-| 126 | Record が segment 境界を跨がない | §8.5.2 | — | 単一ディスクのみのため該当なし |
+| 125 | Multi-disk / split archive | §8 | ✅ | `decode_parts(&[&[u8]])` / `decode_parts_with_password_bytes` が segment を連結し、disk 相対オフセット (entry `disk_start` + local header offset、CD disk、ZIP64 locator/record) を各 segment 開始位置で解決。disk 数と EOCD/ZIP64 disk フィールドの整合を検証、PKZIP spanning signature 0x08074b50 を受理。`split_parts_roundtrip`, `split_parts_real_disk_offsets`, `split_parts_zip64_multidisk`, `split_parts_disk_count_mismatch`, `split_parts_rejects_empty_and_accepts_single`, `split_parts_spanning_signature_tolerated` |
+| 126 | Record が segment 境界を跨がない | §8.5.2 | — | writer 側のレイアウト制約であり reader は各 record を連結ストリーム上でシークして読むだけのため該当なし |
 
 ---
 

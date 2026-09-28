@@ -123,9 +123,13 @@ pub fn decode_with_password_bytes(input: &[u8], password: &[u8]) -> Result<Vec<Z
 /// The segments are one logical byte stream (APPNOTE §8): the last
 /// segment carries the End of Central Directory record, whose disk
 /// fields must be consistent with the number of supplied parts.
-/// An optional `0x08074b50` spanning signature at the start of the
-/// first segment is tolerated (it is part of the byte stream all
-/// offsets are relative to). Empty parts are rejected.
+/// Disk-relative offsets (entry `disk_start` + local header offset,
+/// central directory disk, ZIP64 EOCD locator/record disk fields)
+/// are resolved against each segment's start offset, so entries
+/// stored on any disk are extracted. An optional `0x08074b50`
+/// spanning signature at the start of the first segment is tolerated
+/// (it is part of the byte stream offsets are relative to).
+/// Empty parts are rejected.
 pub fn decode_parts(parts: &[&[u8]]) -> Result<Vec<ZipEntry>, Error> {
     decode_parts_impl(parts, None)
 }
@@ -142,21 +146,51 @@ fn decode_parts_impl(parts: &[&[u8]], password: Option<&[u8]>) -> Result<Vec<Zip
     if parts.is_empty() || parts.iter().any(|p| p.is_empty()) {
         return Err(Error::InvalidData("zip: empty archive part"));
     }
-    if parts.len() == 1 {
-        return decode_impl(parts[0], password, Some(1));
+    let mut starts = Vec::with_capacity(parts.len());
+    let mut pos = 0usize;
+    for p in parts {
+        starts.push(pos);
+        pos += p.len();
     }
-    let total: usize = parts.iter().map(|p| p.len()).sum();
-    let mut input = Vec::with_capacity(total);
+    let disk_map = DiskMap { starts };
+    if parts.len() == 1 {
+        return decode_impl(parts[0], password, Some(&disk_map));
+    }
+    let mut input = Vec::with_capacity(pos);
     for p in parts {
         input.extend_from_slice(p);
     }
-    decode_impl(&input, password, Some(parts.len()))
+    decode_impl(&input, password, Some(&disk_map))
+}
+
+/// Segment map of a split/spanned archive: `starts[d]` is the byte
+/// offset where disk `d` begins inside the concatenated stream.
+#[derive(Debug)]
+struct DiskMap {
+    starts: Vec<usize>,
+}
+
+impl DiskMap {
+    /// Resolve a disk-relative offset (APPNOTE §4.4.13/§4.4.15/§4.4.16)
+    /// into an absolute offset in the concatenated stream.
+    fn resolve(&self, disk: u64, offset: u64) -> Result<usize, Error> {
+        let disk =
+            usize::try_from(disk).map_err(|_| Error::InvalidData("zip: disk index too large"))?;
+        let base = self
+            .starts
+            .get(disk)
+            .ok_or(Error::InvalidData("zip: disk index out of range"))?;
+        let offset =
+            usize::try_from(offset).map_err(|_| Error::Unsupported("zip: offset too large"))?;
+        base.checked_add(offset)
+            .ok_or(Error::InvalidData("zip: disk offset overflow"))
+    }
 }
 
 fn decode_impl(
     input: &[u8],
     password: Option<&[u8]>,
-    disk_parts: Option<usize>,
+    disk_map: Option<&DiskMap>,
 ) -> Result<Vec<ZipEntry>, Error> {
     if input.is_empty() {
         return Ok(Vec::new());
@@ -169,14 +203,16 @@ fn decode_impl(
 
     // Multi-disk consistency: the EOCD sits on the last disk, so its
     // "number of this disk" equals parts-1 (APPNOTE §8, §4.4.19).
-    match disk_parts {
+    match disk_map {
         None => {
             if eocd.disk_number != 0 || eocd.cd_disk_number != 0 {
                 return Err(Error::Unsupported("zip: multi-disk archives"));
             }
         }
-        Some(n) => {
-            if eocd.disk_number as usize != n - 1 || eocd.cd_disk_number > eocd.disk_number {
+        Some(m) => {
+            if eocd.disk_number as usize != m.starts.len() - 1
+                || eocd.cd_disk_number > eocd.disk_number
+            {
                 return Err(Error::InvalidData("zip: disk count mismatch"));
             }
         }
@@ -186,23 +222,30 @@ fn decode_impl(
         Some(parse_zip64_locator_and_record(
             input,
             eocd_offset,
-            disk_parts,
+            disk_map,
         )?)
     } else {
         None
     };
 
-    let cd_offset = zip64
-        .as_ref()
-        .map_or(eocd.central_directory_offset as u64, |z| {
-            z.central_directory_offset
-        });
+    let (cd_offset, cd_disk) = zip64.as_ref().map_or(
+        (
+            eocd.central_directory_offset as u64,
+            eocd.cd_disk_number as u64,
+        ),
+        |z| (z.central_directory_offset, z.cd_disk_number),
+    );
     let total_entries = zip64
         .as_ref()
         .map_or(eocd.total_entries as u64, |z| z.total_entries);
 
-    let cd_offset = usize::try_from(cd_offset)
-        .map_err(|_| Error::Unsupported("zip: central directory offset too large"))?;
+    // APPNOTE §4.4.15: the CD offset is relative to the start of the
+    // disk on which the central directory begins.
+    let cd_offset = match disk_map {
+        Some(m) => m.resolve(cd_disk, cd_offset)?,
+        None => usize::try_from(cd_offset)
+            .map_err(|_| Error::Unsupported("zip: central directory offset too large"))?,
+    };
     if cd_offset > input.len() {
         return Err(Error::UnexpectedEof);
     }
@@ -225,7 +268,7 @@ fn decode_impl(
         let mut cursor = Cursor::new(&cd_data);
         let mut records = Vec::new();
         for _ in 0..total_entries {
-            records.push(parse_central_directory_record(&mut cursor)?);
+            records.push(parse_central_directory_record(&mut cursor, disk_map)?);
         }
         // When CD is decrypted, there's no meaningful "cd_offset" in the original
         // input for determining entry boundaries. Use eocd_offset as the fallback
@@ -236,7 +279,7 @@ fn decode_impl(
         cursor.set(cd_offset);
         let mut records = Vec::new();
         for _ in 0..total_entries {
-            records.push(parse_central_directory_record(&mut cursor)?);
+            records.push(parse_central_directory_record(&mut cursor, disk_map)?);
         }
 
         // Skip Digital Signature record (APPNOTE §4.3.13, signature 0x05054B50)
@@ -403,6 +446,7 @@ impl EocdRecord {
 struct Zip64Record {
     total_entries: u64,
     central_directory_offset: u64,
+    cd_disk_number: u64,
 }
 
 /// Skip an Archive Extra Data Record (APPNOTE §4.3.11) if one is present
@@ -476,7 +520,7 @@ fn parse_eocd(cursor: &mut Cursor<'_>) -> Result<EocdRecord, Error> {
 fn parse_zip64_locator_and_record(
     input: &[u8],
     eocd_offset: usize,
-    disk_parts: Option<usize>,
+    disk_map: Option<&DiskMap>,
 ) -> Result<Zip64Record, Error> {
     if eocd_offset < 20 {
         return Err(Error::InvalidData("zip: missing ZIP64 locator"));
@@ -488,21 +532,27 @@ fn parse_zip64_locator_and_record(
     let disk_with_record = read_u32_at(input, locator_offset + 4)?;
     let zip64_record_offset = read_u64_at(input, locator_offset + 8)?;
     let total_disks = read_u32_at(input, locator_offset + 16)?;
-    match disk_parts {
+    match disk_map {
         None => {
             if disk_with_record != 0 || total_disks != 1 {
                 return Err(Error::Unsupported("zip: multi-disk ZIP64 archives"));
             }
         }
-        Some(n) => {
-            if total_disks as usize != n || disk_with_record as usize >= n {
+        Some(m) => {
+            if total_disks as usize != m.starts.len() || disk_with_record as usize >= m.starts.len()
+            {
                 return Err(Error::InvalidData("zip: disk count mismatch"));
             }
         }
     }
 
-    let record_offset = usize::try_from(zip64_record_offset)
-        .map_err(|_| Error::Unsupported("zip: ZIP64 record offset too large"))?;
+    // APPNOTE §4.3.15: the record offset is relative to the start of
+    // the disk carrying the ZIP64 EOCD record.
+    let record_offset = match disk_map {
+        Some(m) => m.resolve(disk_with_record as u64, zip64_record_offset)?,
+        None => usize::try_from(zip64_record_offset)
+            .map_err(|_| Error::Unsupported("zip: ZIP64 record offset too large"))?,
+    };
     if read_u32_at(input, record_offset)? != ZIP64_EOCD_SIGNATURE {
         return Err(Error::InvalidData("zip: invalid ZIP64 EOCD signature"));
     }
@@ -527,8 +577,18 @@ fn parse_zip64_locator_and_record(
 
     let _ = version_made_by;
     let _ = version_needed;
-    if disk_number != 0 || cd_disk_number != 0 {
-        return Err(Error::Unsupported("zip: multi-disk ZIP64 archives"));
+    match disk_map {
+        None => {
+            if disk_number != 0 || cd_disk_number != 0 {
+                return Err(Error::Unsupported("zip: multi-disk ZIP64 archives"));
+            }
+        }
+        Some(m) => {
+            // The ZIP64 EOCD record sits on the last disk of the set.
+            if disk_number as usize != m.starts.len() - 1 || cd_disk_number > disk_number {
+                return Err(Error::InvalidData("zip: disk count mismatch"));
+            }
+        }
     }
 
     // ZIP64 EOCD extensible data sector (APPNOTE §4.3.14.3):
@@ -540,11 +600,13 @@ fn parse_zip64_locator_and_record(
     Ok(Zip64Record {
         total_entries,
         central_directory_offset: cd_offset,
+        cd_disk_number: cd_disk_number as u64,
     })
 }
 
 fn parse_central_directory_record(
     cursor: &mut Cursor<'_>,
+    disk_map: Option<&DiskMap>,
 ) -> Result<CentralDirectoryRecord, Error> {
     let signature = cursor.read_u32()?;
     if signature != CENTRAL_DIRECTORY_HEADER_SIGNATURE {
@@ -567,8 +629,11 @@ fn parse_central_directory_record(
     let internal_attributes = cursor.read_u16()?;
     let external_attributes = cursor.read_u32()?;
     let local_header_offset_raw = cursor.read_u32()?;
-    if disk_start != 0 {
-        return Err(Error::Unsupported("zip: multi-disk entries"));
+    if disk_start == 0xFFFF {
+        // APPNOTE §4.4.13: the real disk number lives in the ZIP64
+        // extended information extra field; we do not parse that
+        // disk override (intentional scope).
+        return Err(Error::Unsupported("zip: ZIP64 disk-start override"));
     }
 
     let name = cursor.read_string(name_len, (flags & (1 << 11)) != 0)?;
@@ -601,8 +666,18 @@ fn parse_central_directory_record(
     let local_header_offset_u64 = zip64
         .local_header_offset
         .unwrap_or(local_header_offset_raw as u64);
-    let local_header_offset = usize::try_from(local_header_offset_u64)
-        .map_err(|_| Error::Unsupported("zip: local header offset too large"))?;
+    // APPNOTE §4.4.16: the local header offset is relative to the
+    // start of the disk on which the entry begins.
+    let local_header_offset = match disk_map {
+        Some(m) => m.resolve(disk_start as u64, local_header_offset_u64)?,
+        None => {
+            if disk_start != 0 {
+                return Err(Error::Unsupported("zip: multi-disk entries"));
+            }
+            usize::try_from(local_header_offset_u64)
+                .map_err(|_| Error::Unsupported("zip: local header offset too large"))?
+        }
+    };
     let actual_compression_method =
         aes.map_or(compression_method, |aes| aes.actual_compression_method);
 
@@ -2669,7 +2744,9 @@ mod tests {
         }
     }
     /// Locate the EOCD record and patch its disk fields as if the
-    /// archive were split into `disks` segments.
+    /// archive were split so that the EOCD sits on `disks` and the
+    /// central directory starts on `cd_disk` (field values only;
+    /// stored offsets are not touched).
     fn patch_eocd_disks(archive: &mut [u8], disks: u16, cd_disk: u16) {
         let pos = archive
             .windows(4)
@@ -2677,6 +2754,44 @@ mod tests {
             .expect("EOCD not found");
         archive[pos + 4..pos + 6].copy_from_slice(&disks.to_le_bytes());
         archive[pos + 6..pos + 8].copy_from_slice(&cd_disk.to_le_bytes());
+    }
+
+    /// Locate the EOCD and patch both its disk fields and the stored
+    /// CD offset as if the central directory began on `cd_disk` at
+    /// disk-relative offset `cd_offset` (APPNOTE §4.4.15).
+    fn patch_eocd_split(archive: &mut [u8], disks: u16, cd_disk: u16, cd_offset: u32) {
+        let pos = archive
+            .windows(4)
+            .rposition(|w| w == [0x50, 0x4b, 0x05, 0x06])
+            .expect("EOCD not found");
+        archive[pos + 4..pos + 6].copy_from_slice(&disks.to_le_bytes());
+        archive[pos + 6..pos + 8].copy_from_slice(&cd_disk.to_le_bytes());
+        archive[pos + 16..pos + 20].copy_from_slice(&cd_offset.to_le_bytes());
+    }
+
+    /// Return `(disk_start_pos, lh_offset_pos)` for each central
+    /// directory record, starting at `cd_off`.
+    fn cd_record_positions(archive: &[u8], cd_off: usize) -> Vec<(usize, usize)> {
+        let mut out = Vec::new();
+        let mut p = cd_off;
+        while archive[p..p + 4] == [0x50, 0x4b, 0x01, 0x02] {
+            out.push((p + 34, p + 42));
+            let name_len = u16::from_le_bytes(archive[p + 28..p + 30].try_into().unwrap()) as usize;
+            let extra_len =
+                u16::from_le_bytes(archive[p + 30..p + 32].try_into().unwrap()) as usize;
+            let com_len = u16::from_le_bytes(archive[p + 32..p + 34].try_into().unwrap()) as usize;
+            p += 46 + name_len + extra_len + com_len;
+        }
+        out
+    }
+
+    /// Stored absolute CD offset read from the EOCD.
+    fn eocd_cd_offset(archive: &[u8]) -> usize {
+        let pos = archive
+            .windows(4)
+            .rposition(|w| w == [0x50, 0x4b, 0x05, 0x06])
+            .expect("EOCD not found");
+        u32::from_le_bytes(archive[pos + 16..pos + 20].try_into().unwrap()) as usize
     }
 
     #[test]
@@ -2688,10 +2803,19 @@ mod tests {
         enc.add_file("c.txt", b"cccc");
         let mut archive = enc.finish().unwrap();
         // EOCD sits on the last disk; the CD starts on the last disk
-        // too for this small archive.
-        patch_eocd_disks(&mut archive, 2, 2);
+        // too for this small archive, so its stored offset is
+        // relative to the start of disk 2 (APPNOTE §4.4.15).
         let a = archive.len() / 3;
         let bnd = 2 * archive.len() / 3;
+        let cd_off = eocd_cd_offset(&archive);
+        let (cd_disk, cd_rel) = if cd_off >= bnd {
+            (2u16, (cd_off - bnd) as u32)
+        } else if cd_off >= a {
+            (1u16, (cd_off - a) as u32)
+        } else {
+            (0u16, cd_off as u32)
+        };
+        patch_eocd_split(&mut archive, 2, cd_disk, cd_rel);
         let parts = [&archive[..a], &archive[a..bnd], &archive[bnd..]];
         let entries = decode_parts(&parts).unwrap();
         assert_eq!(entries.len(), 3);
@@ -2768,14 +2892,109 @@ mod tests {
             with_sig[pos..pos + 4].copy_from_slice(&(old + 4).to_le_bytes());
         }
         let eocd_pos = eocd_pos + 4;
-        let old_cd = u32::from_le_bytes(with_sig[eocd_pos + 16..eocd_pos + 20].try_into().unwrap());
-        with_sig[eocd_pos + 16..eocd_pos + 20].copy_from_slice(&(old_cd + 4).to_le_bytes());
-        patch_eocd_disks(&mut with_sig, 1, 1);
-
         let mid = with_sig.len() / 2;
+        // The stored CD offset is relative to the disk it starts on
+        // (APPNOTE §4.4.15): pick the disk actually containing it.
+        let old_cd = u32::from_le_bytes(with_sig[eocd_pos + 16..eocd_pos + 20].try_into().unwrap())
+            as usize
+            + 4;
+        let (cd_disk, cd_rel) = if old_cd >= mid {
+            (1u16, (old_cd - mid) as u32)
+        } else {
+            (0u16, old_cd as u32)
+        };
+        with_sig[eocd_pos + 16..eocd_pos + 20].copy_from_slice(&cd_rel.to_le_bytes());
+        patch_eocd_disks(&mut with_sig, 1, cd_disk);
         let entries = decode_parts(&[&with_sig[..mid], &with_sig[mid..]]).unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].data(), b"payload");
         assert_eq!(entries[1].data(), b"other");
+    }
+
+    #[test]
+    fn split_parts_real_disk_offsets() {
+        use crate::traits::ArchiveEntry;
+        let mut enc = crate::archive::zip::encode::ZipEncoder::new();
+        enc.add_file("a.txt", b"payload-a");
+        enc.add_file("b.txt", b"payload-b");
+        let mut archive = enc.finish().unwrap();
+
+        let cd_off = eocd_cd_offset(&archive);
+        let recs = cd_record_positions(&archive, cd_off);
+        assert_eq!(recs.len(), 2);
+        // b.txt's local header is the first byte of disk 1: its
+        // stored offset becomes 0 relative to that disk, and the CD
+        // record's disk-start field becomes 1 (APPNOTE §4.4.13/§4.4.16).
+        let split =
+            u32::from_le_bytes(archive[recs[1].1..recs[1].1 + 4].try_into().unwrap()) as usize;
+        archive[recs[1].1..recs[1].1 + 4].copy_from_slice(&0u32.to_le_bytes());
+        archive[recs[1].0..recs[1].0 + 2].copy_from_slice(&1u16.to_le_bytes());
+        // CD itself begins on disk 1 (it follows b.txt's data), so
+        // the EOCD cd_offset is relative to the start of disk 1.
+        let cd_rel = (cd_off - split) as u32;
+        patch_eocd_split(&mut archive, 1, 1, cd_rel);
+
+        let parts = [&archive[..split], &archive[split..]];
+        let entries = decode_parts(&parts).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].data(), b"payload-a");
+        assert_eq!(entries[1].data(), b"payload-b");
+        // The same bytes still look multi-disk to decode().
+        assert!(matches!(decode(&archive), Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn split_parts_zip64_multidisk() {
+        use crate::traits::ArchiveEntry;
+        let mut enc = crate::archive::zip::encode::ZipEncoder::new();
+        enc.add_file_with_options(
+            "a.txt",
+            b"payload",
+            &crate::archive::zip::encode::ZipEntryOptions {
+                force_zip64: true,
+                ..Default::default()
+            },
+        );
+        let mut archive = enc.finish().unwrap();
+
+        // Locate the ZIP64 EOCD locator (last 20 bytes before EOCD)
+        // and the ZIP64 EOCD record it points at.
+        let eocd_pos = archive
+            .windows(4)
+            .rposition(|w| w == [0x50, 0x4b, 0x05, 0x06])
+            .unwrap();
+        let locator = eocd_pos - 20;
+        assert_eq!(archive[locator..locator + 4], [0x50, 0x4b, 0x06, 0x07]);
+        let rec_off =
+            u64::from_le_bytes(archive[locator + 8..locator + 16].try_into().unwrap()) as usize;
+        assert_eq!(archive[rec_off..rec_off + 4], [0x50, 0x4b, 0x06, 0x06]);
+
+        // Split so the central directory begins on disk 1: find the
+        // first central-directory header signature.
+        let mut cd_pos = 0usize;
+        while archive[cd_pos..cd_pos + 4] != [0x50, 0x4b, 0x01, 0x02] {
+            cd_pos += 1;
+            assert!(cd_pos < rec_off);
+        }
+        let split = cd_pos;
+
+        // Entry stays on disk 0 (absolute offset == disk-0-relative).
+        // CD on disk 1: ZIP64 record's cd_disk/cd_offset become
+        // disk-1-relative; locator's record offset too; EOCD mirrors it.
+        let cd_rel = 0u64; // CD starts at the first byte of disk 1
+        archive[rec_off + 16..rec_off + 20].copy_from_slice(&1u32.to_le_bytes()); // disk_number
+        archive[rec_off + 20..rec_off + 24].copy_from_slice(&1u32.to_le_bytes()); // cd_disk
+        archive[rec_off + 48..rec_off + 56].copy_from_slice(&cd_rel.to_le_bytes());
+        archive[locator + 4..locator + 8].copy_from_slice(&1u32.to_le_bytes()); // disk_with_record
+        archive[locator + 8..locator + 16]
+            .copy_from_slice(&((rec_off - split) as u64).to_le_bytes());
+        archive[locator + 16..locator + 20].copy_from_slice(&2u32.to_le_bytes()); // total_disks
+        patch_eocd_split(&mut archive, 1, 1, 0);
+
+        let parts = [&archive[..split], &archive[split..]];
+        let entries = decode_parts(&parts).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].data(), b"payload");
+        assert!(matches!(decode(&archive), Err(Error::Unsupported(_))));
     }
 }
