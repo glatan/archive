@@ -668,6 +668,23 @@
       "url": "https://raw.githubusercontent.com/chromium/chromium/main/components/crx_file/crx3.proto",
       "filename": "crx3.proto",
       "note": "BSD-style license; format documentation embedded in proto comments"
+    },
+    {
+      "id": "pea-help-pdf",
+      "format": "pea",
+      "title": "PEA file format specifications and implementation notes (pea_help.pdf)",
+      "version": "PeaZip published spec (v1.3-era document)",
+      "url": "https://peazip.github.io/pea_help.pdf",
+      "filename": "pea_help.pdf"
+    },
+    {
+      "id": "peazip-pea-pas",
+      "format": "pea",
+      "title": "PeaZip reference implementation pea.pas / pea_utils.pas (LGPLv3)",
+      "version": "PeaZip sources branch (fetched 2026-09)",
+      "url": "https://raw.githubusercontent.com/peazip/PeaZip/sources/peazip-sources/dev/pea.pas",
+      "filename": "pea.pas",
+      "note": "pea_utils.pas fetched from the same directory; used as wire-format reference only, no code copied"
     }
   ],
   "no_url_available": [

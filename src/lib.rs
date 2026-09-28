@@ -87,6 +87,7 @@
 //! | `cramfs` (default) | Linux cramfs read-only filesystem image |
 //! | `romfs` (default) | Linux romfs read-only filesystem image |
 //! | `crx3` (default) | Chrome extension package (CRX3) read support |
+//! | `pea` (default) | PEA (Pack, Encrypt, Authenticate) archive read support |
 //! | `zim` (default) | ZIM archive (`.zim`) read/write support (v5 write) |
 //! | `mtree` (default) | mtree(5) manifest read/write support |
 //! | `warc` (default) | WARC (`.warc`) record read/write support |
@@ -503,7 +504,7 @@ pub(crate) mod util;
 ))]
 pub mod compress;
 
-/// Archive formats: tar, cpio, ar, deb, rpm, squashfs, cramfs, romfs, crx3, mscab, mscfb, zim, mtree, warc,
+/// Archive formats: tar, cpio, ar, deb, rpm, squashfs, cramfs, romfs, crx3, pea, mscab, mscfb, zim, mtree, warc,
 /// git pack, xar,
 /// lha, arj, arc, zpaq, zip, and 7z.
 #[cfg(any(
@@ -516,6 +517,7 @@ pub mod compress;
     feature = "cramfs",
     feature = "romfs",
     feature = "crx3",
+    feature = "pea",
     feature = "mscab",
     feature = "mscfb",
     feature = "zim",

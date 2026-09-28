@@ -335,6 +335,14 @@ specifications or standards documents:
   protobuf library code was copied. An independently written
   Python protobuf/zip generator is used only as a local test-time
   interoperability oracle; it is not linked or distributed.
+- pea: PEA file format specification (pea_help.pdf, public
+  domain) and PeaZip reference implementation sources
+  (pea.pas, pea_utils.pas; LGPLv3, Giorgio Tani). Spec-informed
+  implementation; the wire format was reimplemented from the
+  specification and reference behavior — no code was copied.
+  An independently written Python PEA writer is used only as a
+  local test-time interoperability oracle; it is not linked or
+  distributed.
 - romfs: Linux kernel romfs documentation
   (Documentation/filesystems/romfs.rst; GPL-2.0 with
   Linux-syscall-note). Spec-informed implementation; no code was

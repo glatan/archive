@@ -60,6 +60,8 @@ use archive::archive::deb;
 use archive::archive::git_pack;
 #[cfg(feature = "mscfb")]
 use archive::archive::mscfb;
+#[cfg(feature = "pea")]
+use archive::archive::pea;
 #[cfg(feature = "romfs")]
 use archive::archive::romfs;
 use archive::archive::rpm;
@@ -265,6 +267,9 @@ mod lzma_alone_tests;
 mod lzo_tests;
 #[path = "integration/lzw.rs"]
 mod lzw_tests;
+#[cfg(feature = "pea")]
+#[path = "integration/pea.rs"]
+mod pea_tests;
 #[cfg(feature = "romfs")]
 #[path = "integration/romfs.rs"]
 mod romfs_tests;
