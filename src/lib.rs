@@ -72,7 +72,7 @@
 //! | `tar` (default) | tar archive format |
 //! | `cpio` (default) | cpio archive format |
 //! | `ar` (default) | GNU/BSD `ar` archive format |
-//! | `deb` (default) | Debian binary package (`.deb`) read support |
+//! | `deb` (default) | Debian binary package (`.deb`) read/write support |
 //! | `rpm` (default) | RPM package (`.rpm`) read support |
 //! | `squashfs` (default) | SquashFS image read support |
 //! | `mscab` (default) | Microsoft Cabinet (`.cab`) read support (MSZIP/stored) |
