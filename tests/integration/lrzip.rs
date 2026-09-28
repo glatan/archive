@@ -5,6 +5,15 @@ fn assert_lrzip_encode_system_decode_compat(
     archive_stem: &str,
     expected: &[u8],
 ) {
+    let archive = lrzip::encode::encode_with(expected, compression);
+    assert_lrzip_archive_system_decode_compat(archive, archive_stem, expected);
+}
+
+fn assert_lrzip_archive_system_decode_compat(
+    archive: Vec<u8>,
+    archive_stem: &str,
+    expected: &[u8],
+) {
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -21,7 +30,6 @@ fn assert_lrzip_encode_system_decode_compat(
     let archive_path = dir.join(format!("{archive_stem}.lrz"));
     let output_path = dir.join("decoded.bin");
 
-    let archive = lrzip::encode::encode_with(expected, compression);
     std::fs::write(&archive_path, &archive).unwrap();
 
     let output = Command::new(cmd)
@@ -217,4 +225,11 @@ fn test_lrzip_encode_zpaq_system_decode_compat() {
         "encoded_zpaq",
         &b"hello lrzip zpaq ".repeat(64),
     );
+}
+
+#[test]
+fn test_lrzip_encode_md5_system_decode_compat() {
+    let input = b"hello lrzip md5 checksum ".repeat(64);
+    let archive = lrzip::encode::encode_with_md5(&input, lrzip::encode::CompressionType::Lzma);
+    assert_lrzip_archive_system_decode_compat(archive, "encoded_md5", &input);
 }
