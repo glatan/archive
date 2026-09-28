@@ -354,7 +354,10 @@ pub fn detect_format(input: &[u8]) -> Option<Format> {
     if input.starts_with(b"WARC/1.0\r\n") || input.starts_with(b"WARC/1.1\r\n") {
         return Some(Format::Warc);
     }
-    if input.len() >= 12 && input.starts_with(b"PACK") && input[4..8] == [0, 0, 0, 2] {
+    if input.len() >= 12
+        && input.starts_with(b"PACK")
+        && matches!(input[4..8], [0, 0, 0, 2] | [0, 0, 0, 3])
+    {
         return Some(Format::GitPack);
     }
     if input.starts_with(b"xar!") {
@@ -609,10 +612,10 @@ mod tests {
         let mut pack = b"PACK\x00\x00\x00\x02".to_vec();
         pack.extend_from_slice(&[0; 16]);
         assert_eq!(detect_format(&pack), Some(Format::GitPack));
-        // version 3 pack must not be detected
+        // version 3 (SHA-256) pack is also detected
         let mut v3 = pack.clone();
         v3[7] = 3;
-        assert_ne!(detect_format(&v3), Some(Format::GitPack));
+        assert_eq!(detect_format(&v3), Some(Format::GitPack));
     }
 
     #[test]
