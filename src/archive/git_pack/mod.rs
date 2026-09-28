@@ -1,12 +1,13 @@
 //! Git pack format (`pack-*.pack` / `pack-*.idx`) support.
 //!
 //! Implements the pack container described by gitformat-pack(5):
-//! a `PACK` + version-2 header, per-object entries (undeltified or
+//! a `PACK` + version-2/3 header, per-object entries (undeltified or
 //! ofs-delta / ref-delta), zlib-compressed payloads, and a trailing
-//! pack checksum. Deltas are resolved in memory, including chained
-//! and (within the same pack) ref-delta bases; thin packs are
-//! rejected. The v2 index (`.idx`) can be read and written; v1 idx,
-//! `.rev`, `.mtimes`, multi-pack-index, and SHA-256 repositories are
+//! pack checksum (SHA-1 for v2, SHA-256 for v3). Deltas are resolved
+//! in memory, including chained and (within the same pack) ref-delta
+//! bases; thin packs are rejected. The v2 index (`.idx`) can be read
+//! and written, and the legacy v1 index can be read; `.rev`,
+//! `.mtimes`, multi-pack-index, and SHA-256 pack/idx writing are
 //! out of scope.
 //!
 //! Entries are exposed as [`GitPackEntry`] values whose name is the
@@ -86,9 +87,33 @@ pub fn object_id(object_type: ObjectType, data: &[u8]) -> ObjectId {
     h.finish()
 }
 
+/// Compute a git object ID under `kind`'s hash algorithm
+/// (`<hash>("<type> <len>\0" + data)`).
+pub fn object_id_with_kind(
+    kind: decode::HashKind,
+    object_type: ObjectType,
+    data: &[u8],
+) -> Vec<u8> {
+    let header = alloc::format!("{} {}\0", object_type.type_name(), data.len());
+    match kind {
+        decode::HashKind::Sha1 => {
+            let mut h = crate::util::sha1::Sha1::new();
+            h.update(header.as_bytes());
+            h.update(data);
+            h.finish().to_vec()
+        }
+        decode::HashKind::Sha256 => {
+            let mut h = crate::util::sha256::Sha256::new();
+            h.update(header.as_bytes());
+            h.update(data);
+            h.finish().to_vec()
+        }
+    }
+}
+
 /// Lower-case hex rendering of an object ID.
-pub fn hex_id(id: &ObjectId) -> String {
-    let mut s = String::with_capacity(40);
+pub fn hex_id(id: &[u8]) -> String {
+    let mut s = String::with_capacity(id.len() * 2);
     for b in id {
         s.push(char::from_digit((b >> 4) as u32, 16).unwrap());
         s.push(char::from_digit((b & 0xF) as u32, 16).unwrap());

@@ -1,9 +1,14 @@
-//! Git pack file (`pack-*.pack` v2) and index (`pack-*.idx` v2) decode.
+//! Git pack file (`pack-*.pack` v2/v3) and index (`pack-*.idx` v1/v2)
+//! decode.
 //!
 //! Object entries are parsed sequentially; `OFS_DELTA` bases are
 //! resolved by pack offset and `REF_DELTA` bases by object name within
 //! the same pack (thin packs are rejected). The trailing pack
-//! checksum (SHA-1 of all preceding bytes) is verified.
+//! checksum (SHA-1 for v2, SHA-256 for v3 packs) is verified. v3 packs
+//! use 32-byte object names throughout (REF_DELTA bases, entry IDs).
+//!
+//! [`decode_idx`] reads checksummed v2 indexes; [`decode_idx_v1`]
+//! reads the checksum-less legacy v1 format.
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -14,10 +19,37 @@ use crate::error::Error;
 use crate::util::adler32::adler32;
 use crate::util::bitreader::BitReader;
 use crate::util::sha1::sha1;
+use crate::util::sha256::sha256;
 
-use super::{ObjectId, ObjectType, hex_id, object_id};
+use super::{ObjectId, ObjectType, hex_id, object_id_with_kind};
 
-const TRAILER_LEN: usize = 20;
+const SHA1_LEN: usize = 20;
+const SHA256_LEN: usize = 32;
+
+/// Object-hash algorithm implied by the pack version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HashKind {
+    /// SHA-1 (pack v2, 20-byte names/trailer).
+    Sha1,
+    /// SHA-256 (pack v3, 32-byte names/trailer).
+    Sha256,
+}
+
+impl HashKind {
+    fn id_len(self) -> usize {
+        match self {
+            Self::Sha1 => SHA1_LEN,
+            Self::Sha256 => SHA256_LEN,
+        }
+    }
+
+    fn digest(self, data: &[u8]) -> Vec<u8> {
+        match self {
+            Self::Sha1 => sha1(data).to_vec(),
+            Self::Sha256 => sha256(data).to_vec(),
+        }
+    }
+}
 /// Bound on delta-chain length (git caps delta depth at 50; keep headroom).
 const MAX_DELTA_DEPTH: usize = 64;
 
@@ -26,8 +58,8 @@ const MAX_DELTA_DEPTH: usize = 64;
 pub struct GitPackEntry {
     /// Lower-case hex object ID.
     name: String,
-    /// Raw 20-byte object ID.
-    id: ObjectId,
+    /// Raw object ID (20 bytes for v2/SHA-1, 32 for v3/SHA-256).
+    id: Vec<u8>,
     object_type: ObjectType,
     data: Vec<u8>,
     /// Byte offset of the entry's object header inside the pack.
@@ -38,8 +70,8 @@ impl GitPackEntry {
     pub fn object_type(&self) -> ObjectType {
         self.object_type
     }
-    /// Raw object ID (SHA-1).
-    pub fn object_id(&self) -> &ObjectId {
+    /// Raw object ID (`HashKind` length: 20 bytes v2, 32 bytes v3).
+    pub fn object_id(&self) -> &[u8] {
         &self.id
     }
     /// Offset of this entry's object header in the pack file.
@@ -74,7 +106,7 @@ enum RawKind {
     /// Base entry `offset` bytes before this entry's header.
     OfsDelta(u64),
     /// Base object ID (must be present in the same pack).
-    RefDelta(ObjectId),
+    RefDelta(Vec<u8>),
 }
 
 fn invalid(msg: &'static str) -> Error {
@@ -83,25 +115,32 @@ fn invalid(msg: &'static str) -> Error {
 
 /// Decode a complete pack file. The trailing pack checksum is verified.
 pub fn decode(input: &[u8]) -> Result<Vec<GitPackEntry>, Error> {
-    let raws = parse_entries(input)?;
-    resolve(input, raws)
+    let (kind, raws) = parse_entries(input)?;
+    resolve(input, kind, raws)
 }
 
-fn parse_entries(input: &[u8]) -> Result<Vec<RawEntry>, Error> {
-    if input.len() < 12 + TRAILER_LEN {
+fn parse_entries(input: &[u8]) -> Result<(HashKind, Vec<RawEntry>), Error> {
+    if input.len() < 12 + SHA1_LEN {
         return Err(invalid("git-pack: truncated header"));
     }
     if &input[..4] != b"PACK" {
         return Err(invalid("git-pack: bad signature"));
     }
     let version = u32::from_be_bytes(input[4..8].try_into().unwrap());
-    if version != 2 {
-        return Err(Error::Unsupported(
-            "git-pack: only version 2 packs supported",
-        ));
-    }
+    let kind = match version {
+        2 => HashKind::Sha1,
+        3 => HashKind::Sha256,
+        _ => {
+            return Err(Error::Unsupported(
+                "git-pack: only version 2/3 packs supported",
+            ));
+        }
+    };
     let count = u32::from_be_bytes(input[8..12].try_into().unwrap()) as usize;
-    let body_end = input.len() - TRAILER_LEN;
+    let body_end = input
+        .len()
+        .checked_sub(kind.id_len())
+        .ok_or(invalid("git-pack: truncated header"))?;
 
     let mut raws = Vec::with_capacity(count.min(1 << 20));
     let mut pos = 12usize;
@@ -154,13 +193,13 @@ fn parse_entries(input: &[u8]) -> Result<Vec<RawEntry>, Error> {
                 RawKind::OfsDelta(n)
             }
             7 => {
-                // REF_DELTA: 20-byte base object name.
-                if pos + TRAILER_LEN > body_end {
+                // REF_DELTA: base object name (hash-length bytes).
+                let hlen = kind.id_len();
+                if pos + hlen > body_end {
                     return Err(invalid("git-pack: truncated ref-delta"));
                 }
-                let mut id = [0u8; 20];
-                id.copy_from_slice(&input[pos..pos + 20]);
-                pos += 20;
+                let id = input[pos..pos + hlen].to_vec();
+                pos += hlen;
                 RawKind::RefDelta(id)
             }
             _ => return Err(invalid("git-pack: invalid object type")),
@@ -183,7 +222,7 @@ fn parse_entries(input: &[u8]) -> Result<Vec<RawEntry>, Error> {
     if pos != body_end {
         return Err(invalid("git-pack: trailing bytes before checksum"));
     }
-    Ok(raws)
+    Ok((kind, raws))
 }
 
 /// Decode a self-terminating zlib stream at the start of `input`,
@@ -220,10 +259,10 @@ fn zlib_decode(input: &[u8]) -> Result<(Vec<u8>, usize), Error> {
     Ok((out, trailer + 4))
 }
 
-fn resolve(input: &[u8], raws: Vec<RawEntry>) -> Result<Vec<GitPackEntry>, Error> {
-    // Verify the pack checksum (SHA-1 of everything before the trailer).
-    let trailer = input.len() - TRAILER_LEN;
-    if sha1(&input[..trailer]) != input[trailer..] {
+fn resolve(input: &[u8], kind: HashKind, raws: Vec<RawEntry>) -> Result<Vec<GitPackEntry>, Error> {
+    // Verify the pack checksum (hash of everything before the trailer).
+    let trailer = input.len() - kind.id_len();
+    if kind.digest(&input[..trailer]) != input[trailer..] {
         return Err(Error::InvalidData("git-pack: pack checksum mismatch"));
     }
 
@@ -240,10 +279,10 @@ fn resolve(input: &[u8], raws: Vec<RawEntry>) -> Result<Vec<GitPackEntry>, Error
 
     // First resolve all non-delta objects so every possible REF_DELTA
     // base name is known.
-    let mut name_index: BTreeMap<ObjectId, usize> = BTreeMap::new();
+    let mut name_index: BTreeMap<Vec<u8>, usize> = BTreeMap::new();
     for (i, raw) in raws.iter().enumerate() {
         if let RawKind::Full(t) = raw.kind {
-            name_index.insert(object_id(t, &raw.payload), i);
+            name_index.insert(object_id_with_kind(kind, t, &raw.payload), i);
         }
     }
 
@@ -251,7 +290,7 @@ fn resolve(input: &[u8], raws: Vec<RawEntry>) -> Result<Vec<GitPackEntry>, Error
         i: usize,
         raws: &[RawEntry],
         offset_index: &BTreeMap<u64, usize>,
-        name_index: &BTreeMap<ObjectId, usize>,
+        name_index: &BTreeMap<Vec<u8>, usize>,
         resolved: &mut [Option<(ObjectType, Vec<u8>)>],
         resolving: &mut [bool],
         depth: usize,
@@ -279,7 +318,7 @@ fn resolve(input: &[u8], raws: Vec<RawEntry>) -> Result<Vec<GitPackEntry>, Error
                     .ok_or_else(|| invalid("git-pack: ofs-delta base missing"))?
             }
             RawKind::RefDelta(id) => *name_index
-                .get(id)
+                .get(id.as_slice())
                 .ok_or_else(|| invalid("git-pack: thin pack (ref-delta base missing)"))?,
         };
         resolve_at(
@@ -310,7 +349,7 @@ fn resolve(input: &[u8], raws: Vec<RawEntry>) -> Result<Vec<GitPackEntry>, Error
             0,
         )?;
         let (t, data) = resolved[i].take().unwrap();
-        let id = object_id(t, &data);
+        let id = object_id_with_kind(kind, t, &data);
         entries.push(GitPackEntry {
             name: hex_id(&id),
             id,
@@ -431,7 +470,7 @@ pub struct IdxEntry {
 /// verify the embedded pack checksum). The idx checksum covers the
 /// whole file before its own trailer.
 pub fn decode_idx(input: &[u8], pack: &[u8]) -> Result<Vec<IdxEntry>, Error> {
-    if input.len() < 8 + 256 * 4 + 2 * TRAILER_LEN {
+    if input.len() < 8 + 256 * 4 + 2 * SHA1_LEN {
         return Err(invalid("git-pack: truncated idx"));
     }
     if input[..4] != IDX_MAGIC {
@@ -441,12 +480,12 @@ pub fn decode_idx(input: &[u8], pack: &[u8]) -> Result<Vec<IdxEntry>, Error> {
     if version != 2 {
         return Err(Error::Unsupported("git-pack: only idx version 2 supported"));
     }
-    let trailer = input.len() - TRAILER_LEN;
+    let trailer = input.len() - SHA1_LEN;
     if sha1(&input[..trailer]) != input[trailer..] {
         return Err(invalid("git-pack: idx checksum mismatch"));
     }
-    let pack_sum = &input[trailer - TRAILER_LEN..trailer];
-    if pack.len() < TRAILER_LEN || pack_sum != &pack[pack.len() - TRAILER_LEN..] {
+    let pack_sum = &input[trailer - SHA1_LEN..trailer];
+    if pack.len() < SHA1_LEN || pack_sum != &pack[pack.len() - SHA1_LEN..] {
         return Err(invalid("git-pack: idx pack checksum mismatch"));
     }
 
@@ -465,10 +504,10 @@ pub fn decode_idx(input: &[u8], pack: &[u8]) -> Result<Vec<IdxEntry>, Error> {
     let crcs_at = names_at + n * 20;
     let offs_at = crcs_at + n * 4;
     let large_at = offs_at + n * 4;
-    if large_at > trailer - TRAILER_LEN {
+    if large_at > trailer - SHA1_LEN {
         return Err(invalid("git-pack: truncated idx tables"));
     }
-    let n_large = (trailer - TRAILER_LEN - large_at) / 8;
+    let n_large = (trailer - SHA1_LEN - large_at) / 8;
 
     let mut entries = Vec::with_capacity(n);
     for i in 0..n {
@@ -503,6 +542,52 @@ pub fn decode_idx(input: &[u8], pack: &[u8]) -> Result<Vec<IdxEntry>, Error> {
             crc32,
             offset,
         });
+    }
+    Ok(entries)
+}
+
+/// Decode a version-1 `.idx` file (legacy, no magic/checksums).
+///
+/// Layout: 256-entry fanout table then `fanout[255]` rows of
+/// `u32 offset + 20-byte SHA-1`, sorted by object name. v1 has no
+/// CRC32 table and no trailing checksums, so `crc32` is reported as
+/// 0 and no integrity verification is possible.
+pub fn decode_idx_v1(input: &[u8]) -> Result<Vec<IdxEntry>, Error> {
+    if input.len() < 256 * 4 {
+        return Err(invalid("git-pack: truncated idx"));
+    }
+    if input[..4] == IDX_MAGIC {
+        return Err(invalid("git-pack: v2 idx passed to v1 decoder"));
+    }
+    let mut fanout = [0u32; 256];
+    for (i, f) in fanout.iter_mut().enumerate() {
+        *f = u32::from_be_bytes(input[i * 4..i * 4 + 4].try_into().unwrap());
+    }
+    for w in fanout.windows(2) {
+        if w[0] > w[1] {
+            return Err(invalid("git-pack: idx fanout not monotonic"));
+        }
+    }
+    let n = fanout[255] as usize;
+    if input.len() != 256 * 4 + n * 24 {
+        return Err(invalid("git-pack: idx v1 size mismatch"));
+    }
+    let mut entries = Vec::with_capacity(n);
+    for i in 0..n {
+        let at = 256 * 4 + i * 24;
+        let offset = u32::from_be_bytes(input[at..at + 4].try_into().unwrap()) as u64;
+        let id: ObjectId = input[at + 4..at + 24].try_into().unwrap();
+        entries.push(IdxEntry {
+            id,
+            name: hex_id(&id),
+            crc32: 0,
+            offset,
+        });
+    }
+    for w in entries.windows(2) {
+        if w[0].id > w[1].id {
+            return Err(invalid("git-pack: idx v1 names not sorted"));
+        }
     }
     Ok(entries)
 }
@@ -542,14 +627,22 @@ mod tests {
     }
 
     fn pack(entries: &[Vec<u8>]) -> Vec<u8> {
+        pack_version(2, entries)
+    }
+
+    fn pack_version(version: u32, entries: &[Vec<u8>]) -> Vec<u8> {
         let mut p = Vec::new();
         p.extend_from_slice(b"PACK");
-        p.extend_from_slice(&be32(2));
+        p.extend_from_slice(&be32(version));
         p.extend_from_slice(&be32(entries.len() as u32));
         for e in entries {
             p.extend_from_slice(e);
         }
-        let sum = crate::util::sha1::sha1(&p);
+        let sum = match version {
+            2 => crate::util::sha1::sha1(&p).to_vec(),
+            3 => crate::util::sha256::sha256(&p).to_vec(),
+            _ => p[..0].to_vec(),
+        };
         p.extend_from_slice(&sum);
         p
     }
@@ -752,5 +845,119 @@ mod tests {
         de.extend_from_slice(&zlib::encode::encode(&delta));
         let p = pack(&[de]);
         assert!(decode(&p).is_err());
+    }
+
+    #[test]
+    fn v3_pack_roundtrip() {
+        // v3: SHA-256 trailer + 32-byte names.
+        let entries_data: &[&[u8]] = &[b"blob one", b"blob two"];
+        let packed: Vec<Vec<u8>> = entries_data.iter().map(|d| blob_entry(d)).collect();
+        let p = pack_version(3, &packed);
+        let entries = decode(&p).unwrap();
+        assert_eq!(entries.len(), 2);
+        for (e, data) in entries.iter().zip(entries_data.iter()) {
+            assert_eq!(e.data(), *data);
+            assert_eq!(e.object_id().len(), 32);
+            assert_eq!(e.name().len(), 64);
+            let want = object_id_with_kind(HashKind::Sha256, e.object_type(), e.data());
+            assert_eq!(e.object_id(), want.as_slice());
+            assert_eq!(e.name(), hex_id(&want));
+        }
+    }
+
+    #[test]
+    fn v3_ref_delta_handbuilt() {
+        // v3 REF_DELTA base names are 32 bytes.
+        let base = b"0123456789abcdef";
+        let base_e = blob_entry(base);
+        let base_id = object_id_with_kind(HashKind::Sha256, ObjectType::Blob, base);
+        // Delta: src=16, dst=3, copy off=0 len=3.
+        let delta = [16u8, 3, 0x90, 3];
+        let mut de = obj_header(7, delta.len() as u64);
+        de.extend_from_slice(&base_id);
+        de.extend_from_slice(&zlib::encode::encode(&delta));
+        let p = pack_version(3, &[base_e, de]);
+        let entries = decode(&p).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[1].data(), b"012");
+        assert_eq!(entries[1].object_id().len(), 32);
+    }
+
+    #[test]
+    fn v3_bad_checksum_rejected() {
+        let mut p = pack_version(3, &[blob_entry(b"x")]);
+        let n = p.len();
+        p[n - 1] ^= 0xFF;
+        assert!(decode(&p).is_err());
+    }
+
+    #[test]
+    fn v1_pack_still_rejected() {
+        let mut p = Vec::new();
+        p.extend_from_slice(b"PACK");
+        p.extend_from_slice(&be32(1));
+        p.extend_from_slice(&be32(0));
+        p.extend_from_slice(&[0u8; 32]);
+        assert!(matches!(decode(&p), Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn decode_idx_v1_handbuilt() {
+        // v1: fanout + N x (u32 offset + 20B sha1), name-sorted.
+        let lo: ObjectId = [0x10; 20];
+        let hi: ObjectId = [0x80; 20];
+        let mut idx = Vec::new();
+        for i in 0..256u32 {
+            let v = if i <= 0x10 {
+                0
+            } else if i <= 0x80 {
+                1
+            } else {
+                2
+            };
+            idx.extend_from_slice(&be32(v));
+        }
+        idx.extend_from_slice(&be32(100));
+        idx.extend_from_slice(&lo);
+        idx.extend_from_slice(&be32(200));
+        idx.extend_from_slice(&hi);
+
+        let entries = decode_idx_v1(&idx).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].offset, 100);
+        assert_eq!(entries[0].crc32, 0);
+        assert_eq!(entries[0].name, hex_id(&lo));
+        assert_eq!(entries[1].offset, 200);
+        assert_eq!(entries[1].name, hex_id(&hi));
+    }
+    #[test]
+    fn decode_idx_v1_rejects_bad_input() {
+        // Truncated.
+        assert!(decode_idx_v1(&[0u8; 100]).is_err());
+        // Non-monotonic fanout.
+        let mut idx = Vec::new();
+        idx.extend_from_slice(&be32(2));
+        for _ in 1..256 {
+            idx.extend_from_slice(&be32(0));
+        }
+        assert!(decode_idx_v1(&idx).is_err());
+        // Size mismatch (fanout says 1 but no entry).
+        let mut idx = Vec::new();
+        for _ in 0..255 {
+            idx.extend_from_slice(&be32(0));
+        }
+        idx.extend_from_slice(&be32(1));
+        assert!(decode_idx_v1(&idx).is_err());
+        // Unsorted names.
+        let mut idx = Vec::new();
+        for _ in 0..255 {
+            idx.extend_from_slice(&be32(0));
+        }
+        idx.extend_from_slice(&be32(2));
+        idx.extend_from_slice(&be32(0));
+        idx.extend_from_slice(&[0xFF; 20]);
+        idx.extend_from_slice(&be32(4));
+        idx.extend_from_slice(&[0x00; 20]);
+        assert!(decode_idx_v1(&idx).is_err());
     }
 }

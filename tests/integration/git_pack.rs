@@ -156,9 +156,9 @@ fn bad_signature() {
 }
 
 #[test]
-fn reject_version3() {
+fn reject_version4() {
     let mut pack = fixture("real.pack");
-    pack[7] = 3;
+    pack[7] = 4;
     assert!(matches!(
         git_pack::decode::decode(&pack),
         Err(Error::Unsupported(_))
