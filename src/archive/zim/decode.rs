@@ -669,6 +669,7 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[1].name, "C/alias");
         assert_eq!(entries[1].data, b"content");
+        assert_eq!(entries[1].mime_type, "");
     }
 
     #[test]
@@ -974,5 +975,41 @@ mod tests {
         let data2 = b.build();
         let e = decode_title_order(&data2).unwrap();
         assert_eq!(e[0].name(), "C/aaa");
+    }
+
+    #[test]
+    fn title_order_falls_back_on_invalid_list() {
+        let mut b = ZimBuilder::new();
+        for (i, p) in ["bbb", "aaa", "ccc"].iter().enumerate() {
+            b.entries.push(DirentSpec::Content {
+                cluster: 0,
+                blob: i as u32,
+                ns: b'C',
+                path: p,
+            });
+        }
+        b.clusters
+            .push((CLUSTER_NONE, stored_cluster(&[b"b", b"a", b"c"])));
+        b.title_ptrs = Some(vec![2, 0, 1]);
+
+        let built = b.build();
+        let path_order: Vec<_> = decode(&built)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name().to_string())
+            .collect();
+
+        // titlePtrPos = 0 (absent): path order.
+        let mut absent = b.build();
+        absent[40..48].copy_from_slice(&0u64.to_le_bytes());
+        let e = decode_title_order(&absent).unwrap();
+        assert_eq!(e.iter().map(|e| e.name()).collect::<Vec<_>>(), path_order);
+
+        // titlePtrPos out of range: path order.
+        let mut oob = b.build();
+        let oob_pos = (oob.len() + 8) as u64;
+        oob[40..48].copy_from_slice(&oob_pos.to_le_bytes());
+        let e = decode_title_order(&oob).unwrap();
+        assert_eq!(e.iter().map(|e| e.name()).collect::<Vec<_>>(), path_order);
     }
 }

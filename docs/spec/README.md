@@ -121,7 +121,7 @@
 | [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 33 | 0 | 2 | 35 |
 | [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 37 | 0 | 6 | 43 |
 | [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 23 | 0 | 4 | 27 |
-| [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 24 | 0 | 2 | 26 |
+| [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 24 | 0 | 3 | 27 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
 | [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 24 | 0 | 5 | 29 |
 | [lha](lha/README.md) | lha header documentation (apphead / lzh_note) | 21 | 0 | 2 | 23 |
@@ -144,7 +144,7 @@
 |------|------|
 | ✅ 実装+テスト済み | 1861 |
 | ⚠️ 部分実装 | 2 |
-| ❌ 未実装 | 46 |
-| **合計** | **1909** |
+| ❌ 未実装 | 47 |
+| **合計** | **1910** |
 
-**全体カバー率**: 1861 / 1909 = **97.5%** (intentional exclusion 除外後: 1861 / 1863 = **99.9%**)
+**全体カバー率**: 1861 / 1910 = **97.4%** (intentional exclusion 除外後: 1861 / 1863 = **99.9%**)
