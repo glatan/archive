@@ -659,6 +659,15 @@
       "version": "linux master (fetched 2026-09)",
       "url": "https://raw.githubusercontent.com/torvalds/linux/master/Documentation/filesystems/romfs.rst",
       "filename": "romfs.rst"
+    },
+    {
+      "id": "chromium-crx3-proto",
+      "format": "crx3",
+      "title": "Chromium components/crx_file/crx3.proto (CRX3 file format)",
+      "version": "chromium main (fetched 2026-09)",
+      "url": "https://raw.githubusercontent.com/chromium/chromium/main/components/crx_file/crx3.proto",
+      "filename": "crx3.proto",
+      "note": "BSD-style license; format documentation embedded in proto comments"
     }
   ],
   "no_url_available": [

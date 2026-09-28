@@ -43,6 +43,8 @@ pub mod squashfs;
 #[cfg(feature = "cramfs")]
 pub mod cramfs;
 
+#[cfg(feature = "crx3")]
+pub mod crx3;
 #[cfg(feature = "romfs")]
 pub mod romfs;
 

@@ -53,6 +53,8 @@ use archive::archive::ar;
 use archive::archive::cpio;
 #[cfg(feature = "cramfs")]
 use archive::archive::cramfs;
+#[cfg(feature = "crx3")]
+use archive::archive::crx3;
 use archive::archive::deb;
 #[cfg(feature = "git-pack")]
 use archive::archive::git_pack;
@@ -237,6 +239,9 @@ mod cpio_tests;
 #[cfg(feature = "cramfs")]
 #[path = "integration/cramfs.rs"]
 mod cramfs_tests;
+#[cfg(feature = "crx3")]
+#[path = "integration/crx3.rs"]
+mod crx3_tests;
 #[path = "integration/deb.rs"]
 mod deb_tests;
 #[path = "integration/deflate.rs"]

@@ -328,6 +328,13 @@ specifications or standards documents:
   no code was copied. `mkfs.cramfs`/`fsck.cramfs` (util-linux,
   GPL-2.0+) are used only as test-time interoperability oracles
   inside the test container; they are not linked or distributed.
+- crx3: Chromium components/crx_file/crx3.proto (BSD-style
+  license). Format documentation embedded in proto comments;
+  spec-informed implementation. The protobuf wire parsing was
+  written directly from the .proto definitions; no Chromium or
+  protobuf library code was copied. An independently written
+  Python protobuf/zip generator is used only as a local test-time
+  interoperability oracle; it is not linked or distributed.
 - romfs: Linux kernel romfs documentation
   (Documentation/filesystems/romfs.rst; GPL-2.0 with
   Linux-syscall-note). Spec-informed implementation; no code was

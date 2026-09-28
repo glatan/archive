@@ -125,6 +125,7 @@
 | [mscfb](mscfb/README.md) | [MS-CFB] Compound File Binary File Format v20210625 | 18 | 1 | 4 | 23 |
 | [cramfs](cramfs/README.md) | Linux kernel cramfs.rst + fs/cramfs/README + cramfs_fs.h | 18 | 1 | 4 | 23 |
 | [romfs](romfs/README.md) | Linux kernel romfs.rst | 20 | 0 | 3 | 23 |
+| [crx3](crx3/README.md) | Chromium components/crx_file/crx3.proto | 13 | 0 | 4 | 17 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 24 | 0 | 3 | 27 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
 | [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 24 | 0 | 5 | 29 |
@@ -156,9 +157,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 2027 |
+| ✅ 実装+テスト済み | 2040 |
 | ⚠️ 部分実装 | 2 |
-| ❌ 未実装 | 72 |
-| **合計** | **2104** |
+| ❌ 未実装 | 76 |
+| **合計** | **2121** |
 
-**全体カバー率**: 2027 / 2104 = **96.3%** (intentional exclusion 除外後: 2027 / 2033 = **99.7%**)
+**全体カバー率**: 2040 / 2121 = **96.2%** (intentional exclusion 除外後: 2040 / 2046 = **99.7%**)
