@@ -186,7 +186,7 @@
 | 118 | Dictionary: entropy tables replacement (Huffman + FSE for LL/ML/OF) | RFC 8878 §5 | ✅ | decode_with_dict 実装 |
 | 119 | Window_Size 上限チェック (128 MiB; level-1 conformance は 8 MB、level-2 以上は緩和) | RFC 8878 §3.1.1.1.2 | ✅ | `test_window_size_exceeds_limit_rejected`, `test_window_size_at_limit_accepted`, `test_window_size_max_descriptor_rejected` |
 | 120 | Single-symbol Huffman tree | RFC 8878 §4.2.1 | ✅ | HuffmanTable 実装 |
-| 121 | Last sequence: literals 追加後の match copy 制約 | RFC 8878 §3.1.1.4.1 | ✅ | execute_sequences() |
+| 121 | Last sequence: literals 追加後の match copy 制約 | RFC 8878 §3.1.1.4 | ✅ | execute_sequences() |
 | 122 | Sequences ビットストリーム完全消費検証 | RFC 8878 §3.1.1.3.2.1.2 | ✅ | `is_fully_consumed()` で検証、未消費で InvalidData |
 | 123 | Huffman ビットストリーム完全消費検証 | RFC 8878 §4.2.2 | ✅ | `byte_pos != 0 \|\| bits_available != 0` で InvalidData |
 | 124 | FSE テーブル: 累積確率超過で corruption エラー | RFC 8878 §4.1.1 | ✅ | remaining != 1 チェックにより "FSE probabilities do not sum to table size" で InvalidData |
