@@ -5,8 +5,10 @@
 //! `tcompTYPE_MSZIP` compression types, including MSZIP history
 //! carried between `CFDATA` blocks within a folder, files spanning
 //! consecutive folders, and `FLAG_RESERVE_PRESENT` reserved areas
-//! (skipped on read, zero-filled on write). Quantum and LZX folders
-//! and multi-cabinet sets are intentionally out of scope.
+//! (skipped on read, zero-filled on write). `decode_parts` reads
+//! multi-cabinet sets (iCabinet/setID validated, folder fragments and
+//! split CFDATA blocks reassembled across members). Quantum and LZX
+//! folders and multi-cabinet writing are intentionally out of scope.
 
 use alloc::vec::Vec;
 
