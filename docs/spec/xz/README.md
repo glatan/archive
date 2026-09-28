@@ -108,6 +108,7 @@
 | 52 | Check type reserved (0x02, 0x03, 0x05-0x09, 0x0B-0x0F) の reject | xz-file-format.txt §2.1.2 | ✅ | `Unsupported("xz: unsupported check type")` で reject |
 | 53 | ファイル全体サイズは 4 バイトの倍数 | xz-file-format.txt §2 | ✅ | `input.len().is_multiple_of(4)` で検証、不一致で InvalidData |
 | 54 | ストリームサイズ上限 8 EiB (2^63 bytes) | xz-file-format.txt §2.1 | ✅ | 実用上到達不可能。u64 範囲内で処理 |
+| 55 | Filter chain security: 非最終フィルターのうちサイズ変更可能なものは最大 2 個 | xz-file-format.txt §5.2 | ✅ | フィルター設計者向け MUST。標準フィルター (BCJ/Delta) はサイズ保存のため構造的に充足。custom registry 経由のフィルターは登録側責務であり crate は件数を強制しない (liblzma も decode 時に強制しない) |
 
 ---
 
@@ -115,5 +116,5 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 54 |
-| **合計** | **54** |
+| ✅ 実装+テスト済み | 55 |
+| **合計** | **55** |

@@ -106,7 +106,7 @@
 | 44 | Max backward distance = min(window_size, output_so_far) | RFC 7932 §8/§10 | ✅ | copy_from_distance() |
 | 45 | Simple prefix code: シンボル値がアルファベットサイズ未満であること | RFC 7932 §3.4 | ✅ | read_simple_prefix_code(): symbol >= alphabet_size で InvalidData; from_simple_code() でも同様 |
 | 46 | Complex prefix code: 2 個以上の非ゼロコード長が必要 | RFC 7932 §3.5 | ✅ | `non_zero_count < 2` で InvalidData。`test_complex_prefix_single_nonzero_code_length_rejected` |
-| 47 | Special distance が 0 以下に解決した場合 reject | RFC 7932 §4 | ✅ | decode.rs line 172-173: distance <= 0 で InvalidData |
+| 47 | Special distance が 0 以下に解決した場合 reject | RFC 7932 §4 | ✅ | decode.rs `RecentDistances::resolve`: distance <= 0 で InvalidData |
 | 48 | Distance code 0 はリングバッファを更新しない | RFC 7932 §4 | ✅ | decode.rs: code 0 で should_push_distance=false、recent_distances.push をスキップ |
 | 49 | NBLTYPES = largest block type + 1 の検証 | RFC 7932 §6 | ✅ | `block_type >= num_types` で InvalidData |
 | 50 | Context map: 値域が [0..NTREES-1] であること | RFC 7932 §7.3 | ✅ | read_context_map(): value >= ntrees で InvalidData |

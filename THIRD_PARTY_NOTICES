@@ -132,6 +132,9 @@ specifications or standards documents:
   tool built locally from mackyle/xar (BSD-3-Clause, used only as
   an interoperability oracle); encode-direction interop was
   verified by `xar -tf`/`-xf` accepting this crate's output.
+  Decode additionally verifies each file's `archived-checksum`
+  digest (over stored heap bytes) in addition to
+  `extracted-checksum`, per the same `xarformat` description.
 - Git pack format (gitformat-pack(5), git.git Documentation):
   format specification pinned as docs/spec/sources/gitformat-pack.adoc
   (git v2.51.0 Documentation; git is GPL-2.0, consulted as a written
@@ -141,6 +144,10 @@ specifications or standards documents:
   git 2.55 `git repack` (GPL-2.0, used as an interoperability oracle);
   encode-direction interop was verified by `git index-pack` accepting
   this crate's output and producing a byte-identical .idx.
+  The writer also emits pack v2/v3 (SHA-1/SHA-256 object names),
+  idx v1/v2, and OFS_DELTA/REF_DELTA delta object encodings from
+  the same written specification; SHA-256 pack output is validated
+  by `git index-pack` in sha256-object-format repositories.
 - Zstandard Seekable Format: format documentation v0.1.0 by Meta
   Platforms (contrib/seekable_format, permissive redistribution
   notice) and reference implementation (BSD/GPL dual license).
@@ -207,7 +214,10 @@ specifications or standards documents:
   format_lead, https://rpm-software-management.github.io/rpm/manual/)
   and rpm `lib/cpio.c` (GPL-2.0-only) stripped payload behavior notes;
   `lib/cpio.c` was read only to confirm structural facts — no code was
-  copied
+  copied.
+  The writer can emit the stripped `07070X` cpio variant
+  (file list carried by BASENAMES/DIRNAMES/DIRINDEXES/FILESIZES or
+  LONGFILESIZES header tags) matching the decode path.
   Writer output is additionally validated with `bsdtar` (libarchive,
   BSD-2-Clause) as a local test-time extraction oracle; it is not
   linked or distributed.
@@ -223,6 +233,12 @@ specifications or standards documents:
   Writer output is validated with `bsdtar` (libarchive, BSD-2-Clause)
   invoked only as a local test-time tool; it is not linked or
   distributed.
+  The decoder also accepts multi-cabinet sets (`decode_parts`:
+  iCabinet/setID validation, continued-folder sentinel handling,
+  CFDATA blocks split across cabinet boundaries, MSZIP history
+  carried across cabinets) and the writer can emit
+  FLAG_RESERVE_PRESENT reserved areas — all from the same [MS-CAB]
+  document.
   MSZIP payloads reuse the existing RFC 1951 DEFLATE decoder
   (`compress::deflate`); no new codec was ported.
   Patent note: [MS-CAB] is published under the general Microsoft Open
@@ -253,6 +269,11 @@ specifications or standards documents:
   history is known.
 - zim: openZIM Wiki "ZIM file format" documentation
   (https://wiki.openzim.org/wiki/ZIM_file_format, CC BY-SA)
+  The implementation in src/archive/zim/ is spec-informed with no
+  code copied; split-archive reading (decode_parts), title/MIME
+  metadata exposure, and trailing MD5 archive checksum verification
+  are implemented from the same document's dirent/header/split-file
+  descriptions. No external ZIM tooling is used as a test oracle.
 - mtree: FreeBSD mtree(5) manual page
   (https://man.freebsd.org/cgi/man.cgi?mtree(5)); dialect behavior
   (optional `#mtree` signature, keyword handling) was cross-checked

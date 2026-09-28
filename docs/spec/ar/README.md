@@ -31,7 +31,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 9 | シンボルテーブル (`/` エントリ) のスキップ | GNU ar: symbol table (ar_name = `/`) | ✅ | デコーダーで `is_symbol_table()` 判定 |
+| 9 | シンボルテーブル (`/` エントリ) のスキップ | GNU ar: symbol table (ar_name = `/`) | ✅ | decode.rs の identifier 判定 (`/` `/SYM64/` `__.SYMDEF` 系) でスキップ |
 | 10 | 文字列テーブル (`//` エントリ) のパースと保持 | GNU ar: string table (ar_name = `//`) | ✅ | `test_decode_gnu_string_table` |
 | 11 | 長名参照 (`/offset`): 文字列テーブルからのオフセット解決 | GNU ar: extended name reference | ✅ | `test_decode_gnu_string_table`, `test_ar_gnu_system_compat` |
 | 12 | 短名 (`name/`): trailing `/` の除去 | GNU ar: short name convention | ✅ | `test_decode_short_gnu_archive`, `test_ar_roundtrip_gnu` |
@@ -60,10 +60,10 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 23 | BSD symbol table (`__.SYMDEF` / `__.SYMDEF SORTED`) スキップ | [BSD ar](https://man.freebsd.org/cgi/man.cgi?ar(5)) | ✅ | `is_symbol_table()` |
+| 23 | BSD symbol table (`__.SYMDEF` / `__.SYMDEF SORTED`) スキップ | [BSD ar](https://man.freebsd.org/cgi/man.cgi?ar(5)) | ✅ | decode.rs:106-109 の identifier 判定でスキップ (同一パスは `test_sym64_symbol_table_skipped` でカバー) |
 | 24 | ar_date / ar_uid / ar_gid: all-space (空) の許容 | GNU/BSD ar | ✅ | パーサーで space trim |
 | 25 | Thin archives (`!<thin>\n`) | GNU ar thin | ✅ | `THIN_MAGIC` 認識、`ArEntry::is_thin` フラグ、`test_thin_archive_decode` |
-| 26 | 64-bit GNU symbol table (`/SYM64/`) | GNU ar 64-bit | ✅ | `is_symbol_table()` でスキップ |
+| 26 | 64-bit GNU symbol table (`/SYM64/`) | GNU ar 64-bit | ✅ | identifier 判定でスキップ (`test_sym64_symbol_table_skipped`) |
 
 ---
 
