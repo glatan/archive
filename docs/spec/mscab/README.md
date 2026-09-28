@@ -4,7 +4,7 @@
 |------|------|
 | 基準仕様 | [[MS-CAB]](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) Cabinet File Format (Microsoft Open Specifications、2011-03-04 版 PDF。HTML 版: <https://learn.microsoft.com/en-us/previous-versions/bb417343(v=msdn.10)>、ローカルスナップショット: `docs/spec/sources/ms-cab_20110304.pdf`) |
 | 形式概要 | CFHEADER + CFFOLDER 配列 + CFFILE 配列 + CFDATA ブロック列。フォルダ単位で圧縮 |
-| 実装範囲 | **read のみ** (write / Quantum / LZX / multi-cabinet set は intentional scope 外) |
+| 実装範囲 | read/write (単一 cabinet・単一 folder の NONE/MSZIP)。Quantum / LZX / multi-cabinet set / reserved 領域は intentional scope 外 |
 
 参照: <https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf>
 
@@ -12,7 +12,7 @@
 
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
-| compression NONE | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) | ✅ | — | read のみ (write は intentional scope 外) |
+| compression NONE | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) | ✅ | ✅ | 単一 folder write |
 | compression MSZIP | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) + [RFC 1951](https://www.rfc-editor.org/rfc/rfc1951.txt) | ✅ | — | `compress::deflate` 再利用 |
 | compression Quantum / LZX | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) | ❌ | — | intentional scope (1997 文書版 LZX の誤記・Quantum 仕様不在) |
 | multi-cabinet set | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) | ❌ | — | 単一キャビネットのみ |
@@ -61,13 +61,15 @@
 | 18 | magic `MSCF` で `.cab` を自動検出 | CLI detection | ✅ | `detect_mscab` |
 | 19 | `archive extract` は entry を展開 | CLI semantics | ✅ | `extract.rs` の `Format::Mscab` アーム |
 | 20 | fuzz algorithm `mscab` (self-regression 含む) | fuzz harness | ✅ | `fuzz/src/algorithms.rs`。fixture は stored のみ生成 (MSZIP/flags/csum パスは fuzz 対象外) |
+| 21 | encode: 単一 cabinet・単一 folder の出力 (CFHEADER + CFFOLDER + CFFILE + CFDATA)。NONE は生ブロック、MSZIP は `CK` + raw DEFLATE (32KiB 履歴を block 越えで継承) | MS-CAB §2.1-2.2, §3.1 | ✅ | `stored_roundtrip`, `mszip_roundtrip`, `mszip_cross_block_history`, `file_spanning_blocks`, `test_mscab_encoder_roundtrip`, `test_mscab_encoder_bsdtar_interop` |
+| 22 | encode: CFDATA csum を実値出力 (cbData/cbUncomp seed + payload) | MS-CAB §2.2 | ✅ | decoder csum 検証パス (`checksum`) が encode 出力で成立 |
 
 ### Intentional scope (実装対象外)
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 21 | write / encode | crate-local | ❌ | read-only reader として設計 |
-| 22 | tcompTYPE_QUANTUM (2) | MS-CAB §3.1 | ❌ | Quantum codec の厳密仕様が MS-CAB 内に完結しない (cf. 対象外フォーマット一覧) |
-| 23 | tcompTYPE_LZX (3) | MS-CAB §3.1 | ❌ | CAB 用 LZX は公開文書の既知誤記を正誤判定できず厳密実装不能 (同上) |
-| 24 | multi-cabinet set (.set / disk spanning) | MS-CAB §2.1, §2.3 | ❌ | 他キャビネットのデータが必要なため単一ファイル reader では再構成不能 |
-| 25 | 属性 / 日時のファイルシステム復元 | MS-CAB §2.3 | ❌ | 展開時の metadata 適用は対象外 (アーカイブ抽出の範囲) |
+| 23 | tcompTYPE_QUANTUM (2) | MS-CAB §3.1 | ❌ | Quantum codec の厳密仕様が MS-CAB 内に完結しない (cf. 対象外フォーマット一覧) |
+| 24 | tcompTYPE_LZX (3) | MS-CAB §3.1 | ❌ | CAB 用 LZX は公開文書の既知誤記を正誤判定できず厳密実装不能 (同上) |
+| 25 | multi-cabinet set (.set / disk spanning) | MS-CAB §2.1, §2.3 | ❌ | 他キャビネットのデータが必要なため単一ファイル reader/writer では再構成不能 |
+| 26 | 属性 / 日時のファイルシステム復元 | MS-CAB §2.3 | ❌ | 展開時の metadata 適用は対象外 (アーカイブ抽出の範囲)。encode 側も date/time/attribs は 0 出力 |
+| 27 | reserved 領域 (FLAG_RESERVE_PRESENT) の出力 | MS-CAB §2.1 | ❌ | 予約領域はアプリ固有情報用で encoder scope 外 (read は skip 対応済み) |

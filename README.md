@@ -46,7 +46,7 @@ README は概要と導線だけを持ちます。仕様準拠、互換性メモ�
 | アーカイブ | deb (Debian package、read) | ✅ | — |
 | アーカイブ | rpm (RPM package、read) | ✅ | — |
 | アーカイブ | squashfs (read) | ✅ | — |
-| アーカイブ | mscab (cab、MSZIP/stored、read) | ✅ | — |
+| アーカイブ | mscab (cab、MSZIP/stored) | ✅ | ✅ |
 | アーカイブ | zim (read) | ✅ | — |
 | アーカイブ | mtree (manifest、read) | ✅ | — |
 | アーカイブ | warc (read) | ✅ | — |

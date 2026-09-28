@@ -85,7 +85,7 @@ fn read_asciiz(data: &[u8], off: usize) -> Result<(String, usize), Error> {
 /// Per-MS-CAB checksum: XOR of little-endian u32 words, tail zero-padded.
 /// For CFDATA the checksum is seeded with the cbData and cbUncomp
 /// fields packed as a little-endian u32 and covers abReserve + ab.
-fn checksum(data: &[u8], seed: u32) -> u32 {
+pub(crate) fn checksum(data: &[u8], seed: u32) -> u32 {
     let mut sum = seed;
     let (chunks, rem) = data.as_chunks::<4>();
     for c in chunks {

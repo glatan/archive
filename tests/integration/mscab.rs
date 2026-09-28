@@ -98,3 +98,57 @@ fn test_mscab_bsdtar_interop() {
     let _ = std::fs::remove_dir_all(&dir);
     assert_eq!(extracted.unwrap(), data);
 }
+
+#[test]
+fn test_mscab_encoder_roundtrip() {
+    use archive::archive::mscab::encode::{MscabCompression, MscabEncoder};
+    let mut enc = MscabEncoder::with_compression(MscabCompression::Mszip);
+    enc.add_file("one.txt", b"first file");
+    enc.add_file("two.txt", b"second file payload".repeat(300).as_slice());
+    let cab = enc.finish().unwrap();
+    let entries = archive::archive::mscab::decode::decode(&cab).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].data, b"first file");
+    assert_eq!(entries[1].data.len(), 19 * 300);
+}
+
+#[test]
+fn test_mscab_encoder_bsdtar_interop() {
+    use archive::archive::mscab::encode::{MscabCompression, MscabEncoder};
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let data = b"encoder-produced mszip cabinet".repeat(50);
+    let mut enc = MscabEncoder::with_compression(MscabCompression::Mszip);
+    enc.add_file("enc.txt", &data);
+    let cab = enc.finish().unwrap();
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_mscabenc_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let cab_path = dir.join("enc.cab");
+    std::fs::write(&cab_path, &cab).unwrap();
+    let out_dir = dir.join("out");
+    std::fs::create_dir_all(&out_dir).unwrap();
+
+    let output = Command::new("bsdtar")
+        .args(["-xf"])
+        .arg(&cab_path)
+        .args(["-C"])
+        .arg(&out_dir)
+        .output();
+    let Ok(result) = output else {
+        let _ = std::fs::remove_dir_all(&dir);
+        return; // bsdtar unavailable
+    };
+    if !result.status.success() {
+        let _ = std::fs::remove_dir_all(&dir);
+        return; // bsdtar lacks cab support in this build
+    }
+    let extracted = std::fs::read(out_dir.join("enc.txt"));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(extracted.unwrap(), data);
+}

@@ -417,13 +417,13 @@ pub fn scope_notes(format: Format) -> Vec<String> {
             "deb extraction unpacks the data.tar payload; use --format ar for raw member access".to_owned(),
         ],
         Format::Rpm => vec![
-            "rpm support is read-only; header signatures and payload digests are parsed but not verified".to_owned(),
+            "rpm header signatures and payload digests are parsed but not verified".to_owned(),
         ],
         Format::Squashfs => vec![
             "squashfs support is read-only; LZMA1-compressed images are unsupported".to_owned(),
         ],
         Format::Mscab => vec![
-            "mscab support is read-only; Quantum/LZX folders and multi-cabinet sets are unsupported".to_owned(),
+            "mscab write covers single-cabinet NONE/MSZIP; Quantum/LZX folders and multi-cabinet sets are unsupported".to_owned(),
         ],
         Format::Zim => vec![
             "zim support is read-only; entry names include the ZIM namespace prefix".to_owned(),
