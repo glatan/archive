@@ -4,7 +4,7 @@
 |------|------|
 | 基準仕様 | [IIPC WARC 1.1 仕様](https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1/) (実際の参照ソース、ローカルスナップショット: `docs/spec/sources/warc_1.1.html`)。WARC 1.0 側は ISO 28500:2009 の版番号参照のみで、規格本文は未参照 |
 | 形式概要 | `version-line CRLF *(named-field CRLF) CRLF block CRLF CRLF` の繰り返し。version-line は `WARC/1.0` / `WARC/1.1`。named-field は `token ":" SP* value` (LWS folding あり)。block は `Content-Length` octet |
-| 実装範囲 | **read のみ** (write は intentional scope 外)。`.warc.gz` は gzip として伸張してから decode する |
+| 実装範囲 | read/write 両対応 (record stream)。`.warc.gz` は gzip として伸張/圧縮してから decode/encode する |
 
 参照: WARC 1.1, <https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1/>
 
@@ -12,9 +12,9 @@
 
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
-| WARC 1.0 | ISO 28500:2009 (版番号参照のみ、本文未参照) | ✅ | ❌ | write は intentional scope 外 |
-| WARC 1.1 | [IIPC WARC 1.1](https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1/) | ✅ | ❌ | 同上 |
-| `.warc.gz` (gzip ラップ) | WARC + gzip | ✅ | ❌ | gzip 伸張後に decode |
+| WARC 1.0 | ISO 28500:2009 (版番号参照のみ、本文未参照) | ✅ | ✅ | write は `WarcEncoder::warc10()` |
+| WARC 1.1 | [IIPC WARC 1.1](https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1/) | ✅ | ✅ | `WarcEncoder` / `encode` |
+| `.warc.gz` (gzip ラップ) | WARC + gzip | ✅ | ✅ | gzip 層は呼び出し側の責務 |
 
 ### レコード構造
 
@@ -46,20 +46,29 @@
 | 14 | エントリ名は `WARC-Target-URI`、欠落時は `WARC-Record-ID` にフォールバック | crate エントリ規約 | ✅ | `parses_multiple_records` |
 | 15 | `.warc.gz` (concatenated gzip members) は gzip 伸張後に decode | gzip multi-member | ✅ | `test_warc_gzip_members` |
 
+### encode
+
+| # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
+|---|------|----------|-----------|----------------|
+| 16 | record grammar `version CRLF *(named-field CRLF) CRLF block CRLF CRLF` を emit、必須フィールド `WARC-Type`/`WARC-Record-ID`/`WARC-Date`/`Content-Length` を自動生成 | §record structure + 各 mandatory 節 | ✅ | `roundtrip_single`, `roundtrip_multiple` |
+| 17 | `WARC-Record-ID` は `<uri>` 形式。裸の URI は自動で `<>` 付与、既に括弧済みならそのまま | §WARC-Record-ID grammar | ✅ | `record_id_gets_brackets` |
+| 18 | `WARC-Block-Digest: sha1:<base32(RFC4648,padなし)>` を block 全体に対して発行 (既定 ON、`block_digest(false)`/extra_fields で上書き可) | §WARC-Block-Digest | ✅ | `block_digest_is_emitted_and_correct`, `block_digest_can_be_disabled_or_overridden` |
+| 19 | `WARC-Payload-Digest` は caller が payload バイトを供給した時のみ発行 (application/http の entity-body 特定は caller 責務、block は opaque)。payload 不明な record には付けない | §WARC-Payload-Digest | ✅ | `payload_digest_only_when_given` |
+| 20 | `WARC/1.0` 版も emit 可能 (`warc10()`)。field name は token (printable ASCII・`:`/空白不可)、value は CR/LF 不許可、managed field (Type/ID/Date/Content-Length/Target-URI/Content-Type) の extra_fields 重複は reject | §named fields grammar | ✅ | `warc10_version`, `rejects_bad_fields` |
+
 ### CLI / fuzz 連携
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 16 | `WARC/1.0\r\n` / `WARC/1.1\r\n` 先頭で `.warc` を自動検出 | CLI detection | ✅ | `detect_warc` |
-| 17 | `archive read` は record を `warc-type` / `content-type` メタデータ付きで一覧化 | CLI semantics | ✅ | `read.rs` の `Format::Warc` アーム |
-| 18 | `archive extract` は各 record の block をファイルとして出力 | CLI semantics | ✅ | `extract.rs` の `Format::Warc` アーム |
-| 19 | fuzz algorithm `warc` | fuzz harness | ✅ | `fuzz/src/algorithms.rs` |
+| 21 | `WARC/1.0\r\n` / `WARC/1.1\r\n` 先頭で `.warc` を自動検出 | CLI detection | ✅ | `detect_warc` |
+| 22 | `archive read` は record を `warc-type` / `content-type` メタデータ付きで一覧化 | CLI semantics | ✅ | `read.rs` の `Format::Warc` アーム |
+| 23 | `archive extract` は各 record の block をファイルとして出力 | CLI semantics | ✅ | `extract.rs` の `Format::Warc` アーム |
+| 24 | fuzz algorithm `warc` | fuzz harness | ✅ | `fuzz/src/algorithms.rs` |
 
 ### Intentional scope (実装対象外)
 
 | # | 項目 | 理由 |
 |---|------|------|
-| 20 | ❌ WARC write/encode | read 需要に限定。レコード生成・digest 計算は対象外 |
-| 21 | ❌ record 間の `WARC-Concurrent-To` / segment (`continuation`) 結合 | 各 record を独立エントリとして公開。結合は利用側の判断 |
-| 22 | ❌ record 内部の HTTP メッセージ解析 (response/request block の中身) | block は opaque octet 列として扱う |
-| 23 | ❌ `WARC-Payload-Digest` / `WARC-Block-Digest` の検証 | digest 値の検証は行わない (未知フィールド同様に無視) |
+| 25 | ❌ record 間の `WARC-Concurrent-To` / segment (`continuation`) 結合 | 各 record を独立エントリとして公開。結合は利用側の判断 |
+| 26 | ❌ record 内部の HTTP メッセージ解析 (response/request block の中身) | block は opaque octet 列として扱う (encode 側も payload 特定は caller 責務) |
+| 27 | ❌ `WARC-Payload-Digest` / `WARC-Block-Digest` の decode 時検証 | digest 値の検証は行わない (未知フィールド同様に無視)。encode 側では sha1 で発行 |
