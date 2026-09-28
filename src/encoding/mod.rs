@@ -10,6 +10,10 @@
 #[cfg(feature = "uuencode")]
 pub mod uuencode;
 
+/// yEnc binary-to-text encoding (draft 1.3).
+#[cfg(feature = "yenc")]
+pub mod yenc;
+
 /// Ascii85 (Adobe  and RFC 1924 Base-85).
 #[cfg(feature = "ascii85")]
 pub mod ascii85;

@@ -41,7 +41,8 @@
     feature = "git-pack",
     feature = "xar",
     feature = "uuencode",
-    feature = "ascii85"
+    feature = "ascii85",
+    feature = "yenc"
 ))]
 
 use archive::archive::ar;
@@ -95,6 +96,7 @@ use archive::compress::zx2;
 use archive::compress::zx5;
 use archive::encoding::ascii85;
 use archive::encoding::uuencode;
+use archive::encoding::yenc;
 
 // ============================================================
 // 7z tests
@@ -328,6 +330,8 @@ mod uuencode_tests;
 #[cfg(feature = "warc")]
 #[path = "integration/warc.rs"]
 mod warc_tests;
+#[path = "integration/yenc.rs"]
+mod yenc_tests;
 #[cfg(feature = "zim")]
 #[path = "integration/zim.rs"]
 mod zim_tests;

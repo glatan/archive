@@ -73,6 +73,7 @@
 //! | `packbits` (default) | PackBits RLE codec (Apple TN1023 / TIFF §9) |
 //! | `uuencode` (default) | uuencode historical algorithm (POSIX.1-2017) |
 //! | `ascii85` (default) | Ascii85 (Adobe ASCII85Decode + RFC 1924) |
+//! | `yenc` (default) | yEnc binary-to-text encoding (draft 1.3) |
 //! | `tar` (default) | tar archive format |
 //! | `cpio` (default) | cpio archive format |
 //! | `ar` (default) | GNU/BSD `ar` archive format |
@@ -519,6 +520,6 @@ pub mod compress;
 ))]
 pub mod archive;
 
-/// Byte encodings: uuencode, Ascii85.
-#[cfg(any(feature = "uuencode", feature = "ascii85"))]
+/// Byte encodings: uuencode, Ascii85, yEnc.
+#[cfg(any(feature = "uuencode", feature = "ascii85", feature = "yenc"))]
 pub mod encoding;
