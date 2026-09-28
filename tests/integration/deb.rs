@@ -208,3 +208,91 @@ fn test_deb_crate_built_extracted_by_bsdtar() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn test_deb_encoder_roundtrip() {
+    use deb::decode::DebCompression;
+    use deb::encode::DebEncoder;
+
+    let mut enc = DebEncoder::new().compression(DebCompression::Gzip);
+    enc.add_control_file("./control", b"Package: demo\nVersion: 1.0\nDepends: none\n");
+    enc.add_control_file("./conffiles", b"/etc/demo.conf\n");
+    enc.add_data_file("./usr/bin/demo", b"#!/bin/sh\necho demo\n");
+    enc.add_data_file("./etc/demo.conf", b"key=value\n");
+    enc.add_extra_member("_gpgorigin", b"sig");
+
+    let package = deb::decode::decode(&enc.finish().unwrap()).unwrap();
+    assert_eq!(package.version, "2.0");
+    assert_eq!(package.members.len(), 4);
+    assert_eq!(package.members[0].name, "debian-binary");
+    assert_eq!(package.members[1].name, "control.tar.gz");
+    assert_eq!(package.members[2].name, "data.tar.gz");
+    assert_eq!(package.members[3].name, "_gpgorigin");
+
+    let control = package.control_entries().unwrap();
+    assert_eq!(control.len(), 2);
+    assert!(control[0].header.name.contains("control"));
+
+    let data = package.data_entries().unwrap();
+    assert_eq!(data.len(), 2);
+    assert!(data.iter().any(|e| e.data == b"key=value\n"));
+}
+
+#[test]
+fn test_deb_encoder_bsdtar_interop() {
+    use deb::decode::DebCompression;
+    use deb::encode::DebEncoder;
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let mut enc = DebEncoder::new().data_compression(DebCompression::None);
+    enc.add_control_file("./control", b"Package: demo\n");
+    enc.add_data_file("./usr/share/doc/readme", b"deb encoder interop");
+    let deb = enc.finish().unwrap();
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_deb_enc_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let deb_path = dir.join("crate.deb");
+    std::fs::write(&deb_path, &deb).unwrap();
+
+    // bsdtar extracts data.tar byte-identically.
+    let out = Command::new("bsdtar")
+        .args(["-xOf"])
+        .arg(&deb_path)
+        .arg("data.tar")
+        .output();
+    if let Ok(result) = out {
+        assert!(
+            result.status.success(),
+            "bsdtar failed: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        // The member is an uncompressed tar; re-decode its payload.
+        let entries = tar::decode::decode(&result.stdout).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].data, b"deb encoder interop");
+    }
+
+    // GNU ar lists members in order.
+    let out = Command::new("ar").args(["t"]).arg(&deb_path).output();
+    if let Ok(result) = out {
+        assert!(
+            result.status.success(),
+            "ar failed: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let text = String::from_utf8_lossy(&result.stdout);
+        let names: Vec<&str> = text.lines().collect();
+        assert_eq!(
+            names,
+            ["debian-binary", "control.tar", "data.tar"],
+            "ar listing: {names:?}"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

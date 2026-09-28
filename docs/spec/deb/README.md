@@ -4,7 +4,7 @@
 |------|------|
 | 基準仕様 | [deb(5)](https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html) — dpkg パッケージフォーマット (Debian マニュアルページ、ローカルスナップショット: `docs/spec/sources/deb_5_unstable.html`) |
 | 形式概要 | `ar` アーカイブ + 固定 member レイアウト: `debian-binary` / `control.tar.*` / `data.tar.*` |
-| 実装範囲 | **read のみ** (write は intentional scope 外) |
+| 実装範囲 | read/write 両対応 (固定 member レイアウトの組み立て + member 圧縮) |
 
 `deb(5)` 参照: <https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html>
 
@@ -12,9 +12,9 @@
 
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
-| ar コンテナ (GNU 拡張名対応) | [deb(5)](https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html) | ✅ | ❌ | write は intentional scope 外 |
-| member 圧縮: 無圧縮 / `.gz` / `.xz` / `.zst` / `.bz2` / `.lzma` / `.Z` | [deb(5) permitted compressions](https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html) | ✅ | — | 未認識 suffix は `Unsupported` |
-| thin ar (`!<thin>`) メンバー | [GNU ar](https://sourceware.org/binutils/docs/binutils/ar.html) | ✅ | — | thin member はファイルシステム参照として扱わない (deb.md メモ参照) |
+| ar コンテナ (GNU 拡張名対応) | [deb(5)](https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html) | ✅ | ✅ | `DebEncoder` / `encode` |
+| member 圧縮: 無圧縮 / `.gz` / `.xz` / `.zst` / `.bz2` / `.lzma` / `.Z` | [deb(5) permitted compressions](https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html) | ✅ | ✅ | 全 7 suffix で encode、control/data は別指定可 |
+| thin ar (`!<thin>`) メンバー | [GNU ar](https://sourceware.org/binutils/docs/binutils/ar.html) | ✅ | — | thin member はファイルシステム参照として扱わない (deb.md メモ参照)。encoder は通常 ar のみ発行 |
 
 ### コンテナレイアウト
 
@@ -42,27 +42,36 @@
 | 15 | `control.tar*` の伸張結果を tar entry として公開 | deb(5): control member = tar of metadata | ✅ | `control_entries()`, `test_deb_decode_minimal` |
 | 16 | 伸張の output limit (bounded decode) を各 codec に伝搬 | crate bounded-decode convention | ✅ | `bounded_decode_enforces_limit` |
 
+### encode
+
+| # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
+|---|------|----------|-----------|----------------|
+| 17 | member 順序 `debian-binary` → `control.tar<ext>` → `data.tar<ext>` → extra members を emit | deb(5) member layout | ✅ | `roundtrip_uncompressed`, `test_deb_encoder_roundtrip` |
+| 18 | `debian-binary` は `<version>\n` (既定 `2.0`)。`version()` は `<num>.<num>` のみ受理 | deb(5) format version | ✅ | `version_validation` |
+| 19 | control/data は file リストから内部で `TarEncoder` 生成、または ready-made tar bytes (`set_control_tar`/`set_data_tar`) | deb(5): tar members | ✅ | `roundtrip_uncompressed`, `raw_tar_and_extra_members` |
+| 20 | member 圧縮は `DebCompression` 全 7 種 (`.gz`/`.xz`/`.zst`/`.bz2`/`.lzma`/`.Z`/無圧縮) を emit、control/data は別指定可、member 名に suffix 付与 | deb(5) permitted compressions | ✅ | `roundtrip_compressed_members`, `separate_compressions` |
+| 21 | extra member (署名等) は必須 member の後に call 順で emit | deb(5): "additional members may follow" | ✅ | `raw_tar_and_extra_members` |
+
 ### システム相互運用
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 17 | system `ar` + `tar` + `gzip` で組み立てた `.deb` を decode | system interop | ✅ | `test_deb_decode_system_built_package` |
-| 18 | crate で組み立てた `.deb` から `bsdtar` が member を byte 一致で抽出 | system interop | ✅ | `test_deb_crate_built_extracted_by_bsdtar` |
+| 22 | system `ar` + `tar` + `gzip` で組み立てた `.deb` を decode | system interop | ✅ | `test_deb_decode_system_built_package` |
+| 23 | crate で組み立てた `.deb` から `bsdtar` が member を byte 一致で抽出、GNU `ar t` が member 順を列挙 | system interop | ✅ | `test_deb_crate_built_extracted_by_bsdtar`, `test_deb_encoder_bsdtar_interop` |
 
 ### CLI / fuzz 連携
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 19 | `!<arch>\ndebian-binary` 先頭で `.deb` を自動検出 (plain `ar` より優先) | CLI detection | ✅ | `detect_deb`, `detect_plain_ar_not_deb` |
-| 20 | `archive extract` は `data.tar` の内容を展開 (生 member は `--format ar` で取得) | CLI semantics | ✅ | `extract.rs` の `Format::Deb` アーム |
+| 24 | `!<arch>\ndebian-binary` 先頭で `.deb` を自動検出 (plain `ar` より優先) | CLI detection | ✅ | `detect_deb`, `detect_plain_ar_not_deb` |
+| 25 | `archive extract` は `data.tar` の内容を展開 (生 member は `--format ar` で取得) | CLI semantics | ✅ | `extract.rs` の `Format::Deb` アーム |
 
 ### Intentional scope (実装対象外)
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 21 | `.deb` の write (encoder) | crate-local | ❌ | read-only scope (intentional)。生成は `ar`+`tar`+codec の組み合わせで代替可能 |
-| 22 | `debian-binary` 2 行目以降・`control` ファイルの deb822 セマンティクス | deb(5) / deb-control(5) | ❌ | コンテナレイヤの責務外 (intentional)。`control_entries()` で生ファイルは取得可能 |
-| 23 | `data.tar` 内の filesystem セマンティクス (conffiles, maintainer scripts) | [deb(5)](https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html) | ❌ | パッケージマネージャ層の責務 (intentional) |
+| 26 | `debian-binary` 2 行目以降・`control` ファイルの deb822 セマンティクス | deb(5) / deb-control(5) | ❌ | コンテナレイヤの責務外 (intentional)。`control_entries()` で生ファイルは取得可能 |
+| 27 | `data.tar` 内の filesystem セマンティクス (conffiles, maintainer scripts) | [deb(5)](https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html) | ❌ | パッケージマネージャ層の責務 (intentional) |
 
 ### 実装メモ
 

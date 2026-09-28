@@ -6,7 +6,13 @@
 //! (payload). This module validates the member layout and exposes the tar
 //! members either raw or decompressed through the crate's existing codecs.
 //!
-//! This module is read-only: `.deb` writing is intentionally out of scope.
+//! The encoder composes packages from the crate's `ar` + `tar` +
+//! codec layers (file lists or ready-made tar bytes, per-member
+//! compression, extra members after the required ones).
+//!
+//! Filesystem semantics inside `control.tar`/`data.tar` (deb822
+//! control fields, maintainer scripts, conffiles) are the package
+//! manager's concern and stay out of scope.
 
 use alloc::vec::Vec;
 
@@ -14,6 +20,9 @@ use crate::error::Error;
 
 /// `.deb` package decoding.
 pub mod decode;
+
+/// `.deb` package encoding.
+pub mod encode;
 
 pub use decode::{DebCompression, DebMember, DebMemberKind, DebPackage, decode};
 
