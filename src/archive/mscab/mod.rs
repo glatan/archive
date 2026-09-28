@@ -1,11 +1,12 @@
 //! Microsoft Cabinet (`.cab`, MSCAB) archive format support.
 //!
-//! Read-only decoder for the cabinet container defined in [MS-CAB].
-//! Supports the `tcompTYPE_NONE` (stored) and `tcompTYPE_MSZIP`
-//! compression types, including MSZIP history carried between `CFDATA`
-//! blocks within a folder and files spanning consecutive folders.
-//! Quantum and LZX folders, multi-cabinet sets, and cabinet writing
-//! are intentionally out of scope.
+//! Reader and single-cabinet writer for the cabinet container defined
+//! in [MS-CAB]. Supports the `tcompTYPE_NONE` (stored) and
+//! `tcompTYPE_MSZIP` compression types, including MSZIP history
+//! carried between `CFDATA` blocks within a folder, files spanning
+//! consecutive folders, and `FLAG_RESERVE_PRESENT` reserved areas
+//! (skipped on read, zero-filled on write). Quantum and LZX folders
+//! and multi-cabinet sets are intentionally out of scope.
 
 use alloc::vec::Vec;
 

@@ -4,7 +4,8 @@
 //! every queued file. Stored cabinets emit raw `CFDATA` blocks;
 //! MSZIP cabinets emit `CK`-prefixed raw-DEFLATE blocks with the
 //! 32 KiB history window carried across `CFDATA` boundaries
-//! (MS-CAB §3.1 `tcompTYPE_MSZIP`). Reserved areas, cabinet sets,
+//! (MS-CAB §3.1 `tcompTYPE_MSZIP`). [`MscabEncoder::reserve`] emits
+//! `FLAG_RESERVE_PRESENT` zero-filled reserved areas; cabinet sets
 //! and per-file date/attribute metadata are not emitted.
 
 use alloc::string::String;
@@ -17,6 +18,7 @@ use crate::error::Error;
 const MAGIC: &[u8; 4] = b"MSCF";
 const COMPRESS_NONE: u16 = 0;
 const COMPRESS_MSZIP: u16 = 1;
+const FLAG_RESERVE_PRESENT: u16 = 0x0004;
 /// Maximum uncompressed bytes per CFDATA block (MS-CAB §2.2: 32 KiB).
 const CFDATA_MAX: usize = 32 * 1024;
 /// MSZIP sliding-window depth carried across CFDATA blocks (§3.1).
@@ -38,6 +40,9 @@ pub enum MscabCompression {
 /// into `CFDATA` blocks of at most 32 KiB uncompressed.
 pub struct MscabEncoder {
     compression: MscabCompression,
+    /// (cbCFHeader, cbCFFolder, cbCFData) reserved-area sizes emitted
+    /// when `FLAG_RESERVE_PRESENT` is set; areas are zero-filled.
+    reserve: Option<(u16, u8, u8)>,
     /// (name, data) pairs in queue order; `uoffFileStart` is the
     /// concatenated folder offset, computed at finish time.
     files: Vec<(String, Vec<u8>)>,
@@ -54,7 +59,21 @@ impl MscabEncoder {
         Self {
             compression,
             files: Vec::new(),
+            reserve: None,
         }
+    }
+
+    /// Emit `FLAG_RESERVE_PRESENT` with per-structure reserved areas:
+    /// `cb_header` bytes after the CFHEADER reserve fields,
+    /// `cb_folder` bytes after each CFFOLDER record, and `cb_data`
+    /// bytes between each CFDATA header and its payload ([MS-CAB]
+    /// CFHEADER/CFFOLDER/CFDATA `abReserve`). Areas are zero-filled;
+    /// the CFDATA checksum covers its reserve area. `cb_header`
+    /// beyond the [MS-CAB] §2.1 limit of 60,000 is rejected at
+    /// `finish`.
+    pub fn reserve(mut self, cb_header: u16, cb_folder: u8, cb_data: u8) -> Self {
+        self.reserve = Some((cb_header, cb_folder, cb_data));
+        self
     }
 
     /// Queue one file. Names are emitted as ASCIIZ; they must be
@@ -67,6 +86,9 @@ impl MscabEncoder {
     /// queued name is empty, contains a NUL byte, or the cabinet
     /// would exceed u32/u16 field limits.
     pub fn finish(self) -> Result<Vec<u8>, Error> {
+        if self.reserve.is_some_and(|(h, _, _)| h > 60_000) {
+            return Err(Error::InvalidData("mscab: cbCFHeader exceeds 60,000"));
+        }
         if self.files.len() > u16::MAX as usize {
             return Err(Error::InvalidData("mscab: too many files"));
         }
@@ -113,8 +135,14 @@ impl MscabEncoder {
             return Err(Error::InvalidData("mscab: too many CFDATA blocks"));
         }
 
-        // Layout: CFHEADER(36) | CFFOLDER(8) | CFFILE array | CFDATA*.
-        let folders_off = 36usize;
+        // Layout: CFHEADER(36) | [reserve fields + abReserve] |
+        // CFFOLDER(8 + cbCFFolder) | CFFILE array | CFDATA*.
+        let (cb_cfheader, cb_cffolder, cb_cfdata) = self.reserve.unwrap_or((0, 0, 0));
+        let folders_off = if self.reserve.is_some() {
+            36 + 4 + cb_cfheader as usize
+        } else {
+            36
+        };
         let mut files_buf = Vec::new();
         for ((name, data), uoff) in self.files.iter().zip(uoffs.iter()) {
             files_buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
@@ -126,28 +154,44 @@ impl MscabEncoder {
             files_buf.extend_from_slice(name.as_bytes());
             files_buf.push(0);
         }
-        let data_off = folders_off + 8 + files_buf.len();
+        let data_off = folders_off + 8 + cb_cffolder as usize + files_buf.len();
 
         let mut out = Vec::new();
         out.extend_from_slice(MAGIC);
         out.extend_from_slice(&0u32.to_le_bytes()); // reserved1
         out.extend_from_slice(&[0; 4]); // cbCabinet, patched below
         out.extend_from_slice(&0u32.to_le_bytes()); // reserved2
-        // Single 8-byte CFFOLDER: CFFILEs follow immediately.
-        out.extend_from_slice(&((folders_off + 8) as u32).to_le_bytes());
+        // Single CFFOLDER: CFFILEs follow the record + its reserve.
+        out.extend_from_slice(&((folders_off + 8 + cb_cffolder as usize) as u32).to_le_bytes());
         out.extend_from_slice(&0u32.to_le_bytes()); // reserved3
         out.push(3); // versionMinor
         out.push(1); // versionMajor
         out.extend_from_slice(&1u16.to_le_bytes()); // cFolders
         out.extend_from_slice(&(self.files.len() as u16).to_le_bytes());
-        out.extend_from_slice(&0u16.to_le_bytes()); // flags
+        out.extend_from_slice(
+            &if self.reserve.is_some() {
+                FLAG_RESERVE_PRESENT
+            } else {
+                0
+            }
+            .to_le_bytes(),
+        ); // flags
         out.extend_from_slice(&0u16.to_le_bytes()); // setID
         out.extend_from_slice(&0u16.to_le_bytes()); // iCabinet
+
+        // FLAG_RESERVE_PRESENT: reserve sizes + cbCFHeader reserve area.
+        if self.reserve.is_some() {
+            out.extend_from_slice(&cb_cfheader.to_le_bytes());
+            out.push(cb_cffolder);
+            out.push(cb_cfdata);
+            out.resize(out.len() + cb_cfheader as usize, 0);
+        }
 
         // The single CFFOLDER record.
         out.extend_from_slice(&(data_off as u32).to_le_bytes()); // coffCabStart
         out.extend_from_slice(&(blocks.len() as u16).to_le_bytes()); // cCFDATA
         out.extend_from_slice(&type_compress.to_le_bytes());
+        out.resize(out.len() + cb_cffolder as usize, 0); // CFFOLDER abReserve
         out.extend_from_slice(&files_buf);
 
         for (block, &uncomp) in blocks.iter().zip(&uncomp_sizes) {
@@ -155,13 +199,16 @@ impl MscabEncoder {
                 return Err(Error::InvalidData("mscab: CFDATA block too large"));
             }
             let cb_data = block.len() as u16;
-            // csum covers cbData|cbUncomp (as seed) + payload.
+            // csum covers cbData|cbUncomp (as seed) + abReserve + payload.
             let seed = (uncomp as u32) << 16 | cb_data as u32;
-            let csum = checksum(block, seed);
+            let mut covered = Vec::with_capacity(cb_cfdata as usize + block.len());
+            covered.resize(covered.len() + cb_cfdata as usize, 0);
+            covered.extend_from_slice(block);
+            let csum = checksum(&covered, seed);
             out.extend_from_slice(&csum.to_le_bytes());
             out.extend_from_slice(&cb_data.to_le_bytes());
             out.extend_from_slice(&uncomp.to_le_bytes());
-            out.extend_from_slice(block);
+            out.extend_from_slice(&covered);
         }
 
         let cb_cabinet = out.len();
@@ -244,6 +291,56 @@ mod tests {
         let entries = decode(&enc.finish().unwrap()).unwrap();
         assert_eq!(entries[0].data().len(), 40000);
         assert_eq!(entries[1].data(), b"tail");
+    }
+
+    #[test]
+    fn reserve_roundtrip_stored() {
+        let mut enc = MscabEncoder::new().reserve(6, 3, 5);
+        enc.add_file("a.bin", b"reserved stored");
+        let entries = decode(&enc.finish().unwrap()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].data(), b"reserved stored");
+    }
+
+    #[test]
+    fn reserve_roundtrip_mszip() {
+        let mut enc = MscabEncoder::with_compression(MscabCompression::Mszip).reserve(4, 2, 3);
+        enc.add_file("a.bin", b"reserved mszip");
+        enc.add_file("b.bin", &vec![0x5A; 70000]);
+        let entries = decode(&enc.finish().unwrap()).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].data(), b"reserved mszip");
+        assert_eq!(entries[1].data().len(), 70000);
+    }
+
+    #[test]
+    fn reserve_wire_layout() {
+        let mut enc = MscabEncoder::new().reserve(6, 3, 5);
+        enc.add_file("a.bin", b"x");
+        let cab = enc.finish().unwrap();
+        // FLAG_RESERVE_PRESENT
+        assert_eq!(u16::from_le_bytes([cab[30], cab[31]]), 0x0004);
+        // cbCFHeader=6, cbCFFolder=3, cbCFData=5 at offset 36
+        assert_eq!(u16::from_le_bytes([cab[36], cab[37]]), 6);
+        assert_eq!(cab[38], 3);
+        assert_eq!(cab[39], 5);
+        // 6-byte zeroed header reserve follows.
+        assert!(cab[40..46].iter().all(|&b| b == 0));
+        // CFFOLDER at 46; its 3-byte reserve trails the 8-byte record.
+        let coff_files = u32::from_le_bytes([cab[16], cab[17], cab[18], cab[19]]);
+        assert_eq!(coff_files as usize, 46 + 8 + 3);
+        assert!(cab[54..57].iter().all(|&b| b == 0));
+        // The decoder's checksum verification covers the 5-byte CFDATA
+        // reserve, so a clean round-trip proves it was included.
+        decode(&cab).unwrap();
+    }
+
+    #[test]
+    fn reserve_rejects_oversize_header() {
+        assert!(MscabEncoder::new().reserve(60_000, 0, 0).finish().is_ok());
+        let mut enc = MscabEncoder::new().reserve(60_001, 0, 0);
+        enc.add_file("a", b"x");
+        assert!(enc.finish().is_err());
     }
 
     #[test]
