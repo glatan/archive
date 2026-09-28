@@ -92,6 +92,8 @@ pub struct ZipEntryOptions {
     pub unix_gid: Option<u16>,
     /// Unicode path (written as extra field 0x7075).
     pub unicode_path: Option<String>,
+    /// Unicode comment (written as extra field 0x6375).
+    pub unicode_comment: Option<String>,
 }
 
 impl Default for ZipEntryOptions {
@@ -114,6 +116,7 @@ impl Default for ZipEntryOptions {
             unix_uid: None,
             unix_gid: None,
             unicode_path: None,
+            unicode_comment: None,
         }
     }
 }
@@ -172,6 +175,7 @@ struct EncodedEntry {
     unix_uid: Option<u16>,
     unix_gid: Option<u16>,
     unicode_path: Option<String>,
+    unicode_comment: Option<String>,
 }
 
 /// Streaming ZIP writer for unknown-size entries.
@@ -611,6 +615,7 @@ impl PreparedArchive {
                 unix_uid: entry.options.unix_uid,
                 unix_gid: entry.options.unix_gid,
                 unicode_path: entry.options.unicode_path.clone(),
+                unicode_comment: entry.options.unicode_comment.clone(),
             });
         }
 
@@ -679,6 +684,7 @@ impl From<&ZipHeader> for ZipEntryOptions {
             unix_uid: header.unix_uid,
             unix_gid: header.unix_gid,
             unicode_path: header.unicode_path.clone(),
+            unicode_comment: header.unicode_comment.clone(),
         }
     }
 }
@@ -1248,8 +1254,8 @@ fn append_timestamp_extra_fields(extra: &mut Vec<u8>, entry: &EncodedEntry) {
         let data_size: u16 = 12;
         extra.extend_from_slice(&UNIX_EXTRA_FIELD_ID.to_le_bytes());
         extra.extend_from_slice(&data_size.to_le_bytes());
-        extra.extend_from_slice(&0u32.to_le_bytes()); // AcTime placeholder
-        extra.extend_from_slice(&0u32.to_le_bytes()); // ModTime placeholder
+        extra.extend_from_slice(&entry.unix_atime.unwrap_or(0).to_le_bytes());
+        extra.extend_from_slice(&entry.unix_mtime.unwrap_or(0).to_le_bytes());
         extra.extend_from_slice(&uid.to_le_bytes());
         extra.extend_from_slice(&gid.to_le_bytes());
     }
@@ -1264,6 +1270,18 @@ fn append_timestamp_extra_fields(extra: &mut Vec<u8>, entry: &EncodedEntry) {
         extra.push(1); // Version
         extra.extend_from_slice(&name_crc.to_le_bytes());
         extra.extend_from_slice(upath_bytes);
+    }
+
+    // Unicode Comment extra field (0x6375)
+    if let Some(ref ucomment) = entry.unicode_comment {
+        let ucomment_bytes = ucomment.as_bytes();
+        let comment_crc = crate::util::crc32::crc32(&entry.comment_bytes);
+        let data_size = (1 + 4 + ucomment_bytes.len()) as u16;
+        extra.extend_from_slice(&0x6375u16.to_le_bytes());
+        extra.extend_from_slice(&data_size.to_le_bytes());
+        extra.push(1); // Version
+        extra.extend_from_slice(&comment_crc.to_le_bytes());
+        extra.extend_from_slice(ucomment_bytes);
     }
 }
 
@@ -1946,5 +1964,108 @@ mod tests {
         let entries = decode::decode(&archive).unwrap();
         assert_eq!(entries[0].header.unix_uid, Some(1000));
         assert_eq!(entries[0].header.unix_gid, Some(100));
+    }
+
+    #[test]
+    fn test_unicode_comment_roundtrip() {
+        let mut encoder = ZipEncoder::new();
+        encoder.add_file_with_options(
+            "unicode_comment.txt",
+            b"comment",
+            &ZipEntryOptions {
+                unicode_comment: Some("コメント".into()),
+                compression: ZipCompression::Store,
+                ..ZipEntryOptions::default()
+            },
+        );
+        let archive = encoder.finish().unwrap();
+        let entries = decode::decode(&archive).unwrap();
+        assert_eq!(
+            entries[0].header.unicode_comment.as_deref(),
+            Some("コメント")
+        );
+    }
+
+    #[test]
+    fn test_unix_extra_field_times() {
+        // 0x000d carries real atime/mtime (not placeholders) when set.
+        let mtime: u32 = 1_700_000_000;
+        let atime: u32 = 1_700_000_100;
+        let mut encoder = ZipEncoder::new();
+        encoder.add_file_with_options(
+            "unix_times.txt",
+            b"times",
+            &ZipEntryOptions {
+                unix_mtime: Some(mtime),
+                unix_atime: Some(atime),
+                unix_uid: Some(1),
+                compression: ZipCompression::Store,
+                ..ZipEntryOptions::default()
+            },
+        );
+        let archive = encoder.finish().unwrap();
+        // Locate the 0x000d extra field and check its payload.
+        let needle = 0x000du16.to_le_bytes();
+        let pos = archive
+            .windows(2)
+            .position(|w| w == needle)
+            .expect("0x000d extra field");
+        assert_eq!(
+            u32::from_le_bytes(archive[pos + 4..pos + 8].try_into().unwrap()),
+            atime
+        );
+        assert_eq!(
+            u32::from_le_bytes(archive[pos + 8..pos + 12].try_into().unwrap()),
+            mtime
+        );
+        assert_eq!(
+            u16::from_le_bytes(archive[pos + 12..pos + 14].try_into().unwrap()),
+            1
+        );
+    }
+
+    #[test]
+    fn test_reencode_preserves_extra_fields() {
+        // decode -> ZipEntryOptions::from(&ZipHeader) -> encode keeps every
+        // recognised extra field.
+        let mut encoder = ZipEncoder::new();
+        encoder.add_file_with_options(
+            "meta.txt",
+            b"meta",
+            &ZipEntryOptions {
+                ntfs_mtime: Some(132_500_000_000_000_000),
+                ntfs_atime: Some(132_500_000_100_000_000),
+                ntfs_ctime: Some(132_500_000_200_000_000),
+                unix_mtime: Some(1_700_000_000),
+                unix_atime: Some(1_700_000_100),
+                unix_uid: Some(1000),
+                unix_gid: Some(100),
+                unicode_path: Some("unicode/パス.txt".into()),
+                unicode_comment: Some("コメント".into()),
+                compression: ZipCompression::Store,
+                ..ZipEntryOptions::default()
+            },
+        );
+        let archive = encoder.finish().unwrap();
+        let first = decode::decode(&archive).unwrap();
+        let header = &first[0].header;
+
+        let mut encoder = ZipEncoder::new();
+        encoder.add_file_with_options(
+            &first[0].name,
+            &first[0].data,
+            &ZipEntryOptions::from(header),
+        );
+        let second = decode::decode(&encoder.finish().unwrap()).unwrap();
+        let h = &second[0].header;
+        assert_eq!(h.ntfs_mtime, header.ntfs_mtime);
+        assert_eq!(h.ntfs_atime, header.ntfs_atime);
+        assert_eq!(h.ntfs_ctime, header.ntfs_ctime);
+        assert_eq!(h.unix_mtime, header.unix_mtime);
+        assert_eq!(h.unix_atime, header.unix_atime);
+        assert_eq!(h.unix_uid, header.unix_uid);
+        assert_eq!(h.unix_gid, header.unix_gid);
+        assert_eq!(h.unicode_path, header.unicode_path);
+        assert_eq!(h.unicode_comment, header.unicode_comment);
     }
 }
