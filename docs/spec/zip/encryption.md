@@ -16,7 +16,7 @@
 
 | # | 仕様要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|---------|---------|------|----------------|
-| 107 | DES / 3DES / RC2 / RC4 encryption | §7.2.3 | ✅ | `decrypt_strong_encryption` で DES/3DES-168/3DES-112/RC2/RC4 復号対応。`test_strong_encryption_des_decrypt`, `test_strong_encryption_3des168_decrypt`, `test_strong_encryption_3des112_decrypt`, `test_strong_encryption_rc2_decrypt`, `test_strong_encryption_rc4_decrypt` |
+| 107 | DES / 3DES / RC2 / RC4 encryption | §7.2.3 | ✅ | `decrypt_strong_encryption` で DES/3DES-168/3DES-112/RC2/RC4 復号対応。`test_strong_encryption_des_decrypt`, `test_strong_encryption_3des_168_decrypt`, `test_strong_encryption_3des_112_decrypt`, `test_strong_encryption_rc2_decrypt`, `test_strong_encryption_rc4_decrypt` |
 | 108 | AES 128/192/256 via Strong Encryption Header | §7.2.3 | ✅ | `decrypt_strong_encryption_aes` で AES-CBC 復号。`test_strong_encryption_aes256_full_decode`, `test_strong_encryption_aes192_full_decode`, `test_strong_encryption_aes128_full_decode` |
 | 109 | Certificate-based encryption | §7.2.4 | ❌ | 未対応 (intentional) |
 | 110 | Central Directory Encryption | §7.5 | ✅ | `detect_and_decrypt_cd` + `decrypt_central_directory` で CD 暗号化検出・復号。`test_cd_encryption_aes256_decode`, `test_cd_encryption_no_password`, `test_cd_encryption_wrong_password` |
