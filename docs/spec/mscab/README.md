@@ -63,7 +63,7 @@
 | 20 | fuzz algorithm `mscab` (self-regression 含む) | fuzz harness | ✅ | `fuzz/src/algorithms.rs`。fixture は stored のみ生成 (MSZIP/flags/csum パスは fuzz 対象外) |
 | 21 | encode: 単一 cabinet・単一 folder の出力 (CFHEADER + CFFOLDER + CFFILE + CFDATA)。NONE は生ブロック、MSZIP は `CK` + raw DEFLATE (32KiB 履歴を block 越えで継承) | MS-CAB §2.1-2.2, §3.1 | ✅ | `stored_roundtrip`, `mszip_roundtrip`, `mszip_cross_block_history`, `file_spanning_blocks`, `test_mscab_encoder_roundtrip`, `test_mscab_encoder_bsdtar_interop` |
 | 22 | encode: CFDATA csum を実値出力 (cbData/cbUncomp seed + payload) | MS-CAB §2.2 | ✅ | decoder csum 検証パス (`checksum`) が encode 出力で成立 |
-| 22a | encode: `FLAG_RESERVE_PRESENT` + cbCFHeader/cbCFFolder/cbCFData の reserved 領域をゼロフィル出力 (csum は CFDATA reserve を含む) | MS-CAB §2.1, §2.2 | ✅ | `reserve_roundtrip_stored`, `reserve_roundtrip_mszip`, `reserve_wire_layout` (`MscabEncoder::reserve`) |
+| 22a | encode: `FLAG_RESERVE_PRESENT` + cbCFHeader/cbCFFolder/cbCFData の reserved 領域をゼロフィル出力 (csum は CFDATA reserve を含む) | MS-CAB §2.1, §2.2 | ✅ | `reserve_roundtrip_stored`, `reserve_roundtrip_mszip`, `reserve_wire_layout` (`MscabEncoder::reserve`; cbCFHeader 上限 60,000 は `finish` で検証 `reserve_rejects_oversize_header`) |
 
 ### Intentional scope (実装対象外)
 

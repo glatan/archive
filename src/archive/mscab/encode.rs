@@ -4,7 +4,8 @@
 //! every queued file. Stored cabinets emit raw `CFDATA` blocks;
 //! MSZIP cabinets emit `CK`-prefixed raw-DEFLATE blocks with the
 //! 32 KiB history window carried across `CFDATA` boundaries
-//! (MS-CAB §3.1 `tcompTYPE_MSZIP`). Reserved areas, cabinet sets,
+//! (MS-CAB §3.1 `tcompTYPE_MSZIP`). [`MscabEncoder::reserve`] emits
+//! `FLAG_RESERVE_PRESENT` zero-filled reserved areas; cabinet sets
 //! and per-file date/attribute metadata are not emitted.
 
 use alloc::string::String;
@@ -67,7 +68,9 @@ impl MscabEncoder {
     /// `cb_folder` bytes after each CFFOLDER record, and `cb_data`
     /// bytes between each CFDATA header and its payload ([MS-CAB]
     /// CFHEADER/CFFOLDER/CFDATA `abReserve`). Areas are zero-filled;
-    /// the CFDATA checksum covers its reserve area.
+    /// the CFDATA checksum covers its reserve area. `cb_header`
+    /// beyond the [MS-CAB] §2.1 limit of 60,000 is rejected at
+    /// `finish`.
     pub fn reserve(mut self, cb_header: u16, cb_folder: u8, cb_data: u8) -> Self {
         self.reserve = Some((cb_header, cb_folder, cb_data));
         self
@@ -83,6 +86,9 @@ impl MscabEncoder {
     /// queued name is empty, contains a NUL byte, or the cabinet
     /// would exceed u32/u16 field limits.
     pub fn finish(self) -> Result<Vec<u8>, Error> {
+        if self.reserve.is_some_and(|(h, _, _)| h > 60_000) {
+            return Err(Error::InvalidData("mscab: cbCFHeader exceeds 60,000"));
+        }
         if self.files.len() > u16::MAX as usize {
             return Err(Error::InvalidData("mscab: too many files"));
         }
@@ -327,6 +333,14 @@ mod tests {
         // The decoder's checksum verification covers the 5-byte CFDATA
         // reserve, so a clean round-trip proves it was included.
         decode(&cab).unwrap();
+    }
+
+    #[test]
+    fn reserve_rejects_oversize_header() {
+        assert!(MscabEncoder::new().reserve(60_000, 0, 0).finish().is_ok());
+        let mut enc = MscabEncoder::new().reserve(60_001, 0, 0);
+        enc.add_file("a", b"x");
+        assert!(enc.finish().is_err());
     }
 
     #[test]
