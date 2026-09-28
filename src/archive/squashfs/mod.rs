@@ -6,9 +6,10 @@
 //! Supported compressors: zlib ("gzip"), LZO, xz, LZ4, zstd. LZMA 1
 //! (compressor id 2, deprecated upstream) is rejected.
 //!
-//! This module is read-only: writing images and interpreting filesystem
-//! semantics (device nodes, xattrs) beyond name/content listing are
-//! intentionally out of scope.
+//! The `encode` module writes a minimal image (regular files + implicit
+//! directories, one compressor, no fragment/xattr/export tables).
+//! Interpreting filesystem semantics (device nodes, xattrs) beyond
+//! name/content listing is intentionally out of scope.
 
 use alloc::vec::Vec;
 
@@ -16,6 +17,7 @@ use crate::error::Error;
 
 /// `.squashfs` image decoding.
 pub mod decode;
+pub mod encode;
 
 pub use decode::{
     SquashfsCompression, SquashfsEntry, SquashfsImage, SquashfsKind, SquashfsSuperblock, decode,

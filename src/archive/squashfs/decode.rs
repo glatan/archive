@@ -56,6 +56,18 @@ pub enum SquashfsCompression {
 }
 
 impl SquashfsCompression {
+    /// On-disk compressor identifier (superblock field).
+    pub fn id(self) -> u16 {
+        match self {
+            Self::Gzip => 1,
+            Self::Lzma => 2,
+            Self::Lzo => 3,
+            Self::Xz => 4,
+            Self::Lz4 => 5,
+            Self::Zstd => 6,
+        }
+    }
+
     fn from_id(id: u16) -> Result<Self, Error> {
         match id {
             1 => Ok(Self::Gzip),

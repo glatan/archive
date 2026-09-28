@@ -119,7 +119,7 @@
 | [ar](ar/README.md) | IEEE Std 1003.1 / GNU ar / BSD ar | 26 | 0 | 0 | 26 |
 | [deb](deb/README.md) | deb(5) (dpkg) | 25 | 0 | 2 | 27 |
 | [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 32 | 0 | 3 | 35 |
-| [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 26 | 0 | 5 | 31 |
+| [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 36 | 5 | 0 | 41 |
 | [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 22 | 0 | 5 | 27 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 20 | 0 | 5 | 25 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |

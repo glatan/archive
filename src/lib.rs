@@ -74,7 +74,7 @@
 //! | `ar` (default) | GNU/BSD `ar` archive format |
 //! | `deb` (default) | Debian binary package (`.deb`) read/write support |
 //! | `rpm` (default) | RPM package (`.rpm`) read/write support |
-//! | `squashfs` (default) | SquashFS image read support |
+//! | `squashfs` (default) | SquashFS image read/write support |
 //! | `mscab` (default) | Microsoft Cabinet (`.cab`) read/write support (MSZIP/stored) |
 //! | `zim` (default) | ZIM archive (`.zim`) read/write support (v5 write) |
 //! | `mtree` (default) | mtree(5) manifest read/write support |
