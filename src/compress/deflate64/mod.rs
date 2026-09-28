@@ -5,4 +5,5 @@
 //! Used as ZIP compression method 9 (APPNOTE.TXT [section 4.4.5, section 5.6]).
 
 pub(crate) mod decode;
+pub(crate) mod encode;
 mod tables;

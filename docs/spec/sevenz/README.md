@@ -3,8 +3,8 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [`7zFormat.txt`](https://raw.githubusercontent.com/ip7z/7zip/main/DOC/7zFormat.txt) / [`Methods.txt`](https://raw.githubusercontent.com/ip7z/7zip/main/DOC/Methods.txt) ([LZMA SDK](https://www.7-zip.org/sdk.html) 26.00 同梱文書、GitHub mirror: ip7z/7zip。ローカルスナップショット: `docs/spec/sources/7zformat.txt` / `7z_methods.txt`) |
-| current scope | multi-folder decode (supported single-output DAG subset)、one/two-folder linear writer、supported codec/filter chain (LZMA2, LZMA, PPMdH, Copy, Deflate, Deflate64 (decode-only), BZip2 + x86/PowerPC/ARM/ARM-Thumb/SPARC/ARM64/RISC-V BCJ, Delta, BCJ2, Brotli) + 7zAES file-content / encoded-header encrypt + timestamp metadata (ctime/atime/mtime) |
-| intentional exclusion | non-linear DAG writer (3+ folder)、empty-stream/directory/anti-item entries、external stream/folder lists、IA64 BCJ encode、Deflate64 encode |
+| current scope | multi-folder decode (supported single-output DAG subset)、one/two-folder linear writer、supported codec/filter chain (LZMA2, LZMA, PPMdH, Copy, Deflate, Deflate64, BZip2 + x86/PowerPC/ARM/ARM-Thumb/SPARC/ARM64/RISC-V BCJ, Delta, BCJ2, Brotli) + 7zAES file-content / encoded-header encrypt + timestamp metadata (ctime/atime/mtime) |
+| intentional exclusion | non-linear DAG writer (3+ folder)、empty-stream/directory/anti-item entries、external stream/folder lists、IA64 BCJ encode、Deflate64 拡張域 encode (code 285 / 64KB distance) |
 
 ## 対応バリアント・仕様版
 
@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | format version 0.4 | [7zFormat.txt](https://www.7-zip.org/sdk.html) | ✅ | ✅ | |
 | codec: LZMA2 / LZMA / PPMd / Copy / Deflate / BZip2 / Brotli | [Methods.txt](https://www.7-zip.org/sdk.html) | ✅ | ✅ | |
-| codec: Deflate64 | [Methods.txt](https://www.7-zip.org/sdk.html) + [APPNOTE §5.6](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) + Info-ZIP de facto | ✅ | ❌ | encode は intentional scope 外 |
+| codec: Deflate64 | [Methods.txt](https://www.7-zip.org/sdk.html) + [APPNOTE §5.6](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) + Info-ZIP de facto | ✅ | ✅ | encode は DEFLATE 互換 subset (match<=257, 32KB window; code 285 / dist 30-31 は未使用) |
 | filter: x86/PowerPC/ARM/ARM-Thumb/SPARC/ARM64/RISC-V BCJ、Delta、BCJ2 | [Methods.txt](https://www.7-zip.org/sdk.html) | ✅ | ✅ (IA64 BCJ encode のみ ❌) | |
 | 7zAES-256 (file content + encoded header) | [Methods.txt](https://www.7-zip.org/sdk.html) | ✅ | ✅ | |
 | non-linear DAG writer (3+ folder) | [7zFormat.txt](https://www.7-zip.org/sdk.html) | — | ❌ | writer は 1-2 folder linear のみ |
@@ -173,7 +173,7 @@
 | 67b | RISC-V BCJ (0x04 0x0B) | Methods.txt: BCJ RISC-V | ✅ | decode + encode: `SevenZFilter::RiscVBcj` |
 | 68 | Brotli (0x04 0xF7 0x11 0x01) | Methods.txt: Brotli | ✅ | decode + encode (`brotli` feature): `SevenZMethod::Brotli`, `test_encode_brotli_method_roundtrip` |
 | 68a | Deflate (0x04 0x01 0x08): no properties, encode/decode | Methods.txt: Deflate | ✅ | `SevenZMethod::Deflate`, `test_decode_folder_deflate_method`, `test_encode_deflate_method_roundtrip`, system interop |
-| 68b | Deflate64 (0x04 0x01 0x09): no properties, decode-only | Methods.txt: Deflate64 + PKWARE APPNOTE §5.6 (概要) + Info-ZIP deflate64 de facto 挙動 (距離コード 30/31・14bit 拡張・長さコード 285・16bit 拡張は APPNOTE 未記載のため参照実装観察に基づく) | ✅ | `test_decode_folder_deflate64_method`, `test_sevenz_deflate64_method_system_decode_compat` |
+| 68b | Deflate64 (0x04 0x01 0x09): no properties, encode/decode | Methods.txt: Deflate64 + PKWARE APPNOTE §5.6 (概要) + Info-ZIP deflate64 de facto 挙動 (距離コード 30/31・14bit 拡張・長さコード 285・16bit 拡張は APPNOTE 未記載のため参照実装観察に基づく)。encode は DEFLATE 互換 subset (code 285 不使用・32KB window) | ✅ | `test_decode_folder_deflate64_method`, `test_sevenz_deflate64_method_system_decode_compat`, `test_encode_deflate64_method_roundtrip`, `roundtrip_long_runs`, `test_sevenz_deflate64_method_system_extract_compat` |
 | 68c | BZip2 (0x04 0x02 0x02): no properties, encode/decode | Methods.txt: BZip2 | ✅ | `SevenZMethod::Bzip2`, `test_decode_folder_bzip2_method`, `test_encode_bzip2_method_roundtrip`, system interop |
 | 69 | Unsupported encryption methods (0x06 prefix, 7zAES 以外) | Methods.txt | ✅ | `is_encryption_method()` → `Unsupported` |
 | 70 | Unknown coder method: reject | 7zFormat.txt: Folder / Coder | ✅ | `decode_coder()` → `Unsupported("7z: unsupported coder method")` |
@@ -256,7 +256,7 @@
 | 112 | crate encode (Delta) → system `7z` extract | system interop | ✅ | `test_sevenz_delta_filter_system_extract_compat` |
 | 113 | crate encode (two-folder + encrypted/encoded-header/PPMd/BCJ/Delta combinations) → system `7z` extract | system interop | ✅ | 20+ two-folder system interop tests |
 | 114 | system `7z` encode (Deflate / Deflate64 / BZip2) → crate decode | system interop | ✅ | `test_sevenz_deflate_method_system_decode_compat`, `test_sevenz_deflate64_method_system_decode_compat`, `test_sevenz_bzip2_method_system_decode_compat` |
-| 115 | crate encode (Deflate / BZip2) → system `7z` extract | system interop | ✅ | `test_sevenz_deflate_method_system_extract_compat`, `test_sevenz_bzip2_method_system_extract_compat` |
+| 115 | crate encode (Deflate / Deflate64 / BZip2) → system `7z` extract | system interop | ✅ | `test_sevenz_deflate_method_system_extract_compat`, `test_sevenz_deflate64_method_system_extract_compat`, `test_sevenz_bzip2_method_system_extract_compat` |
 
 ---
 

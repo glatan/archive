@@ -57,6 +57,10 @@ pub enum SevenZMethod {
         /// DEFLATE compression level.
         level: crate::compress::deflate::encode::Level,
     },
+    /// Use Deflate64 compression (7z method `04 01 09`, no
+    /// properties). Output stays in the DEFLATE-compatible subset
+    /// (matches <=257, 32 KB window).
+    Deflate64,
     /// Use BZip2 compression (7z method `04 02 02`).
     Bzip2 {
         /// BZip2 block size level (1-9).
@@ -351,6 +355,7 @@ fn encode_method(input: &[u8], method: SevenZMethod) -> Result<Vec<u8>, Error> {
             ppmd::encode(input, props, false)?
         }
         SevenZMethod::Deflate { level } => crate::compress::deflate::encode::encode(input, level),
+        SevenZMethod::Deflate64 => crate::compress::deflate64::encode::encode(input),
         SevenZMethod::Bzip2 { level } => {
             crate::compress::bzip2::encode::encode_with_level(input, level)
         }
@@ -564,6 +569,12 @@ fn encode_bcj2_stream(
             num_in_streams: 1,
             num_out_streams: 1,
         },
+        SevenZMethod::Deflate64 => CoderDescription {
+            method_id: vec![0x04, 0x01, 0x09],
+            properties: Vec::new(),
+            num_in_streams: 1,
+            num_out_streams: 1,
+        },
         SevenZMethod::Bzip2 { .. } => CoderDescription {
             method_id: vec![0x04, 0x02, 0x02],
             properties: Vec::new(),
@@ -700,6 +711,15 @@ fn build_folder(
         SevenZMethod::Deflate { .. } => {
             coders.push(CoderDescription {
                 method_id: vec![0x04, 0x01, 0x08],
+                properties: Vec::new(),
+                num_in_streams: 1,
+                num_out_streams: 1,
+            });
+            unpack_sizes.push(filtered_size);
+        }
+        SevenZMethod::Deflate64 => {
+            coders.push(CoderDescription {
+                method_id: vec![0x04, 0x01, 0x09],
                 properties: Vec::new(),
                 num_in_streams: 1,
                 num_out_streams: 1,
@@ -1685,6 +1705,19 @@ mod tests {
         let entries = decode(&archive).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "deflate.txt");
+        assert_eq!(entries[0].data, payload);
+    }
+
+    #[test]
+    fn test_encode_deflate64_method_roundtrip() {
+        let payload = b"Deflate64 method roundtrip payload ".repeat(200);
+        let mut encoder = SevenZEncoder::new();
+        encoder.set_method(SevenZMethod::Deflate64);
+        encoder.add_file("deflate64.txt", &payload);
+        let archive = encoder.finish().unwrap();
+        let entries = decode(&archive).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "deflate64.txt");
         assert_eq!(entries[0].data, payload);
     }
 
