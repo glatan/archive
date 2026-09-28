@@ -3,7 +3,9 @@
 //! Emits the full container: 96-byte Lead + Signature header section
 //! (with the `HEADERSIGNATURES` 62 immutable region) + 8-byte-aligned
 //! padding + Header section (with the `HEADERIMMUTABLE` 63 region) +
-//! compressed `newc` cpio payload.
+//! compressed `newc` cpio payload. [`RpmEncoder::stripped_payload`]
+//! emits rpm's own stripped `07070X` cpio variant instead, with the
+//! file list carried by header tags.
 //!
 //! Tag data is serialized big-endian with per-type alignment padding
 //! inside the data store (INT16 → 2, INT32 → 4, INT64 → 8), index
@@ -30,6 +32,11 @@ const TAG_VERSION: u32 = 1001;
 const TAG_RELEASE: u32 = 1002;
 const TAG_ARCH: u32 = 1022;
 const TAG_PAYLOADCOMPRESSOR: u32 = 1125;
+const TAG_FILESIZES: u32 = 1028;
+const TAG_DIRINDEXES: u32 = 1116;
+const TAG_BASENAMES: u32 = 1117;
+const TAG_DIRNAMES: u32 = 1118;
+const TAG_LONGFILESIZES: u32 = 5008;
 
 /// A typed value for one RPM header tag.
 #[derive(Debug, Clone)]
@@ -145,6 +152,7 @@ pub struct RpmEncoder {
     compression: RpmCompression,
     files: Vec<(String, Vec<u8>)>,
     payload: Option<Vec<u8>>,
+    stripped: bool,
 }
 
 impl RpmEncoder {
@@ -162,6 +170,7 @@ impl RpmEncoder {
             compression: RpmCompression::Gzip,
             files: Vec::new(),
             payload: None,
+            stripped: false,
         }
     }
 
@@ -256,6 +265,18 @@ impl RpmEncoder {
         self.payload = Some(payload);
     }
 
+    /// Emit a stripped `07070X` payload (rpm's own cpio variant used
+    /// for v6 packages and v4 packages with files >= 4 GB) instead of
+    /// `newc`. Stripped entries carry no names or sizes: the header
+    /// file-list tags `BASENAMES` / `DIRNAMES` / `DIRINDEXES` /
+    /// `FILESIZES` (or `LONGFILESIZES` for major >= 6 / large files)
+    /// are emitted automatically and override caller-set values.
+    /// Ignored when `set_payload` supplies raw payload bytes.
+    pub fn stripped_payload(mut self) -> Self {
+        self.stripped = true;
+        self
+    }
+
     fn upsert_tag(&mut self, tag: u32, value: RpmTagValue) {
         self.header_tags.retain(|(t, _)| *t != tag);
         self.header_tags.push((tag, value));
@@ -294,8 +315,16 @@ impl RpmEncoder {
             out.push(0);
         }
 
-        // Header: region tag + compressor + caller tags.
+        // Header: region tag + compressor + caller tags. In stripped
+        // mode the file-list tags are managed by the encoder.
         let mut header_tags = self.header_tags;
+        let stripped = self.stripped && self.payload.is_none();
+        if stripped {
+            for (t, v) in file_list_tags(&self.files, self.major) {
+                header_tags.retain(|(x, _)| *x != t);
+                header_tags.push((t, v));
+            }
+        }
         header_tags.push((
             HDR_REGION_TAG,
             RpmTagValue::Bin(region_trailer(HDR_REGION_TAG)),
@@ -309,6 +338,7 @@ impl RpmEncoder {
         // Payload.
         let payload = match self.payload {
             Some(p) => p,
+            None if stripped => build_stripped(&self.files),
             None => build_cpio(&self.files),
         };
         out.extend_from_slice(&compress(&payload, self.compression)?);
@@ -389,6 +419,70 @@ fn build_cpio(files: &[(String, Vec<u8>)]) -> Vec<u8> {
         enc.add_file(name, data);
     }
     enc.finish()
+}
+
+/// Header file-list tags for a stripped payload: per-file basename,
+/// deduplicated dirname list (trailing `/` retained), per-file dir
+/// index, and file sizes (`LONGFILESIZES` for v6 / >2 GiB files).
+fn file_list_tags(files: &[(String, Vec<u8>)], major: u8) -> Vec<(u32, RpmTagValue)> {
+    let mut dirs: Vec<String> = Vec::new();
+    let mut dir_index = Vec::with_capacity(files.len());
+    let mut basenames = Vec::with_capacity(files.len());
+    for (name, _) in files {
+        let (dir, base) = match name.rfind('/') {
+            Some(i) => (&name[..=i], &name[i + 1..]),
+            None => ("", name.as_str()),
+        };
+        let di = match dirs.iter().position(|d| d == dir) {
+            Some(i) => i,
+            None => {
+                dirs.push(dir.to_string());
+                dirs.len() - 1
+            }
+        };
+        dir_index.push(di as i32);
+        basenames.push(base.to_string());
+    }
+    let mut tags = vec![
+        (TAG_BASENAMES, RpmTagValue::StrArray(basenames)),
+        (TAG_DIRNAMES, RpmTagValue::StrArray(dirs)),
+        (TAG_DIRINDEXES, RpmTagValue::Int32(dir_index)),
+    ];
+    if major >= 6 || files.iter().any(|(_, d)| d.len() > i32::MAX as usize) {
+        tags.push((
+            TAG_LONGFILESIZES,
+            RpmTagValue::Int64(files.iter().map(|(_, d)| d.len() as i64).collect()),
+        ));
+    } else {
+        tags.push((
+            TAG_FILESIZES,
+            RpmTagValue::Int32(files.iter().map(|(_, d)| d.len() as i32).collect()),
+        ));
+    }
+    tags
+}
+
+/// Stripped `07070X` payload: 4-aligned `07070X` + 8-hex-digit file
+/// index + raw file data, terminated by the regular newc
+/// `TRAILER!!!` entry (an empty cpio archive).
+fn build_stripped(files: &[(String, Vec<u8>)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (fx, (_, data)) in files.iter().enumerate() {
+        while !out.len().is_multiple_of(4) {
+            out.push(0);
+        }
+        out.extend_from_slice(b"07070X");
+        out.extend_from_slice(alloc::format!("{fx:08x}").as_bytes());
+        while !out.len().is_multiple_of(4) {
+            out.push(0);
+        }
+        out.extend_from_slice(data);
+    }
+    while !out.len().is_multiple_of(4) {
+        out.push(0);
+    }
+    out.extend_from_slice(&cpio::encode::CpioEncoder::new().finish());
+    out
 }
 
 /// Convenience: build a gzip `.rpm` from `name-version-release`
@@ -550,5 +644,45 @@ mod tests {
         assert_eq!(pkg.lead.name, "demo-2.0-3");
         assert_eq!(pkg.name().unwrap().unwrap(), "demo");
         assert_eq!(pkg.release().unwrap().unwrap(), "3");
+    }
+
+    #[test]
+    fn stripped_roundtrip() {
+        let mut enc = basic().stripped_payload();
+        enc.add_file("usr/share/doc/readme.txt", b"docs");
+        enc.add_file("top_level.txt", b"no dir");
+        let pkg = decode::decode(&enc.finish().unwrap()).unwrap();
+        let entries = pkg.payload_entries().unwrap();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].name, "./usr/bin/demo");
+        assert_eq!(entries[0].file_index, Some(0));
+        assert_eq!(entries[0].data, b"#!/bin/sh\n");
+        assert_eq!(entries[1].name, "usr/share/doc/readme.txt");
+        assert_eq!(entries[1].file_index, Some(1));
+        assert_eq!(entries[2].name, "top_level.txt");
+        assert_eq!(entries[2].data, b"no dir");
+    }
+
+    #[test]
+    fn stripped_v6_uses_longfilesizes() {
+        let enc = basic().stripped_payload().major_minor(6, 0);
+        let pkg = decode::decode(&enc.finish().unwrap()).unwrap();
+        // v6 path emits LONGFILESIZES; decoder resolves it.
+        let entries = pkg.payload_entries().unwrap();
+        assert_eq!(entries[0].data, b"#!/bin/sh\n");
+    }
+
+    #[test]
+    fn stripped_payload_bytes_layout() {
+        // Raw (uncompressed) payload should contain aligned 07070X
+        // records terminated by the newc TRAILER!!! entry.
+        let mut enc = RpmEncoder::new()
+            .compression(RpmCompression::None)
+            .stripped_payload();
+        enc.add_file("a/b.txt", b"xy");
+        let pkg = decode::decode(&enc.finish().unwrap()).unwrap();
+        let raw = pkg.payload().unwrap();
+        assert!(raw.starts_with(b"07070X"));
+        assert!(raw.windows(10).any(|w| w == b"TRAILER!!!"));
     }
 }
