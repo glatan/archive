@@ -358,6 +358,16 @@ specifications or standards documents:
   cross-validate the checked-in test fixture
   `tests/fixtures/erofs/mkfs.erofs.img`; they are not linked or
   distributed.
+- iso9660: ECMA-119 4th edition (= ISO 9660; Ecma International),
+  Linux kernel isofs documentation and on-disk header
+  (Documentation/filesystems/isofs.rst, include/uapi/linux/iso_fs.h;
+  GPL-2.0 with Linux-syscall-note), System Use Sharing Protocol 1.10,
+  Rock Ridge Interchange Protocol 1.12 (IEEE P1282), and the Microsoft
+  Joliet specification. Spec-informed implementation; no code was
+  copied. `bsdtar`/`libarchive` (BSD-2-Clause) was used only as a
+  local test-time oracle to produce and cross-validate the checked-in
+  fixtures `tests/fixtures/iso9660/bsdtar-*.iso`; it is not linked or
+  distributed.
 - mscfb: [MS-CFB] Compound File Binary File Format v20210625
   (Microsoft Open Specifications). Spec-informed implementation;
   no code was copied. An independently written Python reference

@@ -60,6 +60,8 @@ use archive::archive::deb;
 use archive::archive::erofs;
 #[cfg(feature = "git-pack")]
 use archive::archive::git_pack;
+#[cfg(feature = "iso9660")]
+use archive::archive::iso9660;
 #[cfg(feature = "mscfb")]
 use archive::archive::mscfb;
 #[cfg(feature = "pea")]
@@ -257,6 +259,9 @@ mod erofs_tests;
 mod generated_tests;
 #[path = "integration/gzip.rs"]
 mod gzip_tests;
+#[cfg(feature = "iso9660")]
+#[path = "integration/iso9660.rs"]
+mod iso9660_tests;
 #[cfg(feature = "lha")]
 #[path = "integration/lha.rs"]
 mod lha_tests;

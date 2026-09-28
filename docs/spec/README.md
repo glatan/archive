@@ -126,6 +126,7 @@
 | [cramfs](cramfs/README.md) | Linux kernel cramfs.rst + fs/cramfs/README + cramfs_fs.h | 18 | 1 | 4 | 23 |
 | [romfs](romfs/README.md) | Linux kernel romfs.rst | 20 | 0 | 3 | 23 |
 | [erofs](erofs/README.md) | Linux kernel erofs.rst + fs/erofs/erofs_fs.h | 27 | 2 | 3 | 32 |
+| [iso9660](iso9660/README.md) | ECMA-119 + SUSP 1.10 + RRIP 1.12 + Joliet | 30 | 2 | 8 | 40 |
 | [crx3](crx3/README.md) | Chromium components/crx_file/crx3.proto | 13 | 0 | 4 | 17 |
 | [pea](pea/README.md) | PEA file format spec (pea_help.pdf) + PeaZip pea.pas/pea_utils.pas | 16 | 1 | 4 | 21 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 24 | 0 | 3 | 27 |
@@ -159,9 +160,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 2056 |
-| ⚠️ 部分実装 | 3 |
-| ❌ 未実装 | 80 |
-| **合計** | **2142** |
+| ✅ 実装+テスト済み | 2086 |
+| ⚠️ 部分実装 | 5 |
+| ❌ 未実装 | 88 |
+| **合計** | **2179** |
 
-**全体カバー率**: 2056 / 2142 = **96.0%** (intentional exclusion 除外後: 2056 / 2063 = **99.7%**)
+**全体カバー率**: 2086 / 2179 = **95.7%** (intentional exclusion 除外後: 2086 / 2091 = **99.8%**)

@@ -54,6 +54,10 @@ pub mod romfs;
 #[cfg(feature = "erofs")]
 pub mod erofs;
 
+/// ISO 9660 filesystem image read support (Rock Ridge / Joliet).
+#[cfg(feature = "iso9660")]
+pub mod iso9660;
+
 /// Microsoft Cabinet (`.cab`) archive read support.
 #[cfg(feature = "mscab")]
 pub mod mscab;
