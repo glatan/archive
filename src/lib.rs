@@ -81,7 +81,7 @@
 //! | `warc` (default) | WARC (`.warc`) record read support |
 //! | `git-pack` (default) | Git pack (`pack-*.pack`/`pack-*.idx`) read/write support |
 //! | `xar` (default) | XAR (`.xar`) archive read/write support |
-//! | `lha` (default) | LHA/LZH archive support (store methods only) |
+//! | `lha` (default) | LHA/LZH archive support (store methods; header levels 0-2) |
 //! | `arj` (default) | ARJ archive support (method 0 only) |
 //! | `arc` (default) | SEA ARC archive support (store methods only) |
 //! | `zip` | ZIP archive format |

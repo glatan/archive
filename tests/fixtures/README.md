@@ -166,3 +166,10 @@
   - 元データを外部ツールで圧縮し、その出力を crate 側で受ける回帰
 - `*_original_decompress_*`
   - crate 側で圧縮した出力を外部ツールで展開する回帰
+
+### `lha/`
+
+- `level1.lzh`, `level2.lzh`, `level1_nested.lzh`, `level2_nested.lzh`
+  - LHa for UNIX 1.14i (jca02266/lha, `lha a -o1` / `-o2`) が生成した `-lh0-` (stored) アーカイブ
+  - `level1`/`level2` は `f1.txt` (`hello level one`+改行) と `f2.txt` (`payload2`+改行) の 2 エントリ
+  - `*_nested` は `dir/sub/deep.txt` (`nested content`+改行) を先頭に持ち、拡張ヘッダ `0x02` の生 `0xff` 区切りディレクトリを含む
