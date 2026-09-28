@@ -57,7 +57,7 @@
 | 19 | encode: 末尾 16B MD5 archive checksum を実値出力 | Header checksumPos | ✅ | `emits_md5_checksum` |
 | 20 | encode: path pointer list は path ソート順、title pointer list は title (=path) ソートの u32 dirent index 列 | Path/Title Pointer List | ✅ | `stored_roundtrip` (decode が pathPtr 経由で解決) |
 | 21 | archive MD5 checksum 検証 | Header checksumPos | ✅ | `verifies_archive_md5`・`rejects_bad_archive_md5`・`rejects_tampered_content_via_md5` (末尾 digest 存在時のみ検証、欠落は許容)。write は実値出力済み (行 19) |
-| 21a | split archive (.zimaa/.zimab...) の decode | Split ZIM archives | ✅ | `decode_parts(&[&[u8]])` が part を連結して decode。`split_parts_roundtrip`, `split_parts_rejects_empty` |
+| 21a | split archive (.zimaa/.zimab...) の decode | Split ZIM archives | ✅ | `decode_parts(&[&[u8]])` が part を連結して decode (分割可能位置は cluster 境界のみだが reader は任意境界でも受理)。`split_parts_roundtrip`, `split_parts_rejects_empty` |
 
 ### Intentional scope (実装対象外)
 
