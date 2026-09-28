@@ -84,7 +84,7 @@ mod tests {
 
     #[test]
     fn test_rc4_empty_data() {
-        let mut data = [];
+        let mut data: [u8; 0] = [];
         Rc4::new(b"key").apply(&mut data);
         assert_eq!(data, []);
     }

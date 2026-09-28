@@ -232,3 +232,63 @@ fn apply_delta_errors() {
     // result size mismatch
     assert!(git_pack::decode::apply_delta(b"abc", &[3, 5, 1, b'x']).is_err());
 }
+
+#[test]
+fn ofs_delta_pack_accepted_by_git_index_pack() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    // Base + two chained ofs-delta objects (delta of delta).
+    let base = b"The quick brown fox jumps over the lazy dog.\n".repeat(16);
+    let mut mid = base.clone();
+    mid[10] = b'X';
+    let mut end = mid.clone();
+    end.extend_from_slice(b"extra tail line\n");
+
+    let mut enc = git_pack::encode::GitPackEncoder::new();
+    let bi = enc.add_object(git_pack::ObjectType::Blob, &base);
+    let mi = enc.add_delta_object(&mid, bi).unwrap();
+    enc.add_delta_object(&end, mi).unwrap();
+    let pack = enc.finish();
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_gitpack_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("test.pack");
+    std::fs::write(&path, &pack).unwrap();
+
+    //  fully verifies the pack: checksums, delta
+    // chain resolution, and object IDs. It exits 0 even on fatal
+    // errors, so success is the produced .idx file.
+    let output = Command::new("git")
+        .args(["index-pack", "--strict", "-v"])
+        .arg(&path)
+        .output();
+    let Ok(output) = output else { return };
+    if !dir.join("test.idx").exists() {
+        // Distinguish "git missing" from "pack rejected".
+        if String::from_utf8_lossy(&output.stderr).contains("index-pack") {
+            return;
+        }
+        panic!(
+            "git index-pack rejected crate pack: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    // verify-pack reports the resolved delta chain (delta of delta).
+    let output = Command::new("git")
+        .args(["verify-pack", "-v"])
+        .arg(dir.join("test.idx"))
+        .output()
+        .unwrap();
+    let list = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(list.matches(" blob").count(), 3, "{list}");
+    assert!(list.contains("chain length = 1"), "{list}");
+    assert!(list.contains("chain length = 2"), "{list}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
