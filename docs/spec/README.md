@@ -123,6 +123,7 @@
 | [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 37 | 0 | 6 | 43 |
 | [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 24 | 0 | 3 | 27 |
 | [mscfb](mscfb/README.md) | [MS-CFB] Compound File Binary File Format v20210625 | 18 | 1 | 4 | 23 |
+| [cramfs](cramfs/README.md) | Linux kernel cramfs.rst + fs/cramfs/README + cramfs_fs.h | 18 | 1 | 4 | 23 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 24 | 0 | 3 | 27 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
 | [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 24 | 0 | 5 | 29 |
@@ -154,9 +155,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1989 |
+| ✅ 実装+テスト済み | 2007 |
 | ⚠️ 部分実装 | 2 |
-| ❌ 未実装 | 65 |
-| **合計** | **2058** |
+| ❌ 未実装 | 69 |
+| **合計** | **2081** |
 
-**全体カバー率**: 1989 / 2058 = **96.6%** (intentional exclusion 除外後: 1989 / 1994 = **99.7%**)
+**全体カバー率**: 2007 / 2081 = **96.4%** (intentional exclusion 除外後: 2007 / 2013 = **99.7%**)

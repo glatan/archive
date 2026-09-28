@@ -40,6 +40,9 @@ pub mod rpm;
 #[cfg(feature = "squashfs")]
 pub mod squashfs;
 
+#[cfg(feature = "cramfs")]
+pub mod cramfs;
+
 /// Microsoft Cabinet (`.cab`) archive read support.
 #[cfg(feature = "mscab")]
 pub mod mscab;

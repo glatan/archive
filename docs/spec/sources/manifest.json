@@ -627,6 +627,30 @@
       "version": "v20210625 (12.0)",
       "url": "https://winprotocoldocs-bhdugrdyduf5h2e4.b02.azurefd.net/MS-CFB/%5bMS-CFB%5d-210625.pdf",
       "filename": "MS-CFB.pdf"
+    },
+    {
+      "id": "linux-cramfs-doc",
+      "format": "cramfs",
+      "title": "Linux kernel Documentation/filesystems/cramfs.rst",
+      "version": "linux master (fetched 2026-09)",
+      "url": "https://raw.githubusercontent.com/torvalds/linux/master/Documentation/filesystems/cramfs.rst",
+      "filename": "cramfs.rst"
+    },
+    {
+      "id": "linux-cramfs-layout",
+      "format": "cramfs",
+      "title": "Linux kernel fs/cramfs/README (filesystem layout)",
+      "version": "linux master (fetched 2026-09)",
+      "url": "https://raw.githubusercontent.com/torvalds/linux/master/fs/cramfs/README",
+      "filename": "cramfs_layout.txt"
+    },
+    {
+      "id": "linux-cramfs-fs-h",
+      "format": "cramfs",
+      "title": "Linux kernel include/uapi/linux/cramfs_fs.h",
+      "version": "linux master (fetched 2026-09)",
+      "url": "https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/cramfs_fs.h",
+      "filename": "cramfs_fs.h"
     }
   ],
   "no_url_available": [

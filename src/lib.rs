@@ -83,6 +83,8 @@
 //! | `rpm` (default) | RPM package (`.rpm`) read/write support |
 //! | `squashfs` (default) | SquashFS image read/write support |
 //! | `mscab` (default) | Microsoft Cabinet (`.cab`) read/write support (MSZIP/stored) |
+//! | `mscfb` (default) | Microsoft Compound File Binary (OLE2) read support |
+//! | `cramfs` (default) | Linux cramfs read-only filesystem image |
 //! | `zim` (default) | ZIM archive (`.zim`) read/write support (v5 write) |
 //! | `mtree` (default) | mtree(5) manifest read/write support |
 //! | `warc` (default) | WARC (`.warc`) record read/write support |
@@ -499,7 +501,7 @@ pub(crate) mod util;
 ))]
 pub mod compress;
 
-/// Archive formats: tar, cpio, ar, deb, rpm, squashfs, mscab, zim, mtree, warc,
+/// Archive formats: tar, cpio, ar, deb, rpm, squashfs, cramfs, mscab, mscfb, zim, mtree, warc,
 /// git pack, xar,
 /// lha, arj, arc, zpaq, zip, and 7z.
 #[cfg(any(
@@ -509,7 +511,9 @@ pub mod compress;
     feature = "deb",
     feature = "rpm",
     feature = "squashfs",
+    feature = "cramfs",
     feature = "mscab",
+    feature = "mscfb",
     feature = "zim",
     feature = "mtree",
     feature = "warc",

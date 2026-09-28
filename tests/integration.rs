@@ -3,6 +3,7 @@
     feature = "deb",
     feature = "rpm",
     feature = "squashfs",
+    feature = "cramfs",
     feature = "mscab",
     feature = "mscfb",
     feature = "zim",
@@ -50,6 +51,8 @@
 
 use archive::archive::ar;
 use archive::archive::cpio;
+#[cfg(feature = "cramfs")]
+use archive::archive::cramfs;
 use archive::archive::deb;
 #[cfg(feature = "git-pack")]
 use archive::archive::git_pack;
@@ -229,6 +232,9 @@ mod bzip2_tests;
 mod combined_tests;
 #[path = "integration/cpio.rs"]
 mod cpio_tests;
+#[cfg(feature = "cramfs")]
+#[path = "integration/cramfs.rs"]
+mod cramfs_tests;
 #[path = "integration/deb.rs"]
 mod deb_tests;
 #[path = "integration/deflate.rs"]

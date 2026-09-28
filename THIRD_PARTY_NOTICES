@@ -322,6 +322,12 @@ specifications or standards documents:
   implementation written independently from the spec text is used
   only as a local test-time interoperability oracle; it is not
   linked or distributed.
+- cramfs: Linux kernel cramfs documentation and uapi headers
+  (cramfs.rst, fs/cramfs/README, include/uapi/linux/cramfs_fs.h;
+  GPL-2.0 with Linux-syscall-note). Spec-informed implementation;
+  no code was copied. `mkfs.cramfs`/`fsck.cramfs` (util-linux,
+  GPL-2.0+) are used only as test-time interoperability oracles
+  inside the test container; they are not linked or distributed.
 - mscfb: [MS-CFB] Compound File Binary File Format v20210625
   (Microsoft Open Specifications). Spec-informed implementation;
   no code was copied. An independently written Python reference
