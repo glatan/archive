@@ -4,13 +4,13 @@
 |------|------|
 | 基準仕様 | [gitformat-pack(5)](https://git-scm.com/docs/gitformat-pack) (ローカルスナップショット: `docs/spec/sources/gitformat-pack.adoc`、git v2.51.0 Documentation) |
 | 形式概要 | `PACK` + u32 version + u32 object count の 12B ヘッダのあと、各オブジェクトエントリ (可変長オブジェクトヘッダ + zlib 本体)。delta エントリ (OFS_DELTA/REF_DELTA) は base 参照を伴う。末尾は pack チェックサム (全先行バイトの SHA-1)。オブジェクト ID は git オブジェクトモデルの `SHA-1("<type> <len>\0" + payload)` |
-| 実装範囲 | pack v2 (SHA-1) の read/write (write は non-deltified)、pack v3 (SHA-256) の read、idx v2 の read/write、idx v1 の read。delta 解決は pack 内完結のみ (thin pack は reject) |
+| 実装範囲 | pack v2 (SHA-1) の read/write (write は OFS_DELTA 出力対応)、pack v3 (SHA-256) の read、idx v2 の read/write、idx v1 の read。delta 解決は pack 内完結のみ (thin pack は reject) |
 
 ## 対応バリアント・仕様版
 
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
-| pack v2 (SHA-1) | gitformat-pack "pack-*.pack files" | ✅ | ✅ | encode は non-deltified (全オブジェクト全量格納) |
+| pack v2 (SHA-1) | gitformat-pack "pack-*.pack files" | ✅ | ✅ | encode は `add_delta_object` で OFS_DELTA (type 6) 出力対応 |
 | pack v1 | 同節 (idx なし旧形式) | ❌ | ❌ | Git 現行ツール未使用の旧形式 (intentional scope) |
 | pack v3 (SHA-256 repo) | 同節 | ✅ | ❌ | 32B object name / SHA-256 trailer の read。write は対象外 |
 | idx v2 | gitformat-pack "pack-*.idx files" | ✅ | ✅ | fanout + sorted names + CRC32 + offset 表 |
@@ -56,7 +56,8 @@
 | 23 | idx v2: fanout[256] (単調増加)、sorted SHA-1 名表、CRC32 表、4B offset 表、8B large-offset 表 (MSB=1 のエントリが指す) | 同節 | ✅ | `decode_real_idx`, `idx_large_offset_table` (合成 idx による large offset 経路) |
 | 24 | idx 末尾は pack チェックサム + idx チェックサム (自身の SHA-1)。両者を検証 | 同節 | ✅ | `decode_real_idx`, `idx_bad_checksums_rejected` |
 | 24a | idx v1: fanout[256] + sorted (u32 offset + 20B sha1) 24B 行。checksum なし、crc32 は 0 報告。非単調 fanout / サイズ不一致 / 未ソートは reject | "pack-*.idx files" v1 | ✅ | `decode_idx_v1_handbuilt`, `decode_idx_v1_rejects_bad_input` |
-| 25 | encode: non-deltified pack v2 を出力し、`finish_with_index` で対応 idx v2 を生成。git `index-pack` が受理する | gitformat-pack 全体 | ✅ | `encode_roundtrip`, `encode_roundtrip_with_index` + git interop (手動確認: `git index-pack`/`verify-pack` が受理、生成 idx は git 生成物とバイト一致) |
+| 25 | encode: pack v2 を出力し、`finish_with_index` で対応 idx v2 を生成。git `index-pack` が受理する | gitformat-pack 全体 | ✅ | `encode_roundtrip`, `encode_roundtrip_with_index` + git interop (手動確認: `git index-pack`/`verify-pack` が受理、生成 idx は git 生成物とバイト一致) |
+| 25a | encode: `add_delta_object` が先行エントリを base とする OFS_DELTA (type 6) を出力。delta 命令列は greedy block matcher で生成 (delta 生成戦略は仕様非規定)。実 `git index-pack`/`verify-pack` が depth-2 chain を受理 | "object entries" + "deltified representation" 節 | ✅ | `delta_encoder_object_roundtrip`, `delta_chain_of_three`, `delta_rejects_bad_base_index`, `create_delta_roundtrip_various`, `delta_with_index_roundtrip`, `ofs_offset_encoding`, `ofs_delta_pack_accepted_by_git_index_pack` |
 
 ## エントリモデル / API
 
@@ -79,7 +80,7 @@
 
 | # | 項目 | 理由 |
 |---|------|------|
-| 33 | deltified pack の encode (delta 圧縮出力) | crate encoder は全量格納。delta encode は圧縮率最適化の領域で、decode 側と非対称な別機能 |
+| 33 | REF_DELTA (type 7) 形式での delta 出力 | encode は OFS_DELTA (pack 内 offset 参照) のみ。OFS 出力で pack 内 delta 格納は完結するため対象外 |
 | 34 | thin pack の受理・外部 base 結合 (`index-pack --fix-thin` 相当) | thin pack は送信用途中形式で、リポジトリ上の pack は常に self-contained |
 | 35 | pack v1 (idx なし旧形式) の read/write、pack v3 の write | v1 は現行 Git が出力しない、v3 write は SHA-256 repo 生成を対象外とするため |
 | 36 | idx v1 の write、idx v2 SHA-256 (32B names) の read/write | 現行 Git は v2 (SHA-1) のみ出力;v1 は read のみ対応 |

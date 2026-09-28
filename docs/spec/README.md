@@ -127,7 +127,7 @@
 | [lha](lha/README.md) | lha header documentation (apphead / lzh_note) | 21 | 0 | 2 | 23 |
 | [arj](arj/README.md) | ARJ technical note (ARJ 2.x) | 18 | 0 | 4 | 22 |
 | [arc](arc/README.md) | SEA ARC file format description | 14 | 0 | 3 | 17 |
-| [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 33 | 0 | 7 | 40 |
+| [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 34 | 0 | 7 | 41 |
 | [xar](xar/README.md) | xarformat (mackyle/xar wiki) | 31 | 1 | 7 | 39 |
 | [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 150 | 0 | 3 | 153 |
 | [7z](sevenz/README.md) | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) | 120 | 0 | 0 | 120 |
