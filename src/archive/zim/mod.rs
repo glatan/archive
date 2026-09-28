@@ -6,8 +6,9 @@
 //! and redirect entry resolution. `decode_parts` reads split
 //! `.zimaa`/`.zimab` archives, and the archive MD5 checksum is
 //! verified when present. The writer emits a single-cluster archive
-//! with an MD5 checksum trailer. MIME metadata exposure and title
-//! search APIs are intentionally out of scope.
+//! with an MD5 checksum trailer. Entries expose MIME type and title
+//! metadata, and `decode_title_order` lists entries in title-pointer
+//! order; fulltext index search is intentionally out of scope.
 
 use alloc::vec::Vec;
 

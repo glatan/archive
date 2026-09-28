@@ -4,7 +4,7 @@
 |------|------|
 | 基準仕様 | openZIM Wiki "[ZIM file format](https://wiki.openzim.org/wiki/ZIM_file_format)" (ローカルスナップショット: `docs/spec/sources/zim_file_format.html`) |
 | 形式概要 | 80B header + MIME list + path/title pointer list + dirent + cluster pointer list + blob cluster |
-| 実装範囲 | read/write (write は v5 単一 cluster・content entry のみ)。MIME メタデータ公開 / title index 検索 API は intentional scope 外 |
+| 実装範囲 | read/write (write は v5 単一 cluster・content entry のみ)。fulltext index 検索 API は intentional scope 外 |
 
 参照: <https://wiki.openzim.org/wiki/ZIM_file_format>
 
@@ -58,11 +58,12 @@
 | 20 | encode: path pointer list は path ソート順、title pointer list は title (=path) ソートの u32 dirent index 列 | Path/Title Pointer List | ✅ | `stored_roundtrip` (decode が pathPtr 経由で解決) |
 | 21 | archive MD5 checksum 検証 | Header checksumPos | ✅ | `verifies_archive_md5`・`rejects_bad_archive_md5`・`rejects_tampered_content_via_md5` (末尾 digest 存在時のみ検証、欠落は許容)。write は実値出力済み (行 19) |
 | 21a | split archive (.zimaa/.zimab...) の decode | Split ZIM archives | ✅ | `decode_parts(&[&[u8]])` が part を連結して decode (分割可能位置は cluster 境界のみだが reader は任意境界でも受理)。`split_parts_roundtrip`, `split_parts_rejects_empty` |
+| 21b | title pointer list 順の entry 列 API | Title Pointer List | ✅ | `decode_title_order` が titlePtrPos の u32 index 列でソート (欠落/不正なら path 順)。`title_order_uses_title_pointer_list` |
+| 21c | MIME type メタデータと title の公開 | MIME Type List, Directory Entries | ✅ | `ZimEntry::mime_type` (MIME list 参照、redirect は空) / `ZimEntry::title` (空 title は bare path にフォールバック)。`exposes_mime_type_and_title` |
 
 ### Intentional scope (実装対象外)
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 22 | title pointer list / fulltext index の検索 API | Title Pointer List | ❌ | archive listing/extract には path index のみ使用。write はソート済み index を出力するが検索 API は提供しない |
-| 23 | MIME type メタデータの公開 | MIME Type List | ❌ | コンテンツ種別は `ArchiveEntry` に含めない (encode は単一 MIME 指定可) |
+| 22 | fulltext index 検索 API | Fulltext Index | ❌ | title pointer list 順の列挙は `decode_title_order` で提供 (21b)。fulltext index そのものの検索は対象外 |
 | 25 | v6 write / extended cluster の出力、redirect・deprecated entry の出力 | Directory Entries, Clusters | ❌ | write は v5 content entry のみ |
