@@ -11,7 +11,7 @@
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
 | seek table あり (Checksum_Flag=0) | format doc §Seek Table Format | ✅ | ✅ | エンコーダ出力 |
-| seek table あり (Checksum_Flag=1) | format doc §Seek_Table_Descriptor / §Checksum | ✅ | ❌ | intentional scope (decode は検証まで実施、encode は常に flag=0) |
+| seek table あり (Checksum_Flag=1) | format doc §Seek_Table_Descriptor / §Checksum | ✅ | ✅ | `encode_with_checksums` が flag=1 で出力 |
 | seek table なし (plain multi-frame zstd) | zstd 本体 | ✅※ | — | ※ `compress::zstd::decode` で復号可能。`seekable::decode` は seek table 必須として拒否 |
 
 ## Seek Table 構造
@@ -54,7 +54,7 @@
 |---|------|----------|------|----------------|
 | 20 | 入力を `frame_size` ごとの独立フレームに分割して seek table を生成 | format doc | ✅ | `roundtrip_multi_frame`、`test_zstd_seekable_roundtrip` (統合) |
 | 21 | 空入力は 0 フレーム + seek table のみを出力 | format doc (`Number_Of_Frames=0`) | ✅ | `roundtrip_empty` |
-| 22 | エンコードする seek table は `Checksum_Flag=0` (per-frame checksum 未付加) | 実装選択 | ✅ | 全 encode テスト |
+| 22 | `encode` は `Checksum_Flag=0`、`encode_with_checksums` は flag=1 (XXH64 下位32bit 付加) の seek table を出力 | format doc §Checksum_Flag / §Checksum | ✅ | `encode_checksum_flag_stream`、参照ツール interop (両出力を復号検証)
 
 ## その他
 

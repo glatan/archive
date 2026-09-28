@@ -7,9 +7,9 @@
 //! decompressed offsets to physical frame offsets, which enables range
 //! decompression without decoding the whole stream.
 //!
-//! The encoder emits seek tables without per-frame XXH64 checksums
-//! (`Checksum_Flag` clear); the decoder accepts and verifies them when
-//! present.
+//! The default encoder emits seek tables without per-frame XXH64 checksums
+//! (`Checksum_Flag` clear); [`encode_with_checksums`] sets the flag and stores
+//! a checksum per frame. The decoder accepts and verifies them when present.
 
 use alloc::vec::Vec;
 
@@ -161,6 +161,21 @@ pub fn has_seek_table(input: &[u8]) -> bool {
 ///
 /// Panics if `frame_size` is 0 or greater than `u32::MAX`.
 pub fn encode(input: &[u8], frame_size: usize) -> Vec<u8> {
+    encode_impl(input, frame_size, false)
+}
+
+/// Compress `input` as a seekable zstd stream whose seek table has
+/// `Checksum_Flag` set: each entry stores the low 32 bits of the XXH64 digest
+/// of the frame's decompressed data.
+///
+/// # Panics
+///
+/// Panics if `frame_size` is 0 or greater than `u32::MAX`.
+pub fn encode_with_checksums(input: &[u8], frame_size: usize) -> Vec<u8> {
+    encode_impl(input, frame_size, true)
+}
+
+fn encode_impl(input: &[u8], frame_size: usize, checksums: bool) -> Vec<u8> {
     assert!(
         frame_size > 0 && frame_size <= u32::MAX as usize,
         "zstd-seekable: frame_size must be in 1..=u32::MAX"
@@ -173,20 +188,32 @@ pub fn encode(input: &[u8], frame_size: usize) -> Vec<u8> {
         entries.push(SeekEntry {
             compressed_size: frame.len() as u32,
             decompressed_size: chunk.len() as u32,
-            checksum: None,
+            checksum: checksums.then(|| xxhash::xxhash64(chunk, 0) as u32),
         });
         out.extend_from_slice(&frame);
     }
 
-    let payload_size = entries.len() * ENTRY_SIZE + FOOTER_SIZE;
+    let entry_size = if checksums {
+        ENTRY_SIZE + CHECKSUM_SIZE
+    } else {
+        ENTRY_SIZE
+    };
+    let payload_size = entries.len() * entry_size + FOOTER_SIZE;
     out.extend_from_slice(&SKIPPABLE_MAGIC.to_le_bytes());
     out.extend_from_slice(&(payload_size as u32).to_le_bytes());
     for entry in &entries {
         out.extend_from_slice(&entry.compressed_size.to_le_bytes());
         out.extend_from_slice(&entry.decompressed_size.to_le_bytes());
+        if let Some(sum) = entry.checksum {
+            out.extend_from_slice(&sum.to_le_bytes());
+        }
     }
     out.extend_from_slice(&(entries.len() as u32).to_le_bytes());
-    out.push(0); // Seek_Table_Descriptor: no checksum, no reserved/unused bits
+    out.push(if checksums {
+        DESCRIPTOR_CHECKSUM_FLAG
+    } else {
+        0
+    });
     out.extend_from_slice(&SEEKABLE_MAGIC.to_le_bytes());
     out
 }
@@ -351,31 +378,22 @@ mod tests {
         assert!(decode_range(&compressed, data.len() - 1, 2).is_err());
     }
 
-    /// Build a seekable stream with Checksum_Flag set, per spec.
-    fn encode_with_checksums(input: &[u8], frame_size: usize) -> Vec<u8> {
-        let mut out = Vec::new();
-        let mut entries = Vec::new();
-        for chunk in input.chunks(frame_size) {
-            let frame = super::super::encode::encode(chunk);
-            entries.push((
-                frame.len() as u32,
-                chunk.len() as u32,
-                xxhash::xxhash64(chunk, 0) as u32,
-            ));
-            out.extend_from_slice(&frame);
+    #[test]
+    fn encode_checksum_flag_stream() {
+        let data = sample();
+        let compressed = encode_with_checksums(&data, 4096);
+        let table = seek_table(&compressed).unwrap();
+        assert!(table.has_checksums);
+        assert_eq!(table.entries.len(), 3);
+        for (i, entry) in table.entries.iter().enumerate() {
+            let chunk = &data[i * 4096..data.len().min((i + 1) * 4096)];
+            assert_eq!(entry.checksum.unwrap(), xxhash::xxhash64(chunk, 0) as u32);
         }
-        let payload = entries.len() * (ENTRY_SIZE + CHECKSUM_SIZE) + FOOTER_SIZE;
-        out.extend_from_slice(&SKIPPABLE_MAGIC.to_le_bytes());
-        out.extend_from_slice(&(payload as u32).to_le_bytes());
-        for (c, d, sum) in &entries {
-            out.extend_from_slice(&c.to_le_bytes());
-            out.extend_from_slice(&d.to_le_bytes());
-            out.extend_from_slice(&sum.to_le_bytes());
-        }
-        out.extend_from_slice(&(entries.len() as u32).to_le_bytes());
-        out.push(DESCRIPTOR_CHECKSUM_FLAG);
-        out.extend_from_slice(&SEEKABLE_MAGIC.to_le_bytes());
-        out
+        assert_eq!(decode(&compressed).unwrap(), data);
+        assert_eq!(
+            decode_range(&compressed, 5000, 100).unwrap(),
+            &data[5000..5100]
+        );
     }
 
     #[test]
