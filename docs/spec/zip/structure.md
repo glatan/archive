@@ -91,7 +91,7 @@
 | 42 | ZIP64 EOCD Record (sig `0x06064B50`): size, versions, counts, offsets | §4.3.14 | ✅ | `test_force_zip64_roundtrip` |
 | 43 | ZIP64 EOCD Locator (sig `0x07064B50`): disk, offset, total_disks | §4.3.15 | ✅ | `test_force_zip64_roundtrip` |
 | 44 | ZIP64 EOCD extensible data sector | §4.3.14.3 | ✅ | ZIP64 EOCD パース時に明示的スキップ (size_of_record - 44 bytes) |
-| 45 | ZIP64 multi-disk: disk_number / cd_disk_number 検証 | §4.3.14 | ✅ | 0 以外は reject |
+| 45 | ZIP64 multi-disk: disk_number / cd_disk_number 検証 | §4.3.14 | ✅ | 単一入力では 0 以外 reject、`decode_parts` では `disk_number == parts-1` かつ `cd_disk_number <= disk_number` を検証 |
 
 ---
 
@@ -101,7 +101,7 @@
 |---|---------|---------|------|----------------|
 | 46 | Signature `0x06054B50` (4B) | §4.3.16 | ✅ | `find_eocd()` |
 | 47 | 後方検索 (comment length 検証付き) | §4.3.16 | ✅ | `test_decode_with_eocd_comment_backward_search` |
-| 48 | disk number / CD disk number (2B × 2) | §4.3.16 | ✅ | 0 以外は reject |
+| 48 | disk number / CD disk number (2B × 2) | §4.3.16 | ✅ | 単一入力では 0 以外 reject、`decode_parts` では `disk_number == parts-1` かつ `cd_disk_number <= disk_number` を検証 |
 | 49 | total entries (2B) / CD size (4B) / CD offset (4B) | §4.3.16 | ✅ | 0xFFFF/0xFFFFFFFF 時は ZIP64 fallback |
 | 50 | .ZIP file comment (variable) | §4.3.16, §4.4.26 | ✅ | デコード時パース済み。エンコード時は `set_archive_comment()` で設定可能 |
 
@@ -156,7 +156,7 @@
 | 85 | file name: forward slash のみ、drive letter 不可 | §4.4.17.1 | ✅ | エンコーダーでバックスラッシュ、ドライブレター、パストラバーサル reject。`test_path_validation_*` |
 | 86 | file name: NULL 終端ではない (length field で管理) | §4.4.17 | ✅ | length-based parsing |
 | 87 | ZIP64: offset 0xFFFFFFFF → extra field 0x0001 参照 | §4.4.16 | ✅ | `test_force_zip64_roundtrip` |
-| 88 | ZIP64: disk 0xFFFF → extra field 0x0001 参照 | §4.4.13 | ❌ | multi-disk 未対応 (intentional) |
+| 88 | ZIP64: disk 0xFFFF → extra field 0x0001 参照 | §4.4.13 | ❌ | ZIP64 extra の disk-start override は未実装 (`decode_parts` は 16-bit `disk_start` フィールドのみ解決、0xFFFF sentinel は `Unsupported`) |
 | 89 | internal file attributes bit 0 (ASCII text marker) | §4.4.14 | ✅ | `ZipEntry::internal_attributes` で公開 (bit 解釈はアプリケーション側) |
 | 90 | external file attributes (host-system dependent) | §4.4.15 | ✅ | `ZipEntry::external_attributes` で公開、任意値 write 可能 |
 | 150 | encode 時の auto-ZIP64 promotion (field overflow → 0xFFFF/0xFFFFFFFF 設定) | §4.4.1.4 | ✅ | `needs_zip64_entry()` で自動判定 |
@@ -168,8 +168,8 @@
 
 | # | 仕様要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|---------|---------|------|----------------|
-| 125 | Multi-disk / split archive | §8 | ❌ | `Unsupported("zip: multi-disk")` (intentional) |
-| 126 | Record が segment 境界を跨がない | §8.5.2 | — | 単一ディスクのみのため該当なし |
+| 125 | Multi-disk / split archive | §8 | ✅ | `decode_parts(&[&[u8]])` / `decode_parts_with_password_bytes` が segment を連結し、disk 相対オフセット (entry `disk_start` + local header offset、CD disk、ZIP64 locator/record) を各 segment 開始位置で解決。disk 数と EOCD/ZIP64 disk フィールドの整合を検証、PKZIP spanning signature 0x08074b50 を受理。`split_parts_roundtrip`, `split_parts_real_disk_offsets`, `split_parts_zip64_multidisk`, `split_parts_disk_count_mismatch`, `split_parts_rejects_empty_and_accepts_single`, `split_parts_spanning_signature_tolerated` |
+| 126 | Record が segment 境界を跨がない | §8.5.2 | — | writer 側のレイアウト制約であり reader は各 record を連結ストリーム上でシークして読むだけのため該当なし |
 
 ---
 
