@@ -292,3 +292,56 @@ fn ofs_delta_pack_accepted_by_git_index_pack() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// REF_DELTA (type 7) entries are git's preferred delta form: real
+/// `git index-pack --strict` must accept and resolve them.
+#[test]
+fn ref_delta_pack_accepted_by_git_index_pack() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let base = b"ref-delta base payload line.\n".repeat(20);
+    let mut target = base.clone();
+    target[5] = b'Q';
+    target.extend_from_slice(b"appended ref-delta tail\n");
+
+    let mut enc = git_pack::encode::GitPackEncoder::new();
+    let bi = enc.add_object(git_pack::ObjectType::Blob, &base);
+    enc.add_ref_delta_object(&target, bi).unwrap();
+    let pack = enc.finish();
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_gitpack_ref_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("test.pack");
+    std::fs::write(&path, &pack).unwrap();
+
+    let output = Command::new("git")
+        .args(["index-pack", "--strict", "-v"])
+        .arg(&path)
+        .output();
+    let Ok(output) = output else { return };
+    if !dir.join("test.idx").exists() {
+        if String::from_utf8_lossy(&output.stderr).contains("index-pack") {
+            return;
+        }
+        panic!(
+            "git index-pack rejected ref-delta pack: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let output = Command::new("git")
+        .args(["verify-pack", "-v"])
+        .arg(dir.join("test.idx"))
+        .output()
+        .unwrap();
+    let list = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(list.matches(" blob").count(), 2, "{list}");
+    assert!(list.contains("chain length = 1"), "{list}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
