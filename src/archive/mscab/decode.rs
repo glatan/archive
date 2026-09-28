@@ -356,6 +356,7 @@ fn extract_cabs(cabs: &[&ParsedCab<'_>]) -> Result<Vec<MscabEntry>, Error> {
     let mut folder_base: Vec<Vec<usize>> = Vec::with_capacity(cabs.len());
     let mut pending: Vec<u8> = Vec::new();
     let mut cur_logical = 0usize;
+    let mut prev_type = u16::MAX;
     for (k, cab) in cabs.iter().enumerate() {
         let mut bases = Vec::with_capacity(cab.folders.len());
         for (i, folder) in cab.folders.iter().enumerate() {
@@ -367,7 +368,14 @@ fn extract_cabs(cabs: &[&ParsedCab<'_>]) -> Result<Vec<MscabEntry>, Error> {
                     ));
                 }
                 cur_logical = stream.len();
+            } else if folder.type_compress != prev_type {
+                // MS-CAB §2.2: typeCompress may vary between folders
+                // but not between fragments of one continued folder.
+                return Err(Error::InvalidData(
+                    "mscab: continuation folder compression type mismatch",
+                ));
             }
+            prev_type = folder.type_compress;
             bases.push(cur_logical);
             decompress_folder(
                 cab.input,
@@ -419,6 +427,7 @@ fn extract_cabs(cabs: &[&ParsedCab<'_>]) -> Result<Vec<MscabEntry>, Error> {
                             name: f.name.clone(),
                             data: Vec::new(),
                         });
+                        seen.push((f.name.clone(), 0));
                         continue;
                     }
                     let base = folder_base[k]
@@ -1122,5 +1131,62 @@ mod tests {
         let via_decode = decode(&cab0);
         let via_parts = decode_parts(&[&cab0]);
         assert_eq!(via_decode.is_err(), via_parts.is_err());
+    }
+
+    #[test]
+    fn decode_parts_three_member_chain() {
+        // Middle member is a pure continuation fragment: cFolders=1
+        // and only CONTINUED records, chained prev+next (0xFFFF).
+        let mut first = CabBuilder::new();
+        first.set_id = 3;
+        first.i_cabinet = 0;
+        first.flags = FLAG_NEXT_CABINET;
+        first.folders.push((COMPRESS_NONE, vec![b"head".to_vec()]));
+        first.files.push((12, 0, 0xfffe, "big.bin".into()));
+
+        let mut middle = CabBuilder::new();
+        middle.set_id = 3;
+        middle.i_cabinet = 1;
+        middle.flags = FLAG_PREV_CABINET | FLAG_NEXT_CABINET;
+        middle.folders.push((COMPRESS_NONE, vec![b"body".to_vec()]));
+        middle.files.push((12, 0, 0xffff, "big.bin".into()));
+
+        let mut last = CabBuilder::new();
+        last.set_id = 3;
+        last.i_cabinet = 2;
+        last.flags = FLAG_PREV_CABINET;
+        last.folders.push((COMPRESS_NONE, vec![b"tail".to_vec()]));
+        last.files.push((12, 0, 0xfffd, "big.bin".into()));
+
+        let (c0, c1, c2) = (first.build(), middle.build(), last.build());
+        let entries = decode_parts(&[&c0, &c1, &c2]).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].data(), b"headbodytail");
+    }
+
+    #[test]
+    fn decode_parts_continued_type_mismatch() {
+        // A continuation fragment must keep the original folder's
+        // compression type (MS-CAB §2.2).
+        let mut first = CabBuilder::new();
+        first.i_cabinet = 0;
+        first.flags = FLAG_NEXT_CABINET;
+        first.folders.push((COMPRESS_NONE, vec![b"head".to_vec()]));
+        first.files.push((8, 0, 0xfffe, "x.bin".into()));
+
+        let mut second = CabBuilder::new();
+        second.i_cabinet = 1;
+        second.flags = FLAG_PREV_CABINET;
+        // Continuation fragment wrongly claims MSZIP (the payload
+        // itself is a valid block so the type check is what fails).
+        let tail = deflate::encode::encode(b"tail", deflate::encode::Level::Default);
+        second.folders.push((COMPRESS_MSZIP, vec![tail]));
+        second.files.push((8, 0, 0xfffd, "x.bin".into()));
+
+        let (c0, c1) = (first.build(), second.build());
+        assert!(matches!(
+            decode_parts(&[&c0, &c1]),
+            Err(Error::InvalidData(_))
+        ));
     }
 }
