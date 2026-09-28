@@ -21,7 +21,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 1 | CFHEADER: magic `MSCF`、reserved フィールド、cbCabinet、coffFiles、cFolders、cFiles、flags (全て LE)。setID / iCabinet はsetID / iCabinet は parse 対象だが単一 cabinet decode ではバリデーション対象外 (`decode_parts` で index/setID 整合を検証) | MS-CAB §2.1 | ✅ | `parses_stored_cabinet` |
+| 1 | CFHEADER: magic `MSCF`、reserved フィールド、cbCabinet、coffFiles、cFolders、cFiles、flags (全て LE)。setID / iCabinet は parse 対象だが単一 cabinet decode ではバリデーション対象外 (`decode_parts` で index/setID 整合を検証) | MS-CAB §2.1 | ✅ | `parses_stored_cabinet` |
 | 2 | version 1.x (major=1, minor<=3) を受理、それ以外は reject | MS-CAB §2.1 | ✅ | `rejects_bad_major_version`, `rejects_bad_minor_version` |
 | 3 | flags bit0/bit1 (prev/next cabinet) の ASCIIZ 文字列を skip して解釈 | MS-CAB §2.1 | ✅ | `parses_cabinet_with_prev_next_names` |
 | 4 | flags bit2 (RESERVE_PRESENT): cbCFHeader/cbCFFolder/cbCFData による reserved 領域 skip | MS-CAB §2.1 | ✅ | `parses_cabinet_with_nonzero_reserve` |
