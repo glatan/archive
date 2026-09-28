@@ -7,8 +7,10 @@
 //! RPM-specific stripped cpio variant (magic `07070X`, file index only) for
 //! v6 packages and v4 packages containing files >= 4 GB.
 //!
-//! This module is read-only: `.rpm` writing and cryptographic signature
-//! verification are intentionally out of scope.
+//! [`decode`] reads Lead/Signature/Header plus gzip/bzip2/lzma/xz/zstd/
+//! uncompressed `newc` or stripped payloads. [`encode`] writes packages
+//! (`newc` payload, all six compressors). Cryptographic signature
+//! verification and stripped-payload writing are intentionally out of scope.
 
 use alloc::vec::Vec;
 
@@ -16,6 +18,9 @@ use crate::error::Error;
 
 /// `.rpm` package decoding.
 pub mod decode;
+
+/// `.rpm` package encoding.
+pub mod encode;
 
 pub use decode::{
     RpmCompression, RpmHeaderSection, RpmLead, RpmPackage, RpmPackageType, RpmPayloadEntry,

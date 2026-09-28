@@ -4,7 +4,7 @@
 |------|------|
 | 基準仕様 | rpm.org Package Format documentation ([`format_v6.html`](https://rpm-software-management.github.io/rpm/manual/format_v6.html) / [`format_header.html`](https://rpm-software-management.github.io/rpm/manual/format_header.html) / [`format_lead.html`](https://rpm-software-management.github.io/rpm/manual/format_lead.html)、ローカルスナップショット: `docs/spec/sources/rpm_format_*.html`) + rpm `lib/cpio.c` (stripped payload 挙動) |
 | 形式概要 | 96B Lead + Signature header + 8B パディング + Header + 圧縮 payload (cpio `newc` / stripped `07070X`) |
-| 実装範囲 | **read のみ** (write / 署名検証は intentional scope 外) |
+| 実装範囲 | **read/write** (署名検証・stripped payload write は intentional scope 外) |
 
 参照: <https://rpm-software-management.github.io/rpm/manual/format_v6.html> /
 <https://rpm-software-management.github.io/rpm/manual/format_header.html> /
@@ -14,9 +14,9 @@
 
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
-| Lead (major 3/4/6) | [format_lead.html](https://rpm-software-management.github.io/rpm/manual/format_lead.html) | ✅ | ❌ | major/minor はメタデータとして記録 (バージョンによる処理分岐なし)。write は intentional scope 外 |
-| payload compressor: gzip / bzip2 / lzma / xz / zstd / none | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ✅ | — | tag 1125 認識、欠落時 gzip 既定 |
-| payload format: cpio `newc` / stripped `07070X` | rpm `lib/cpio.c` 挙動 | ✅ | — | |
+| Lead (major 3/4/6) | [format_lead.html](https://rpm-software-management.github.io/rpm/manual/format_lead.html) | ✅ | ✅ | major/minor はメタデータとして記録 (バージョンによる処理分岐なし) |
+| payload compressor: gzip / bzip2 / lzma / xz / zstd / none | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ✅ | ✅ | tag 1125 認識、欠落時 gzip 既定 |
+| payload format: cpio `newc` / stripped `07070X` | rpm `lib/cpio.c` 挙動 | ✅ | ⚠️ | write は `newc` のみ (stripped は read-only、intentional) |
 | 署名検証 (Signature header / GPG) | [format_header.html](https://rpm-software-management.github.io/rpm/manual/format_header.html) | ❌ | — | intentional scope |
 
 ### Lead / ヘッダ構造
@@ -48,25 +48,38 @@
 | 18 | stripped payload の file size は payload に含まれず `RPMTAG_LONGFILESIZES` (5008) → `RPMTAG_FILESIZES` (1028) から取得。tag 不在は reject | rpm `lib/cpio.c` | ✅ | `rejects_stripped_payload_without_sizes` |
 | 19 | stripped entry の名前は `BASENAMES`(1117) + `DIRNAMES`(1118) + `DIRINDEXES`(1116) で解決。不在時は hex index | rpm tag 定義 | ✅ | `resolve_stripped_name` |
 
+### write
+
+| # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
+|---|------|----------|-----------|----------------|
+| 25 | Lead 書き出し: magic + major/minor + type + archnum + name[66] + osnum + signature_type=5。name は 66B 超/含 NUL を reject | [format_lead.html](https://rpm-software-management.github.io/rpm/manual/format_lead.html) | ✅ | `lead_variants` |
+| 26 | Header structure 書き出し: BE index/data、データ型 1-9 全て、要素サイズ整列パディング、NUL 終端、index エントリはタグ昇順 | [format_header.html](https://rpm-software-management.github.io/rpm/manual/format_header.html) | ✅ | `typed_tags_roundtrip` |
+| 27 | immutable region 自動 emit: Signature 先頭 tag=62、Header 先頭 tag=63、16B BIN trailer (`[tag, type 7, offset 0, count 16]`) | [format_header.html](https://rpm-software-management.github.io/rpm/manual/format_header.html) | ✅ | `typed_tags_roundtrip` |
+| 28 | Signature section 後を 8B 境界までパディング | format_header.html ("8-byte aligned") | ✅ | `roundtrip_gzip` |
+| 29 | メタデータ tag API (NAME/VERSION/RELEASE/ARCH = 1000/1001/1002/1022) + 任意 tag の header/signature 追加。管理 tag (62/63/1125) の手動指定は reject | [format_header.html](https://rpm-software-management.github.io/rpm/manual/format_header.html) | ✅ | `managed_tags_rejected`, `typed_tags_roundtrip` |
+| 30 | payload は `newc` cpio を `cpio` encoder で生成、または raw payload 指定 (`set_payload`) | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ✅ | `roundtrip_gzip` |
+| 31 | `RPMTAG_PAYLOADCOMPRESSOR` (1125) を自動 emit + gzip/bzip2/lzma/xz/zstd/none の 6 codec で圧縮出力 | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ✅ | `roundtrip_all_compressions` |
+| 32 | encoder 出力を decoder で往復 + `bsdtar` (libarchive) が payload 抽出 | system interop | ✅ | `test_rpm_encode_decode_roundtrip`, `test_rpm_encode_uncompressed_roundtrip`, `test_rpm_encode_read_by_bsdtar` |
+
 ### システム相互運用
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 20 | system `cpio -o -H newc` + `gzip` で作った payload を decode | system interop | ✅ | `test_rpm_decode_system_compressed_payload` |
-| 21 | crate で組み立てた `.rpm` を `bsdtar` (libarchive) が読み payload 内容を抽出 | system interop | ✅ | `test_rpm_crate_built_read_by_bsdtar` |
+| 33 | system `cpio -o -H newc` + `gzip` で作った payload を decode | system interop | ✅ | `test_rpm_decode_system_compressed_payload` |
+| 34 | crate で組み立てた `.rpm` を `bsdtar` (libarchive) が読み payload 内容を抽出 | system interop | ✅ | `test_rpm_crate_built_read_by_bsdtar` |
 
 ### CLI / fuzz 連携
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 22 | Lead magic `ED AB EE DB` で `.rpm` を自動検出 | CLI detection | ✅ | `detect_rpm` |
-| 23 | `archive extract` は payload entry を展開 | CLI semantics | ✅ | `extract.rs` の `Format::Rpm` アーム |
-| 24 | fuzz algorithm `rpm` (self-regression 含む) | fuzz harness | ✅ | `fuzz/src/algorithms.rs` |
+| 35 | Lead magic `ED AB EE DB` で `.rpm` を自動検出 | CLI detection | ✅ | `detect_rpm` |
+| 36 | `archive extract` は payload entry を展開 | CLI semantics | ✅ | `extract.rs` の `Format::Rpm` アーム |
+| 37 | fuzz algorithm `rpm` (self-regression 含む) | fuzz harness | ✅ | `fuzz/src/algorithms.rs` |
 
 ### Intentional scope (実装対象外)
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 25 | `.rpm` の write (encoder) | crate-local | ❌ | read-only scope (intentional) |
-| 26 | OpenPGP 署名検証・payload/header digest 検証 | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ❌ | 暗号検証はコンテナレイヤの責務外 (intentional)。tag 値は API 経由で参照可能 |
-| 27 | RPMTAG のパッケージ管理セマンティクス (依存関係・scriptlet・ファイル属性の install 意味) | rpm tags | ❌ | パッケージマネージャ層の責務 (intentional)。生 tag は `header.get_*` で取得可能 |
+| 38 | stripped `07070X` payload の write | rpm `lib/cpio.c` | ❌ | v4/newc のみ出力 (intentional)。stripped は decode のみ |
+| 39 | OpenPGP 署名検証・payload/header digest 検証 | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ❌ | 暗号検証はコンテナレイヤの責務外 (intentional)。tag 値は API 経由で参照可能 |
+| 40 | RPMTAG のパッケージ管理セマンティクス (依存関係・scriptlet・ファイル属性の install 意味) | rpm tags | ❌ | パッケージマネージャ層の責務 (intentional)。生 tag は `header.get_*` で取得可能 |

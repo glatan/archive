@@ -249,3 +249,109 @@ fn test_rpm_crate_built_read_by_bsdtar() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ============================================================
+// RPM encode tests
+// ============================================================
+
+#[test]
+fn test_rpm_encode_decode_roundtrip() {
+    use archive::archive::rpm::decode::{RpmCompression, decode};
+    use archive::archive::rpm::encode::{RpmEncoder, RpmTagValue};
+
+    let mut enc = RpmEncoder::new()
+        .lead_name("demo-1.0-1")
+        .unwrap()
+        .name("demo")
+        .version("1.0")
+        .release("1")
+        .arch("x86_64")
+        .header_tag(1028, RpmTagValue::Int32(vec![12, 34]))
+        .unwrap()
+        .header_tag(
+            1117,
+            RpmTagValue::StrArray(vec!["demo".into(), "readme.txt".into()]),
+        )
+        .unwrap()
+        .header_tag(
+            1118,
+            RpmTagValue::StrArray(vec!["./usr/bin".into(), "./etc".into()]),
+        )
+        .unwrap();
+    enc.add_file("./usr/bin/demo", b"#!/bin/sh\nexit 0\n");
+    enc.add_file("./etc/readme.txt", b"read me\n");
+    let bytes = enc.finish().unwrap();
+
+    // Lead structure.
+    assert_eq!(&bytes[..4], &[0xed, 0xab, 0xee, 0xdb]);
+    assert_eq!(bytes[4], 4);
+
+    let pkg = decode(&bytes).unwrap();
+    assert_eq!(pkg.lead.name, "demo-1.0-1");
+    assert_eq!(pkg.name().unwrap().unwrap(), "demo");
+    assert_eq!(pkg.arch().unwrap().unwrap(), "x86_64");
+    assert_eq!(pkg.payload_compressor().unwrap(), RpmCompression::Gzip);
+    assert_eq!(pkg.header.get_i32s(1028).unwrap().unwrap(), vec![12, 34]);
+
+    let entries = pkg.payload_entries().unwrap();
+    let mut names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+    names.sort();
+    assert_eq!(names, ["./etc/readme.txt", "./usr/bin/demo"]);
+}
+
+#[test]
+fn test_rpm_encode_uncompressed_roundtrip() {
+    use archive::archive::rpm::decode::{RpmCompression, decode};
+    use archive::archive::rpm::encode::RpmEncoder;
+
+    let mut enc = RpmEncoder::new().compression(RpmCompression::None);
+    enc.add_file("./plain.txt", b"no compression");
+    let pkg = decode(&enc.finish().unwrap()).unwrap();
+    assert_eq!(pkg.payload_compressor().unwrap(), RpmCompression::None);
+    let entries = pkg.payload_entries().unwrap();
+    assert_eq!(entries[0].data, b"no compression");
+}
+
+#[test]
+fn test_rpm_encode_read_by_bsdtar() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use archive::archive::rpm::encode::RpmEncoder;
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_rpm_enc_bsdtar_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let mut enc = RpmEncoder::new()
+        .lead_name("crate-1.0-1")
+        .unwrap()
+        .name("crate");
+    enc.add_file("./pkg.txt", b"bsdtar rpm encoder interop");
+    let rpm_path = dir.join("crate.rpm");
+    std::fs::write(&rpm_path, enc.finish().unwrap()).unwrap();
+
+    if let Ok(result) = Command::new("bsdtar")
+        .args(["-xOf"])
+        .arg(&rpm_path)
+        .output()
+    {
+        assert!(
+            result.status.success(),
+            "bsdtar failed: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert!(
+            result
+                .stdout
+                .windows(b"bsdtar rpm encoder interop".len())
+                .any(|w| w == b"bsdtar rpm encoder interop"),
+            "bsdtar output missing payload"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
