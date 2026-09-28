@@ -40,7 +40,8 @@
     feature = "cmpsc",
     feature = "git-pack",
     feature = "xar",
-    feature = "uuencode"
+    feature = "uuencode",
+    feature = "ascii85"
 ))]
 
 use archive::archive::ar;
@@ -92,6 +93,7 @@ use archive::compress::zx0;
 use archive::compress::zx1;
 use archive::compress::zx2;
 use archive::compress::zx5;
+use archive::encoding::ascii85;
 use archive::encoding::uuencode;
 
 // ============================================================
@@ -319,6 +321,8 @@ mod xca_tests;
 #[path = "integration/xz.rs"]
 mod xz_tests;
 
+#[path = "integration/ascii85.rs"]
+mod ascii85_tests;
 #[path = "integration/uuencode.rs"]
 mod uuencode_tests;
 #[cfg(feature = "warc")]

@@ -514,6 +514,6 @@ pub mod compress;
 ))]
 pub mod archive;
 
-/// Byte encodings: uuencode.
-#[cfg(feature = "uuencode")]
+/// Byte encodings: uuencode, Ascii85.
+#[cfg(any(feature = "uuencode", feature = "ascii85"))]
 pub mod encoding;

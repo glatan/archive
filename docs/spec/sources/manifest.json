@@ -563,6 +563,22 @@
       "version": "IEEE Std 1003.1-2017 (2018 edition)",
       "url": "https://pubs.opengroup.org/onlinepubs/9699919799/utilities/uuencode.html",
       "filename": "posix_uuencode_9699919799.html"
+    },
+    {
+      "id": "rfc1924",
+      "format": "ascii85",
+      "title": "A Compact Representation of IPv6 Addresses",
+      "version": "RFC 1924 (April 1996)",
+      "url": "https://www.rfc-editor.org/rfc/rfc1924.txt",
+      "filename": "rfc1924.txt"
+    },
+    {
+      "id": "pdf32000",
+      "format": "ascii85",
+      "title": "Document management - Portable document format - Part 1: PDF 1.7 (ASCII85Decode §7.4.3)",
+      "version": "PDF 32000-1:2008",
+      "url": "https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/PDF32000_2008.pdf",
+      "filename": "pdf32000_2008.pdf"
     }
   ],
   "no_url_available": [

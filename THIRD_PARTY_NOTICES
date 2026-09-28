@@ -312,6 +312,10 @@ specifications or standards documents:
   (historical algorithm). Spec-informed implementation; no code was
   copied. CPython `binascii` (PSF License) is invoked only as a local
   test-time interoperability oracle; it is not linked or distributed.
+- ascii85: Adobe ASCII85Decode (PDF 32000-1:2008 §7.4.3) and
+  RFC 1924 Base-85. Spec-informed implementation; no code was copied.
+  CPython `base64` (PSF License) is invoked only as a local test-time
+  interoperability oracle; it is not linked or distributed.
 - zip: PKWARE APPNOTE.TXT 6.3.10
 - 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00)
 - LZMA codec: LZMA algorithm specification (`lzma-specification.txt`)

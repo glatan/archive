@@ -9,3 +9,7 @@
 /// uuencode (POSIX.1-2017 historical algorithm).
 #[cfg(feature = "uuencode")]
 pub mod uuencode;
+
+/// Ascii85 (Adobe  and RFC 1924 Base-85).
+#[cfg(feature = "ascii85")]
+pub mod ascii85;
