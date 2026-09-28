@@ -72,3 +72,5 @@
 | 25 | ❌ record 間の `WARC-Concurrent-To` / segment (`continuation`) 結合 | 各 record を独立エントリとして公開。結合は利用側の判断 |
 | 26 | ❌ record 内部の HTTP メッセージ解析 (response/request block の中身) | block は opaque octet 列として扱う (encode 側も payload 特定は caller 責務) |
 | 27 | ❌ `WARC-Payload-Digest` / `WARC-Block-Digest` の decode 時検証 | digest 値の検証は行わない (未知フィールド同様に無視)。encode 側では sha1 で発行 |
+| 28 | ❌ record type 別のフィールド使用制約 (warcinfo/metadata の payload 不可等) の強制 | ヘッダ構文と必須フィールド存在のみ検証。type 別制約違反の record も opaque entry として受理 |
+| 29 | ❌ segmentation ルール (`continuation` / `WARC-Segment-Origin-ID` 必須性) の検証 | record 結合を行わない (行 25 と同根拠) |

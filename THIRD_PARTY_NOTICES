@@ -201,11 +201,16 @@ specifications or standards documents:
 - ar: IEEE Std 1003.1 (POSIX) ar format / GNU ar extensions / BSD ar extensions
 - deb: `deb(5)` Debian binary package format (dpkg manual page,
   https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html)
+  Integration tests invoke `tar`/`ar`/`bsdtar` only as local
+  test-time tools; they are not linked or distributed.
 - rpm: rpm.org Package Format documentation (format_v6 / format_header /
   format_lead, https://rpm-software-management.github.io/rpm/manual/)
   and rpm `lib/cpio.c` (GPL-2.0-only) stripped payload behavior notes;
   `lib/cpio.c` was read only to confirm structural facts — no code was
   copied
+  Writer output is additionally validated with `bsdtar` (libarchive,
+  BSD-2-Clause) as a local test-time extraction oracle; it is not
+  linked or distributed.
 - squashfs: SquashFS binary format documentation
   (https://dr-emann.github.io/squashfs/squashfs.html, CC BY-SA 4.0).
   Test fixtures are produced by `mksquashfs` and writer output
@@ -215,6 +220,9 @@ specifications or standards documents:
 - mscab: [MS-CAB] Cabinet File Format documentation
   (Microsoft Open Specifications,
   https://learn.microsoft.com/openspecs/windows_protocols/ms-cab/).
+  Writer output is validated with `bsdtar` (libarchive, BSD-2-Clause)
+  invoked only as a local test-time tool; it is not linked or
+  distributed.
   MSZIP payloads reuse the existing RFC 1951 DEFLATE decoder
   (`compress::deflate`); no new codec was ported.
   Patent note: [MS-CAB] is published under the general Microsoft Open
@@ -259,6 +267,15 @@ specifications or standards documents:
   with GNU lha and documented at
   https://github.com/jca02266/lha/blob/master/apphead.txt.jp;
   header field facts only, no code or document text was copied.
+  The implementation was additionally cross-checked against LHa for
+  UNIX 1.14i (jca02266/lha) behavior: its source was read only to
+  confirm wire-format facts - no code was copied. Test fixtures in
+  `tests/fixtures/lha/` are binary archives produced by that tool
+  (`lha a -o1`/`-o2`); they are program output, not source material,
+  and are kept solely as known-answer vectors. LHa for UNIX uses its
+  own non-OSI license requiring preservation of copyright notices;
+  this notice satisfies the attribution requirement for the
+  redistributed fixture binaries.
 - arj: ARJ technical note (ARJ 2.x archiver file format description);
   header field facts only, no code was copied.
 - arc: SEA ARC file format description

@@ -119,11 +119,11 @@
 | [ar](ar/README.md) | IEEE Std 1003.1 / GNU ar / BSD ar | 26 | 0 | 0 | 26 |
 | [deb](deb/README.md) | deb(5) (dpkg) | 25 | 0 | 2 | 27 |
 | [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 32 | 0 | 3 | 35 |
-| [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 36 | 0 | 5 | 41 |
+| [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 36 | 0 | 6 | 42 |
 | [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 22 | 0 | 5 | 27 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 20 | 0 | 5 | 25 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
-| [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 24 | 0 | 3 | 27 |
+| [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 24 | 0 | 5 | 29 |
 | [lha](lha/README.md) | lha header documentation (apphead / lzh_note) | 21 | 0 | 2 | 23 |
 | [arj](arj/README.md) | ARJ technical note (ARJ 2.x) | 18 | 0 | 4 | 22 |
 | [arc](arc/README.md) | SEA ARC file format description | 14 | 0 | 3 | 17 |
@@ -144,7 +144,7 @@
 |------|------|
 | ✅ 実装+テスト済み | 1850 |
 | ⚠️ 部分実装 | 3 |
-| ❌ 未実装 | 51 |
-| **合計** | **1904** |
+| ❌ 未実装 | 54 |
+| **合計** | **1907** |
 
-**全体カバー率**: 1850 / 1903 = **97.2%** (intentional exclusion 除外後: 1850 / 1852 = **99.9%**)
+**全体カバー率**: 1850 / 1906 = **97.1%** (intentional exclusion 除外後: 1850 / 1852 = **99.9%**)
