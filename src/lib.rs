@@ -77,7 +77,7 @@
 //! | `squashfs` (default) | SquashFS image read support |
 //! | `mscab` (default) | Microsoft Cabinet (`.cab`) read support (MSZIP/stored) |
 //! | `zim` (default) | ZIM archive (`.zim`) read support |
-//! | `mtree` (default) | mtree(5) manifest read support |
+//! | `mtree` (default) | mtree(5) manifest read/write support |
 //! | `warc` (default) | WARC (`.warc`) record read/write support |
 //! | `git-pack` (default) | Git pack (`pack-*.pack`/`pack-*.idx`) read/write support |
 //! | `xar` (default) | XAR (`.xar`) archive read/write support |

@@ -131,7 +131,7 @@
 | [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 26 | 0 | 5 | 31 |
 | [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 20 | 0 | 5 | 25 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 16 | 0 | 5 | 21 |
-| [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 19 | 0 | 3 | 22 |
+| [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
 | [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 24 | 0 | 3 | 27 |
 | [lha](lha/README.md) | lha header documentation (apphead / lzh_note) | 21 | 0 | 2 | 23 |
 | [arj](arj/README.md) | ARJ technical note (ARJ 2.x) | 18 | 0 | 4 | 22 |
@@ -151,9 +151,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1726 |
+| ✅ 実装+テスト済み | 1732 |
 | ⚠️ 部分実装 | 1 |
-| ❌ 未実装 | 38 |
-| **合計** | **1798** |
+| ❌ 未実装 | 37 |
+| **合計** | **1803** |
 
-**全体カバー率**: 1726 / 1768 = **97.6%** (intentional exclusion 除外後: 1726 / 1728 = **99.9%**)
+**全体カバー率**: 1732 / 1773 = **97.7%** (intentional exclusion 除外後: 1732 / 1735 = **99.8%**)
