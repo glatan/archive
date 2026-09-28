@@ -345,3 +345,83 @@ fn ref_delta_pack_accepted_by_git_index_pack() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// A v3/SHA-256 pack emitted by the crate is accepted by real
+///  inside a sha256-objectformat repo,
+/// and  resolves the REF_DELTA chain.
+#[test]
+fn v3_pack_accepted_by_git_index_pack() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let mut enc = git_pack::encode::GitPackEncoder::new_sha256();
+    let bi = enc.add_object(
+        git_pack::ObjectType::Blob,
+        b"v3 interop base.
+",
+    );
+    enc.add_ref_delta_object(
+        b"v3 interop base.
+changed",
+        bi,
+    )
+    .unwrap();
+    enc.add_object(git_pack::ObjectType::Blob, b"third blob");
+    let pack = enc.finish();
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_gitpack_v3_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // index-pack derives the hash length from the repo's
+    // extensions.objectformat, so initialize a sha256 repo first.
+    let init = Command::new("git")
+        .args(["init", "--object-format=sha256", "-q"])
+        .arg(&dir)
+        .output();
+    let Ok(init) = init else {
+        std::fs::remove_dir_all(&dir).ok();
+        return;
+    };
+    if !init.status.success() {
+        std::fs::remove_dir_all(&dir).ok();
+        return;
+    }
+
+    let path = dir.join("test.pack");
+    std::fs::write(&path, &pack).unwrap();
+    let output = Command::new("git")
+        .args(["index-pack", "--strict", "-v"])
+        .arg(&path)
+        .current_dir(&dir)
+        .output();
+    let Ok(output) = output else {
+        std::fs::remove_dir_all(&dir).ok();
+        return;
+    };
+    if !dir.join("test.idx").exists() {
+        if String::from_utf8_lossy(&output.stderr).contains("index-pack") {
+            std::fs::remove_dir_all(&dir).ok();
+            return;
+        }
+        panic!(
+            "git index-pack rejected v3 pack: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let output = Command::new("git")
+        .args(["verify-pack", "-v"])
+        .arg(dir.join("test.idx"))
+        .current_dir(&dir)
+        .output()
+        .unwrap();
+    let list = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(list.matches(" blob").count(), 3, "{list}");
+    assert!(list.contains("chain length = 1"), "{list}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}

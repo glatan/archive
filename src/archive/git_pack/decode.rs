@@ -36,14 +36,14 @@ pub enum HashKind {
 }
 
 impl HashKind {
-    fn id_len(self) -> usize {
+    pub(crate) fn id_len(self) -> usize {
         match self {
             Self::Sha1 => SHA1_LEN,
             Self::Sha256 => SHA256_LEN,
         }
     }
 
-    fn digest(self, data: &[u8]) -> Vec<u8> {
+    pub(crate) fn digest(self, data: &[u8]) -> Vec<u8> {
         match self {
             Self::Sha1 => sha1(data).to_vec(),
             Self::Sha256 => sha256(data).to_vec(),
@@ -454,8 +454,8 @@ const IDX_MAGIC: [u8; 4] = [0xFF, 0x74, 0x4F, 0x63];
 /// One row of a v2 pack index.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdxEntry {
-    /// Object ID (binary).
-    pub id: ObjectId,
+    /// Object ID (binary; 20 bytes for SHA-1, 32 for SHA-256).
+    pub id: Vec<u8>,
     /// Hex object name.
     pub name: String,
     /// CRC32 of the object's packed entry data.
@@ -470,7 +470,18 @@ pub struct IdxEntry {
 /// verify the embedded pack checksum). The idx checksum covers the
 /// whole file before its own trailer.
 pub fn decode_idx(input: &[u8], pack: &[u8]) -> Result<Vec<IdxEntry>, Error> {
-    if input.len() < 8 + 256 * 4 + 2 * SHA1_LEN {
+    decode_idx_with_kind(input, pack, HashKind::Sha1)
+}
+
+/// Decode a version-2 `.idx` file for a SHA-256 (v3) pack:
+/// 32-byte object names and SHA-256 trailer checksums.
+pub fn decode_idx_v2_sha256(input: &[u8], pack: &[u8]) -> Result<Vec<IdxEntry>, Error> {
+    decode_idx_with_kind(input, pack, HashKind::Sha256)
+}
+
+fn decode_idx_with_kind(input: &[u8], pack: &[u8], hash: HashKind) -> Result<Vec<IdxEntry>, Error> {
+    let hl = hash.id_len();
+    if input.len() < 8 + 256 * 4 + 2 * hl {
         return Err(invalid("git-pack: truncated idx"));
     }
     if input[..4] != IDX_MAGIC {
@@ -480,12 +491,12 @@ pub fn decode_idx(input: &[u8], pack: &[u8]) -> Result<Vec<IdxEntry>, Error> {
     if version != 2 {
         return Err(Error::Unsupported("git-pack: only idx version 2 supported"));
     }
-    let trailer = input.len() - SHA1_LEN;
-    if sha1(&input[..trailer]) != input[trailer..] {
+    let trailer = input.len() - hl;
+    if hash.digest(&input[..trailer]) != input[trailer..] {
         return Err(invalid("git-pack: idx checksum mismatch"));
     }
-    let pack_sum = &input[trailer - SHA1_LEN..trailer];
-    if pack.len() < SHA1_LEN || pack_sum != &pack[pack.len() - SHA1_LEN..] {
+    let pack_sum = &input[trailer - hl..trailer];
+    if pack.len() < hl || pack_sum != &pack[pack.len() - hl..] {
         return Err(invalid("git-pack: idx pack checksum mismatch"));
     }
 
@@ -501,18 +512,17 @@ pub fn decode_idx(input: &[u8], pack: &[u8]) -> Result<Vec<IdxEntry>, Error> {
     let n = fanout[255] as usize;
 
     let names_at = 8 + 256 * 4;
-    let crcs_at = names_at + n * 20;
+    let crcs_at = names_at + n * hl;
     let offs_at = crcs_at + n * 4;
     let large_at = offs_at + n * 4;
-    if large_at > trailer - SHA1_LEN {
+    if large_at > trailer - hl {
         return Err(invalid("git-pack: truncated idx tables"));
     }
-    let n_large = (trailer - SHA1_LEN - large_at) / 8;
+    let n_large = (trailer - hl - large_at) / 8;
 
     let mut entries = Vec::with_capacity(n);
     for i in 0..n {
-        let mut id = [0u8; 20];
-        id.copy_from_slice(&input[names_at + i * 20..names_at + i * 20 + 20]);
+        let id = input[names_at + i * hl..names_at + i * hl + hl].to_vec();
         let crc32 = u32::from_be_bytes(
             input[crcs_at + i * 4..crcs_at + i * 4 + 4]
                 .try_into()
@@ -537,8 +547,8 @@ pub fn decode_idx(input: &[u8], pack: &[u8]) -> Result<Vec<IdxEntry>, Error> {
             off32 as u64
         };
         entries.push(IdxEntry {
-            id,
             name: hex_id(&id),
+            id,
             crc32,
             offset,
         });
@@ -578,7 +588,7 @@ pub fn decode_idx_v1(input: &[u8]) -> Result<Vec<IdxEntry>, Error> {
         let offset = u32::from_be_bytes(input[at..at + 4].try_into().unwrap()) as u64;
         let id: ObjectId = input[at + 4..at + 24].try_into().unwrap();
         entries.push(IdxEntry {
-            id,
+            id: id.to_vec(),
             name: hex_id(&id),
             crc32: 0,
             offset,
