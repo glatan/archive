@@ -97,6 +97,8 @@
 | カバー項目 | テスト |
 |---|---|
 | `mksquashfs` 生成 image (gzip/zstd/xz/lz4/lzo) の decode | `test_squashfs_decode_mksquashfs_image` |
+| 本 writer 出力 (gzip/xz/lz4/lzo/zstd) の `unsquashfs` 展開 | `test_squashfs_encoder_unsquashfs_extract` |
+| encoder → decoder roundtrip | `test_squashfs_encoder_roundtrip` |
 
 ### `mscab.rs`
 

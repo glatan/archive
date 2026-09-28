@@ -93,7 +93,7 @@
 | [zx0](zx0/README.md) | ZX0 v2 README (BSD-3) | 20 | 0 | 0 | 20 |
 | [zx1](zx1/README.md) | ZX1 README (BSD-3) | 21 | 0 | 0 | 21 |
 | [zx2](zx2/README.md) | ZX2 README (BSD-3) | 20 | 0 | 0 | 20 |
-| [zx5](zx5/README.md) | ZX5 README (BSD-3) | 23 | 0 | 0 | 23 |
+| [zx5](zx5/README.md) | ZX5 README (BSD-3) | 24 | 0 | 0 | 24 |
 | [vcdiff](vcdiff/README.md) | RFC 3284 | 30 | 0 | 0 | 30 |
 | [mppc](mppc/README.md) | RFC 2118 | 31 | 1 | 0 | 32 |
 | [lzs](lzs/README.md) | RFC 2395 (§2.2 = ANSI X3.241 informational 転記) | 26 | 0 | 0 | 26 |
@@ -119,7 +119,7 @@
 | [ar](ar/README.md) | IEEE Std 1003.1 / GNU ar / BSD ar | 26 | 0 | 0 | 26 |
 | [deb](deb/README.md) | deb(5) (dpkg) | 25 | 0 | 2 | 27 |
 | [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 32 | 0 | 3 | 35 |
-| [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 26 | 0 | 5 | 31 |
+| [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 36 | 0 | 5 | 41 |
 | [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 22 | 0 | 5 | 27 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 20 | 0 | 5 | 25 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
@@ -127,7 +127,7 @@
 | [lha](lha/README.md) | lha header documentation (apphead / lzh_note) | 21 | 0 | 2 | 23 |
 | [arj](arj/README.md) | ARJ technical note (ARJ 2.x) | 18 | 0 | 4 | 22 |
 | [arc](arc/README.md) | SEA ARC file format description | 14 | 0 | 3 | 17 |
-| [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 34 | 0 | 7 | 41 |
+| [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 35 | 0 | 7 | 42 |
 | [xar](xar/README.md) | xarformat (mackyle/xar wiki) | 31 | 1 | 7 | 39 |
 | [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 150 | 0 | 3 | 153 |
 | [7z](sevenz/README.md) | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) | 120 | 0 | 0 | 120 |
@@ -142,9 +142,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1747 |
-| ⚠️ 部分実装 | 1 |
-| ❌ 未実装 | 36 |
-| **合計** | **1817** |
+| ✅ 実装+テスト済み | 1850 |
+| ⚠️ 部分実装 | 3 |
+| ❌ 未実装 | 51 |
+| **合計** | **1904** |
 
-**全体カバー率**: 1747 / 1787 = **97.8%** (intentional exclusion 除外後: 1747 / 1750 = **99.8%**)
+**全体カバー率**: 1850 / 1903 = **97.2%** (intentional exclusion 除外後: 1850 / 1852 = **99.9%**)
