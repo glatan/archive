@@ -308,6 +308,10 @@ specifications or standards documents:
   For lha/arj/arc interoperability checks the `bsdtar` (libarchive,
   BSD 2-Clause) and `7z` binaries are invoked only as local test-time
   oracles; they are not linked or distributed.
+- uuencode: IEEE Std 1003.1-2017 `uuencode` utility description
+  (historical algorithm). Spec-informed implementation; no code was
+  copied. CPython `binascii` (PSF License) is invoked only as a local
+  test-time interoperability oracle; it is not linked or distributed.
 - zip: PKWARE APPNOTE.TXT 6.3.10
 - 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00)
 - LZMA codec: LZMA algorithm specification (`lzma-specification.txt`)

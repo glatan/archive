@@ -39,7 +39,8 @@
     feature = "lzxd",
     feature = "cmpsc",
     feature = "git-pack",
-    feature = "xar"
+    feature = "xar",
+    feature = "uuencode"
 ))]
 
 use archive::archive::ar;
@@ -91,6 +92,7 @@ use archive::compress::zx0;
 use archive::compress::zx1;
 use archive::compress::zx2;
 use archive::compress::zx5;
+use archive::encoding::uuencode;
 
 // ============================================================
 // 7z tests
@@ -317,6 +319,8 @@ mod xca_tests;
 #[path = "integration/xz.rs"]
 mod xz_tests;
 
+#[path = "integration/uuencode.rs"]
+mod uuencode_tests;
 #[cfg(feature = "warc")]
 #[path = "integration/warc.rs"]
 mod warc_tests;

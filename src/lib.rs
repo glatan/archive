@@ -513,3 +513,7 @@ pub mod compress;
     feature = "sevenz",
 ))]
 pub mod archive;
+
+/// Byte encodings: uuencode.
+#[cfg(feature = "uuencode")]
+pub mod encoding;
