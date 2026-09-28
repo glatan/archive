@@ -243,3 +243,65 @@ fn test_ar_decode_rejects_invalid_header_trailer() {
         ))
     ));
 }
+
+#[test]
+fn test_ar_decode_gnu_thin_fixture() {
+    // Bytes produced by `ar rcT` (binutils): the `//` member holds the
+    // string table payload, regular members are header-only.
+    let archive = include_bytes!("../fixtures/ar/thin_gnu.a");
+    let entries = ar::decode::decode(archive).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert!(entries.iter().all(|e| e.is_thin));
+    assert_eq!(entries[0].name, "thinmem1.txt");
+    assert_eq!(entries[0].header.size, 4);
+    assert!(entries[0].data.is_empty());
+    assert_eq!(entries[1].name, "thinmem2.txt");
+    assert_eq!(entries[1].header.size, 5);
+    assert!(entries[1].data.is_empty());
+}
+
+#[test]
+fn test_ar_thin_system_list_compat() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_thin_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // Thin members are filesystem references: GNU `ar` resolves them
+    // relative to its working directory.
+    std::fs::write(dir.join("one.txt"), b"1234").unwrap();
+    std::fs::write(dir.join("two.txt"), b"12345").unwrap();
+
+    let mut encoder = ar::encode::ArEncoder::new_thin();
+    encoder.add_file("one.txt", b"1234");
+    encoder.add_file("two.txt", b"12345");
+    let archive_path = dir.join("thin.a");
+    std::fs::write(&archive_path, encoder.finish().unwrap()).unwrap();
+
+    let output = Command::new("ar")
+        .args(["tv", "thin.a"])
+        .current_dir(&dir)
+        .output();
+    let _ = std::fs::remove_file(&archive_path);
+    let _ = std::fs::remove_file(dir.join("one.txt"));
+    let _ = std::fs::remove_file(dir.join("two.txt"));
+    let _ = std::fs::remove_dir(&dir);
+
+    if let Ok(result) = output {
+        assert!(
+            result.status.success(),
+            "ar tv failed: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let listing = String::from_utf8_lossy(&result.stdout);
+        assert!(listing.contains("one.txt"));
+        assert!(listing.contains("two.txt"));
+        assert!(listing.contains(" 4 "));
+        assert!(listing.contains(" 5 "));
+    }
+}
