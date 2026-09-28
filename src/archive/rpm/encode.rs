@@ -266,7 +266,7 @@ impl RpmEncoder {
     }
 
     /// Emit a stripped `07070X` payload (rpm's own cpio variant used
-    /// for v6 packages and v4 packages with files >= 4 GB) instead of
+    /// for v6 packages and v4 packages with files >2 GiB) instead of
     /// `newc`. Stripped entries carry no names or sizes: the header
     /// file-list tags `BASENAMES` / `DIRNAMES` / `DIRINDEXES` /
     /// `FILESIZES` (or `LONGFILESIZES` for major >= 6 / large files)
