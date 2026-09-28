@@ -50,6 +50,10 @@ pub mod pea;
 #[cfg(feature = "romfs")]
 pub mod romfs;
 
+/// Linux erofs read-only filesystem image read support.
+#[cfg(feature = "erofs")]
+pub mod erofs;
+
 /// Microsoft Cabinet (`.cab`) archive read support.
 #[cfg(feature = "mscab")]
 pub mod mscab;

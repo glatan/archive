@@ -11,8 +11,8 @@ pub(crate) mod crc16;
 #[cfg(any(feature = "macbinary", feature = "binhex"))]
 pub(crate) mod crc16ccitt;
 
-/// CRC32C (Castagnoli) checksum for Snappy framing.
-#[cfg(feature = "snappy")]
+/// CRC32C (Castagnoli) checksum for Snappy framing and erofs.
+#[cfg(any(feature = "snappy", feature = "erofs"))]
 pub(crate) mod crc32c;
 
 /// LSB-first bit reader for DEFLATE and zstd streams.

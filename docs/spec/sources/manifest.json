@@ -661,6 +661,22 @@
       "filename": "romfs.rst"
     },
     {
+      "id": "linux-erofs-doc",
+      "format": "erofs",
+      "title": "Linux kernel Documentation/filesystems/erofs.rst",
+      "version": "linux master (fetched 2026-09)",
+      "url": "https://raw.githubusercontent.com/torvalds/linux/master/Documentation/filesystems/erofs.rst",
+      "filename": "erofs.rst"
+    },
+    {
+      "id": "linux-erofs-fs-h",
+      "format": "erofs",
+      "title": "Linux kernel fs/erofs/erofs_fs.h (on-disk structures)",
+      "version": "linux master (fetched 2026-09)",
+      "url": "https://raw.githubusercontent.com/torvalds/linux/master/fs/erofs/erofs_fs.h",
+      "filename": "erofs_fs.h"
+    },
+    {
       "id": "chromium-crx3-proto",
       "format": "crx3",
       "title": "Chromium components/crx_file/crx3.proto (CRX3 file format)",

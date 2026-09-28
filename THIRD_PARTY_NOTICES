@@ -350,6 +350,14 @@ specifications or standards documents:
   Farkas) was built from source and used only to produce the
   checked-in test fixture `tests/fixtures/romfs/genromfs.romfs`;
   it is not linked or distributed.
+- erofs: Linux kernel erofs documentation and on-disk headers
+  (Documentation/filesystems/erofs.rst, fs/erofs/erofs_fs.h;
+  GPL-2.0 with Linux-syscall-note). Spec-informed implementation;
+  no code was copied. `erofs-utils` `mkfs.erofs`/`fsck.erofs`
+  (GPL-2.0+) were built from source and used only to produce and
+  cross-validate the checked-in test fixture
+  `tests/fixtures/erofs/mkfs.erofs.img`; they are not linked or
+  distributed.
 - mscfb: [MS-CFB] Compound File Binary File Format v20210625
   (Microsoft Open Specifications). Spec-informed implementation;
   no code was copied. An independently written Python reference

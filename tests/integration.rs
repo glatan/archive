@@ -56,6 +56,8 @@ use archive::archive::cramfs;
 #[cfg(feature = "crx3")]
 use archive::archive::crx3;
 use archive::archive::deb;
+#[cfg(feature = "erofs")]
+use archive::archive::erofs;
 #[cfg(feature = "git-pack")]
 use archive::archive::git_pack;
 #[cfg(feature = "mscfb")]
@@ -248,6 +250,9 @@ mod crx3_tests;
 mod deb_tests;
 #[path = "integration/deflate.rs"]
 mod deflate_tests;
+#[cfg(feature = "erofs")]
+#[path = "integration/erofs.rs"]
+mod erofs_tests;
 #[path = "integration/generated/mod.rs"]
 mod generated_tests;
 #[path = "integration/gzip.rs"]

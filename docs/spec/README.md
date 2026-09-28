@@ -125,6 +125,7 @@
 | [mscfb](mscfb/README.md) | [MS-CFB] Compound File Binary File Format v20210625 | 18 | 1 | 4 | 23 |
 | [cramfs](cramfs/README.md) | Linux kernel cramfs.rst + fs/cramfs/README + cramfs_fs.h | 18 | 1 | 4 | 23 |
 | [romfs](romfs/README.md) | Linux kernel romfs.rst | 20 | 0 | 3 | 23 |
+| [erofs](erofs/README.md) | Linux kernel erofs.rst + fs/erofs/erofs_fs.h | 27 | 2 | 3 | 32 |
 | [crx3](crx3/README.md) | Chromium components/crx_file/crx3.proto | 13 | 0 | 4 | 17 |
 | [pea](pea/README.md) | PEA file format spec (pea_help.pdf) + PeaZip pea.pas/pea_utils.pas | 16 | 1 | 4 | 21 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 24 | 0 | 3 | 27 |

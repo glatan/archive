@@ -359,7 +359,10 @@ mod tests {
 
     fn build(entries: &[(&str, bool, &[u8])], obj_algo: PeaAlgo, compression: u8) -> Vec<u8> {
         // archive header
-        let mut f = alloc::vec![MAGIC, VER, REV, 2 /* volume algo: CRC32 */, 0, 1, 1, 1, 0, 0];
+        let mut f = alloc::vec![
+            MAGIC, VER, REV, 2, /* volume algo: CRC32 */
+            0, 1, 1, 1, 0, 0
+        ];
         // stream header
         f.extend_from_slice(&[0, 0, b'P', b'O', b'D', 0]);
         f.push(compression);
