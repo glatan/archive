@@ -22,7 +22,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 1 | magic `0x044D495A` (LE u32)、major 5/6 のみ受理 | Header | ✅ | `parses_basic_zim` / `rejects_unsupported_version` |
-| 2 | entryCount / clusterCount / pathPtrPos / titlePtrPos / clusterPtrPos / mimeListPos / checksumPos を解釈 | Header | ✅ | `ZimBuilder` フィクスチャ |
+| 2 | entryCount / clusterCount / pathPtrPos / titlePtrPos / clusterPtrPos / mimeListPos / checksumPos を解釈 | Header | ✅ | `ZimBuilder` フィクスチャ。uuid (16B) は decode 無視・encode ゼロ埋め、mainPage/layoutPage は decode 未消費・encode `0xffffffff` 固定 |
 | 3 | path pointer list: entryCount × u64 offset → dirent | Path Pointer List | ✅ | `parse_dirent` |
 | 4 | Content entry: mimetype(2) + param_len(1) + namespace(1) + revision(4) + cluster(4) + blob(4) + path + title | Directory Entries | ✅ | `parses_basic_zim` |
 | 5 | Redirect entry (mimetype=0xffff): redirect_index 経由で target entry の content を解決 (多段リダイレクトは対象外、1 段のみ解決) | Directory Entries | ✅ | `resolves_redirect` |

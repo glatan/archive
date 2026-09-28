@@ -1,8 +1,9 @@
 //! ZIM archive decoding.
 //!
 //! Parses the ZIM header, path pointer list, directory entries, and
-//! cluster pointer list, then extracts entry content from stored,
-//! xz-compressed, or zstd-compressed clusters.
+//! cluster pointer list, extracts entry content from stored,
+//! xz-compressed, or zstd-compressed clusters, and verifies the
+//! trailing 16-byte MD5 archive checksum when present.
 
 use alloc::format;
 use alloc::string::String;
@@ -196,6 +197,10 @@ fn extract_blob(
 ///
 /// Redirect entries are resolved to their target's content.
 /// Entry names are exposed as `N/path` (namespace prefix).
+///
+/// When the archive carries a trailing 16-byte MD5 checksum
+/// (`checksumPos` at `len - 16`), it is verified over all
+/// preceding bytes; archives without the digest are tolerated.
 pub fn decode(input: &[u8]) -> Result<Vec<ZimEntry>, Error> {
     if input.len() < 80 {
         return Err(Error::InvalidData("zim: input too short"));
