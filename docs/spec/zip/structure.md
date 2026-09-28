@@ -91,7 +91,7 @@
 | 42 | ZIP64 EOCD Record (sig `0x06064B50`): size, versions, counts, offsets | §4.3.14 | ✅ | `test_force_zip64_roundtrip` |
 | 43 | ZIP64 EOCD Locator (sig `0x07064B50`): disk, offset, total_disks | §4.3.15 | ✅ | `test_force_zip64_roundtrip` |
 | 44 | ZIP64 EOCD extensible data sector | §4.3.14.3 | ✅ | ZIP64 EOCD パース時に明示的スキップ (size_of_record - 44 bytes) |
-| 45 | ZIP64 multi-disk: disk_number / cd_disk_number 検証 | §4.3.14 | ✅ | 0 以外は reject |
+| 45 | ZIP64 multi-disk: disk_number / cd_disk_number 検証 | §4.3.14 | ✅ | 単一入力では 0 以外 reject、`decode_parts` では `disk_number == parts-1` かつ `cd_disk_number <= disk_number` を検証 |
 
 ---
 
@@ -101,7 +101,7 @@
 |---|---------|---------|------|----------------|
 | 46 | Signature `0x06054B50` (4B) | §4.3.16 | ✅ | `find_eocd()` |
 | 47 | 後方検索 (comment length 検証付き) | §4.3.16 | ✅ | `test_decode_with_eocd_comment_backward_search` |
-| 48 | disk number / CD disk number (2B × 2) | §4.3.16 | ✅ | 0 以外は reject |
+| 48 | disk number / CD disk number (2B × 2) | §4.3.16 | ✅ | 単一入力では 0 以外 reject、`decode_parts` では `disk_number == parts-1` かつ `cd_disk_number <= disk_number` を検証 |
 | 49 | total entries (2B) / CD size (4B) / CD offset (4B) | §4.3.16 | ✅ | 0xFFFF/0xFFFFFFFF 時は ZIP64 fallback |
 | 50 | .ZIP file comment (variable) | §4.3.16, §4.4.26 | ✅ | デコード時パース済み。エンコード時は `set_archive_comment()` で設定可能 |
 
