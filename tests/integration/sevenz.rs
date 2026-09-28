@@ -169,6 +169,15 @@ fn test_sevenz_deflate_method_system_extract_compat() {
 
 #[cfg(feature = "sevenz")]
 #[test]
+fn test_sevenz_deflate64_method_system_extract_compat() {
+    encoded_method_system_extract_compat(
+        sevenz::encode::SevenZMethod::Deflate64,
+        b"crate deflate64 method payload payload payload",
+    );
+}
+
+#[cfg(feature = "sevenz")]
+#[test]
 fn test_sevenz_bzip2_method_system_extract_compat() {
     encoded_method_system_extract_compat(
         sevenz::encode::SevenZMethod::Bzip2 { level: 9 },

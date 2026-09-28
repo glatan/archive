@@ -53,6 +53,22 @@ pub fn encode(input: &[u8], level: Level) -> Vec<u8> {
     }
 }
 
+/// Encode like `encode` but cap LZ77 match lengths at `max_match`.
+///
+/// Deflate64 is a DEFLATE superset whose only behavioural difference
+/// within the classic tables is that length code 285 takes 16 extra
+/// bits instead of meaning 258. Restricting matches to <=257 keeps
+/// the stream free of code 285, so the output is a valid Deflate64
+/// stream (32 KB distances are likewise a subset of the 64 KB
+/// Deflate64 window).
+pub(crate) fn encode_max_match(input: &[u8], level: Level, max_match: usize) -> Vec<u8> {
+    match level {
+        Level::NoCompression => encode_stored(input),
+        Level::Fast => encode_compressed_with(input, level, max_match),
+        Level::Default => encode_dynamic_with(input, level, max_match),
+    }
+}
+
 /// Encode data using DEFLATE compression with a preset dictionary.
 ///
 /// The dictionary is used to pre-seed the LZ77 hash chains so that
@@ -131,6 +147,10 @@ fn encode_stored(input: &[u8]) -> Vec<u8> {
 
 /// Encode using LZ77 + fixed Huffman codes (BTYPE=01).
 fn encode_compressed(input: &[u8], level: Level) -> Vec<u8> {
+    encode_compressed_with(input, level, MAX_MATCH_LEN)
+}
+
+fn encode_compressed_with(input: &[u8], level: Level, max_match: usize) -> Vec<u8> {
     if input.is_empty() {
         let mut writer = BitWriter::new();
         writer.write_bits(1, 1); // BFINAL
@@ -139,7 +159,7 @@ fn encode_compressed(input: &[u8], level: Level) -> Vec<u8> {
         return writer.finish();
     }
 
-    let matches = lz77_compress(input, level);
+    let matches = lz77_compress_max(input, level, max_match);
 
     let mut writer = BitWriter::new();
     writer.write_bits(1, 1); // BFINAL
@@ -175,6 +195,10 @@ fn encode_compressed(input: &[u8], level: Level) -> Vec<u8> {
 /// Encode using LZ77 + dynamic Huffman codes (BTYPE=10).
 /// Falls back to fixed Huffman if dynamic doesn't improve size.
 fn encode_dynamic(input: &[u8], level: Level) -> Vec<u8> {
+    encode_dynamic_with(input, level, MAX_MATCH_LEN)
+}
+
+fn encode_dynamic_with(input: &[u8], level: Level, max_match: usize) -> Vec<u8> {
     if input.is_empty() {
         let mut writer = BitWriter::new();
         writer.write_bits(1, 1);
@@ -183,7 +207,7 @@ fn encode_dynamic(input: &[u8], level: Level) -> Vec<u8> {
         return writer.finish();
     }
 
-    let matches = lz77_compress(input, level);
+    let matches = lz77_compress_max(input, level, max_match);
 
     // Count symbol frequencies
     let mut lit_freq = vec![0u32; 286]; // 0-255 literals, 256 EOB, 257-285 length codes
@@ -690,8 +714,8 @@ const HASH_BITS: usize = 15;
 const HASH_SIZE: usize = 1 << HASH_BITS;
 
 /// Simple hash-chain LZ77 compressor.
-fn lz77_compress(input: &[u8], level: Level) -> Vec<LZ77Token> {
-    lz77_compress_with_dict(input, level, &[])
+fn lz77_compress_max(input: &[u8], level: Level, max_match: usize) -> Vec<LZ77Token> {
+    lz77_compress_with_dict_max(input, level, &[], max_match)
 }
 
 /// Simple hash-chain LZ77 compressor with optional preset dictionary.
@@ -700,6 +724,15 @@ fn lz77_compress(input: &[u8], level: Level) -> Vec<LZ77Token> {
 /// back-references can reach into dictionary content, but no tokens
 /// are emitted for the dictionary bytes.
 fn lz77_compress_with_dict(input: &[u8], level: Level, dict: &[u8]) -> Vec<LZ77Token> {
+    lz77_compress_with_dict_max(input, level, dict, MAX_MATCH_LEN)
+}
+
+fn lz77_compress_with_dict_max(
+    input: &[u8],
+    level: Level,
+    dict: &[u8],
+    max_match: usize,
+) -> Vec<LZ77Token> {
     let max_chain = match level {
         Level::NoCompression => 0,
         Level::Fast => 4,
@@ -750,12 +783,12 @@ fn lz77_compress_with_dict(input: &[u8], level: Level, dict: &[u8]) -> Vec<LZ77T
         while chain_pos >= min_pos && chain_pos < pos && chain_count < max_chain {
             let dist = pos - chain_pos;
             if dist > 0 && dist <= WINDOW_SIZE {
-                let max_len = MAX_MATCH_LEN.min(combined.len() - pos);
+                let max_len = max_match.min(combined.len() - pos);
                 let match_len = count_match(&combined[chain_pos..], &combined[pos..], max_len);
                 if match_len > best_len {
                     best_len = match_len;
                     best_dist = dist as u16;
-                    if best_len == MAX_MATCH_LEN {
+                    if best_len == max_match {
                         break;
                     }
                 }
