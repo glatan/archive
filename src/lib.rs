@@ -69,6 +69,10 @@
 //! | `lzrw3a` (default) | LZRW3-A raw codec |
 //! | `lzsa` (default) | LZSA stream / LZSA1 / LZSA2 raw codecs |
 //! | `lzxd` (default) | LZX DELTA (MS-PATCH) codec (decode; uncompressed-block encode) |
+//! | `cmpsc` (default) | IBM CMPSC (z/Arch compression call) codec |
+//! | `packbits` (default) | PackBits RLE codec (Apple TN1023 / TIFF §9) |
+//! | `uuencode` (default) | uuencode historical algorithm (POSIX.1-2017) |
+//! | `ascii85` (default) | Ascii85 (Adobe ASCII85Decode + RFC 1924) |
 //! | `tar` (default) | tar archive format |
 //! | `cpio` (default) | cpio archive format |
 //! | `ar` (default) | GNU/BSD `ar` archive format |
@@ -487,7 +491,8 @@ pub(crate) mod util;
     feature = "mppc",
     feature = "lzs",
     feature = "lzxd",
-    feature = "cmpsc"
+    feature = "cmpsc",
+    feature = "packbits"
 ))]
 pub mod compress;
 

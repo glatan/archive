@@ -579,6 +579,14 @@
       "version": "PDF 32000-1:2008",
       "url": "https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/PDF32000_2008.pdf",
       "filename": "pdf32000_2008.pdf"
+    },
+    {
+      "id": "tiff6",
+      "format": "packbits",
+      "title": "TIFF Revision 6.0 (Section 9: PackBits Compression)",
+      "version": "TIFF 6.0 (June 3, 1992)",
+      "url": "https://download.osgeo.org/libtiff/doc/TIFF6.pdf",
+      "filename": "tiff6.pdf"
     }
   ],
   "no_url_available": [
@@ -685,6 +693,17 @@
       "version": "ARC 5.x/6.x de facto",
       "note": "正式標準なし。wotsit 'arc' entry の fileformat.info mirror を sources/arc_format_corion.htm にスナップショット済み",
       "reference_url": "https://www.fileformat.info/format/arc/corion.htm"
+    },
+    {
+      "id": "apple-tn1023",
+      "format": "packbits",
+      "title": "Apple Technical Note TN1023 'Understanding PackBits'",
+      "version": "TN1023 (February 1996)",
+      "note": "Apple のオリジナル URL は消滅。sources/apple_tn1023_packbits.html にスナップショット済み (preterhuman.net ミラー)",
+      "reference_url": [
+        "https://developer.apple.com/library/mac/technotes/tn1023/_index.html",
+        "https://preterhuman.net/"
+      ]
     }
   ]
 }

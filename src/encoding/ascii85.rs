@@ -41,16 +41,15 @@ fn push_group(out: &mut Vec<u8>, value: u32) {
 pub fn encode(data: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(data.len() / 4 * 5 + 4);
     out.extend_from_slice(b"<~");
-    let mut chunks = data.chunks_exact(4);
-    for chunk in &mut chunks {
-        let value = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+    let (chunks, rem) = data.as_chunks::<4>();
+    for chunk in chunks {
+        let value = u32::from_be_bytes(*chunk);
         if value == 0 {
             out.push(ADOBE_SHORTHAND);
         } else {
             push_group(&mut out, value);
         }
     }
-    let rem = chunks.remainder();
     if !rem.is_empty() {
         let mut buf = [0u8; 4];
         buf[..rem.len()].copy_from_slice(rem);
@@ -199,7 +198,7 @@ mod tests {
         assert_eq!(&enc[..], b"<~z~>");
         assert_eq!(decode(b"z").unwrap(), [0; 4]);
         // 'z' may not appear inside a group.
-        assert!(decode(b"zz9jq").is_err() == false);
+        assert!(!decode(b"zz9jq").is_err());
         assert!(decode(b"9jqz").is_err());
     }
 

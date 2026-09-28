@@ -107,6 +107,7 @@
 | [cmpsc](cmpsc/README.md) | IBM z/Arch POP App.D / ESA/390 Data Compression + APPNOTE method 16 | 20 | 0 | 0 | 20 |
 | [rzip](rzip/README.md) | rzip `.rz` format (upstream 2.1) | 20 | 0 | 0 | 20 |
 | [lrzip](lrzip/README.md) | lrzip `.lrz` format (crate-local subset) | 38 | 0 | 0 | 38 |
+| [packbits](packbits/README.md) | Apple TN1023 + TIFF 6.0 §9 | 12 | 0 | 3 | 15 |
 | [xz](xz/README.md) | xz-file-format.txt | 54 | 0 | 0 | 54 |
 | [ZPAQ](zpaq/README.md) | ZPAQ Level 1/2 specification (zpaq206.pdf) + crate bounded contract (archive 層) | — | — | — | bounded contract |
 
@@ -149,9 +150,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1903 |
+| ✅ 実装+テスト済み | 1915 |
 | ⚠️ 部分実装 | 2 |
-| ❌ 未実装 | 45 |
-| **合計** | **1951** |
+| ❌ 未実装 | 48 |
+| **合計** | **1966** |
 
-**全体カバー率**: 1903 / 1951 = **97.5%** (intentional exclusion 除外後: 1903 / 1905 = **99.9%**)
+**全体カバー率**: 1915 / 1966 = **97.4%** (intentional exclusion 除外後: 1915 / 1917 = **99.9%**)

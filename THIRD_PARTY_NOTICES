@@ -316,6 +316,9 @@ specifications or standards documents:
   RFC 1924 Base-85. Spec-informed implementation; no code was copied.
   CPython `base64` (PSF License) is invoked only as a local test-time
   interoperability oracle; it is not linked or distributed.
+- packbits: Apple Technical Note TN1023 "Understanding PackBits" and
+  TIFF Revision 6.0 Section 9 "PackBits Compression". Spec-informed
+  implementation; no code was copied.
 - zip: PKWARE APPNOTE.TXT 6.3.10
 - 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00)
 - LZMA codec: LZMA algorithm specification (`lzma-specification.txt`)
