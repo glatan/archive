@@ -89,6 +89,32 @@ fn encode_roundtrip() {
     assert!(find(&entries, "emptydir").is_dir);
 }
 
+/// Corrupting stored heap bytes is caught by the per-file
+/// `archived-checksum` digest (verified before decompression).
+#[test]
+fn archived_checksum_catches_tampered_heap() {
+    let mut enc = archive::archive::xar::encode::XarEncoder::new();
+    enc.add_file("payload.txt", b"archived checksum coverage\n");
+    let mut bytes = enc.finish();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0x01;
+    let err = archive::archive::xar::decode::decode(&bytes).unwrap_err();
+    assert!(
+        err.to_string().contains("archived-checksum"),
+        "unexpected error: {err}"
+    );
+}
+
+/// A valid archive with `archived-checksum` verifies cleanly.
+#[test]
+fn archived_checksum_verified_on_valid_archive() {
+    let mut enc = archive::archive::xar::encode::XarEncoder::new();
+    enc.add_file("ok.txt", b"verify me");
+    let bytes = enc.finish();
+    let entries = archive::archive::xar::decode::decode(&bytes).unwrap();
+    assert_eq!(find(&entries, "ok.txt").data(), b"verify me");
+}
+
 #[test]
 fn encode_xml_escape() {
     let mut enc = archive::archive::xar::encode::XarEncoder::new();
