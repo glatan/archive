@@ -82,7 +82,7 @@
 | [lzip](lzip/README.md) | lzip マニュアル | 39 | 0 | 0 | 39 |
 | [`.lzma`](lzma_alone/README.md) | lzma-file-format.txt (tukaani/xz doc) | 25 | 0 | 0 | 25 |
 | [LZW](lzw/README.md) | ncompress `compress42.c` (de facto) | 21 | 0 | 0 | 21 |
-| [LZ4](lz4/README.md) | LZ4 Frame/Block Format | 58 | 0 | 0 | 58 |
+| [LZ4](lz4/README.md) | LZ4 Frame/Block Format | 56 | 0 | 0 | 56 |
 | [LZO](lzo/README.md) | kernel `Documentation/lzo.txt` + lzop format | 39 | 0 | 0 | 39 |
 | [Snappy](snappy/README.md) | snappy format_description / framing_format | 35 | 0 | 0 | 35 |
 | [Brotli](brotli/README.md) | RFC 7932 | 52 | 0 | 0 | 52 |
@@ -93,7 +93,7 @@
 | [zx0](zx0/README.md) | ZX0 v2 README (BSD-3) | 20 | 0 | 0 | 20 |
 | [zx1](zx1/README.md) | ZX1 README (BSD-3) | 21 | 0 | 0 | 21 |
 | [zx2](zx2/README.md) | ZX2 README (BSD-3) | 20 | 0 | 0 | 20 |
-| [zx5](zx5/README.md) | ZX5 README (BSD-3) | 24 | 0 | 0 | 24 |
+| [zx5](zx5/README.md) | ZX5 README (BSD-3) | 23 | 0 | 0 | 23 |
 | [vcdiff](vcdiff/README.md) | RFC 3284 | 30 | 0 | 0 | 30 |
 | [mppc](mppc/README.md) | RFC 2118 | 31 | 1 | 0 | 32 |
 | [lzs](lzs/README.md) | RFC 2395 (§2.2 = ANSI X3.241 informational 転記) | 26 | 0 | 0 | 26 |
@@ -108,7 +108,7 @@
 | [rzip](rzip/README.md) | rzip `.rz` format (upstream 2.1) | 20 | 0 | 0 | 20 |
 | [lrzip](lrzip/README.md) | lrzip `.lrz` format (crate-local subset) | 38 | 0 | 0 | 38 |
 | [packbits](packbits/README.md) | Apple TN1023 + TIFF 6.0 §9 | 12 | 0 | 3 | 15 |
-| [xz](xz/README.md) | xz-file-format.txt | 54 | 0 | 0 | 54 |
+| [xz](xz/README.md) | xz-file-format.txt | 55 | 0 | 0 | 55 |
 | [ZPAQ](zpaq/README.md) | ZPAQ Level 1/2 specification (zpaq206.pdf) + crate bounded contract (archive 層) | — | — | — | bounded contract |
 
 ### アーカイブフォーマット
@@ -119,26 +119,26 @@
 | [cpio](cpio/README.md) | POSIX `odc` / SVR4 `newc`/`newcrc`/`bin` | 42 | 1 | 0 | 43 |
 | [ar](ar/README.md) | IEEE Std 1003.1 / GNU ar / BSD ar | 27 | 0 | 0 | 27 |
 | [deb](deb/README.md) | deb(5) (dpkg) | 25 | 0 | 2 | 27 |
-| [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 33 | 0 | 2 | 35 |
-| [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 37 | 0 | 6 | 43 |
-| [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 24 | 0 | 3 | 27 |
+| [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 32 | 0 | 2 | 34 |
+| [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 35 | 0 | 6 | 41 |
+| [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 23 | 0 | 3 | 26 |
 | [mscfb](mscfb/README.md) | [MS-CFB] Compound File Binary File Format v20210625 | 18 | 1 | 4 | 23 |
 | [cramfs](cramfs/README.md) | Linux kernel cramfs.rst + fs/cramfs/README + cramfs_fs.h | 18 | 1 | 4 | 23 |
 | [romfs](romfs/README.md) | Linux kernel romfs.rst | 20 | 0 | 3 | 23 |
-| [erofs](erofs/README.md) | Linux kernel erofs.rst + fs/erofs/erofs_fs.h | 27 | 2 | 3 | 32 |
-| [iso9660](iso9660/README.md) | ECMA-119 + SUSP 1.10 + RRIP 1.12 + Joliet | 30 | 2 | 8 | 40 |
+| [erofs](erofs/README.md) | Linux kernel erofs.rst + erofs_fs.h (+ erofs-utils include/erofs_fs.h) | 27 | 2 | 4 | 33 |
+| [iso9660](iso9660/README.md) | ECMA-119 + SUSP 1.10 + RRIP 1.12 + Joliet | 32 | 2 | 8 | 42 |
 | [crx3](crx3/README.md) | Chromium components/crx_file/crx3.proto | 13 | 0 | 4 | 17 |
 | [pea](pea/README.md) | PEA file format spec (pea_help.pdf) + PeaZip pea.pas/pea_utils.pas | 16 | 1 | 4 | 21 |
-| [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 24 | 0 | 3 | 27 |
+| [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 21 | 0 | 3 | 24 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
 | [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 24 | 0 | 5 | 29 |
-| [lha](lha/README.md) | lha header documentation (apphead / lzh_note) | 21 | 0 | 2 | 23 |
+| [lha](lha/README.md) | lha header documentation (apphead / lzh_note) | 19 | 0 | 2 | 21 |
 | [arj](arj/README.md) | ARJ technical note (ARJ 2.x) | 18 | 0 | 4 | 22 |
 | [arc](arc/README.md) | SEA ARC file format description | 14 | 0 | 3 | 17 |
-| [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 38 | 0 | 5 | 43 |
+| [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 32 | 0 | 5 | 37 |
 | [xar](xar/README.md) | xarformat (mackyle/xar wiki) | 32 | 0 | 6 | 38 |
 | [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 151 | 0 | 2 | 154 |
-| [7z](sevenz/README.md) | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) | 120 | 0 | 0 | 120 |
+| [7z](sevenz/README.md) | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) | 115 | 0 | 0 | 115 |
 
 ### エンコードフォーマット
 
@@ -160,9 +160,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 2086 |
-| ⚠️ 部分実装 | 5 |
-| ❌ 未実装 | 88 |
-| **合計** | **2179** |
+| ✅ 実装+テスト済み | 2157 |
+| ⚠️ 部分実装 | 9 |
+| ❌ 未実装 | 92 |
+| **合計** | **2258** |
 
-**全体カバー率**: 2086 / 2179 = **95.7%** (intentional exclusion 除外後: 2086 / 2091 = **99.8%**)
+**全体カバー率**: 2157 / 2258 = **95.5%** (intentional exclusion 除外後: 2157 / 2167 = **99.5%**)

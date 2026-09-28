@@ -10,7 +10,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 1 | magic `0xE0F5E1E2` at `EROFS_SUPER_OFFSET` (1024) | erofs_fs.h `EROFS_SUPER_OFFSET` / `EROFS_SUPER_MAGIC_V1` | ✅ | `rejects_bad_magic` |
+| 1 | magic `0xE0F5E1E2` at `EROFS_SUPER_OFFSET` (1024) | erofs_fs.h `EROFS_SUPER_OFFSET`、erofs-utils `include/erofs_fs.h` `EROFS_SUPER_MAGIC_V1` | ✅ | `rejects_bad_magic` |
 | 2 | `blkszbits` は 9..=16、`blksz = 1 << blkszbits` | erofs_fs.h `blkszbits`、erofs-utils の検証 | ✅ | decode 時検証 |
 | 3 | `sb_extslots`: superblock size = 128 + slots*16 | erofs_fs.h `EROFS_SB_EXTSLOT_SIZE` | ✅ | decode 時検証 |
 | 4 | `EROFS_FEATURE_COMPAT_SB_CHKSUM`: `blksz - 1024` バイトの CRC32C (checksum フィールド zero、seed ~0、final complement なし) | erofs-utils `erofs_superblock_csum_verify` | ✅ | `test_erofs_rejects_bad_superblock_checksum`、実 mkfs fixture (compat `sb_csum` 付き) で検証 |
