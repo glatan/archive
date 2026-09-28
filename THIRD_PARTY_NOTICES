@@ -322,6 +322,11 @@ specifications or standards documents:
   implementation written independently from the spec text is used
   only as a local test-time interoperability oracle; it is not
   linked or distributed.
+- macbinary: MacBinary II Standard Proposal (24-Jul-1987, MacBinary II
+  Conference). Spec-informed implementation; no code was copied.
+  A Python reference implementation written independently from the
+  spec text is used only as a local test-time interoperability
+  oracle; it is not linked or distributed.
 - packbits: Apple Technical Note TN1023 "Understanding PackBits" and
   TIFF Revision 6.0 Section 9 "PackBits Compression". Spec-informed
   implementation; no code was copied.

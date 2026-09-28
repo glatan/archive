@@ -14,6 +14,10 @@ pub mod uuencode;
 #[cfg(feature = "yenc")]
 pub mod yenc;
 
+/// MacBinary II container format.
+#[cfg(feature = "macbinary")]
+pub mod macbinary;
+
 /// Ascii85 (Adobe  and RFC 1924 Base-85).
 #[cfg(feature = "ascii85")]
 pub mod ascii85;

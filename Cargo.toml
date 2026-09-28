@@ -3,10 +3,10 @@ name = "archive"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Pure Rust archive and compression library (DEFLATE, gzip, zlib, zstd, bzip2, lzip, lzma, xz, LZW, LZ4, LZO, Snappy, Brotli, ZPAQ, rzip, lrzip, tar, cpio, ar, zip, 7z, deb, rpm, squashfs, mscab, zim, mtree, warc, lha, arj, arc, git-pack, xar, xca, lzf, fastlz, lzrw1, lzrw1a, lzrw2, lzrw3, lzrw3a, lzsa, zx0, zx1, zx2, zx5, vcdiff, mppc, lzs, lzxd, cmpsc, uuencode, ascii85, yenc, packbits)"
+description = "Pure Rust archive and compression library (DEFLATE, gzip, zlib, zstd, bzip2, lzip, lzma, xz, LZW, LZ4, LZO, Snappy, Brotli, ZPAQ, rzip, lrzip, tar, cpio, ar, zip, 7z, deb, rpm, squashfs, mscab, zim, mtree, warc, lha, arj, arc, git-pack, xar, xca, lzf, fastlz, lzrw1, lzrw1a, lzrw2, lzrw3, lzrw3a, lzsa, zx0, zx1, zx2, zx5, vcdiff, mppc, lzs, lzxd, cmpsc, uuencode, ascii85, yenc, macbinary, packbits)"
 
 [features]
-default = ["std", "tar", "cpio", "ar", "deb", "rpm", "squashfs", "mscab", "zim", "mtree", "warc", "lha", "arj", "arc", "git-pack", "xar", "xca", "lzf", "fastlz", "lzrw1", "lzrw1a", "lzrw2", "lzrw3", "lzrw3a", "lzsa", "zx0", "zx1", "zx2", "zx5", "vcdiff", "mppc", "lzs", "lzxd", "cmpsc", "uuencode", "ascii85", "yenc", "packbits", "gzip", "zstd", "bzip2", "lzip", "lzma-alone", "lzw", "lz4", "lzo", "lrzip", "xz", "zlib", "zpaq", "rzip", "snappy"]
+default = ["std", "tar", "cpio", "ar", "deb", "rpm", "squashfs", "mscab", "zim", "mtree", "warc", "lha", "arj", "arc", "git-pack", "xar", "xca", "lzf", "fastlz", "lzrw1", "lzrw1a", "lzrw2", "lzrw3", "lzrw3a", "lzsa", "zx0", "zx1", "zx2", "zx5", "vcdiff", "mppc", "lzs", "lzxd", "cmpsc", "uuencode", "ascii85", "yenc", "macbinary", "packbits", "gzip", "zstd", "bzip2", "lzip", "lzma-alone", "lzw", "lz4", "lzo", "lrzip", "xz", "zlib", "zpaq", "rzip", "snappy"]
 std = []
 tar = []
 cpio = []
@@ -44,6 +44,7 @@ cmpsc = []
 uuencode = []
 ascii85 = []
 yenc = []
+macbinary = []
 packbits = []
 gzip = ["deflate"]
 deflate = []

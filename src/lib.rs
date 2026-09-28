@@ -74,6 +74,7 @@
 //! | `uuencode` (default) | uuencode historical algorithm (POSIX.1-2017) |
 //! | `ascii85` (default) | Ascii85 (Adobe ASCII85Decode + RFC 1924) |
 //! | `yenc` (default) | yEnc binary-to-text encoding (draft 1.3) |
+//! | `macbinary` (default) | MacBinary II container format |
 //! | `tar` (default) | tar archive format |
 //! | `cpio` (default) | cpio archive format |
 //! | `ar` (default) | GNU/BSD `ar` archive format |
@@ -520,6 +521,11 @@ pub mod compress;
 ))]
 pub mod archive;
 
-/// Byte encodings: uuencode, Ascii85, yEnc.
-#[cfg(any(feature = "uuencode", feature = "ascii85", feature = "yenc"))]
+/// Byte encodings: uuencode, Ascii85, yEnc, MacBinary.
+#[cfg(any(
+    feature = "uuencode",
+    feature = "ascii85",
+    feature = "yenc",
+    feature = "macbinary"
+))]
 pub mod encoding;
