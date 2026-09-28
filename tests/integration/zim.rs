@@ -93,3 +93,27 @@ fn test_zim_rejects_truncated_header() {
     let zim = build_zim(b"x", &stored_cluster(b"x"), 1);
     assert!(archive::archive::zim::decode::decode(&zim[..30]).is_err());
 }
+
+#[test]
+fn test_zim_encoder_roundtrip() {
+    use archive::archive::zim::encode::{ZimCompression, ZimEncoder};
+    let mut enc = ZimEncoder::with_compression(ZimCompression::Zstd);
+    enc.add_file("C/index.html", b"<html><body>hello zim</body></html>");
+    enc.add_file("C/style.css", b"body { margin: 0 }".repeat(100).as_slice());
+    let zim = enc.finish().unwrap();
+    let entries = archive::archive::zim::decode::decode(&zim).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].name, "C/index.html");
+    assert_eq!(entries[1].data.len(), 18 * 100);
+}
+
+#[test]
+fn test_zim_encoder_xz_stored() {
+    use archive::archive::zim::encode::{ZimCompression, ZimEncoder};
+    for comp in [ZimCompression::None, ZimCompression::Xz] {
+        let mut enc = ZimEncoder::with_compression(comp);
+        enc.add_file("A/f.bin", &[0xAB; 1000]);
+        let entries = archive::archive::zim::decode::decode(&enc.finish().unwrap()).unwrap();
+        assert_eq!(entries[0].data, vec![0xAB; 1000]);
+    }
+}

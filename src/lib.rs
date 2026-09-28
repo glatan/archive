@@ -76,7 +76,7 @@
 //! | `rpm` (default) | RPM package (`.rpm`) read/write support |
 //! | `squashfs` (default) | SquashFS image read support |
 //! | `mscab` (default) | Microsoft Cabinet (`.cab`) read/write support (MSZIP/stored) |
-//! | `zim` (default) | ZIM archive (`.zim`) read support |
+//! | `zim` (default) | ZIM archive (`.zim`) read/write support (v5 write) |
 //! | `mtree` (default) | mtree(5) manifest read/write support |
 //! | `warc` (default) | WARC (`.warc`) record read/write support |
 //! | `git-pack` (default) | Git pack (`pack-*.pack`/`pack-*.idx`) read/write support |

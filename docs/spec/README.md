@@ -121,7 +121,7 @@
 | [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 32 | 0 | 3 | 35 |
 | [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 26 | 0 | 5 | 31 |
 | [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 22 | 0 | 5 | 27 |
-| [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 16 | 0 | 5 | 21 |
+| [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 20 | 0 | 5 | 25 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
 | [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 24 | 0 | 3 | 27 |
 | [lha](lha/README.md) | lha header documentation (apphead / lzh_note) | 21 | 0 | 2 | 23 |
