@@ -72,7 +72,6 @@
 
 | 候補 | 狙い | 前提 |
 |---|---|---|
-| [zip](zip/README.md) extra field round-trip 拡張 | 認識済み extra field の encode/decode 保持 | 対応済み field の一覧は zip 側の要件表を参照 |
 | [rzip](rzip/README.md) / [lrzip](lrzip/README.md) interop 拡張 | system tool parity を encode 側にも広げる | 先に current subset と新規 claim の境界を direct interop test で固定する |
 
 ---

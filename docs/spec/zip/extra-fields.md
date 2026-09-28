@@ -9,14 +9,14 @@
 | 93 | Header ID 0x0001: Local Header は original + compressed 必須 | §4.5.3 | ✅ | Local/CD 両方で parse |
 | 94 | Header ID 0x0007: AV Info | §4.5.2 | ✅ | extra field パーサーが未知 ID として正しくスキップ |
 | 95 | Header ID 0x000a: NTFS (Mtime/Atime/Ctime) | §4.5.5 | ✅ | decode: `ZipHeader.ntfs_mtime/atime/ctime` に公開。encode: 書き込み対応。`test_ntfs_timestamp_roundtrip` |
-| 96 | Header ID 0x000d: UNIX (Atime/Mtime/Uid/Gid) | §4.5.7 | ✅ | decode: `ZipHeader.unix_uid/gid` に公開。encode: 書き込み対応。`test_unix_uid_gid_roundtrip` |
+| 96 | Header ID 0x000d: UNIX (Atime/Mtime/Uid/Gid) | §4.5.7 | ✅ | decode: `ZipHeader.unix_uid/gid` に公開。encode: 書き込み対応 (uid/gid + unix_atime/mtime 設定時は AcTime/ModTime に実値)。`test_unix_uid_gid_roundtrip`, `test_unix_extra_field_times` |
 | 97 | Header ID 0x0017: Strong Encryption Header | §4.5.12 | ✅ | パース + AES-128/192/256 復号対応。`test_parse_strong_encryption_extra_aes256`, `test_strong_encryption_aes256_decrypt`, `test_strong_encryption_aes192_decrypt`, `test_strong_encryption_aes128_decrypt` |
 | 98 | Header ID 0x5455: extended timestamp (Info-ZIP) | §4.6 third-party | ✅ | decode: `ZipHeader.unix_mtime/atime` に公開。encode: 書き込み対応。`test_unix_timestamp_roundtrip` |
 | 99 | Header ID 0x7075: Info-ZIP Unicode Path | §4.6.9 | ✅ | decode: `ZipHeader.unicode_path` に公開。encode: extra field 0x7075 書き込み対応 |
 | 100 | Header ID 0x9901: WinZip AES | Appendix E | ✅ | `test_roundtrip_aes_encrypted_single_file` |
 | 101 | 未知 extra field: スキップ (round-trip しない) | §4.5 | ✅ | パーサーで skip |
 | 153 | ZIP64 extra field: conditional presence (sentinel 値の場合のみ出現) | §4.5.3 | ✅ | `parse_zip64_extra()` で `need_compressed`/`need_uncompressed`/`need_offset` フラグで制御 |
-| 154 | Unicode Comment Extra Field (0x6375) | §4.6.8 | ✅ | decode: `ZipHeader.unicode_comment` に公開。`parse_unicode_comment_extra()` |
+| 154 | Unicode Comment Extra Field (0x6375) | §4.6.8 | ✅ | decode: `ZipHeader.unicode_comment` に公開。encode: `ZipEntryOptions.unicode_comment` で 0x6375 書き込み対応。`test_unicode_comment_roundtrip`, `test_reencode_preserves_extra_fields` |
 
 ---
 
