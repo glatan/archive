@@ -42,7 +42,7 @@
 | 20 | その他の encoding (bzip2/lzma/xz 等) は reject | crate intentional scope | ✅ | `reject_bzip2_encoding` |
 | 21 | `<size>` があれば伸張後サイズと一致必須 | 同上 | ✅ | 実装 + `decode_real` 経由 |
 | 22 | `<extracted-checksum style="sha1|md5">` は伸張後データの digest。不一致は reject。未知 style は検証しない | 同上 | ✅ | `bad_extracted_checksum`, `decode_md5_checksums` |
-| 23 | `<archived-checksum>` は格納バイト列の digest (verify は optional scope、現在は生成のみ) | 同上 | ⚠️ | encode で生成、decode は未検証 (見出し後述) |
+| 23 | `<archived-checksum>` は格納バイト列の digest。伸張前に検証、不一致は reject。未知 style は検証しない | 同上 | ✅ | `archived_checksum_catches_tampered_heap`, `archived_checksum_verified_on_valid_archive` |
 
 ## エントリモデル / encode
 
@@ -71,6 +71,5 @@
 | 34 | `<signature>` / xar 署名検証 | OpenSSL/CMS 署名で crate スコープ外 |
 | 35 | bzip2/lzma/xz エンコードの data | libxar が対応するが crate は gzip(zlib)/stored のみに限定 (追加 feature なしで完結するため) |
 | 36 | cksum_alg=3 の "sha1"/"md5" 以外の digest 名 | OpenSSL digest 名依存 (sha256 等)。sha1/md5 は受理 |
-| 37 | `<archived-checksum>` の decode 時検証 | extracted-checksum で伸張後完全性は担保済み。格納バイトの追加検証は冗長 |
-| 38 | hardlink/character/block special の実データ展開 | TOC メタデータは保持するが特殊ファイル生成は対象外 |
-| 39 | heap 内エントリのストリーミング順序要件 (ea を data より先に置き per-file でグループ化する推奨) | 本実装は heap 全体をランダムアクセスで読むため順序制約は不要 |
+| 37 | hardlink/character/block special の実データ展開 | TOC メタデータは保持するが特殊ファイル生成は対象外 |
+| 38 | heap 内エントリのストリーミング順序要件 (ea を data より先に置き per-file でグループ化する推奨) | 本実装は heap 全体をランダムアクセスで読むため順序制約は不要 |

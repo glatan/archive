@@ -128,7 +128,7 @@
 | [arj](arj/README.md) | ARJ technical note (ARJ 2.x) | 18 | 0 | 4 | 22 |
 | [arc](arc/README.md) | SEA ARC file format description | 14 | 0 | 3 | 17 |
 | [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 36 | 0 | 6 | 42 |
-| [xar](xar/README.md) | xarformat (mackyle/xar wiki) | 31 | 1 | 7 | 39 |
+| [xar](xar/README.md) | xarformat (mackyle/xar wiki) | 32 | 0 | 6 | 38 |
 | [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 150 | 0 | 3 | 153 |
 | [7z](sevenz/README.md) | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) | 120 | 0 | 0 | 120 |
 
@@ -142,9 +142,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1852 |
-| ⚠️ 部分実装 | 3 |
-| ❌ 未実装 | 52 |
-| **合計** | **1907** |
+| ✅ 実装+テスト済み | 1853 |
+| ⚠️ 部分実装 | 2 |
+| ❌ 未実装 | 51 |
+| **合計** | **1906** |
 
-**全体カバー率**: 1852 / 1906 = **97.2%** (intentional exclusion 除外後: 1852 / 1854 = **99.9%**)
+**全体カバー率**: 1853 / 1905 = **97.3%** (intentional exclusion 除外後: 1853 / 1855 = **99.9%**)

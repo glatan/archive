@@ -4,7 +4,8 @@
 //! contents, verifies the TOC checksum stored at the start of the
 //! heap, and extracts file data from the heap (stored or
 //! `application/x-gzip` zlib-compressed), verifying per-file
-//! `extracted-checksum` values when present.
+//! `extracted-checksum` values when present, and
+//! `archived-checksum` digests over the stored bytes.
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -195,6 +196,19 @@ fn walk_file(
             .filter(|&end| end <= heap.len())
             .ok_or_else(|| invalid("xar: data out of heap bounds"))?;
         let stored = &heap[offset..end];
+        // Verify archived-checksum over the stored bytes before
+        // decompression; unknown digest styles are not verified.
+        if let Some(cs) = d.child("archived-checksum")
+            && let Some(style) = cs.attr("style")
+        {
+            let expected =
+                hex_bytes(cs.text.trim()).ok_or_else(|| invalid("xar: bad archived-checksum"))?;
+            if let "sha1" | "md5" = style
+                && digest(style, stored)?[..] != expected[..]
+            {
+                return Err(invalid("xar: archived-checksum mismatch"));
+            }
+        }
         let encoding = d
             .child("encoding")
             .and_then(|e| e.attr("style"))
