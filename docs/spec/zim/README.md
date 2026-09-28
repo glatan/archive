@@ -4,7 +4,7 @@
 |------|------|
 | 基準仕様 | openZIM Wiki "[ZIM file format](https://wiki.openzim.org/wiki/ZIM_file_format)" (ローカルスナップショット: `docs/spec/sources/zim_file_format.html`) |
 | 形式概要 | 80B header + MIME list + path/title pointer list + dirent + cluster pointer list + blob cluster |
-| 実装範囲 | read/write (write は v5 単一 cluster・content entry のみ)。MIME メタデータ公開 / title index 検索 API / archive checksum 検証は intentional scope 外 |
+| 実装範囲 | read/write (write は v5 単一 cluster・content entry のみ)。MIME メタデータ公開 / title index 検索 API は intentional scope 外 |
 
 参照: <https://wiki.openzim.org/wiki/ZIM_file_format>
 
@@ -56,12 +56,12 @@
 | 18 | encode: cluster compression none (1) / xz (4) / zstd (5) を選択可能。offset table + blob 列を単一 stream で圧縮 | Clusters | ✅ | `xz_and_zstd_roundtrip`, `test_zim_encoder_xz_stored` |
 | 19 | encode: 末尾 16B MD5 archive checksum を実値出力 | Header checksumPos | ✅ | `emits_md5_checksum` |
 | 20 | encode: path pointer list は path ソート順、title pointer list は title (=path) ソートの u32 dirent index 列 | Path/Title Pointer List | ✅ | `stored_roundtrip` (decode が pathPtr 経由で解決) |
+| 21 | archive MD5 checksum 検証 | Header checksumPos | ✅ | `verifies_archive_md5`・`rejects_bad_archive_md5`・`rejects_tampered_content_via_md5` (末尾 digest 存在時のみ検証、欠落は許容)。write は実値出力済み (行 19) |
 
 ### Intentional scope (実装対象外)
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 21 | archive MD5 checksum 検証 | Header checksumPos | ❌ | read 側はパースのみ (検証は行わない)。write は実値出力済み |
 | 22 | title pointer list / fulltext index の検索 API | Title Pointer List | ❌ | archive listing/extract には path index のみ使用。write はソート済み index を出力するが検索 API は提供しない |
 | 23 | MIME type メタデータの公開 | MIME Type List | ❌ | コンテンツ種別は `ArchiveEntry` に含めない (encode は単一 MIME 指定可) |
 | 24 | split archive (.zimaa/.zimab...) | Split ZIM archives | ❌ | 単一ファイルのみ |

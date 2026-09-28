@@ -9,6 +9,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::error::Error;
+use crate::util::md5::md5;
 
 const MAGIC: u32 = 0x044D_495A; // 72173914
 
@@ -282,6 +283,16 @@ pub fn decode(input: &[u8]) -> Result<Vec<ZimEntry>, Error> {
             name: d.name.clone(),
             data,
         });
+    }
+
+    // Archive checksum: checksumPos points to the trailing 16-byte MD5
+    // over all preceding bytes. Verify it when present; archives without
+    // the trailing digest (checksumPos not at end - 16) are tolerated.
+    if checksum_pos != 0
+        && checksum_pos + 16 == input.len()
+        && md5(&input[..checksum_pos]) != input[checksum_pos..]
+    {
+        return Err(Error::InvalidData("zim: archive checksum mismatch"));
     }
     Ok(entries)
 }
@@ -696,5 +707,44 @@ mod tests {
         });
         b.clusters.push((CLUSTER_NONE, stored_cluster(&[b"only"])));
         assert!(decode(&b.build()).is_err());
+    }
+
+    /// Build an archive carrying a real trailing MD5 checksum.
+    fn build_with_md5() -> Vec<u8> {
+        let mut b = ZimBuilder::new();
+        b.entries.push(DirentSpec::Content {
+            cluster: 0,
+            blob: 0,
+            ns: b'C',
+            path: "x",
+        });
+        b.clusters.push((CLUSTER_NONE, stored_cluster(&[b"data"])));
+        let mut data = b.build();
+        data.extend_from_slice(&md5(&data));
+        data
+    }
+
+    #[test]
+    fn verifies_archive_md5() {
+        let data = build_with_md5();
+        let entries = decode(&data).unwrap();
+        assert_eq!(entries[0].data, b"data");
+    }
+
+    #[test]
+    fn rejects_bad_archive_md5() {
+        let mut data = build_with_md5();
+        let last = data.len() - 1;
+        data[last] ^= 0x01;
+        assert!(decode(&data).is_err());
+    }
+
+    #[test]
+    fn rejects_tampered_content_via_md5() {
+        // Corrupt a payload byte: structure still parses, checksum catches it.
+        let mut data = build_with_md5();
+        let n = data.len();
+        data[n - 18] ^= 0xff; // inside the cluster, before the digest
+        assert!(decode(&data).is_err());
     }
 }
