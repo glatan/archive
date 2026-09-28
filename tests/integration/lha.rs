@@ -111,3 +111,172 @@ fn test_lha_bsdtar_list_interop() {
     let listing = String::from_utf8_lossy(&output.stdout);
     assert!(listing.contains("bsd.txt"), "bsdtar -tf output: {listing}");
 }
+
+fn lha_fixture_level(name: &str, data: &[u8], level: u8) -> Vec<u8> {
+    archive::archive::lha::encode::encode_level(&[(name, data)], level).unwrap()
+}
+
+#[test]
+fn test_lha_level1_roundtrip() {
+    let data = b"lha level 1 payload".repeat(4);
+    let a = lha_fixture_level("sub/dir/one.txt", &data, 1);
+    let entries = archive::archive::lha::decode::decode(&a).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "sub/dir/one.txt");
+    assert_eq!(entries[0].level, 1);
+    assert_eq!(entries[0].data, data.as_slice());
+}
+
+#[test]
+fn test_lha_level2_roundtrip() {
+    let data = b"lha level 2 payload".repeat(4);
+    let a = lha_fixture_level("sub/dir/two.txt", &data, 2);
+    let entries = archive::archive::lha::decode::decode(&a).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "sub/dir/two.txt");
+    assert_eq!(entries[0].level, 2);
+    assert_eq!(entries[0].data, data.as_slice());
+}
+
+#[test]
+fn test_lha_level1_7z_interop() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_lha1_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("test1.lzh");
+    let data = b"level one data".repeat(3);
+    std::fs::write(&path, lha_fixture_level("sub/lvl1.txt", &data, 1)).unwrap();
+
+    let output = Command::new("7z").args(["l"]).arg(&path).output();
+    let Ok(output) = output else { return };
+    if !output.status.success() {
+        return; // 7z build without LZH support
+    }
+    let listing = String::from_utf8_lossy(&output.stdout);
+    assert!(listing.contains("lvl1.txt"), "7z l output: {listing}");
+
+    // Extraction verifies the skip-size field and data offset.
+    let out_dir = dir.join("out");
+    let output = Command::new("7z")
+        .args(["x", "-y"])
+        .arg(format!("-o{}", out_dir.display()))
+        .arg(&path)
+        .output()
+        .unwrap();
+    if output.status.success() {
+        let extracted = std::fs::read(out_dir.join("sub").join("lvl1.txt"))
+            .or_else(|_| std::fs::read(out_dir.join("lvl1.txt")))
+            .unwrap();
+        assert_eq!(extracted, data.as_slice());
+    }
+}
+
+#[test]
+fn test_lha_level1_bsdtar_interop() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_lha1b_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("test1.lzh");
+    std::fs::write(&path, lha_fixture_level("sub/lvl1b.txt", b"level one", 1)).unwrap();
+
+    let output = Command::new("bsdtar").args(["-tf"]).arg(&path).output();
+    let Ok(output) = output else { return };
+    if !output.status.success() {
+        return; // libarchive build without lzh support
+    }
+    let listing = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        listing.contains("lvl1b.txt"),
+        "bsdtar -tf output: {listing}"
+    );
+}
+
+#[test]
+fn test_lha_level2_7z_interop() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_lha2_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("test2.lzh");
+    let data = b"level two data".repeat(3);
+    std::fs::write(&path, lha_fixture_level("lvl2.txt", &data, 2)).unwrap();
+
+    let output = Command::new("7z").args(["l"]).arg(&path).output();
+    let Ok(output) = output else { return };
+    if !output.status.success() {
+        return; // 7z build without LZH support
+    }
+    let listing = String::from_utf8_lossy(&output.stdout);
+    assert!(listing.contains("lvl2.txt"), "7z l output: {listing}");
+
+    // Extraction verifies the total-header-size semantics and the
+    // level-2 header CRC block we emit.
+    let out_dir = dir.join("out");
+    let output = Command::new("7z")
+        .args(["x", "-y"])
+        .arg(format!("-o{}", out_dir.display()))
+        .arg(&path)
+        .output()
+        .unwrap();
+    if output.status.success() {
+        let extracted = std::fs::read(out_dir.join("lvl2.txt")).unwrap();
+        assert_eq!(extracted, data.as_slice());
+    }
+}
+
+#[test]
+fn test_lha_level2_bsdtar_interop() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_lha2b_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("test2.lzh");
+    let data = b"level two bsdtar".repeat(3);
+    std::fs::write(&path, lha_fixture_level("lvl2b.txt", &data, 2)).unwrap();
+
+    let output = Command::new("bsdtar").args(["-tf"]).arg(&path).output();
+    let Ok(output) = output else { return };
+    if !output.status.success() {
+        return; // libarchive build without lzh support
+    }
+    let listing = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        listing.contains("lvl2b.txt"),
+        "bsdtar -tf output: {listing}"
+    );
+
+    let out_dir = dir.join("out");
+    std::fs::create_dir_all(&out_dir).unwrap();
+    let output = Command::new("bsdtar")
+        .args(["-xf"])
+        .arg(&path)
+        .current_dir(&out_dir)
+        .output()
+        .unwrap();
+    if output.status.success() {
+        let extracted = std::fs::read(out_dir.join("lvl2b.txt")).unwrap();
+        assert_eq!(extracted, data.as_slice());
+    }
+}

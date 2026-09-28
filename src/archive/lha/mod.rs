@@ -8,8 +8,10 @@
 //!   every other method (`-lh1-`, `-lh5-`, `-lh6-`, `-lh7-`, `-lzs-`,
 //!   `-lz4-`, `-pm0-`, `-pm2-`, ...) is rejected with
 //!   [`Error::Unsupported`];
-//! - writing emits header level 0 `-lh0-` entries only (file names must
-//!   fit in one byte, i.e. at most 255 bytes, and be non-empty).
+//! - writing emits `-lh0-`/`-lhd-` entries at header level 0, 1, or 2
+//!   (`LhaEncoder::with_level`). Level 0 requires the whole filename to
+//!   fit in one byte (at most 255 bytes); levels 1/2 carry the name
+//!   through extended headers.
 //!
 //! Layout (level 0):
 //! `[hdr_size u8][checksum u8][method 5B][packed u32le][orig u32le]
