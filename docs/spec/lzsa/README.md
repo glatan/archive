@@ -11,7 +11,7 @@
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
 | stream コンテナ (`7b 9e` magic + 64KiB フレーム + EOD) | [StreamFormat.md v1.4.1](https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/StreamFormat.md) | ✅ | ✅ | |
-| LZSA1 ブロック | [BlockFormat_LZSA1.md](https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/BlockFormat_LZSA1.md) | ✅ | ❌ | encode は LZSA2 のみ (`encode_lzsa2`) |
+| LZSA1 ブロック | [BlockFormat_LZSA1.md](https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/BlockFormat_LZSA1.md) | ✅ | ✅ | `encode` は LZSA1 ブロックを出力 |
 | LZSA2 ブロック | [BlockFormat_LZSA2.md](https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/BlockFormat_LZSA2.md) | ✅ | ✅ | |
 | backward / dictionary モード | StreamFormat.md | ❌ | ❌ | intentional scope |
 
