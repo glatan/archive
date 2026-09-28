@@ -93,3 +93,4 @@ mksquashfs 生成イメージの decode、`unsquashfs` による本 writer 出�
 | 38 | LZMA1 (compressor id 2) payload の伸張 | §2.4 | ❌ | upstream deprecated。`Unsupported` を返す (intentional) |
 | 39 | xattr / export table の展開 | §8/§10 | ❌ | メタデータ解析は layout 検証まで。xattr 値の公開は intentional scope 外 |
 | 40 | filesystem セマンティクス (デバイス node 作成、パーミッション適用) | crate-local | ❌ | 抽出は name/content 列挙まで (intentional) |
+| 41 | directory index (§6.1: 拡張 dir inode 付随の readdir 高速化構造) の read/emit | §6.1 | ❌ | decode は位置独立アクセスで index を使わず index_count を無視する。emit もしない (intentional) |
