@@ -57,6 +57,7 @@
 | 19 | encode: 末尾 16B MD5 archive checksum を実値出力 | Header checksumPos | ✅ | `emits_md5_checksum` |
 | 20 | encode: path pointer list は path ソート順、title pointer list は title (=path) ソートの u32 dirent index 列 | Path/Title Pointer List | ✅ | `stored_roundtrip` (decode が pathPtr 経由で解決) |
 | 21 | archive MD5 checksum 検証 | Header checksumPos | ✅ | `verifies_archive_md5`・`rejects_bad_archive_md5`・`rejects_tampered_content_via_md5` (末尾 digest 存在時のみ検証、欠落は許容)。write は実値出力済み (行 19) |
+| 21a | split archive (.zimaa/.zimab...) の decode | Split ZIM archives | ✅ | `decode_parts(&[&[u8]])` が part を連結して decode。`split_parts_roundtrip`, `split_parts_rejects_empty` |
 
 ### Intentional scope (実装対象外)
 
@@ -64,5 +65,4 @@
 |---|------|----------|-----------|------|
 | 22 | title pointer list / fulltext index の検索 API | Title Pointer List | ❌ | archive listing/extract には path index のみ使用。write はソート済み index を出力するが検索 API は提供しない |
 | 23 | MIME type メタデータの公開 | MIME Type List | ❌ | コンテンツ種別は `ArchiveEntry` に含めない (encode は単一 MIME 指定可) |
-| 24 | split archive (.zimaa/.zimab...) | Split ZIM archives | ❌ | 単一ファイルのみ |
 | 25 | v6 write / extended cluster の出力、redirect・deprecated entry の出力 | Directory Entries, Clusters | ❌ | write は v5 content entry のみ |
