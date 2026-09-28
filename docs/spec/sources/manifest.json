@@ -750,6 +750,14 @@
    "version": "Microsoft Joliet spec (1995)",
    "url": "https://pismotechnic.com/cfs/jolspec.html",
    "filename": "jolspec.html"
+  },
+  {
+   "id": "erofs-utils-erofs-fs-h",
+   "format": "erofs",
+   "title": "erofs-utils include/erofs_fs.h (EROFS_SUPER_MAGIC_V1 etc.)",
+   "version": "erofs-utils master (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/erofs/erofs-utils/master/include/erofs_fs.h",
+   "filename": "erofs_utils_fs.h"
   }
  ],
  "no_url_available": [

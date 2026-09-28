@@ -64,7 +64,7 @@
 | 24 | ar_date / ar_uid / ar_gid: all-space (空) の許容 | GNU/BSD ar | ✅ | パーサーで space trim |
 | 25 | Thin archives (`!<thin>\n`): 通常メンバはヘッダのみ (size は実ファイルサイズ、payload 非格納)。`//`・`/` 等の特殊メンバは payload を持つ | GNU ar thin (binutils `ar rcT` 出力で検証) | ✅ | `THIN_MAGIC` 認識、`ArEntry::is_thin`、`test_thin_archive_decode`、`test_ar_decode_gnu_thin_fixture` (実 ar バイト) |
 | 26 | 64-bit GNU symbol table (`/SYM64/`) | GNU ar 64-bit | ✅ | identifier 判定でスキップ (`test_sym64_symbol_table_skipped`) |
-| 27 | thin encoder: `!<thin>\n` + メンバヘッダのみ emit (size=実ファイルサイズ)。`add_reference` でデータなし参照可 | GNU ar thin | ✅ | `test_thin_roundtrip`、`test_thin_add_file_uses_data_len`、`test_thin_system_list_compat` (system `ar tv`) |
+| 27 | thin encoder: `!<thin>\n` + メンバヘッダのみ emit (size=実ファイルサイズ)。`add_reference` でデータなし参照可 | GNU ar thin | ✅ | `test_thin_roundtrip`、`test_thin_add_file_uses_data_len`、`test_ar_thin_system_list_compat` (system `ar tv`) |
 
 ---
 
