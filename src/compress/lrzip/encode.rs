@@ -106,6 +106,31 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
 /// assert_eq!(decompressed, data);
 /// ```
 pub fn encode_with(input: &[u8], compression: CompressionType) -> Vec<u8> {
+    encode_impl(input, compression, false)
+}
+
+/// Compress data using lrzip format with an MD5 integrity checksum.
+///
+/// Sets header byte 21 (`md5_flag`) and appends the 16-byte RFC 1321
+/// digest of `input` after the last chunk, matching the layout verified
+/// by [`decode`][crate::compress::lrzip::decode::decode] and by upstream
+/// `lrzip` checksum verification.
+///
+/// # Examples
+///
+/// ```
+/// use archive::compress::lrzip::{decode, encode};
+///
+/// let data = b"Hello, lrzip md5!";
+/// let compressed = encode::encode_with_md5(data, encode::CompressionType::Lzma);
+/// let decompressed = decode::decode(&compressed).unwrap();
+/// assert_eq!(decompressed, data);
+/// ```
+pub fn encode_with_md5(input: &[u8], compression: CompressionType) -> Vec<u8> {
+    encode_impl(input, compression, true)
+}
+
+fn encode_impl(input: &[u8], compression: CompressionType, md5: bool) -> Vec<u8> {
     let mut output = Vec::new();
 
     // ── File header (24 bytes) ──────────────────────────────────
@@ -118,7 +143,7 @@ pub fn encode_with(input: &[u8], compression: CompressionType) -> Vec<u8> {
     // LZMA properties (5 bytes): props_byte + dict_size (4 LE)
     output.push(LZMA_PROPS_BYTE); // 16
     output.extend_from_slice(&LZMA_DICT_SIZE.to_le_bytes()); // 17-20
-    output.push(0); // 21: no MD5
+    output.push(u8::from(md5)); // 21: MD5 flag
     output.push(0); // 22: no encryption
     output.push(0); // 23: unused
     debug_assert_eq!(output.len(), 24);
@@ -126,6 +151,9 @@ pub fn encode_with(input: &[u8], compression: CompressionType) -> Vec<u8> {
     if input.is_empty() {
         // Write a single empty chunk with eof=1
         write_empty_chunk(&mut output);
+        if md5 {
+            output.extend_from_slice(&crate::util::md5::md5(input));
+        }
         return output;
     }
 
@@ -136,6 +164,10 @@ pub fn encode_with(input: &[u8], compression: CompressionType) -> Vec<u8> {
     for (i, chunk) in chunks.iter().enumerate() {
         let is_last = i == num_chunks - 1;
         write_chunk(&mut output, chunk, is_last, compression);
+    }
+
+    if md5 {
+        output.extend_from_slice(&crate::util::md5::md5(input));
     }
 
     output
@@ -655,5 +687,45 @@ mod tests {
     fn test_header_version_minor_updated() {
         let compressed = encode(b"version");
         assert_eq!(compressed[5], VERSION_MINOR);
+    }
+
+    #[test]
+    fn test_encode_with_md5_roundtrip() {
+        let input = b"md5 integrity payload ".repeat(128);
+        let compressed = encode_with_md5(&input, CompressionType::Lzma);
+        assert_eq!(compressed[21], 1);
+        // Digest appended after the last chunk = md5(input).
+        let digest = crate::util::md5::md5(&input);
+        assert_eq!(&compressed[compressed.len() - 16..], &digest);
+        let decompressed = super::super::decode::decode(&compressed).unwrap();
+        assert_eq!(decompressed, input);
+    }
+
+    #[test]
+    fn test_encode_with_md5_empty() {
+        let compressed = encode_with_md5(b"", CompressionType::None);
+        assert_eq!(compressed[21], 1);
+        let digest = crate::util::md5::md5(b"");
+        assert_eq!(&compressed[compressed.len() - 16..], &digest);
+        let decompressed = super::super::decode::decode(&compressed).unwrap();
+        assert!(decompressed.is_empty());
+    }
+
+    #[test]
+    fn test_encode_with_md5_backend_matrix() {
+        let input = b"md5 backend coverage ".repeat(64);
+        for ct in [
+            CompressionType::None,
+            CompressionType::Bzip2,
+            CompressionType::Lzo,
+            CompressionType::Lzma,
+            CompressionType::Gzip,
+            CompressionType::Zpaq,
+        ] {
+            let compressed = encode_with_md5(&input, ct);
+            let decompressed = super::super::decode::decode(&compressed)
+                .unwrap_or_else(|e| panic!("md5 roundtrip {ct:?}: {e}"));
+            assert_eq!(decompressed, input, "{ct:?}");
+        }
     }
 }

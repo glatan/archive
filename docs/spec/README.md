@@ -68,14 +68,6 @@
 
 ---
 
-## 次の library 実装候補
-
-| 候補 | 狙い | 前提 |
-|---|---|---|
-| [rzip](rzip/README.md) / [lrzip](lrzip/README.md) interop 拡張 | system tool parity を encode 側にも広げる | 先に current subset と新規 claim の境界を direct interop test で固定する |
-
----
-
 ## フォーマット別要件表
 
 ### 圧縮フォーマット
@@ -114,7 +106,7 @@
 | [lzxd](lzxd/README.md) | [MS-PATCH] LZX DELTA (Microsoft Open Specifications) | 22 | 0 | 0 | 22 |
 | [cmpsc](cmpsc/README.md) | IBM z/Arch POP App.D / ESA/390 Data Compression + APPNOTE method 16 | 20 | 0 | 0 | 20 |
 | [rzip](rzip/README.md) | rzip `.rz` format (upstream 2.1) | 20 | 0 | 0 | 20 |
-| [lrzip](lrzip/README.md) | lrzip `.lrz` format (crate-local subset) | 37 | 0 | 0 | 37 |
+| [lrzip](lrzip/README.md) | lrzip `.lrz` format (crate-local subset) | 38 | 0 | 0 | 38 |
 | [xz](xz/README.md) | xz-file-format.txt | 54 | 0 | 0 | 54 |
 | [ZPAQ](zpaq/README.md) | ZPAQ Level 1/2 specification (zpaq206.pdf) + crate bounded contract (archive 層) | — | — | — | bounded contract |
 
@@ -150,9 +142,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1745 |
+| ✅ 実装+テスト済み | 1746 |
 | ⚠️ 部分実装 | 1 |
 | ❌ 未実装 | 36 |
-| **合計** | **1815** |
+| **合計** | **1816** |
 
-**全体カバー率**: 1745 / 1785 = **97.8%** (intentional exclusion 除外後: 1745 / 1748 = **99.8%**)
+**全体カバー率**: 1746 / 1786 = **97.8%** (intentional exclusion 除外後: 1746 / 1749 = **99.8%**)

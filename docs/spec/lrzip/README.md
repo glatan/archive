@@ -5,7 +5,7 @@
 | 基準仕様 | upstream [`ckolivas/lrzip`](https://github.com/ckolivas/lrzip) の [`doc/magic.header.txt`](https://github.com/ckolivas/lrzip/blob/master/doc/magic.header.txt) + ソースコード (0.6x 系、ローカルスナップショット: `docs/spec/sources/lrzip_magic.header.txt`)。本 crate は crate-local subset のため完全互換は主張しない |
 | 形式概要 | crate-local な `.lrz` framing を持ち、shared long-range match finder の上に lrzip-specific variable-width match offset token を載せる。system `lrzip` との完全互換 reimplementation は目標外 |
 | 内部構成 | crate-local shared `rzip`-style token/chunk logic を再利用し、その上に `LZMA` / `bzip2` / `LZO` / `gzip` / `ZPAQ` / `none` バックエンドを重ねる |
-| system `lrzip` 相互運用の確認範囲 | 現在の実測確認は system `lrzip` 生成の simple / match-rich LZMA archive decode と、crate 出力を system `lrzip -d` が decode できる LZMA / `bzip2` / `LZO` / `gzip` / `ZPAQ` / `none` backend matrix まで。未検証の option matrix や large-payload outer framing 全体の完全互換は主張しない |
+| system `lrzip` 相互運用の確認範囲 | 現在の実測確認は system `lrzip` 生成の simple / match-rich LZMA archive decode と、crate 出力を system `lrzip -d` が decode できる LZMA / `bzip2` / `LZO` / `gzip` / `ZPAQ` / `none` backend matrix と MD5 flag 付き出力まで。未検証の option matrix や large-payload outer framing 全体の完全互換は主張しない |
 
 ## 対応バリアント・仕様版
 
@@ -68,8 +68,9 @@
 | 33 | Backend type byte encoding (数値) | lrzip header | ✅ | 実装済み |
 | 34 | Unknown backend type reject | lrzip header | ✅ | 実装済み |
 | 35 | Variable-width match offset token format | lrzip token layer | ✅ | 実装済み |
-| 36 | MD5 checksum flag (header byte 21): パース + 検証 | lrzip header | ✅ | `md5_flag != 0` 時にデコード結果の MD5 を検証。`test_decode_md5_flag_valid`, `test_decode_md5_flag_mismatch`, `test_decode_md5_flag_truncated` |
+| 36 | MD5 checksum flag (header byte 21): パース + 検証 + emit | lrzip header | ✅ | decode: `md5_flag != 0` 時にデコード結果の MD5 を検証 (`test_decode_md5_flag_valid`, `test_decode_md5_flag_mismatch`, `test_decode_md5_flag_truncated`)。encode: `encode_with_md5` で flag + 末尾 digest を出力 (`test_encode_with_md5_roundtrip`, `test_encode_with_md5_empty`, `test_encode_with_md5_backend_matrix`) |
 | 37 | Reserved byte 23: encode 時は 0 | lrzip header | ✅ | エンコーダーで 0 書き出し |
+| 38 | MD5 flag 付き crate 出力を system `lrzip -d` が decode (digest 検証通過) | system `lrzip` interoperability behavior | ✅ | `test_lrzip_encode_md5_system_decode_compat` |
 
 ---
 

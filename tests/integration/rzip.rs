@@ -2,6 +2,12 @@ use super::*;
 
 #[cfg(feature = "rzip")]
 fn assert_rzip_encode_system_decode_compat(level: u8, archive_stem: &str, expected: &[u8]) {
+    let archive = rzip::encode::encode_with_level(expected, level);
+    assert_rzip_archive_system_decode_compat(archive, archive_stem, expected);
+}
+
+#[cfg(feature = "rzip")]
+fn assert_rzip_archive_system_decode_compat(archive: Vec<u8>, archive_stem: &str, expected: &[u8]) {
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -18,7 +24,6 @@ fn assert_rzip_encode_system_decode_compat(level: u8, archive_stem: &str, expect
     let archive_path = dir.join(format!("{archive_stem}.rz"));
     let output_path = dir.join("decoded.bin");
 
-    let archive = rzip::encode::encode_with_level(expected, level);
     std::fs::write(&archive_path, &archive).unwrap();
 
     let output = Command::new(cmd)
@@ -127,4 +132,28 @@ fn test_rzip_encode_system_decode_multichunk_payload() {
         [..100 * 1024 * 1024 + 4096]
         .to_vec();
     assert_rzip_encode_system_decode_compat(1, "encoded_multichunk", &input);
+}
+
+#[cfg(feature = "rzip")]
+#[test]
+fn test_rzip_encode_system_decode_level_edges() {
+    let input = b"rzip level edge payload ".repeat(4096);
+    assert_rzip_encode_system_decode_compat(0, "encoded_l0", &input);
+    assert_rzip_encode_system_decode_compat(9, "encoded_l9", &input);
+}
+
+#[cfg(feature = "rzip")]
+#[test]
+fn test_rzip_encode_system_decode_backend_matrix() {
+    use rzip::encode::Backend;
+    let input = b"rzip backend payload ".repeat(2048);
+    for (stem, backend) in [
+        ("b_none", Backend::None),
+        ("b_gzip", Backend::Gzip),
+        ("b_lzo", Backend::Lzo),
+        ("b_bzip2", Backend::Bzip2),
+    ] {
+        let archive = rzip::encode::encode_with_backend(&input, backend);
+        assert_rzip_archive_system_decode_compat(archive, stem, &input);
+    }
 }
