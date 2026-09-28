@@ -141,6 +141,7 @@
 | [ascii85](ascii85/README.md) | PDF 32000-1:2008 §7.4.3 + RFC 1924 | 17 | 0 | 0 | 17 |
 | [yenc](yenc/README.md) | yEnc revised draft 1.3 (yenc.org) | 22 | 0 | 4 | 26 |
 | [macbinary](macbinary/README.md) | MacBinary II Standard Proposal (24-Jul-1987) | 14 | 0 | 5 | 19 |
+| [binhex](binhex/README.md) | BinHex 4.0 Definition (Peter N Lewis 1991) + RFC 1741 | 20 | 0 | 4 | 24 |
 
 ### 共有コンポーネント
 
@@ -152,9 +153,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1951 |
+| ✅ 実装+テスト済み | 1971 |
 | ⚠️ 部分実装 | 2 |
-| ❌ 未実装 | 57 |
-| **合計** | **2011** |
+| ❌ 未実装 | 61 |
+| **合計** | **2035** |
 
-**全体カバー率**: 1951 / 2011 = **97.0%** (intentional exclusion 除外後: 1951 / 1955 = **99.8%**)
+**全体カバー率**: 1971 / 2035 = **96.9%** (intentional exclusion 除外後: 1971 / 1975 = **99.8%**)

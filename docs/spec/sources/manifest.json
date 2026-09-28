@@ -603,6 +603,22 @@
       "version": "MacBinary II (1987)",
       "url": "https://files.stairways.com/other/macbinaryii-standard-info.txt",
       "filename": "macbinaryii-standard-info.txt"
+    },
+    {
+      "id": "binhex40-definition",
+      "format": "binhex",
+      "title": "BinHex 4.0 Definition (Peter N Lewis)",
+      "version": "August 1991",
+      "url": "https://files.stairways.com/other/binhex-40-specs-info.txt",
+      "filename": "binhex-40-specs-info.txt"
+    },
+    {
+      "id": "rfc1741",
+      "format": "binhex",
+      "title": "MIME Content Type for BinHex Encoded Files (Appendix A: The BinHex format)",
+      "version": "RFC 1741 (December 1994)",
+      "url": "https://www.rfc-editor.org/rfc/rfc1741.txt",
+      "filename": "rfc1741.txt"
     }
   ],
   "no_url_available": [

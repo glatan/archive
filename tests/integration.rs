@@ -43,7 +43,8 @@
     feature = "uuencode",
     feature = "ascii85",
     feature = "yenc",
-    feature = "macbinary"
+    feature = "macbinary",
+    feature = "binhex"
 ))]
 
 use archive::archive::ar;
@@ -96,6 +97,7 @@ use archive::compress::zx1;
 use archive::compress::zx2;
 use archive::compress::zx5;
 use archive::encoding::ascii85;
+use archive::encoding::binhex;
 use archive::encoding::macbinary;
 use archive::encoding::uuencode;
 use archive::encoding::yenc;
@@ -327,6 +329,8 @@ mod xz_tests;
 
 #[path = "integration/ascii85.rs"]
 mod ascii85_tests;
+#[path = "integration/binhex.rs"]
+mod binhex_tests;
 #[path = "integration/macbinary.rs"]
 mod macbinary_tests;
 #[path = "integration/uuencode.rs"]

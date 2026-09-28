@@ -7,6 +7,10 @@ pub(crate) mod crc32;
 #[cfg(any(feature = "lha", feature = "arc"))]
 pub(crate) mod crc16;
 
+/// CRC-16/CCITT checksum for MacBinary II and BinHex 4.0.
+#[cfg(any(feature = "macbinary", feature = "binhex"))]
+pub(crate) mod crc16ccitt;
+
 /// CRC32C (Castagnoli) checksum for Snappy framing.
 #[cfg(feature = "snappy")]
 pub(crate) mod crc32c;

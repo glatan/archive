@@ -11,28 +11,12 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::error::Error;
+use crate::util::crc16ccitt::crc16_ccitt as header_crc;
 
 const HEADER_LEN: usize = 128;
 const MAX_NAME: usize = 63;
 const MAX_FORK: u64 = 0x007F_FFFF;
 const MB2_VERSION: u8 = 129;
-
-/// CRC-16/CCITT (poly 0x1021, init 0x0000, MSB-first) used by MacBinary II
-/// for the 124-byte header checksum.
-fn header_crc(data: &[u8]) -> u16 {
-    let mut crc: u16 = 0;
-    for &b in data {
-        crc ^= (b as u16) << 8;
-        for _ in 0..8 {
-            crc = if crc & 0x8000 != 0 {
-                (crc << 1) ^ 0x1021
-            } else {
-                crc << 1
-            };
-        }
-    }
-    crc
-}
 
 fn be32(b: &[u8]) -> u32 {
     u32::from_be_bytes([b[0], b[1], b[2], b[3]])
