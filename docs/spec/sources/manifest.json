@@ -555,6 +555,201 @@
    "version": "mackyle/xar wiki (pinned fetch)",
    "url": "https://raw.githubusercontent.com/wiki/mackyle/xar/xarformat.wiki",
    "filename": "xarformat.wiki"
+  },
+  {
+   "id": "posix-uuencode",
+   "format": "uuencode",
+   "title": "uuencode - encode a binary file (POSIX.1-2017 utilities)",
+   "version": "IEEE Std 1003.1-2017 (2018 edition)",
+   "url": "https://pubs.opengroup.org/onlinepubs/9699919799/utilities/uuencode.html",
+   "filename": "posix_uuencode_9699919799.html"
+  },
+  {
+   "id": "rfc1924",
+   "format": "ascii85",
+   "title": "A Compact Representation of IPv6 Addresses",
+   "version": "RFC 1924 (April 1996)",
+   "url": "https://www.rfc-editor.org/rfc/rfc1924.txt",
+   "filename": "rfc1924.txt"
+  },
+  {
+   "id": "pdf32000",
+   "format": "ascii85",
+   "title": "Document management - Portable document format - Part 1: PDF 1.7 (ASCII85Decode §7.4.3)",
+   "version": "PDF 32000-1:2008",
+   "url": "https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/PDF32000_2008.pdf",
+   "filename": "pdf32000_2008.pdf"
+  },
+  {
+   "id": "tiff6",
+   "format": "packbits",
+   "title": "TIFF Revision 6.0 (Section 9: PackBits Compression)",
+   "version": "TIFF 6.0 (June 3, 1992)",
+   "url": "https://download.osgeo.org/libtiff/doc/TIFF6.pdf",
+   "filename": "tiff6.pdf"
+  },
+  {
+   "id": "yenc-draft",
+   "format": "yenc",
+   "title": "yEncode - A quick and dirty encoding for binaries (revised draft 1.3)",
+   "version": "draft 1.3 (document header v1.2, 28-Feb-2002)",
+   "url": "http://www.yenc.org/yenc-draft.1.3.txt",
+   "filename": "yenc-draft_1.3.txt"
+  },
+  {
+   "id": "macbinary2-proposal",
+   "format": "macbinary",
+   "title": "MacBinary II Standard Proposal (revised 24-Jul-1987)",
+   "version": "MacBinary II (1987)",
+   "url": "https://files.stairways.com/other/macbinaryii-standard-info.txt",
+   "filename": "macbinaryii-standard-info.txt"
+  },
+  {
+   "id": "binhex40-definition",
+   "format": "binhex",
+   "title": "BinHex 4.0 Definition (Peter N Lewis)",
+   "version": "August 1991",
+   "url": "https://files.stairways.com/other/binhex-40-specs-info.txt",
+   "filename": "binhex-40-specs-info.txt"
+  },
+  {
+   "id": "rfc1741",
+   "format": "binhex",
+   "title": "MIME Content Type for BinHex Encoded Files (Appendix A: The BinHex format)",
+   "version": "RFC 1741 (December 1994)",
+   "url": "https://www.rfc-editor.org/rfc/rfc1741.txt",
+   "filename": "rfc1741.txt"
+  },
+  {
+   "id": "ms-cfb-20210625",
+   "format": "mscfb",
+   "title": "[MS-CFB]: Compound File Binary File Format",
+   "version": "v20210625 (12.0)",
+   "url": "https://winprotocoldocs-bhdugrdyduf5h2e4.b02.azurefd.net/MS-CFB/%5bMS-CFB%5d-210625.pdf",
+   "filename": "MS-CFB.pdf"
+  },
+  {
+   "id": "linux-cramfs-doc",
+   "format": "cramfs",
+   "title": "Linux kernel Documentation/filesystems/cramfs.rst",
+   "version": "linux master (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/torvalds/linux/master/Documentation/filesystems/cramfs.rst",
+   "filename": "cramfs.rst"
+  },
+  {
+   "id": "linux-cramfs-layout",
+   "format": "cramfs",
+   "title": "Linux kernel fs/cramfs/README (filesystem layout)",
+   "version": "linux master (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/torvalds/linux/master/fs/cramfs/README",
+   "filename": "cramfs_layout.txt"
+  },
+  {
+   "id": "linux-cramfs-fs-h",
+   "format": "cramfs",
+   "title": "Linux kernel include/uapi/linux/cramfs_fs.h",
+   "version": "linux master (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/cramfs_fs.h",
+   "filename": "cramfs_fs.h"
+  },
+  {
+   "id": "linux-romfs-doc",
+   "format": "romfs",
+   "title": "Linux kernel Documentation/filesystems/romfs.rst",
+   "version": "linux master (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/torvalds/linux/master/Documentation/filesystems/romfs.rst",
+   "filename": "romfs.rst"
+  },
+  {
+   "id": "linux-erofs-doc",
+   "format": "erofs",
+   "title": "Linux kernel Documentation/filesystems/erofs.rst",
+   "version": "linux master (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/torvalds/linux/master/Documentation/filesystems/erofs.rst",
+   "filename": "erofs.rst"
+  },
+  {
+   "id": "linux-erofs-fs-h",
+   "format": "erofs",
+   "title": "Linux kernel fs/erofs/erofs_fs.h (on-disk structures)",
+   "version": "linux master (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/torvalds/linux/master/fs/erofs/erofs_fs.h",
+   "filename": "erofs_fs.h"
+  },
+  {
+   "id": "chromium-crx3-proto",
+   "format": "crx3",
+   "title": "Chromium components/crx_file/crx3.proto (CRX3 file format)",
+   "version": "chromium main (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/chromium/chromium/main/components/crx_file/crx3.proto",
+   "filename": "crx3.proto",
+   "note": "BSD-style license; format documentation embedded in proto comments"
+  },
+  {
+   "id": "pea-help-pdf",
+   "format": "pea",
+   "title": "PEA file format specifications and implementation notes (pea_help.pdf)",
+   "version": "PeaZip published spec (v1.3-era document)",
+   "url": "https://peazip.github.io/pea_help.pdf",
+   "filename": "pea_help.pdf"
+  },
+  {
+   "id": "peazip-pea-pas",
+   "format": "pea",
+   "title": "PeaZip reference implementation pea.pas / pea_utils.pas (LGPLv3)",
+   "version": "PeaZip sources branch (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/peazip/PeaZip/sources/peazip-sources/dev/pea.pas",
+   "filename": "pea.pas",
+   "note": "pea_utils.pas fetched from the same directory; used as wire-format reference only, no code copied"
+  },
+  {
+   "id": "ecma-119",
+   "format": "iso9660",
+   "title": "ECMA-119 Volume and File Structure of CDROM for Information Interchange (= ISO 9660)",
+   "version": "ECMA-119 4th edition (June 2019)",
+   "url": "https://ecma-international.org/wp-content/uploads/ECMA-119_4th_edition_june_2019.pdf",
+   "filename": "ecma119.pdf"
+  },
+  {
+   "id": "linux-isofs-doc",
+   "format": "iso9660",
+   "title": "Linux kernel Documentation/filesystems/isofs.rst",
+   "version": "linux master (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/torvalds/linux/master/Documentation/filesystems/isofs.rst",
+   "filename": "isofs.rst"
+  },
+  {
+   "id": "linux-iso-fs-h",
+   "format": "iso9660",
+   "title": "Linux kernel include/uapi/linux/iso_fs.h (on-disk structures)",
+   "version": "linux master (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/iso_fs.h",
+   "filename": "iso_fs.h"
+  },
+  {
+   "id": "rrip-112",
+   "format": "iso9660",
+   "title": "Rock Ridge Interchange Protocol (IEEE P1282)",
+   "version": "RRIP 1.12 (1994)",
+   "url": "https://people.freebsd.org/~emaste/rrip112.pdf",
+   "filename": "rrip112.pdf"
+  },
+  {
+   "id": "susp-110",
+   "format": "iso9660",
+   "title": "System Use Sharing Protocol (SUSP) draft",
+   "version": "SUSP 1.10 troff source archive",
+   "url": "http://cd.textfiles.com/internetinfo/standards/iso/9660/rockridge/susp.shar",
+   "filename": "susp.shar",
+   "note": "SP/CE/ER/ST entry framing; historical archive copy (no canonical host remains)"
+  },
+  {
+   "id": "joliet-spec",
+   "format": "iso9660",
+   "title": "Joliet Specification: ISO 9660 supplementary volume descriptor UCS-2 naming",
+   "version": "Microsoft Joliet spec (1995)",
+   "url": "https://pismotechnic.com/cfs/jolspec.html",
+   "filename": "jolspec.html"
   }
  ],
  "no_url_available": [
@@ -661,6 +856,17 @@
    "version": "ARC 5.x/6.x de facto",
    "note": "正式標準なし。wotsit 'arc' entry の fileformat.info mirror を sources/arc_format_corion.htm にスナップショット済み",
    "reference_url": "https://www.fileformat.info/format/arc/corion.htm"
+  },
+  {
+   "id": "apple-tn1023",
+   "format": "packbits",
+   "title": "Apple Technical Note TN1023 'Understanding PackBits'",
+   "version": "TN1023 (February 1996)",
+   "note": "Apple のオリジナル URL は消滅。sources/apple_tn1023_packbits.html にスナップショット済み (preterhuman.net ミラー)",
+   "reference_url": [
+    "https://developer.apple.com/library/mac/technotes/tn1023/_index.html",
+    "https://preterhuman.net/"
+   ]
   }
  ]
 }

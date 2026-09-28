@@ -107,6 +107,7 @@
 | [cmpsc](cmpsc/README.md) | IBM z/Arch POP App.D / ESA/390 Data Compression + APPNOTE method 16 | 20 | 0 | 0 | 20 |
 | [rzip](rzip/README.md) | rzip `.rz` format (upstream 2.1) | 20 | 0 | 0 | 20 |
 | [lrzip](lrzip/README.md) | lrzip `.lrz` format (crate-local subset) | 38 | 0 | 0 | 38 |
+| [packbits](packbits/README.md) | Apple TN1023 + TIFF 6.0 §9 | 12 | 0 | 3 | 15 |
 | [xz](xz/README.md) | xz-file-format.txt | 54 | 0 | 0 | 54 |
 | [ZPAQ](zpaq/README.md) | ZPAQ Level 1/2 specification (zpaq206.pdf) + crate bounded contract (archive 層) | — | — | — | bounded contract |
 
@@ -116,11 +117,18 @@
 |---|---|---|---|---|---|
 | [tar](tar/README.md) | POSIX.1-1988 ustar / GNU tar / POSIX.1-2001 PAX | 59 | 0 | 0 | 59 |
 | [cpio](cpio/README.md) | POSIX `odc` / SVR4 `newc`/`newcrc`/`bin` | 42 | 1 | 0 | 43 |
-| [ar](ar/README.md) | IEEE Std 1003.1 / GNU ar / BSD ar | 26 | 0 | 0 | 26 |
+| [ar](ar/README.md) | IEEE Std 1003.1 / GNU ar / BSD ar | 27 | 0 | 0 | 27 |
 | [deb](deb/README.md) | deb(5) (dpkg) | 25 | 0 | 2 | 27 |
 | [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 33 | 0 | 2 | 35 |
 | [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 37 | 0 | 6 | 43 |
 | [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 24 | 0 | 3 | 27 |
+| [mscfb](mscfb/README.md) | [MS-CFB] Compound File Binary File Format v20210625 | 18 | 1 | 4 | 23 |
+| [cramfs](cramfs/README.md) | Linux kernel cramfs.rst + fs/cramfs/README + cramfs_fs.h | 18 | 1 | 4 | 23 |
+| [romfs](romfs/README.md) | Linux kernel romfs.rst | 20 | 0 | 3 | 23 |
+| [erofs](erofs/README.md) | Linux kernel erofs.rst + fs/erofs/erofs_fs.h | 27 | 2 | 3 | 32 |
+| [iso9660](iso9660/README.md) | ECMA-119 + SUSP 1.10 + RRIP 1.12 + Joliet | 30 | 2 | 8 | 40 |
+| [crx3](crx3/README.md) | Chromium components/crx_file/crx3.proto | 13 | 0 | 4 | 17 |
+| [pea](pea/README.md) | PEA file format spec (pea_help.pdf) + PeaZip pea.pas/pea_utils.pas | 16 | 1 | 4 | 21 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 24 | 0 | 3 | 27 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
 | [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 24 | 0 | 5 | 29 |
@@ -132,6 +140,16 @@
 | [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 151 | 0 | 2 | 154 |
 | [7z](sevenz/README.md) | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) | 120 | 0 | 0 | 120 |
 
+### エンコードフォーマット
+
+| フォーマット | 基準仕様 | ✅ | ⚠️ | ❌ | 合計 |
+|---|---|---|---|---|---|
+| [uuencode](uuencode/README.md) | IEEE Std 1003.1-2017 uuencode | 21 | 0 | 0 | 21 |
+| [ascii85](ascii85/README.md) | PDF 32000-1:2008 §7.4.3 + RFC 1924 | 17 | 0 | 0 | 17 |
+| [yenc](yenc/README.md) | yEnc revised draft 1.3 (yenc.org) | 22 | 0 | 4 | 26 |
+| [macbinary](macbinary/README.md) | MacBinary II Standard Proposal (24-Jul-1987) | 14 | 0 | 5 | 19 |
+| [binhex](binhex/README.md) | BinHex 4.0 Definition (Peter N Lewis 1991) + RFC 1741 | 20 | 0 | 4 | 24 |
+
 ### 共有コンポーネント
 
 | コンポーネント | ファイル | ✅ | ⚠️ | ❌ | 合計 |
@@ -142,9 +160,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1864 |
-| ⚠️ 部分実装 | 2 |
-| ❌ 未実装 | 45 |
-| **合計** | **1912** |
+| ✅ 実装+テスト済み | 2086 |
+| ⚠️ 部分実装 | 5 |
+| ❌ 未実装 | 88 |
+| **合計** | **2179** |
 
-**全体カバー率**: 1864 / 1912 = **97.5%** (intentional exclusion 除外後: 1864 / 1866 = **99.9%**)
+**全体カバー率**: 2086 / 2179 = **95.7%** (intentional exclusion 除外後: 2086 / 2091 = **99.8%**)

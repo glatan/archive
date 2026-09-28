@@ -86,13 +86,24 @@ pub fn decode(input: &[u8]) -> Result<Vec<ArEntry>, Error> {
         let mode = parse_octal_field(&header[40..48])? as u32;
         let raw_size = parse_decimal_field(&header[48..58])? as usize;
 
-        if pos + raw_size > input.len() {
+        let special = identifier == "/"
+            || identifier == "/SYM64/"
+            || identifier == "__.SYMDEF"
+            || identifier == "__.SYMDEF SORTED"
+            || identifier == "//";
+        // In a thin archive a regular member's data is not stored in the
+        // archive; the header size field records the real file size but no
+        // payload bytes (or padding) follow the header. Special members such
+        // as the `//` string table and `/` symbol table still carry data.
+        let stored_size = if is_thin && !special { 0 } else { raw_size };
+
+        if pos + stored_size > input.len() {
             return Err(Error::UnexpectedEof);
         }
-        let payload = &input[pos..pos + raw_size];
-        pos += raw_size;
+        let payload = &input[pos..pos + stored_size];
+        pos += stored_size;
 
-        if raw_size % 2 == 1 {
+        if stored_size % 2 == 1 {
             if pos >= input.len() {
                 return Err(Error::UnexpectedEof);
             }
@@ -381,21 +392,20 @@ mod tests {
         let mut archive = Vec::new();
         archive.extend_from_slice(THIN_MAGIC);
 
-        // A regular member in a thin archive: header is present but the
-        // caller is expected to read data from disk, so we still need to
-        // include the payload bytes in the serialized form (the header size
-        // field tells us how far to advance), but the decoded entry should
-        // have empty data and is_thin == true.
+        // A regular member in a thin archive: the header records the real
+        // file size but no payload bytes follow the header.
         push_header(&mut archive, "foo.o/", 6);
-        archive.extend_from_slice(b"ABCDEF");
+        push_header(&mut archive, "bar.o/", 4);
 
         let entries = decode(&archive).unwrap();
-        assert_eq!(entries.len(), 1);
+        assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].name, "foo.o");
         assert!(entries[0].is_thin);
         assert!(entries[0].data.is_empty());
         // size should reflect the original member size from the header.
         assert_eq!(entries[0].header.size, 6);
+        assert_eq!(entries[1].name, "bar.o");
+        assert_eq!(entries[1].header.size, 4);
     }
 
     #[test]

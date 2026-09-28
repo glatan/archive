@@ -197,6 +197,7 @@ pub mod mppc;
 
 #[cfg(feature = "cmpsc")]
 pub mod cmpsc;
+
 /// LZX DELTA decompression ([MS-PATCH]): delta-compressed streams with
 /// caller-supplied reference data, used by Exchange Offline Address Book
 /// differential patches.
@@ -204,6 +205,9 @@ pub mod cmpsc;
 /// [MS-PATCH]: https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-patch/
 #[cfg(feature = "lzxd")]
 pub mod lzxd;
+/// PackBits run-length encoding (Apple TN1023 / TIFF 6.0 §9).
+#[cfg(feature = "packbits")]
+pub mod packbits;
 
 /// LZF compression and decompression (liblzf format).
 #[cfg(feature = "lzf")]

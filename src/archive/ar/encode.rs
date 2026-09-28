@@ -1,4 +1,5 @@
-//! `ar` archive encoding (GNU and BSD dialects).
+//! `ar` archive encoding (GNU and BSD dialects), including GNU thin
+//! archives (`!<thin>\n`).
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -8,6 +9,7 @@ use crate::error::Error;
 use super::decode::ArEntry;
 
 const GLOBAL_MAGIC: &[u8; 8] = b"!<arch>\n";
+const THIN_MAGIC: &[u8; 8] = b"!<thin>\n";
 
 /// ar filename encoding dialect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -48,12 +50,17 @@ impl Default for ArEntryOptions {
 pub struct ArEncoder {
     entries: Vec<PendingEntry>,
     dialect: ArDialect,
+    thin: bool,
 }
 
 #[derive(Debug)]
 struct PendingEntry {
     name: String,
     data: Vec<u8>,
+    /// Member size recorded in the header. For regular entries this equals
+    /// `data.len()`; in thin archives it may instead be the size of a file
+    /// whose contents are not stored in the archive.
+    declared_size: u64,
     options: ArEntryOptions,
 }
 
@@ -63,6 +70,7 @@ impl ArEncoder {
         Self {
             entries: Vec::new(),
             dialect: ArDialect::Gnu,
+            thin: false,
         }
     }
 
@@ -71,6 +79,24 @@ impl ArEncoder {
         Self {
             entries: Vec::new(),
             dialect: ArDialect::Bsd,
+            thin: false,
+        }
+    }
+
+    /// Create a GNU thin-archive encoder (`!<thin>\n` magic).
+    ///
+    /// Thin archives store only member headers: the header size field
+    /// records each member's real file size but no payload bytes follow the
+    /// header. Entries added via `add_file*` use `data.len()` as the
+    /// recorded size; `add_reference` records a member without data.
+    ///
+    /// Thin archives always use the GNU dialect (`//` string table for long
+    /// names).
+    pub const fn new_thin() -> Self {
+        Self {
+            entries: Vec::new(),
+            dialect: ArDialect::Gnu,
+            thin: true,
         }
     }
 
@@ -88,7 +114,23 @@ impl ArEncoder {
     pub fn add_file_with_options(&mut self, name: &str, data: &[u8], options: &ArEntryOptions) {
         self.entries.push(PendingEntry {
             name: name.to_string(),
+            declared_size: data.len() as u64,
             data: data.to_vec(),
+            options: options.clone(),
+        });
+    }
+
+    /// Add a thin-archive member referencing `size` bytes of external data.
+    ///
+    /// Only meaningful on a thin encoder (`new_thin`): the emitted header
+    /// records `size` but no payload is stored. On a regular encoder the
+    /// member is stored with an empty payload whose size must still fit the
+    /// format; prefer `add_file*` there.
+    pub fn add_reference(&mut self, name: &str, size: u64, options: &ArEntryOptions) {
+        self.entries.push(PendingEntry {
+            name: name.to_string(),
+            data: Vec::new(),
+            declared_size: size,
             options: options.clone(),
         });
     }
@@ -97,6 +139,7 @@ impl ArEncoder {
     pub fn add_entry(&mut self, entry: &ArEntry) {
         self.entries.push(PendingEntry {
             name: entry.name.clone(),
+            declared_size: entry.data.len() as u64,
             data: entry.data.clone(),
             options: ArEntryOptions {
                 mtime: entry.header.mtime,
@@ -110,16 +153,22 @@ impl ArEncoder {
     /// Finish the archive and return its serialized bytes.
     pub fn finish(self) -> Result<Vec<u8>, Error> {
         let mut output = Vec::new();
-        output.extend_from_slice(GLOBAL_MAGIC);
-        match self.dialect {
-            ArDialect::Gnu => encode_gnu_entries(&mut output, &self.entries)?,
-            ArDialect::Bsd => encode_bsd_entries(&mut output, &self.entries)?,
+        output.extend_from_slice(if self.thin { THIN_MAGIC } else { GLOBAL_MAGIC });
+        if self.thin {
+            encode_thin_entries(&mut output, &self.entries)?;
+        } else {
+            match self.dialect {
+                ArDialect::Gnu => encode_gnu_entries(&mut output, &self.entries)?,
+                ArDialect::Bsd => encode_bsd_entries(&mut output, &self.entries)?,
+            }
         }
         Ok(output)
     }
 }
 
-fn encode_gnu_entries(output: &mut Vec<u8>, entries: &[PendingEntry]) -> Result<(), Error> {
+/// Emit GNU thin-archive members: `//` string table for long names, then
+/// one header per member with no payload bytes.
+fn encode_thin_entries(output: &mut Vec<u8>, entries: &[PendingEntry]) -> Result<(), Error> {
     let mut string_table = Vec::new();
     let mut offsets = Vec::with_capacity(entries.len());
 
@@ -136,7 +185,7 @@ fn encode_gnu_entries(output: &mut Vec<u8>, entries: &[PendingEntry]) -> Result<
     }
 
     if !string_table.is_empty() {
-        write_header(output, "//", 0, 0, 0, 0, string_table.len())?;
+        write_header(output, "//", 0, 0, 0, 0, string_table.len() as u64)?;
         output.extend_from_slice(&string_table);
         if string_table.len() % 2 == 1 {
             output.push(b'\n');
@@ -156,7 +205,53 @@ fn encode_gnu_entries(output: &mut Vec<u8>, entries: &[PendingEntry]) -> Result<
             entry.options.uid,
             entry.options.gid,
             entry.options.mode,
-            entry.data.len(),
+            entry.declared_size,
+        )?;
+        // Thin members are header-only: the size field records the real
+        // file size but no payload (and no padding) is emitted.
+    }
+
+    Ok(())
+}
+
+fn encode_gnu_entries(output: &mut Vec<u8>, entries: &[PendingEntry]) -> Result<(), Error> {
+    let mut string_table = Vec::new();
+    let mut offsets = Vec::with_capacity(entries.len());
+
+    for entry in entries {
+        validate_name(&entry.name)?;
+        if requires_gnu_long_name(&entry.name) {
+            let offset = string_table.len();
+            string_table.extend_from_slice(entry.name.as_bytes());
+            string_table.extend_from_slice(b"/\n");
+            offsets.push(Some(offset));
+        } else {
+            offsets.push(None);
+        }
+    }
+
+    if !string_table.is_empty() {
+        write_header(output, "//", 0, 0, 0, 0, string_table.len() as u64)?;
+        output.extend_from_slice(&string_table);
+        if string_table.len() % 2 == 1 {
+            output.push(b'\n');
+        }
+    }
+
+    for (entry, offset) in entries.iter().zip(offsets) {
+        let identifier = if let Some(offset) = offset {
+            alloc::format!("/{offset}")
+        } else {
+            alloc::format!("{}/", entry.name)
+        };
+        write_header(
+            output,
+            &identifier,
+            entry.options.mtime,
+            entry.options.uid,
+            entry.options.gid,
+            entry.options.mode,
+            entry.data.len() as u64,
         )?;
         output.extend_from_slice(&entry.data);
         if entry.data.len() % 2 == 1 {
@@ -189,7 +284,7 @@ fn encode_bsd_entries(output: &mut Vec<u8>, entries: &[PendingEntry]) -> Result<
             entry.options.uid,
             entry.options.gid,
             entry.options.mode,
-            encoded_size,
+            encoded_size as u64,
         )?;
         if use_long {
             output.extend_from_slice(entry.name.as_bytes());
@@ -209,7 +304,7 @@ fn write_header(
     uid: u32,
     gid: u32,
     mode: u32,
-    size: usize,
+    size: u64,
 ) -> Result<(), Error> {
     write_field(output, identifier, 16)?;
     write_field(output, &alloc::format!("{mtime}"), 12)?;
@@ -300,5 +395,49 @@ mod tests {
         encoder.add_file("", b"x");
         let result = encoder.finish();
         assert!(matches!(result, Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn test_thin_roundtrip() {
+        let mut encoder = ArEncoder::new_thin();
+        encoder.add_reference("obj1.o", 4096, &ArEntryOptions::default());
+        encoder.add_reference(
+            "a very long object name.o",
+            12345,
+            &ArEntryOptions::default(),
+        );
+        let archive = encoder.finish().unwrap();
+        assert!(archive.starts_with(
+            b"!<thin>
+"
+        ));
+
+        let entries = decode::decode(&archive).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|e| e.is_thin));
+        assert_eq!(entries[0].name, "obj1.o");
+        assert_eq!(entries[0].header.size, 4096);
+        assert!(entries[0].data.is_empty());
+        assert_eq!(entries[1].name, "a very long object name.o");
+        assert_eq!(entries[1].header.size, 12345);
+    }
+
+    #[test]
+    fn test_thin_add_file_uses_data_len() {
+        let mut encoder = ArEncoder::new_thin();
+        encoder.add_file("x.o", b"contents");
+        let archive = encoder.finish().unwrap();
+        // The payload bytes must not appear in the archive.
+        assert!(!archive.windows(b"contents".len()).any(|w| w == b"contents"));
+        let entries = decode::decode(&archive).unwrap();
+        assert_eq!(entries[0].header.size, 8);
+        assert!(entries[0].data.is_empty());
+    }
+
+    #[test]
+    fn test_thin_reference_size_width_overflow() {
+        let mut encoder = ArEncoder::new_thin();
+        encoder.add_reference("big.o", 10_000_000_000, &ArEntryOptions::default());
+        assert!(matches!(encoder.finish(), Err(Error::InvalidData(_))));
     }
 }

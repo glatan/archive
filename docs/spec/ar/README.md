@@ -11,7 +11,7 @@
 |---|---|---|---|---|
 | POSIX 共通 (60B 固定長メンバーヘッダ) | [IEEE Std 1003.1](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/ar.html) | ✅ | ✅ | 短い名前のみ |
 | GNU 拡張 (`//` 文字列テーブル、`/offset`、`/<n>`) | [GNU ar](https://sourceware.org/binutils/docs/binutils/ar.html) | ✅ | ✅ | 長い名前の既定エンコード |
-| GNU thin (`!<thin>\n`) | [GNU ar](https://sourceware.org/binutils/docs/binutils/ar.html) | ✅ | ❌ | thin archive の生成は非対応 |
+| GNU thin (`!<thin>\n`) | [GNU ar](https://sourceware.org/binutils/docs/binutils/ar.html) | ✅ | ✅ | `ArEncoder::new_thin()` (GNU 方言のみ) |
 | BSD 拡張 (`#1/<len>` 名前埋め込み) | [BSD ar](https://man.freebsd.org/cgi/man.cgi?ar(5)) | ✅ | ✅ | 16文字超 or スペース含有名 |
 
 ### 共通フォーマット
@@ -62,8 +62,9 @@
 |---|------|----------|-----------|----------------|
 | 23 | BSD symbol table (`__.SYMDEF` / `__.SYMDEF SORTED`) スキップ | [BSD ar](https://man.freebsd.org/cgi/man.cgi?ar(5)) | ✅ | decode.rs:106-109 の identifier 判定でスキップ (同一パスは `test_sym64_symbol_table_skipped` でカバー) |
 | 24 | ar_date / ar_uid / ar_gid: all-space (空) の許容 | GNU/BSD ar | ✅ | パーサーで space trim |
-| 25 | Thin archives (`!<thin>\n`) | GNU ar thin | ✅ | `THIN_MAGIC` 認識、`ArEntry::is_thin` フラグ、`test_thin_archive_decode` |
+| 25 | Thin archives (`!<thin>\n`): 通常メンバはヘッダのみ (size は実ファイルサイズ、payload 非格納)。`//`・`/` 等の特殊メンバは payload を持つ | GNU ar thin (binutils `ar rcT` 出力で検証) | ✅ | `THIN_MAGIC` 認識、`ArEntry::is_thin`、`test_thin_archive_decode`、`test_ar_decode_gnu_thin_fixture` (実 ar バイト) |
 | 26 | 64-bit GNU symbol table (`/SYM64/`) | GNU ar 64-bit | ✅ | identifier 判定でスキップ (`test_sym64_symbol_table_skipped`) |
+| 27 | thin encoder: `!<thin>\n` + メンバヘッダのみ emit (size=実ファイルサイズ)。`add_reference` でデータなし参照可 | GNU ar thin | ✅ | `test_thin_roundtrip`、`test_thin_add_file_uses_data_len`、`test_thin_system_list_compat` (system `ar tv`) |
 
 ---
 
@@ -71,5 +72,5 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 26 |
-| **合計** | **26** |
+| ✅ 実装+テスト済み | 27 |
+| **合計** | **27** |

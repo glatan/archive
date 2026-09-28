@@ -40,9 +40,30 @@ pub mod rpm;
 #[cfg(feature = "squashfs")]
 pub mod squashfs;
 
+#[cfg(feature = "cramfs")]
+pub mod cramfs;
+
+#[cfg(feature = "crx3")]
+pub mod crx3;
+#[cfg(feature = "pea")]
+pub mod pea;
+#[cfg(feature = "romfs")]
+pub mod romfs;
+
+/// Linux erofs read-only filesystem image read support.
+#[cfg(feature = "erofs")]
+pub mod erofs;
+
+/// ISO 9660 filesystem image read support (Rock Ridge / Joliet).
+#[cfg(feature = "iso9660")]
+pub mod iso9660;
+
 /// Microsoft Cabinet (`.cab`) archive read support.
 #[cfg(feature = "mscab")]
 pub mod mscab;
+
+#[cfg(feature = "mscfb")]
+pub mod mscfb;
 
 /// ZIM (`.zim`) archive read support.
 #[cfg(feature = "zim")]

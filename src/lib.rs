@@ -69,6 +69,13 @@
 //! | `lzrw3a` (default) | LZRW3-A raw codec |
 //! | `lzsa` (default) | LZSA stream / LZSA1 / LZSA2 raw codecs |
 //! | `lzxd` (default) | LZX DELTA (MS-PATCH) codec (decode; uncompressed-block encode) |
+//! | `cmpsc` (default) | IBM CMPSC (z/Arch compression call) codec |
+//! | `packbits` (default) | PackBits RLE codec (Apple TN1023 / TIFF §9) |
+//! | `uuencode` (default) | uuencode historical algorithm (POSIX.1-2017) |
+//! | `ascii85` (default) | Ascii85 (Adobe ASCII85Decode + RFC 1924) |
+//! | `yenc` (default) | yEnc binary-to-text encoding (draft 1.3) |
+//! | `macbinary` (default) | MacBinary II container format |
+//! | `binhex` (default) | BinHex 4.0 (.hqx) encoding |
 //! | `tar` (default) | tar archive format |
 //! | `cpio` (default) | cpio archive format |
 //! | `ar` (default) | GNU/BSD `ar` archive format |
@@ -76,6 +83,13 @@
 //! | `rpm` (default) | RPM package (`.rpm`) read/write support |
 //! | `squashfs` (default) | SquashFS image read/write support |
 //! | `mscab` (default) | Microsoft Cabinet (`.cab`) read/write support (MSZIP/stored) |
+//! | `mscfb` (default) | Microsoft Compound File Binary (OLE2) read support |
+//! | `cramfs` (default) | Linux cramfs read-only filesystem image |
+//! | `romfs` (default) | Linux romfs read-only filesystem image |
+//! | `erofs` (default) | Linux erofs read-only filesystem image (uncompressed) |
+//! | `iso9660` (default) | ISO 9660 CD-ROM image (Rock Ridge / Joliet) |
+//! | `crx3` (default) | Chrome extension package (CRX3) read support |
+//! | `pea` (default) | PEA (Pack, Encrypt, Authenticate) archive read support |
 //! | `zim` (default) | ZIM archive (`.zim`) read/write support (v5 write) |
 //! | `mtree` (default) | mtree(5) manifest read/write support |
 //! | `warc` (default) | WARC (`.warc`) record read/write support |
@@ -487,11 +501,12 @@ pub(crate) mod util;
     feature = "mppc",
     feature = "lzs",
     feature = "lzxd",
-    feature = "cmpsc"
+    feature = "cmpsc",
+    feature = "packbits"
 ))]
 pub mod compress;
 
-/// Archive formats: tar, cpio, ar, deb, rpm, squashfs, mscab, zim, mtree, warc,
+/// Archive formats: tar, cpio, ar, deb, rpm, squashfs, cramfs, romfs, erofs, iso9660, crx3, pea, mscab, mscfb, zim, mtree, warc,
 /// git pack, xar,
 /// lha, arj, arc, zpaq, zip, and 7z.
 #[cfg(any(
@@ -501,7 +516,14 @@ pub mod compress;
     feature = "deb",
     feature = "rpm",
     feature = "squashfs",
+    feature = "cramfs",
+    feature = "romfs",
+    feature = "erofs",
+    feature = "iso9660",
+    feature = "crx3",
+    feature = "pea",
     feature = "mscab",
+    feature = "mscfb",
     feature = "zim",
     feature = "mtree",
     feature = "warc",
@@ -513,3 +535,13 @@ pub mod compress;
     feature = "sevenz",
 ))]
 pub mod archive;
+
+/// Byte encodings: uuencode, Ascii85, yEnc, MacBinary, BinHex.
+#[cfg(any(
+    feature = "uuencode",
+    feature = "ascii85",
+    feature = "yenc",
+    feature = "macbinary",
+    feature = "binhex"
+))]
+pub mod encoding;

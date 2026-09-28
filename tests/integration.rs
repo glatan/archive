@@ -3,7 +3,9 @@
     feature = "deb",
     feature = "rpm",
     feature = "squashfs",
+    feature = "cramfs",
     feature = "mscab",
+    feature = "mscfb",
     feature = "zim",
     feature = "mtree",
     feature = "cpio",
@@ -39,14 +41,33 @@
     feature = "lzxd",
     feature = "cmpsc",
     feature = "git-pack",
-    feature = "xar"
+    feature = "xar",
+    feature = "uuencode",
+    feature = "ascii85",
+    feature = "yenc",
+    feature = "macbinary",
+    feature = "binhex"
 ))]
 
 use archive::archive::ar;
 use archive::archive::cpio;
+#[cfg(feature = "cramfs")]
+use archive::archive::cramfs;
+#[cfg(feature = "crx3")]
+use archive::archive::crx3;
 use archive::archive::deb;
+#[cfg(feature = "erofs")]
+use archive::archive::erofs;
 #[cfg(feature = "git-pack")]
 use archive::archive::git_pack;
+#[cfg(feature = "iso9660")]
+use archive::archive::iso9660;
+#[cfg(feature = "mscfb")]
+use archive::archive::mscfb;
+#[cfg(feature = "pea")]
+use archive::archive::pea;
+#[cfg(feature = "romfs")]
+use archive::archive::romfs;
 use archive::archive::rpm;
 #[cfg(feature = "sevenz")]
 use archive::archive::sevenz;
@@ -91,6 +112,11 @@ use archive::compress::zx0;
 use archive::compress::zx1;
 use archive::compress::zx2;
 use archive::compress::zx5;
+use archive::encoding::ascii85;
+use archive::encoding::binhex;
+use archive::encoding::macbinary;
+use archive::encoding::uuencode;
+use archive::encoding::yenc;
 
 // ============================================================
 // 7z tests
@@ -216,14 +242,26 @@ mod bzip2_tests;
 mod combined_tests;
 #[path = "integration/cpio.rs"]
 mod cpio_tests;
+#[cfg(feature = "cramfs")]
+#[path = "integration/cramfs.rs"]
+mod cramfs_tests;
+#[cfg(feature = "crx3")]
+#[path = "integration/crx3.rs"]
+mod crx3_tests;
 #[path = "integration/deb.rs"]
 mod deb_tests;
 #[path = "integration/deflate.rs"]
 mod deflate_tests;
+#[cfg(feature = "erofs")]
+#[path = "integration/erofs.rs"]
+mod erofs_tests;
 #[path = "integration/generated/mod.rs"]
 mod generated_tests;
 #[path = "integration/gzip.rs"]
 mod gzip_tests;
+#[cfg(feature = "iso9660")]
+#[path = "integration/iso9660.rs"]
+mod iso9660_tests;
 #[cfg(feature = "lha")]
 #[path = "integration/lha.rs"]
 mod lha_tests;
@@ -239,6 +277,12 @@ mod lzma_alone_tests;
 mod lzo_tests;
 #[path = "integration/lzw.rs"]
 mod lzw_tests;
+#[cfg(feature = "pea")]
+#[path = "integration/pea.rs"]
+mod pea_tests;
+#[cfg(feature = "romfs")]
+#[path = "integration/romfs.rs"]
+mod romfs_tests;
 #[path = "integration/rpm.rs"]
 mod rpm_tests;
 #[cfg(feature = "rzip")]
@@ -255,6 +299,9 @@ mod squashfs_tests;
 #[cfg(feature = "mscab")]
 #[path = "integration/mscab.rs"]
 mod mscab_tests;
+#[cfg(feature = "mscfb")]
+#[path = "integration/mscfb.rs"]
+mod mscfb_tests;
 
 #[path = "integration/fastlz.rs"]
 mod fastlz_tests;
@@ -317,9 +364,19 @@ mod xca_tests;
 #[path = "integration/xz.rs"]
 mod xz_tests;
 
+#[path = "integration/ascii85.rs"]
+mod ascii85_tests;
+#[path = "integration/binhex.rs"]
+mod binhex_tests;
+#[path = "integration/macbinary.rs"]
+mod macbinary_tests;
+#[path = "integration/uuencode.rs"]
+mod uuencode_tests;
 #[cfg(feature = "warc")]
 #[path = "integration/warc.rs"]
 mod warc_tests;
+#[path = "integration/yenc.rs"]
+mod yenc_tests;
 #[cfg(feature = "zim")]
 #[path = "integration/zim.rs"]
 mod zim_tests;

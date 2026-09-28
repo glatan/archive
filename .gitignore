@@ -25,3 +25,4 @@ docs/spec/sources/lzrw45_covering
 
 # local work files (plans, reference trees, oracle builds)
 /.local/
+docs/spec/sources/*.shar

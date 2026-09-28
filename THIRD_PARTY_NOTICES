@@ -308,6 +308,86 @@ specifications or standards documents:
   For lha/arj/arc interoperability checks the `bsdtar` (libarchive,
   BSD 2-Clause) and `7z` binaries are invoked only as local test-time
   oracles; they are not linked or distributed.
+- uuencode: IEEE Std 1003.1-2017 `uuencode` utility description
+  (historical algorithm). Spec-informed implementation; no code was
+  copied. CPython `binascii` (PSF License) is invoked only as a local
+  test-time interoperability oracle; it is not linked or distributed.
+- ascii85: Adobe ASCII85Decode (PDF 32000-1:2008 §7.4.3) and
+  RFC 1924 Base-85. Spec-informed implementation; no code was copied.
+  CPython `base64` (PSF License) is invoked only as a local test-time
+  interoperability oracle; it is not linked or distributed.
+- yenc: yEnc revised draft 1.3 "yEncode - A quick and dirty encoding
+  for binaries" (yenc.org, Juergen Helbing). Spec-informed
+  implementation; no code was copied. A Python reference
+  implementation written independently from the spec text is used
+  only as a local test-time interoperability oracle; it is not
+  linked or distributed.
+- cramfs: Linux kernel cramfs documentation and uapi headers
+  (cramfs.rst, fs/cramfs/README, include/uapi/linux/cramfs_fs.h;
+  GPL-2.0 with Linux-syscall-note). Spec-informed implementation;
+  no code was copied. `mkfs.cramfs`/`fsck.cramfs` (util-linux,
+  GPL-2.0+) are used only as test-time interoperability oracles
+  inside the test container; they are not linked or distributed.
+- crx3: Chromium components/crx_file/crx3.proto (BSD-style
+  license). Format documentation embedded in proto comments;
+  spec-informed implementation. The protobuf wire parsing was
+  written directly from the .proto definitions; no Chromium or
+  protobuf library code was copied. An independently written
+  Python protobuf/zip generator is used only as a local test-time
+  interoperability oracle; it is not linked or distributed.
+- pea: PEA file format specification (pea_help.pdf, public
+  domain) and PeaZip reference implementation sources
+  (pea.pas, pea_utils.pas; LGPLv3, Giorgio Tani). Spec-informed
+  implementation; the wire format was reimplemented from the
+  specification and reference behavior — no code was copied.
+  An independently written Python PEA writer is used only as a
+  local test-time interoperability oracle; it is not linked or
+  distributed.
+- romfs: Linux kernel romfs documentation
+  (Documentation/filesystems/romfs.rst; GPL-2.0 with
+  Linux-syscall-note). Spec-informed implementation; no code was
+  copied. `genromfs` 0.5.2 (GPL-2.0+, Jan T Zimmerman / Janos
+  Farkas) was built from source and used only to produce the
+  checked-in test fixture `tests/fixtures/romfs/genromfs.romfs`;
+  it is not linked or distributed.
+- erofs: Linux kernel erofs documentation and on-disk headers
+  (Documentation/filesystems/erofs.rst, fs/erofs/erofs_fs.h;
+  GPL-2.0 with Linux-syscall-note). Spec-informed implementation;
+  no code was copied. `erofs-utils` `mkfs.erofs`/`fsck.erofs`
+  (GPL-2.0+) were built from source and used only to produce and
+  cross-validate the checked-in test fixture
+  `tests/fixtures/erofs/mkfs.erofs.img`; they are not linked or
+  distributed.
+- iso9660: ECMA-119 4th edition (= ISO 9660; Ecma International),
+  Linux kernel isofs documentation and on-disk header
+  (Documentation/filesystems/isofs.rst, include/uapi/linux/iso_fs.h;
+  GPL-2.0 with Linux-syscall-note), System Use Sharing Protocol 1.10,
+  Rock Ridge Interchange Protocol 1.12 (IEEE P1282), and the Microsoft
+  Joliet specification. Spec-informed implementation; no code was
+  copied. `bsdtar`/`libarchive` (BSD-2-Clause) was used only as a
+  local test-time oracle to produce and cross-validate the checked-in
+  fixtures `tests/fixtures/iso9660/bsdtar-*.iso`; it is not linked or
+  distributed.
+- mscfb: [MS-CFB] Compound File Binary File Format v20210625
+  (Microsoft Open Specifications). Spec-informed implementation;
+  no code was copied. An independently written Python reference
+  generator (built directly against [MS-CFB] section 2) is used
+  only as a local test-time interoperability oracle; it is not
+  linked or distributed.
+- binhex: "BinHex 4.0 Definition" (Peter N Lewis, Aug 1991) and
+  RFC 1741 Appendix A. Spec-informed implementation; no code was
+  copied. CPython `binascii.crc_hqx` (PSF License) and an
+  independently written Python reference encoder are used only as
+  local test-time interoperability oracles; they are not linked or
+  distributed.
+- macbinary: MacBinary II Standard Proposal (24-Jul-1987, MacBinary II
+  Conference). Spec-informed implementation; no code was copied.
+  A Python reference implementation written independently from the
+  spec text is used only as a local test-time interoperability
+  oracle; it is not linked or distributed.
+- packbits: Apple Technical Note TN1023 "Understanding PackBits" and
+  TIFF Revision 6.0 Section 9 "PackBits Compression". Spec-informed
+  implementation; no code was copied.
 - zip: PKWARE APPNOTE.TXT 6.3.10
 - 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00)
 - LZMA codec: LZMA algorithm specification (`lzma-specification.txt`)
