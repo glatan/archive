@@ -129,7 +129,7 @@
 | [arc](arc/README.md) | SEA ARC file format description | 14 | 0 | 3 | 17 |
 | [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 38 | 0 | 5 | 43 |
 | [xar](xar/README.md) | xarformat (mackyle/xar wiki) | 32 | 0 | 6 | 38 |
-| [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 150 | 0 | 3 | 153 |
+| [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 151 | 0 | 2 | 153 |
 | [7z](sevenz/README.md) | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) | 120 | 0 | 0 | 120 |
 
 ### 共有コンポーネント
@@ -142,9 +142,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1861 |
+| ✅ 実装+テスト済み | 1862 |
 | ⚠️ 部分実装 | 2 |
-| ❌ 未実装 | 47 |
+| ❌ 未実装 | 46 |
 | **合計** | **1910** |
 
-**全体カバー率**: 1861 / 1910 = **97.4%** (intentional exclusion 除外後: 1861 / 1863 = **99.9%**)
+**全体カバー率**: 1862 / 1910 = **97.5%** (intentional exclusion 除外後: 1862 / 1864 = **99.9%**)

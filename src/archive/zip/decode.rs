@@ -104,20 +104,60 @@ impl crate::traits::ArchiveEntry for ZipEntry {
 
 /// Decode a ZIP archive into memory.
 pub fn decode(input: &[u8]) -> Result<Vec<ZipEntry>, Error> {
-    decode_impl(input, None)
+    decode_impl(input, None, None)
 }
 
 /// Decode a ZIP archive into memory using a password for encrypted entries.
 pub fn decode_with_password(input: &[u8], password: &str) -> Result<Vec<ZipEntry>, Error> {
-    decode_impl(input, Some(password.as_bytes()))
+    decode_impl(input, Some(password.as_bytes()), None)
 }
 
 /// Decode a ZIP archive into memory using a password for encrypted entries.
 pub fn decode_with_password_bytes(input: &[u8], password: &[u8]) -> Result<Vec<ZipEntry>, Error> {
-    decode_impl(input, Some(password))
+    decode_impl(input, Some(password), None)
 }
 
-fn decode_impl(input: &[u8], password: Option<&[u8]>) -> Result<Vec<ZipEntry>, Error> {
+/// Decode a split/spanned ZIP archive (`file.z01`, `file.z02`, ...,
+/// `file.zip`) into a list of entries.
+///
+/// The segments are one logical byte stream (APPNOTE §8): the last
+/// segment carries the End of Central Directory record, whose disk
+/// fields must be consistent with the number of supplied parts.
+/// An optional `0x08074b50` spanning signature at the start of the
+/// first segment is tolerated (it is part of the byte stream all
+/// offsets are relative to). Empty parts are rejected.
+pub fn decode_parts(parts: &[&[u8]]) -> Result<Vec<ZipEntry>, Error> {
+    decode_parts_impl(parts, None)
+}
+
+/// [`decode_parts`] with a password for encrypted entries.
+pub fn decode_parts_with_password_bytes(
+    parts: &[&[u8]],
+    password: &[u8],
+) -> Result<Vec<ZipEntry>, Error> {
+    decode_parts_impl(parts, Some(password))
+}
+
+fn decode_parts_impl(parts: &[&[u8]], password: Option<&[u8]>) -> Result<Vec<ZipEntry>, Error> {
+    if parts.is_empty() || parts.iter().any(|p| p.is_empty()) {
+        return Err(Error::InvalidData("zip: empty archive part"));
+    }
+    if parts.len() == 1 {
+        return decode_impl(parts[0], password, Some(1));
+    }
+    let total: usize = parts.iter().map(|p| p.len()).sum();
+    let mut input = Vec::with_capacity(total);
+    for p in parts {
+        input.extend_from_slice(p);
+    }
+    decode_impl(&input, password, Some(parts.len()))
+}
+
+fn decode_impl(
+    input: &[u8],
+    password: Option<&[u8]>,
+    disk_parts: Option<usize>,
+) -> Result<Vec<ZipEntry>, Error> {
     if input.is_empty() {
         return Ok(Vec::new());
     }
@@ -127,8 +167,27 @@ fn decode_impl(input: &[u8], password: Option<&[u8]>) -> Result<Vec<ZipEntry>, E
     cursor.set(eocd_offset);
     let eocd = parse_eocd(&mut cursor)?;
 
+    // Multi-disk consistency: the EOCD sits on the last disk, so its
+    // "number of this disk" equals parts-1 (APPNOTE §8, §4.4.19).
+    match disk_parts {
+        None => {
+            if eocd.disk_number != 0 || eocd.cd_disk_number != 0 {
+                return Err(Error::Unsupported("zip: multi-disk archives"));
+            }
+        }
+        Some(n) => {
+            if eocd.disk_number as usize != n - 1 || eocd.cd_disk_number > eocd.disk_number {
+                return Err(Error::InvalidData("zip: disk count mismatch"));
+            }
+        }
+    }
+
     let zip64 = if eocd.requires_zip64() {
-        Some(parse_zip64_locator_and_record(input, eocd_offset)?)
+        Some(parse_zip64_locator_and_record(
+            input,
+            eocd_offset,
+            disk_parts,
+        )?)
     } else {
         None
     };
@@ -328,6 +387,8 @@ struct CentralDirectoryRecord {
 
 #[derive(Debug, Clone, Copy)]
 struct EocdRecord {
+    disk_number: u16,
+    cd_disk_number: u16,
     total_entries: u16,
     central_directory_offset: u32,
 }
@@ -404,16 +465,19 @@ fn parse_eocd(cursor: &mut Cursor<'_>) -> Result<EocdRecord, Error> {
     let cd_offset = cursor.read_u32()?;
     let comment_len = cursor.read_u16()? as usize;
     cursor.skip(comment_len)?;
-    if disk_number != 0 || cd_disk_number != 0 {
-        return Err(Error::Unsupported("zip: multi-disk archives"));
-    }
     Ok(EocdRecord {
+        disk_number,
+        cd_disk_number,
         total_entries,
         central_directory_offset: cd_offset,
     })
 }
 
-fn parse_zip64_locator_and_record(input: &[u8], eocd_offset: usize) -> Result<Zip64Record, Error> {
+fn parse_zip64_locator_and_record(
+    input: &[u8],
+    eocd_offset: usize,
+    disk_parts: Option<usize>,
+) -> Result<Zip64Record, Error> {
     if eocd_offset < 20 {
         return Err(Error::InvalidData("zip: missing ZIP64 locator"));
     }
@@ -424,8 +488,17 @@ fn parse_zip64_locator_and_record(input: &[u8], eocd_offset: usize) -> Result<Zi
     let disk_with_record = read_u32_at(input, locator_offset + 4)?;
     let zip64_record_offset = read_u64_at(input, locator_offset + 8)?;
     let total_disks = read_u32_at(input, locator_offset + 16)?;
-    if disk_with_record != 0 || total_disks != 1 {
-        return Err(Error::Unsupported("zip: multi-disk ZIP64 archives"));
+    match disk_parts {
+        None => {
+            if disk_with_record != 0 || total_disks != 1 {
+                return Err(Error::Unsupported("zip: multi-disk ZIP64 archives"));
+            }
+        }
+        Some(n) => {
+            if total_disks as usize != n || disk_with_record as usize >= n {
+                return Err(Error::InvalidData("zip: disk count mismatch"));
+            }
+        }
     }
 
     let record_offset = usize::try_from(zip64_record_offset)
@@ -2594,5 +2667,115 @@ mod tests {
             assert_eq!(entry.name(), expected_name);
             assert_eq!(entry.data(), expected_data.as_bytes());
         }
+    }
+    /// Locate the EOCD record and patch its disk fields as if the
+    /// archive were split into `disks` segments.
+    fn patch_eocd_disks(archive: &mut [u8], disks: u16, cd_disk: u16) {
+        let pos = archive
+            .windows(4)
+            .rposition(|w| w == [0x50, 0x4b, 0x05, 0x06])
+            .expect("EOCD not found");
+        archive[pos + 4..pos + 6].copy_from_slice(&disks.to_le_bytes());
+        archive[pos + 6..pos + 8].copy_from_slice(&cd_disk.to_le_bytes());
+    }
+
+    #[test]
+    fn split_parts_roundtrip() {
+        use crate::traits::ArchiveEntry;
+        let mut enc = crate::archive::zip::encode::ZipEncoder::new();
+        enc.add_file("a.txt", b"aaaa");
+        enc.add_file("dir/b.bin", &[0x55; 3000]);
+        enc.add_file("c.txt", b"cccc");
+        let mut archive = enc.finish().unwrap();
+        // EOCD sits on the last disk; the CD starts on the last disk
+        // too for this small archive.
+        patch_eocd_disks(&mut archive, 2, 2);
+        let a = archive.len() / 3;
+        let bnd = 2 * archive.len() / 3;
+        let parts = [&archive[..a], &archive[a..bnd], &archive[bnd..]];
+        let entries = decode_parts(&parts).unwrap();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].name(), "a.txt");
+        assert_eq!(entries[0].data(), b"aaaa");
+        assert_eq!(entries[1].data(), vec![0x55; 3000]);
+        // The same bytes still look multi-disk to decode().
+        assert!(matches!(decode(&archive), Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn split_parts_disk_count_mismatch() {
+        let mut enc = crate::archive::zip::encode::ZipEncoder::new();
+        enc.add_file("a.txt", b"data");
+        let mut archive = enc.finish().unwrap();
+        patch_eocd_disks(&mut archive, 4, 0);
+        let mid = archive.len() / 2;
+        let parts = [&archive[..mid], &archive[mid..]];
+        assert!(matches!(decode_parts(&parts), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn split_parts_rejects_empty_and_accepts_single() {
+        let mut enc = crate::archive::zip::encode::ZipEncoder::new();
+        enc.add_file("a.txt", b"data");
+        let archive = enc.finish().unwrap();
+        assert!(matches!(decode_parts(&[]), Err(Error::InvalidData(_))));
+        assert!(matches!(
+            decode_parts(&[&archive[..10], &[]]),
+            Err(Error::InvalidData(_))
+        ));
+        assert_eq!(decode_parts(&[&archive]).unwrap().len(), 1);
+        // Single part may still carry disk 0 fields (unsplit archive).
+        let mut multi = archive.clone();
+        patch_eocd_disks(&mut multi, 0, 0);
+        assert_eq!(decode_parts(&[&multi]).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn split_parts_spanning_signature_tolerated() {
+        use crate::traits::ArchiveEntry;
+        let mut enc = crate::archive::zip::encode::ZipEncoder::new();
+        enc.add_file("a.txt", b"payload");
+        enc.add_file("b.txt", b"other");
+        let archive = enc.finish().unwrap();
+        // PKZIP spanning archives prepend the 0x08074b50 signature as
+        // the first 4 bytes of segment 1; every stored absolute offset
+        // (CD local-header offsets, EOCD cd_offset) counts those bytes.
+        let eocd_pos = archive
+            .windows(4)
+            .rposition(|w| w == [0x50, 0x4b, 0x05, 0x06])
+            .unwrap();
+        let cd_off =
+            u32::from_le_bytes(archive[eocd_pos + 16..eocd_pos + 20].try_into().unwrap()) as usize;
+        // Collect each CD record's local_header_offset position.
+        let mut lh_offs = Vec::new();
+        let mut p = cd_off;
+        while archive[p..p + 4] == [0x50, 0x4b, 0x01, 0x02] {
+            lh_offs.push(p + 42);
+            let name_len = u16::from_le_bytes(archive[p + 28..p + 30].try_into().unwrap()) as usize;
+            let extra_len =
+                u16::from_le_bytes(archive[p + 30..p + 32].try_into().unwrap()) as usize;
+            let com_len = u16::from_le_bytes(archive[p + 32..p + 34].try_into().unwrap()) as usize;
+            p += 46 + name_len + extra_len + com_len;
+        }
+
+        let mut with_sig = Vec::with_capacity(archive.len() + 4);
+        with_sig.extend_from_slice(&[0x50, 0x4b, 0x07, 0x08]);
+        with_sig.extend_from_slice(&archive);
+        // Shift every stored absolute offset by 4.
+        for pos in lh_offs {
+            let pos = pos + 4; // record itself moved
+            let old = u32::from_le_bytes(with_sig[pos..pos + 4].try_into().unwrap());
+            with_sig[pos..pos + 4].copy_from_slice(&(old + 4).to_le_bytes());
+        }
+        let eocd_pos = eocd_pos + 4;
+        let old_cd = u32::from_le_bytes(with_sig[eocd_pos + 16..eocd_pos + 20].try_into().unwrap());
+        with_sig[eocd_pos + 16..eocd_pos + 20].copy_from_slice(&(old_cd + 4).to_le_bytes());
+        patch_eocd_disks(&mut with_sig, 1, 1);
+
+        let mid = with_sig.len() / 2;
+        let entries = decode_parts(&[&with_sig[..mid], &with_sig[mid..]]).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].data(), b"payload");
+        assert_eq!(entries[1].data(), b"other");
     }
 }

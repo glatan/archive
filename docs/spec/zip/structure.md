@@ -168,7 +168,7 @@
 
 | # | 仕様要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|---------|---------|------|----------------|
-| 125 | Multi-disk / split archive | §8 | ❌ | `Unsupported("zip: multi-disk")` (intentional) |
+| 125 | Multi-disk / split archive | §8 | ✅ | `decode_parts(&[&[u8]])` / `decode_parts_with_password_bytes` が segment を連結して decode (disk 数と EOCD/ZIP64 disk フィールドの整合を検証、PKZIP spanning signature 0x08074b50 を受理)。`split_parts_roundtrip`, `split_parts_disk_count_mismatch`, `split_parts_rejects_empty_and_accepts_single`, `split_parts_spanning_signature_tolerated` |
 | 126 | Record が segment 境界を跨がない | §8.5.2 | — | 単一ディスクのみのため該当なし |
 
 ---

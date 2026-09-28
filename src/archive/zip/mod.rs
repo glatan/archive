@@ -12,7 +12,8 @@
 //! - Bit 13 Central Directory field masking (APPNOTE §4.4.4)
 //! - Data Descriptor validation on the read path
 //! - Data Descriptor emission on the write path, including encrypted entries
-//! - Unknown-size streaming entry write via `encode::ZipStreamWriter`
+//! - Unknown-size streaming entry write via
+//! - Split/spanned (multi-disk) archive read via `encode::ZipStreamWriter`
 
 use alloc::string::String;
 use alloc::vec::Vec;
