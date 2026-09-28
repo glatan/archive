@@ -119,7 +119,7 @@
 | [ar](ar/README.md) | IEEE Std 1003.1 / GNU ar / BSD ar | 26 | 0 | 0 | 26 |
 | [deb](deb/README.md) | deb(5) (dpkg) | 25 | 0 | 2 | 27 |
 | [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 33 | 0 | 2 | 35 |
-| [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 36 | 0 | 6 | 42 |
+| [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 37 | 0 | 6 | 43 |
 | [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 23 | 0 | 4 | 27 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 22 | 0 | 3 | 25 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
@@ -142,9 +142,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 1858 |
+| ✅ 実装+テスト済み | 1859 |
 | ⚠️ 部分実装 | 2 |
 | ❌ 未実装 | 47 |
-| **合計** | **1907** |
+| **合計** | **1908** |
 
-**全体カバー率**: 1858 / 1907 = **97.4%** (intentional exclusion 除外後: 1858 / 1860 = **99.9%**)
+**全体カバー率**: 1859 / 1908 = **97.5%** (intentional exclusion 除外後: 1859 / 1861 = **99.9%**)

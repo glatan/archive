@@ -1,9 +1,11 @@
 //! SquashFS 4.0 image writer.
 //!
-//! [`SquashfsEncoder`] produces a minimal image: a root directory
-//! tree of regular files, no fragment table (file tails are stored
-//! as ordinary data blocks), no xattr/export tables, and a single
-//! UID/GID 0 entry in the ID table. Data blocks and metadata
+//! [`SquashfsEncoder`] produces an image with a root directory
+//! tree of regular files and symlinks. File tails go to ordinary
+//! data blocks unless [`SquashfsEncoder::with_fragments`] packs them
+//! into a shared fragment table. `add_file`/`add_symlink` use
+//! uid/gid 0; the `*_owned` variants record additional ids in the
+//! UID/GID table. No xattr/export tables are emitted. Data blocks and metadata
 //! blocks use the configured compressor and fall back to stored
 //! when compression does not shrink a block. The inode table is
 //! always stored uncompressed: directory listings embed on-disk
@@ -32,10 +34,14 @@ const TABLE_ABSENT: u64 = u64::MAX;
 
 const TYPE_BASIC_DIR: u16 = 1;
 const TYPE_BASIC_FILE: u16 = 2;
+const TYPE_BASIC_SYMLINK: u16 = 3;
 const TYPE_EXT_FILE: u16 = 9;
 
-/// No fragments, duplicates removed, no xattrs (informational bits).
-const FLAGS: u16 = 0x0008 | 0x0010 | 0x0040 | 0x0100;
+/// Duplicates removed, no xattrs (informational bits); fragment
+/// flags are OR'd in when the fragment table is disabled.
+const FLAGS: u16 = 0x0040 | 0x0100;
+/// Fragments stored uncompressed / no fragment table (informational).
+const FLAG_FRAG_MASK: u16 = 0x0008 | 0x0010;
 /// Compressor options block present (required for LZ4).
 const FLAG_COMP_OPT: u16 = 0x0400;
 
@@ -46,7 +52,11 @@ pub struct SquashfsEncoder {
     compression: SquashfsCompression,
     block_size: u32,
     mtime: u32,
-    files: Vec<(String, Vec<u8>)>,
+    fragments: bool,
+    /// UID/GID table: index 0 is always id 0; later ids are appended
+    /// on first use. Both uid and gid draw from this one table.
+    ids: Vec<u32>,
+    files: Vec<(String, NodeData, u32, u32)>,
 }
 
 #[derive(Default)]
@@ -57,8 +67,16 @@ struct DirNode {
     files: BTreeMap<String, usize>,
 }
 
+#[derive(Clone)]
+enum NodeData {
+    File(Vec<u8>),
+    Symlink(Vec<u8>),
+}
+
 struct FileNode {
-    data: Vec<u8>,
+    data: NodeData,
+    uid_idx: u16,
+    guid_idx: u16,
 }
 
 impl SquashfsEncoder {
@@ -68,6 +86,8 @@ impl SquashfsEncoder {
             compression: SquashfsCompression::Gzip,
             block_size: DEFAULT_BLOCK_SIZE,
             mtime: 0,
+            fragments: false,
+            ids: vec![0],
             files: Vec::new(),
         }
     }
@@ -93,10 +113,41 @@ impl SquashfsEncoder {
         self
     }
 
-    /// Queue one regular file. `name` is a `/`-separated path;
-    /// intermediate directories are created implicitly.
+    /// Pack each file's tail (the remainder after full data blocks)
+    /// into shared fragment blocks and emit a fragment table
+    /// (§7). Without this, tails occupy a whole data block each and
+    /// `frag_index` stays `NO_INDEX`.
+    pub fn with_fragments(mut self) -> Self {
+        self.fragments = true;
+        self
+    }
+
+    /// Queue one file owned by uid/gid 0.
     pub fn add_file(&mut self, name: &str, data: &[u8]) {
-        self.files.push((String::from(name), data.to_vec()));
+        self.add_file_owned(name, data, 0, 0);
+    }
+
+    /// Queue one file with explicit owner ids. The UID and GID tables
+    /// share a single id list; ids are deduplicated on first use.
+    pub fn add_file_owned(&mut self, name: &str, data: &[u8], uid: u32, gid: u32) {
+        self.files
+            .push((String::from(name), NodeData::File(data.to_vec()), uid, gid));
+    }
+
+    /// Queue one symlink (`name` -> `target`) owned by uid/gid 0.
+    /// The target is stored verbatim; no normalization is applied.
+    pub fn add_symlink(&mut self, name: &str, target: &str) {
+        self.add_symlink_owned(name, target, 0, 0);
+    }
+
+    /// Queue one symlink with explicit owner ids.
+    pub fn add_symlink_owned(&mut self, name: &str, target: &str, uid: u32, gid: u32) {
+        self.files.push((
+            String::from(name),
+            NodeData::Symlink(target.as_bytes().to_vec()),
+            uid,
+            gid,
+        ));
     }
 
     /// Serialize the image.
@@ -116,10 +167,25 @@ impl SquashfsEncoder {
             return Err(Error::InvalidData("squashfs: bad block size"));
         }
 
+        // ---- id table: index 0 = id 0; first-use order after that ----
+        let mut encoder_ids = self.ids;
+        let id_idx = |ids: &mut Vec<u32>, id: u32| -> Result<u16, Error> {
+            match ids.iter().position(|&x| x == id) {
+                Some(i) => Ok(i as u16),
+                None => {
+                    if ids.len() >= u16::MAX as usize {
+                        return Err(Error::InvalidData("squashfs: too many ids"));
+                    }
+                    ids.push(id);
+                    Ok((ids.len() - 1) as u16)
+                }
+            }
+        };
+
         // ---- directory tree ----
         let mut dirs: Vec<DirNode> = vec![DirNode::default()]; // 0 = root
         let mut files: Vec<FileNode> = Vec::new();
-        for (name, data) in &self.files {
+        for (name, data, uid, gid) in &self.files {
             let mut d = 0usize;
             let mut parts = name.split('/').peekable();
             while let Some(part) = parts.next() {
@@ -141,7 +207,11 @@ impl SquashfsEncoder {
                         return Err(Error::InvalidData("squashfs: duplicate name"));
                     }
                     dirs[d].files.insert(String::from(part), files.len());
-                    files.push(FileNode { data: data.clone() });
+                    files.push(FileNode {
+                        data: data.clone(),
+                        uid_idx: id_idx(&mut encoder_ids, *uid)?,
+                        guid_idx: id_idx(&mut encoder_ids, *gid)?,
+                    });
                 }
             }
         }
@@ -197,14 +267,54 @@ impl SquashfsEncoder {
         let mut data_area = Vec::new();
         // Data blocks sit right after the superblock and the optional
         // compressor options block, so blocks_start is absolute.
-        let mut layouts: Vec<(u64, Vec<u32>)> = Vec::with_capacity(files.len());
+        // Each layout: (blocks_start, block_sizes, frag_index,
+        // frag_offset). Symlinks carry no data.
+        let mut layouts: Vec<(u64, Vec<u32>, u32, u32)> = Vec::with_capacity(files.len());
+        // Pending fragment block (concatenated tails, <= block_size)
+        // and its table entries: (absolute start, raw size field).
+        let mut frag_stream: Vec<u8> = Vec::new();
+        let mut frag_entries: Vec<(u64, u32)> = Vec::new();
         for f in &files {
+            let data = match &f.data {
+                NodeData::File(d) => d.as_slice(),
+                NodeData::Symlink(_) => {
+                    layouts.push((0, Vec::new(), NO_INDEX, 0));
+                    continue;
+                }
+            };
             let start = 96 + comp_opts.len() as u64 + data_area.len() as u64;
             let mut sizes = Vec::new();
-            for chunk in f.data.chunks(block_size) {
+            let (block_data, tail) = if self.fragments {
+                let full = data.len() / block_size;
+                data.split_at(full * block_size)
+            } else {
+                (data, &[][..])
+            };
+            for chunk in block_data.chunks(block_size) {
                 sizes.push(emit_data_block(&mut data_area, self.compression, chunk));
             }
-            layouts.push((start, sizes));
+            let mut frag_index = NO_INDEX;
+            let mut frag_offset = 0u32;
+            if !tail.is_empty() {
+                // Flush the pending fragment when the tail does
+                // not fit.
+                if frag_stream.len() + tail.len() > block_size {
+                    let fstart = 96 + comp_opts.len() as u64 + data_area.len() as u64;
+                    let raw = emit_data_block(&mut data_area, self.compression, &frag_stream);
+                    frag_entries.push((fstart, raw));
+                    frag_stream.clear();
+                }
+                frag_index = frag_entries.len() as u32;
+                frag_offset = frag_stream.len() as u32;
+                frag_stream.extend_from_slice(tail);
+            }
+            layouts.push((start, sizes, frag_index, frag_offset));
+        }
+        // Flush the final pending fragment.
+        if !frag_stream.is_empty() {
+            let fstart = 96 + comp_opts.len() as u64 + data_area.len() as u64;
+            let raw = emit_data_block(&mut data_area, self.compression, &frag_stream);
+            frag_entries.push((fstart, raw));
         }
 
         // ---- inode table stream ----
@@ -249,32 +359,49 @@ impl SquashfsEncoder {
                     );
                 }
                 Node::File(f) => {
-                    let (start, sizes) = &layouts[*f];
-                    let file_size = files[*f].data.len() as u64;
-                    if *start > u32::MAX as u64 || file_size > u32::MAX as u64 {
-                        let body_len = 16 + 40 + sizes.len() * 4;
-                        pad_for(&mut inode_stream, body_len);
-                        inode_stream_off.push((ino, inode_stream.len()));
-                        emit_ext_file_inode(
-                            &mut inode_stream,
-                            ino,
-                            self.mtime,
-                            *start,
-                            file_size,
-                            sizes,
-                        );
-                    } else {
-                        let body_len = 16 + 16 + sizes.len() * 4;
-                        pad_for(&mut inode_stream, body_len);
-                        inode_stream_off.push((ino, inode_stream.len()));
-                        emit_basic_file_inode(
-                            &mut inode_stream,
-                            ino,
-                            self.mtime,
-                            *start as u32,
-                            file_size as u32,
-                            sizes,
-                        );
+                    let node = &files[*f];
+                    let (start, sizes, frag_index, frag_offset) = &layouts[*f];
+                    match &node.data {
+                        NodeData::Symlink(target) => {
+                            let body_len = 16 + 8 + target.len();
+                            pad_for(&mut inode_stream, body_len);
+                            inode_stream_off.push((ino, inode_stream.len()));
+                            emit_symlink_inode(
+                                &mut inode_stream,
+                                ino,
+                                node.uid_idx,
+                                node.guid_idx,
+                                self.mtime,
+                                target,
+                            );
+                        }
+                        NodeData::File(data) => {
+                            let file_size = data.len() as u64;
+                            let fields = FileInodeFields {
+                                ino,
+                                uid_idx: node.uid_idx,
+                                guid_idx: node.guid_idx,
+                                mtime: self.mtime,
+                                blocks_start: *start,
+                                file_size,
+                                frag_index: *frag_index,
+                                frag_offset: *frag_offset,
+                                block_sizes: sizes.clone(),
+                            };
+                            if fields.blocks_start > u32::MAX as u64
+                                || fields.file_size > u32::MAX as u64
+                            {
+                                let body_len = 16 + 40 + sizes.len() * 4;
+                                pad_for(&mut inode_stream, body_len);
+                                inode_stream_off.push((ino, inode_stream.len()));
+                                emit_ext_file_inode(&mut inode_stream, &fields);
+                            } else {
+                                let body_len = 16 + 16 + sizes.len() * 4;
+                                pad_for(&mut inode_stream, body_len);
+                                inode_stream_off.push((ino, inode_stream.len()));
+                                emit_basic_file_inode(&mut inode_stream, &fields);
+                            }
+                        }
                     }
                 }
             }
@@ -308,7 +435,11 @@ impl SquashfsEncoder {
                 children.push((name, dir_ino[sub], TYPE_BASIC_DIR, sub));
             }
             for (name, &f) in &dirs[d].files {
-                children.push((name, file_ino[f], TYPE_BASIC_FILE, f));
+                let ty = match files[f].data {
+                    NodeData::File(_) => TYPE_BASIC_FILE,
+                    NodeData::Symlink(_) => TYPE_BASIC_SYMLINK,
+                };
+                children.push((name, file_ino[f], ty, f));
             }
             children.sort_by(|a, b| a.0.cmp(b.0));
             if children.is_empty() {
@@ -390,14 +521,32 @@ impl SquashfsEncoder {
         // wire layout identical to the first pass).
         let (inode_meta, _) = pack_meta_stored(&inode_stream);
 
-        // ---- ID table: one metadata block containing [u32 0] ----
-        let (id_meta, _) = pack_meta(&0u32.to_le_bytes(), self.compression);
+        // ---- fragment table (16B entries: start u64, size u32,
+        // unused u32) + location list ----
+        let frag_count = frag_entries.len() as u32;
+        let mut frag_stream_entries = Vec::with_capacity(frag_entries.len() * 16);
+        for &(start, raw) in &frag_entries {
+            frag_stream_entries.extend_from_slice(&start.to_le_bytes());
+            frag_stream_entries.extend_from_slice(&raw.to_le_bytes());
+            frag_stream_entries.extend_from_slice(&0u32.to_le_bytes());
+        }
+        let (frag_meta, frag_disk) = pack_meta(&frag_stream_entries, self.compression);
+
+        // ---- ID table: collected ids as u32 entries ----
+        let id_count = encoder_ids.len() as u16;
+        let mut id_stream = Vec::with_capacity(encoder_ids.len() * 4);
+        for &id in &encoder_ids {
+            id_stream.extend_from_slice(&id.to_le_bytes());
+        }
+        let (id_meta, _) = pack_meta(&id_stream, self.compression);
 
         // ---- assemble ----
         let data_len = comp_opts.len() as u64 + data_area.len() as u64;
         let inode_table_start = 96 + data_len;
         let dir_table_start = inode_table_start + inode_meta.len() as u64;
-        let id_meta_start = dir_table_start + dir_meta.len() as u64;
+        let frag_meta_start = dir_table_start + dir_meta.len() as u64;
+        let frag_table_start = frag_meta_start + frag_meta.len() as u64;
+        let id_meta_start = frag_table_start + frag_disk.len() as u64 * 8;
         let id_table_start = id_meta_start + id_meta.len() as u64;
         let bytes_used = id_table_start + 8;
 
@@ -407,17 +556,18 @@ impl SquashfsEncoder {
         out.extend_from_slice(&inode_count.to_le_bytes());
         out.extend_from_slice(&self.mtime.to_le_bytes()); // mkfs_time
         out.extend_from_slice(&(block_size as u32).to_le_bytes());
-        out.extend_from_slice(&0u32.to_le_bytes()); // frag_count
+        out.extend_from_slice(&frag_count.to_le_bytes());
         out.extend_from_slice(&self.compression.id().to_le_bytes());
         out.extend_from_slice(&(block_size.trailing_zeros() as u16).to_le_bytes());
         let flags = FLAGS
+            | if self.fragments { 0 } else { FLAG_FRAG_MASK }
             | if comp_opts.is_empty() {
                 0
             } else {
                 FLAG_COMP_OPT
             };
         out.extend_from_slice(&flags.to_le_bytes());
-        out.extend_from_slice(&1u16.to_le_bytes()); // id_count
+        out.extend_from_slice(&id_count.to_le_bytes());
         out.extend_from_slice(&4u16.to_le_bytes()); // major
         out.extend_from_slice(&0u16.to_le_bytes()); // minor
         out.extend_from_slice(&root_inode_ref.to_le_bytes());
@@ -426,7 +576,14 @@ impl SquashfsEncoder {
         out.extend_from_slice(&TABLE_ABSENT.to_le_bytes()); // xattr
         out.extend_from_slice(&inode_table_start.to_le_bytes());
         out.extend_from_slice(&dir_table_start.to_le_bytes());
-        out.extend_from_slice(&TABLE_ABSENT.to_le_bytes()); // frag
+        out.extend_from_slice(
+            &(if frag_count == 0 {
+                TABLE_ABSENT
+            } else {
+                frag_table_start
+            })
+            .to_le_bytes(),
+        ); // frag
         out.extend_from_slice(&TABLE_ABSENT.to_le_bytes()); // export
         debug_assert_eq!(out.len(), 96);
 
@@ -434,6 +591,10 @@ impl SquashfsEncoder {
         out.extend_from_slice(&data_area);
         out.extend_from_slice(&inode_meta);
         out.extend_from_slice(&dir_meta);
+        out.extend_from_slice(&frag_meta);
+        for &d in &frag_disk {
+            out.extend_from_slice(&(frag_meta_start + d).to_le_bytes());
+        }
         out.extend_from_slice(&id_meta);
         out.extend_from_slice(&id_meta_start.to_le_bytes()); // location list
         debug_assert_eq!(out.len() as u64, bytes_used);
@@ -448,6 +609,18 @@ fn pad_for(stream: &mut Vec<u8>, len: usize) {
     if len > rem && len <= META_BLOCK_SIZE {
         stream.resize(stream.len() + rem, 0);
     }
+}
+
+struct FileInodeFields {
+    ino: u32,
+    uid_idx: u16,
+    guid_idx: u16,
+    mtime: u32,
+    blocks_start: u64,
+    file_size: u64,
+    frag_index: u32,
+    frag_offset: u32,
+    block_sizes: Vec<u32>,
 }
 
 struct DirInodeFields {
@@ -474,53 +647,58 @@ fn emit_dir_inode(out: &mut Vec<u8>, f: &DirInodeFields) {
     out.extend_from_slice(&f.parent.to_le_bytes());
 }
 
-fn emit_basic_file_inode(
-    out: &mut Vec<u8>,
-    ino: u32,
-    mtime: u32,
-    blocks_start: u32,
-    file_size: u32,
-    block_sizes: &[u32],
-) {
+fn emit_basic_file_inode(out: &mut Vec<u8>, f: &FileInodeFields) {
     out.extend_from_slice(&TYPE_BASIC_FILE.to_le_bytes());
     out.extend_from_slice(&0o644u16.to_le_bytes());
-    out.extend_from_slice(&0u16.to_le_bytes());
-    out.extend_from_slice(&0u16.to_le_bytes());
-    out.extend_from_slice(&mtime.to_le_bytes());
-    out.extend_from_slice(&ino.to_le_bytes());
-    out.extend_from_slice(&blocks_start.to_le_bytes());
-    out.extend_from_slice(&NO_INDEX.to_le_bytes()); // frag index
-    out.extend_from_slice(&0u32.to_le_bytes()); // frag offset
-    out.extend_from_slice(&file_size.to_le_bytes());
-    for &s in block_sizes {
+    out.extend_from_slice(&f.uid_idx.to_le_bytes());
+    out.extend_from_slice(&f.guid_idx.to_le_bytes());
+    out.extend_from_slice(&f.mtime.to_le_bytes());
+    out.extend_from_slice(&f.ino.to_le_bytes());
+    out.extend_from_slice(&(f.blocks_start as u32).to_le_bytes());
+    out.extend_from_slice(&f.frag_index.to_le_bytes());
+    out.extend_from_slice(&f.frag_offset.to_le_bytes());
+    out.extend_from_slice(&(f.file_size as u32).to_le_bytes());
+    for &s in &f.block_sizes {
         out.extend_from_slice(&s.to_le_bytes());
     }
 }
 
-fn emit_ext_file_inode(
-    out: &mut Vec<u8>,
-    ino: u32,
-    mtime: u32,
-    blocks_start: u64,
-    file_size: u64,
-    block_sizes: &[u32],
-) {
+fn emit_ext_file_inode(out: &mut Vec<u8>, f: &FileInodeFields) {
     out.extend_from_slice(&TYPE_EXT_FILE.to_le_bytes());
     out.extend_from_slice(&0o644u16.to_le_bytes());
-    out.extend_from_slice(&0u16.to_le_bytes());
-    out.extend_from_slice(&0u16.to_le_bytes());
-    out.extend_from_slice(&mtime.to_le_bytes());
-    out.extend_from_slice(&ino.to_le_bytes());
-    out.extend_from_slice(&blocks_start.to_le_bytes());
-    out.extend_from_slice(&file_size.to_le_bytes());
+    out.extend_from_slice(&f.uid_idx.to_le_bytes());
+    out.extend_from_slice(&f.guid_idx.to_le_bytes());
+    out.extend_from_slice(&f.mtime.to_le_bytes());
+    out.extend_from_slice(&f.ino.to_le_bytes());
+    out.extend_from_slice(&f.blocks_start.to_le_bytes());
+    out.extend_from_slice(&f.file_size.to_le_bytes());
     out.extend_from_slice(&0u64.to_le_bytes()); // sparse
     out.extend_from_slice(&1u32.to_le_bytes()); // nlink
-    out.extend_from_slice(&NO_INDEX.to_le_bytes()); // frag index
-    out.extend_from_slice(&0u32.to_le_bytes()); // frag offset
+    out.extend_from_slice(&f.frag_index.to_le_bytes());
+    out.extend_from_slice(&f.frag_offset.to_le_bytes());
     out.extend_from_slice(&NO_INDEX.to_le_bytes()); // xattr
-    for &s in block_sizes {
+    for &s in &f.block_sizes {
         out.extend_from_slice(&s.to_le_bytes());
     }
+}
+
+fn emit_symlink_inode(
+    out: &mut Vec<u8>,
+    ino: u32,
+    uid_idx: u16,
+    guid_idx: u16,
+    mtime: u32,
+    target: &[u8],
+) {
+    out.extend_from_slice(&TYPE_BASIC_SYMLINK.to_le_bytes());
+    out.extend_from_slice(&0o777u16.to_le_bytes());
+    out.extend_from_slice(&uid_idx.to_le_bytes());
+    out.extend_from_slice(&guid_idx.to_le_bytes());
+    out.extend_from_slice(&mtime.to_le_bytes());
+    out.extend_from_slice(&ino.to_le_bytes());
+    out.extend_from_slice(&1u32.to_le_bytes()); // nlink
+    out.extend_from_slice(&(target.len() as u32).to_le_bytes());
+    out.extend_from_slice(target);
 }
 
 /// Emit one data block (compressed if smaller, else stored).
@@ -697,6 +875,82 @@ mod tests {
         assert!(enc.finish().is_err());
         let enc = SquashfsEncoder::new().with_compression(SquashfsCompression::Lzma);
         assert!(matches!(enc.finish(), Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn symlink_roundtrip() {
+        let mut enc = SquashfsEncoder::new();
+        enc.add_symlink("link", "/target/path");
+        enc.add_symlink_owned("sub/rel", "../a.txt", 1000, 200);
+        enc.add_file("a.txt", b"content");
+        let img = enc.finish().unwrap();
+        // id_count = 3: 0, 1000, 200
+        assert_eq!(u16::from_le_bytes([img[26], img[27]]), 3);
+        let dec = crate::archive::squashfs::decode::decode(&img).unwrap();
+        let link = dec.entries.iter().find(|e| e.name == "link").unwrap();
+        assert_eq!(link.data, b"/target/path");
+        let rel = dec.entries.iter().find(|e| e.name == "sub/rel").unwrap();
+        assert_eq!(rel.data, b"../a.txt");
+    }
+
+    #[test]
+    fn fragments_roundtrip() {
+        let block = 4096usize;
+        let mut enc = SquashfsEncoder::new()
+            .with_block_size(block as u32)
+            .with_fragments();
+        let a: Vec<u8> = (0..(block + 100) as u32).map(|i| (i % 13) as u8).collect();
+        let b: Vec<u8> = (0..50u32).map(|i| (i % 7) as u8).collect();
+        enc.add_file("a.bin", &a);
+        enc.add_file("dir/b.bin", &b);
+        let img = enc.finish().unwrap();
+        // frag_count > 0 in the superblock (offset 16)
+        assert!(u32::from_le_bytes([img[16], img[17], img[18], img[19]]) > 0);
+        // frag_table_start != TABLE_ABSENT (offset 80)
+        assert_ne!(
+            u64::from_le_bytes(img[80..88].try_into().unwrap()),
+            u64::MAX
+        );
+        let dec = crate::archive::squashfs::decode::decode(&img).unwrap();
+        assert_eq!(
+            dec.entries.iter().find(|e| e.name == "a.bin").unwrap().data,
+            a
+        );
+        assert_eq!(
+            dec.entries
+                .iter()
+                .find(|e| e.name == "dir/b.bin")
+                .unwrap()
+                .data,
+            b
+        );
+    }
+
+    #[test]
+    fn fragments_disabled_by_default() {
+        let mut enc = SquashfsEncoder::new().with_block_size(4096);
+        enc.add_file("a", &[1, 2, 3]);
+        let img = enc.finish().unwrap();
+        assert_eq!(u32::from_le_bytes([img[16], img[17], img[18], img[19]]), 0);
+        let dec = crate::archive::squashfs::decode::decode(&img).unwrap();
+        let e = dec.entries.iter().find(|e| e.name == "a").unwrap();
+        assert_eq!(e.data, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn multiple_ids_roundtrip() {
+        let mut enc = SquashfsEncoder::new();
+        enc.add_file("a", b"1");
+        enc.add_file_owned("b", b"2", 1000, 0);
+        enc.add_file_owned("c", b"3", 1000, 200);
+        let img = enc.finish().unwrap();
+        // id_count = 3: 0, 1000, 200 (offset 26)
+        assert_eq!(u16::from_le_bytes([img[26], img[27]]), 3);
+        let dec = crate::archive::squashfs::decode::decode(&img).unwrap();
+        for (name, want) in [("a", b"1" as &[u8]), ("b", b"2"), ("c", b"3")] {
+            let e = dec.entries.iter().find(|e| e.name == name).unwrap();
+            assert_eq!(e.data, want);
+        }
     }
 
     #[test]

@@ -6,8 +6,9 @@
 //! Supported compressors: zlib ("gzip"), LZO, xz, LZ4, zstd. LZMA 1
 //! (compressor id 2, deprecated upstream) is rejected.
 //!
-//! The `encode` module writes a minimal image (regular files + implicit
-//! directories, one compressor, no fragment/xattr/export tables).
+//! The `encode` module writes an image (regular files, symlinks,
+//! implicit directories, one compressor, optional fragment table and
+//! multiple UID/GID ids; no xattr/export tables).
 //! Interpreting filesystem semantics (device nodes, xattrs) beyond
 //! name/content listing is intentionally out of scope.
 
