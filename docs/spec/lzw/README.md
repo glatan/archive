@@ -34,8 +34,8 @@
 
 ## 外部ツール非互換 (intentional scope)
 
-以下は `ncompress` (system `compress`/`uncompress`) 固有の動作であり、ライブラリ実装の問題ではありません。
-fuzz の `original-compress` / `original-decompress` パターンでの false failure を防ぐため、`fuzz/src/known_issues.rs` でフィルタリングされます。
+以下は `ncompress` (system `compress`/`uncompress`) 固有の動作であり、本ライブラリの欠陥ではない。
+fuzz の `original-compress` / `original-decompress` パターンにおける誤検知を防ぐため、`fuzz/src/known_issues.rs` で除外対象としている。
 
 | # | 項目 | 対象 variant | 理由 |
 |---|------|------------|------|

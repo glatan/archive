@@ -53,7 +53,7 @@
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
 | 28 | z_erofs 圧縮 inode (datalayout 1/3: LZ4/MicroLZMA/DEFLATE/Zstandard pcluster) | ❌ intentional scope | `Error::Unsupported`。mkfs.erofs デフォルトは非圧縮 |
-| 29 | METABOX / ZTAILPACKING / FRAGMENTS・DEDUPE / DEVICE_TABLE イメージ | ❌ intentional scope | メタデータアドレッシングを根本変更、または外部 blob が必要。superblock で早期拒否 |
+| 29 | METABOX / ZTAILPACKING / FRAGMENTS・DEDUPE / DEVICE_TABLE イメージ | ❌ intentional scope | 通常と異なるメタデータアドレッシング構造を持つか、外部 blob を要するため。superblock で早期拒否 |
 | 30 | erofs write | ❌ intentional scope | mkfs.erofs の領域。read が主用途 |
 | 31 | xattr 内容の解釈・ACL 復元 (inline/shared/long prefix) | ❌ intentional scope | ibody サイズは skip のため計算するが名前・値は展開しない |
 | 32 | dirblkbits ≠ 0 の sub-page directory block | ⚠️ 未対応 | mkfs.erofs は現在 0 を出力。ディレクトリ走査は blksz 単位 |

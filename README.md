@@ -2,8 +2,8 @@
 
 純 Rust 実装のアーカイブ・圧縮ライブラリ。外部依存なし、`no_std` + `alloc` 対応。
 
-README は概要と導線だけを持ちます。仕様準拠、互換性メモ、intentional scope 制約、
-要件単位のテスト網羅は [`docs/spec/`](docs/spec/README.md) を正本とします。
+本ドキュメントは概要と導線のみを記載する。仕様準拠、互換性メモ、意図的なスコープ制約（intentional scope）、
+要件単位のテスト網羅は [`docs/spec/`](docs/spec/README.md) を正本とする。
 
 ## 対応フォーマット
 
@@ -81,7 +81,7 @@ for entry in &entries {
 
 ## Trait ベース API
 
-フォーマット横断の汎用コードには `traits` モジュールの共通インターフェースを利用できます。
+フォーマット横断の汎用コードには `traits` モジュールの共通インターフェースを利用できる。
 
 ```rust
 use archive::traits::{Decode, Encode};
@@ -95,14 +95,14 @@ let decoded = codec.decode(&compressed, None).unwrap();
 let err = codec.decode(&compressed, Some(3)).unwrap_err();
 ```
 
-アーカイブ形式には `ArchiveEntry` / `ArchiveDecode` / `ArchiveEncode` trait があります。
-詳細は `cargo doc --open` の [`traits`](https://docs.rs/archive/latest/archive/traits/) モジュールを参照してください。
+アーカイブ形式には `ArchiveEntry` / `ArchiveDecode` / `ArchiveEncode` trait を定義している。
+詳細は `cargo doc --open` の [`traits`](https://docs.rs/archive/latest/archive/traits/) モジュールを参照。
 
 ## Workspace packages
 
 ### archive-cli
 
-`archive` コマンドとして library の全フォーマットをコマンドラインから操作できます。
+`archive` コマンドとしてライブラリの全フォーマットをコマンドラインから操作できる。
 
 ```sh
 archive list sample.tar.gz --tree        # ツリー表示
@@ -113,8 +113,8 @@ archive inspect sample.7z               # フォーマット検出
 archive test sample.bz2                  # 整合性検証
 ```
 
-`list` コマンドは TTY 出力時に自動で pager (`$PAGER`, デフォルト `less -FRX`) を通します。
-暗号化 zip/7z は `--password` オプション対応。`--json` で機械可読出力。
+`list` コマンドは TTY 出力時に自動で pager (`$PAGER`, デフォルト `less -FRX`) を通す。
+暗号化 zip/7z は `--password` オプションに対応し、`--json` で機械可読な出力を得る。
 
 詳細: [`archive-cli/README.md`](archive-cli/README.md)
 

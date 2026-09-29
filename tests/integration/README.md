@@ -1,7 +1,7 @@
 # Integration tests
 
-このディレクトリ配下の integration test は、crate の public API を format ごとに end-to-end で確認するためのものです。
-主に次の観点を扱います。
+このディレクトリ配下の integration test は、crate の public API を format ごとに end-to-end で検証することを目的とする。
+主に次の観点を扱う。
 
 - encode/decode の roundtrip
 - `encode_writer` / `decode_reader`
@@ -9,7 +9,7 @@
 - metadata / dictionary / multi-member / multi-frame
 - corruption / malformed input / checksum mismatch
 
-`tests/integration.rs` が harness になっており、各 `tests/integration/*.rs` を module として読み込みます。
+`tests/integration.rs` が harness であり、各 `tests/integration/*.rs` を module として読み込む。
 
 ## 実行方法
 
@@ -22,10 +22,10 @@
 
 ## System tool interop の扱い
 
-一部の integration test は Arch Linux 側の外部ツールを使います。
-ツールが見つからない環境では、それらの test は skip されます。
+一部の integration test は Arch Linux 環境の外部ツールを使用する。
+ツールが存在しない環境では、該当テストをスキップする。
 
-現時点で `Containerfile` では次を用意しています。
+現時点で `Containerfile` に用意している外部ツールは次の通りである。
 
 - `python`
 - `brotli`
@@ -46,8 +46,8 @@
   - `rzip`
   - `zpaq`
 
-ただし、**tool が入っていても相互運用 test を持たない format はあります**。
-これは current implementation scope と upstream tool の format 差分によるものです。
+ただし、ツールが導入されていても相互運用テストを持たないフォーマットが存在する。
+これは現在の実装スコープ（current implementation scope）と外部ツールのフォーマット仕様差分に起因する。
 
 - `zpaq`
   - crate 側は simplified archive layout を対象としており、system `zpaq` の journaling archive とは直接互換ではない
@@ -60,7 +60,7 @@
 
 ## Test inventory
 
-以下の表では、各 integration test file がどの観点をどの test case で固定しているかを対応付けています。
+以下の表は、各 integration test file がどの観点をどの test case で固定しているかを対応付けたものである。
 
 ### `ar.rs`
 

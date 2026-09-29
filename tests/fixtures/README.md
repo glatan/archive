@@ -1,18 +1,26 @@
 # Test fixtures
 
-このディレクトリには、integration test で使う外部 fixture を置いています。
-基本方針は次の通りです。
+このディレクトリには、統合テスト（integration test）で使用する外部フィクスチャを配置している。
+基本方針は次の通りである。
 
-- `.txt` / `.bin` は元データ
-- `.gz` / `.zst` / `.Z` / `.lz4` / `.lzo` / `.lrz` は、その元データを各形式で圧縮したもの
-- `.tar` / `.cpio` は、複数エントリや format-specific metadata を確認するためのアーカイブ
-- `fuzz/` は、ファズテストで見つかった回帰ケースを最小化して保存したもの
+- `.txt` / `.bin`: 元データ
+- `.gz` / `.zst` / `.Z` / `.lz4` / `.lzo` / `.lrz`: 元データを各形式で圧縮したファイル
+- `.tar` / `.cpio` / `.lzh`: 複数エントリや形式固有のメタデータを検証するためのアーカイブ
+- `fuzz/`: ファズテストで検出された回帰ケースを最小化して保存したファイル
+
+## 命名規則
+
+- `hello.*`: 最小の固定文字列サンプル
+- `repeated.*`: 繰り返しパターンを持つ圧縮向きサンプル
+- `large.*`: ブロックやサイズ境界の検証を目的とした大きめのサンプル
+- `*_original_compress_*`: 元データを外部ツールで圧縮し、その出力を crate 側で検証する回帰テスト用データ
+- `*_original_decompress_*`: crate 側で圧縮した出力を外部ツールで展開して検証する回帰テスト用データ
 
 ---
 
 ## Fixture provenance
 
-以下は、「どんなデータを」「どう加工して」 fixture にしたかの説明です。
+以下に、各フィクスチャの元データおよび生成手順を記す。
 
 ### `gzip/`
 
@@ -101,6 +109,13 @@
 - `bin_mixed.cpio`
   - 同ツール生成。エントリ: `subdir/nested.txt` (20B)、`link.txt` (symlink → `hello.txt`)、`hello.txt` (22B)
 
+### `lha/`
+
+- `level1.lzh`, `level2.lzh`, `level1_nested.lzh`, `level2_nested.lzh`
+  - LHa for UNIX 1.14i (jca02266/lha, `lha a -o1` / `-o2`) が生成した `-lh0-` (stored) アーカイブ
+  - `level1`/`level2` は `f1.txt` (`hello level one`+改行) と `f2.txt` (`payload2`+改行) の 2 エントリ
+  - `*_nested` は `dir/sub/deep.txt` (`nested content`+改行) を先頭に持ち、拡張ヘッダ `0x02` の生 `0xff` 区切りディレクトリを含む
+
 ### `lzw/`
 
 - `hello.Z`
@@ -128,8 +143,8 @@
 
 ### `fuzz/`
 
-このディレクトリの fixture は、意味のある文書や自然言語データではなく、**ファズテストで回帰を再現するために保存した入力** です。
-基本的に「最小化された入力」なので、人が読める意味は薄いですが、失敗パターンを固定するのに重要です。
+このディレクトリのフィクスチャは、ファズテストで検出された不具合を再現するための最小化入力である。
+人間が判読可能なデータ構造は持たないが、特定の失敗パターンをリグレッションテストとして決定論的に固定・再現する役割を持つ。
 
 - `zstd_original_compress_1.bin`
   - fuzz で残した ASCII 寄りの入力データ
@@ -153,23 +168,3 @@
   - fuzz で残した ASCII 寄りの入力
   - crate 側で xz encode した結果を system `xz -dc` で展開できるかの回帰に使う
   - ツール不在時は self-roundtrip のみ検証する
-
-### 命名規則メモ
-
-- `hello.*`
-  - 最小の固定文字列サンプル
-- `repeated.*`
-  - 繰り返しパターンを持つ圧縮向きサンプル
-- `large.*`
-  - ブロックやサイズ境界を見やすくするための大きめサンプル
-- `*_original_compress_*`
-  - 元データを外部ツールで圧縮し、その出力を crate 側で受ける回帰
-- `*_original_decompress_*`
-  - crate 側で圧縮した出力を外部ツールで展開する回帰
-
-### `lha/`
-
-- `level1.lzh`, `level2.lzh`, `level1_nested.lzh`, `level2_nested.lzh`
-  - LHa for UNIX 1.14i (jca02266/lha, `lha a -o1` / `-o2`) が生成した `-lh0-` (stored) アーカイブ
-  - `level1`/`level2` は `f1.txt` (`hello level one`+改行) と `f2.txt` (`payload2`+改行) の 2 エントリ
-  - `*_nested` は `dir/sub/deep.txt` (`nested content`+改行) を先頭に持ち、拡張ヘッダ `0x02` の生 `0xff` 区切りディレクトリを含む
