@@ -29,6 +29,7 @@
 | 12 | 列挙: root.child から red-black 木を left/node/right DFS。storage は path 成分、stream のみ entry 出力 (`Storage/Sub/Name`) | §2.6.4 | ✅ | `storage_children_get_path_prefix`、`sibling_chain_enumerates_all` |
 | 13 | stream ID 循環・範囲外を拒否 | §2.6.1 | ✅ | `visited` セット + depth 制限 |
 | 14 | v3 の stream size ≤ 0x80000000 (上位 32bit が非ゼロの旧実装ファイルはサイズ解釈を 32bit に限定せず規格値として扱い超過なら拒否) | §2.6.1 | ✅ | decode 時 assert |
+| 21 | CLSID / State Bits / FILETIME の公開 | §2.6.1 | ✅ | stream entry は `CfbEntry.meta` (`CfbEntryMeta`: clsid/state_bits/created/modified、FILETIME は生 u64)、root storage は `root_meta()` で公開。`exposes_stream_entry_metadata`, `root_meta_reads_root_entry` |
 
 ## mini stream 層
 
@@ -45,7 +46,6 @@
 |---|------|------|------|
 | 19 | compound file write | ❌ intentional scope | red-black 木の構築・FAT 確保・トランザクションは別仕事。read が本フォーマットの主用途 |
 | 20 | Range Lock sector (offset 0x7FFFFFFF) / トランザクション signature | ❌ intentional scope | 並行アクセス制御はコンテナ展開に不要。signature は読み飛ばし |
-| 21 | CLSID / State Bits / FILETIME の公開 | ❌ intentional scope | ディレクトリ entry から読み出しはするが entry API には出さない (name+data のみ。必要になったら拡張) |
 | 22 | 大文字 mapping / red-black 挿入順序 | ⚠️ 列挙は DFS で網羅、名前順序保証なし | 検索用ソート規則は write 時にのみ意味を持つ |
 | 23 | version 3 で上位 32bit が非ゼロな stream size の寛容読み | ❌ intentional scope | spec は「parser は上位を無視すべき」と推奨。本実装は規格上限超過を厳格拒否 |
 
@@ -53,7 +53,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 18 |
+| ✅ 実装+テスト済み | 19 |
 | ⚠️ 部分対応 | 1 |
-| ❌ 未対応 | 4 |
+| ❌ 未対応 | 3 |
 | **合計** | **23** |

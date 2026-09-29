@@ -55,6 +55,7 @@
 | 18 | `WARC-Block-Digest: sha1:<base32(RFC4648,padなし)>` を block 全体に対して発行 (既定 ON、`block_digest(false)`/extra_fields で上書き可) | §WARC-Block-Digest | ✅ | `block_digest_is_emitted_and_correct`, `block_digest_can_be_disabled_or_overridden` |
 | 19 | `WARC-Payload-Digest` は caller が payload バイトを供給した時のみ発行 (application/http の entity-body 特定は caller 責務、block は opaque)。payload 不明な record には付けない | §WARC-Payload-Digest | ✅ | `payload_digest_only_when_given` |
 | 20 | `WARC/1.0` 版も emit 可能 (`warc10()`)。field name は token (printable ASCII・`:`/空白不可)、value は CR/LF 不許可、managed field (Type/ID/Date/Content-Length/Target-URI/Content-Type) の extra_fields 重複は reject | §named fields grammar | ✅ | `warc10_version`, `rejects_bad_fields` |
+| 27 | `WARC-Block-Digest` の decode 時検証 (sha1 + RFC 4648 base32 decode)。`WARC-Payload-Digest` は payload==block が確定できる record のみ検証 (application/http・revisit・segmented/truncated は skip)。sha1 以外の algo label は受理して検証しない | §WARC-Block-Digest / §WARC-Payload-Digest | ✅ | `verify_digest`/`verify_digests` (decode.rs)、`verifies_block_digest`, `rejects_wrong_block_digest`, `rejects_malformed_block_digest`, `skips_unknown_digest_algorithm`, `verifies_payload_digest_for_opaque_block`, `skips_payload_digest_when_payload_not_block` |
 
 ### CLI / fuzz 連携
 
@@ -70,7 +71,6 @@
 | # | 項目 | 理由 |
 |---|------|------|
 | 25 | ❌ record 間の `WARC-Concurrent-To` / segment (`continuation`) 結合 | 各 record を独立エントリとして公開。結合は利用側の判断 |
-| 26 | ❌ record 内部の HTTP メッセージ解析 (response/request block の中身) | block は opaque octet 列として扱う (encode 側も payload 特定は caller 責務) |
-| 27 | ❌ `WARC-Payload-Digest` / `WARC-Block-Digest` の decode 時検証 | digest 値の検証は行わない (未知フィールド同様に無視)。encode 側では sha1 で発行 |
+| 26 | ❌ record 内部の HTTP メッセージ解析 (response/request block の中身) | block は opaque octet 列として扱う (encode 側も payload 特定は caller 責務)。`WARC-Payload-Digest` が特定不能な record では digest 検証も skip (行 27 参照) |
 | 28 | ❌ record type 別のフィールド使用制約 (warcinfo/metadata の payload 不可等) の強制 | ヘッダ構文と必須フィールド存在のみ検証。type 別制約違反の record も opaque entry として受理 |
 | 29 | ❌ segmentation ルール (`continuation` / `WARC-Segment-Origin-ID` 必須性) の検証 | record 結合を行わない (行 25 と同根拠) |

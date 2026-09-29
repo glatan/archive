@@ -49,6 +49,7 @@
 | 27 | `TF`: timestamp ビット列、7B 形式の modify time (bit1) を mtime として採用。17B 長形式は読み飛ばし | RRIP §4.1.6 | ✅ | decode 時処理 |
 | 28 | RRIP 名は Joliet/ISO 名に優先、PX 非存在時は dir=0o040555 / file=0o100444 の合成 mode | 優先順位設計 | ✅ | `test_iso9660_rockridge_image` / `test_iso9660_plain_image` |
 | 29 | PX mode の S_IFMT で kind を決定: 0o120000→Symlink、0o100000→File、その他→`Other(sfmt)` | RRIP + POSIX | ✅ | `rr_symlink_with_px` |
+| 35 | zisofs `ZF` 圧縮エントリ (transparent decompression): `ZF` System Use entry (signature `pz`、log2 block size、非圧縮サイズ) + データ領域のポインタテーブル + 各ブロックの zlib ストリームを透過展開 | zisofs format (kernel `fs/isofs/rock.c`/`compress.c`、zisofs-tools `mkzftree`) | ✅ | `zisofs_inflate` (block_shift 15-17 のみ受理、csize==0 は全ゼロブロック、ポインタ逆転/範囲外/truncate は reject)。`zisofs_roundtrip`, `zisofs_small_file`, `zisofs_rejects_bad_header`, `zisofs_rejects_bad_pointers`, `zisofs_rejects_bad_params` |
 
 ## Joliet 層
 
@@ -57,6 +58,8 @@
 | 30 | SVD escape sequence `%/@` `%/C` `%/E` (UCS-2 level 1-3) で Joliet SVD を識別 | Joliet spec §"Escape Sequences" | ✅ | `test_iso9660_joliet_image` (`has_joliet`) |
 | 31 | Joliet ツリーの file identifier は UCS-2BE、U+0000 で終端、`;version` 除去 | Joliet spec | ✅ | `test_iso9660_joliet_image` (lowercase 名) |
 | 32 | Joliet ツリーは primary ツリーで Rock Ridge 名が得られなかった場合のみ使用 | 優先順位設計 | ✅ | RR fixture が RR 名で decode されることで確認 |
+| 41 | UTF-16 surrogate ペア・Joliet level 3 超の UCS-2 拡張 | Joliet spec (UCS-2 規定 + 規格外入力の防御) | ✅ | `decode_ucs2` が `char::decode_utf16` で非 BMP を合成 (孤立 surrogate は `U+FFFD`)。`joliet_surrogate_pair_names` |
+| 42 | Path Table の読み出し | ECMA-119 §8.4, §9.2 | ✅ | type-L path table を `PathTableEntry` として parse・`IsoImage.path_table` で公開 (欠落・範囲外は空で寛容、木走査が authoritative)。`path_table_matches_tree`, `path_table_absent_or_bad_extent_is_tolerated`, `test_iso9660_path_table` |
 
 ## 意図的な scope 制約
 
@@ -64,14 +67,12 @@
 |---|------|------|------|
 | 33 | multi-extent file (flags bit7: >4GiB 分割記録) | ❌ intentional scope | `Error::Unsupported` |
 | 34 | interleaved file (file unit size / interleave gap ≠ 0) | ❌ intentional scope | `Error::Unsupported`。Video-CD 向け |
-| 35 | zisofs `ZF` 圧縮エントリ (transparent decompression) | ❌ intentional scope | `Error::Unsupported` (検出して拒否) |
+
 | 36 | El Torito boot catalog / Boot Record の解釈 | ❌ intentional scope | VD type 0 は読み飛ばし |
 | 37 | extended attribute record の内容解釈 | ❌ intentional scope | extent 開始ブロックへの加算のみ (読み飛ばし) |
 | 38 | multi-session / UDF bridge / HFS ハイブリッドの別ツリー | ❌ intentional scope | primary + Joliet SVD のみ |
 | 39 | RRIP `PN`/`CL`/`PL`/`RE`/`RR` 以外の残エントリ (hardlink dev/inode 等) | ❌ intentional scope | 読み飛ばし (decode に必須でない)。`NM`/`PX`/`SL`/`TF`/`CE`/`SP`/`ST`/`ER` 系のみ処理 |
 | 40 | ISO 9660 write | ❌ intentional scope | mkisofs/xorriso の領域 |
-| 41 | UTF-16 surrogate ペア・Joliet level 3 超の UCS-2 拡張 | ⚠️ 未検証 | BMP のみ decode、非 BMP は `\u{FFFD}` |
-| 42 | Path Table の読み出し | ⚠️ 未使用 | ディレクトリ木走査で代替 (内容は冗長) |
 
 ## Fixture / interop
 

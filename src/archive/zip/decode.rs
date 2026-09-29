@@ -625,16 +625,10 @@ fn parse_central_directory_record(
     let name_len = cursor.read_u16()? as usize;
     let extra_len = cursor.read_u16()? as usize;
     let comment_len = cursor.read_u16()? as usize;
-    let disk_start = cursor.read_u16()?;
+    let disk_start_raw = cursor.read_u16()?;
     let internal_attributes = cursor.read_u16()?;
     let external_attributes = cursor.read_u32()?;
     let local_header_offset_raw = cursor.read_u32()?;
-    if disk_start == 0xFFFF {
-        // APPNOTE §4.4.13: the real disk number lives in the ZIP64
-        // extended information extra field; we do not parse that
-        // disk override (intentional scope).
-        return Err(Error::Unsupported("zip: ZIP64 disk-start override"));
-    }
 
     let name = cursor.read_string(name_len, (flags & (1 << 11)) != 0)?;
     let extra = cursor.read_bytes(extra_len)?;
@@ -645,6 +639,7 @@ fn parse_central_directory_record(
         compressed_size_raw == u32::MAX,
         uncompressed_size_raw == u32::MAX,
         local_header_offset_raw == u32::MAX,
+        disk_start_raw == 0xFFFF,
     )?;
     let aes = parse_aes_extra_field(&extra)?;
     if aes.is_some() && compression_method != ZIP_AES_METHOD {
@@ -666,6 +661,16 @@ fn parse_central_directory_record(
     let local_header_offset_u64 = zip64
         .local_header_offset
         .unwrap_or(local_header_offset_raw as u64);
+    // APPNOTE §4.4.13/§4.5.3: a disk-start of 0xFFFF means the real
+    // disk number is stored in the ZIP64 extra field, right after the
+    // size/offset overrides.
+    let disk_start = if disk_start_raw == 0xFFFF {
+        zip64
+            .disk_start
+            .ok_or(Error::InvalidData("zip: missing ZIP64 disk start field"))?
+    } else {
+        disk_start_raw as u32
+    };
     // APPNOTE §4.4.16: the local header offset is relative to the
     // start of the disk on which the entry begins.
     let local_header_offset = match disk_map {
@@ -749,6 +754,8 @@ fn extract_entry(
         &local_extra,
         local_compressed_size == u32::MAX,
         local_uncompressed_size == u32::MAX,
+        false,
+        // Local file headers carry no disk-start field (APPNOTE §4.5.3).
         false,
     )?;
     let local_aes = parse_aes_extra_field(&local_extra)?;
@@ -1201,6 +1208,7 @@ struct Zip64Extra {
     uncompressed_size: Option<u64>,
     compressed_size: Option<u64>,
     local_header_offset: Option<u64>,
+    disk_start: Option<u32>,
 }
 
 fn parse_zip64_extra(
@@ -1208,6 +1216,7 @@ fn parse_zip64_extra(
     need_compressed: bool,
     need_uncompressed: bool,
     need_offset: bool,
+    need_disk: bool,
 ) -> Result<Zip64Extra, Error> {
     let mut pos = 0usize;
     while pos + 4 <= extra.len() {
@@ -1231,6 +1240,15 @@ fn parse_zip64_extra(
             }
             if need_offset {
                 result.local_header_offset = Some(read_u64_at(extra, field_pos)?);
+                field_pos += 8;
+            }
+            // Disk start number (4 bytes, APPNOTE §4.5.3). The version 1
+            // record may hold only the fields the sentinels require, so a
+            // record that ends before this field is tolerated here; the
+            // caller treats a missing disk override as malformed.
+            if need_disk && field_pos + 4 <= end {
+                result.disk_start = Some(read_u32_at(extra, field_pos)?);
+                field_pos += 4;
             }
             if field_pos > end {
                 return Err(Error::UnexpectedEof);
@@ -1239,7 +1257,7 @@ fn parse_zip64_extra(
         }
         pos += size;
     }
-    if need_compressed || need_uncompressed || need_offset {
+    if need_compressed || need_uncompressed || need_offset || need_disk {
         return Err(Error::InvalidData("zip: missing ZIP64 extra field"));
     }
     Ok(Zip64Extra::default())
@@ -2996,5 +3014,135 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].data(), b"payload");
         assert!(matches!(decode(&archive), Err(Error::Unsupported(_))));
+    }
+
+    // --- ZIP64 disk-start override tests (§4.4.13, §4.5.3) ---
+
+    /// ZIP64 extra field (tag 0x0001) holding only the disk start
+    /// number. The size/offset fields would precede it but are absent
+    /// here because their sentinels are not set (APPNOTE §4.5.3).
+    /// `None` emits the tag with a zero-length body (no disk field).
+    fn zip64_disk_extra(disk: Option<u32>) -> Vec<u8> {
+        let mut extra = Vec::new();
+        extra.extend_from_slice(&0x0001u16.to_le_bytes());
+        match disk {
+            Some(d) => {
+                extra.extend_from_slice(&4u16.to_le_bytes());
+                extra.extend_from_slice(&d.to_le_bytes());
+            }
+            None => extra.extend_from_slice(&0u16.to_le_bytes()),
+        }
+        extra
+    }
+
+    /// Build a single-file (stored) archive whose Central Directory
+    /// record uses the 0xFFFF disk-start sentinel; `cd_extra` becomes
+    /// the record's extra field verbatim. When `disk0_len` is non-zero
+    /// the archive is laid out as a 2-disk set: `disk0_len` filler bytes
+    /// form disk 0, the local header sits at disk-1-relative offset 0,
+    /// the CD follows it on disk 1, and the EOCD records the entry/CD
+    /// disks accordingly (APPNOTE §8, §4.4.15/§4.4.16).
+    fn build_disk_start_override_zip(cd_extra: &[u8], disk0_len: usize) -> Vec<u8> {
+        let name = b"disk.txt";
+        let data = b"payload";
+        let crc = crc32::crc32(data);
+        let multi = disk0_len > 0;
+        let last_disk: u16 = if multi { 1 } else { 0 };
+
+        // Disk-1-relative content: local file header + stored data.
+        let mut disk1 = Vec::new();
+        disk1.extend_from_slice(&LOCAL_FILE_HEADER_SIGNATURE.to_le_bytes());
+        disk1.extend_from_slice(&20u16.to_le_bytes());
+        disk1.extend_from_slice(&0u16.to_le_bytes()); // flags
+        disk1.extend_from_slice(&0u16.to_le_bytes()); // method = Store
+        disk1.extend_from_slice(&0u16.to_le_bytes()); // mod_time
+        disk1.extend_from_slice(&0u16.to_le_bytes()); // mod_date
+        disk1.extend_from_slice(&crc.to_le_bytes());
+        disk1.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        disk1.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        disk1.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        disk1.extend_from_slice(&0u16.to_le_bytes()); // local extra len
+        disk1.extend_from_slice(name);
+        disk1.extend_from_slice(data);
+
+        let mut cd = Vec::new();
+        cd.extend_from_slice(&CENTRAL_DIRECTORY_HEADER_SIGNATURE.to_le_bytes());
+        cd.extend_from_slice(&20u16.to_le_bytes()); // version made by
+        cd.extend_from_slice(&20u16.to_le_bytes()); // version needed
+        cd.extend_from_slice(&0u16.to_le_bytes()); // flags
+        cd.extend_from_slice(&0u16.to_le_bytes()); // method = Store
+        cd.extend_from_slice(&0u16.to_le_bytes()); // mod_time
+        cd.extend_from_slice(&0u16.to_le_bytes()); // mod_date
+        cd.extend_from_slice(&crc.to_le_bytes());
+        cd.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        cd.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        cd.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        cd.extend_from_slice(&(cd_extra.len() as u16).to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes()); // comment len
+        cd.extend_from_slice(&0xFFFFu16.to_le_bytes()); // disk start sentinel
+        cd.extend_from_slice(&0u16.to_le_bytes()); // internal attrs
+        cd.extend_from_slice(&0u32.to_le_bytes()); // external attrs
+        // Local header offset, relative to the entry's disk (§4.4.16):
+        // 0 in both layouts (start of disk 1, or start of the archive).
+        cd.extend_from_slice(&0u32.to_le_bytes());
+        cd.extend_from_slice(name);
+        cd.extend_from_slice(cd_extra);
+
+        let mut archive = vec![0xAA; disk0_len];
+        archive.extend_from_slice(&disk1);
+        archive.extend_from_slice(&cd);
+
+        archive.extend_from_slice(&EOCD_SIGNATURE.to_le_bytes());
+        archive.extend_from_slice(&last_disk.to_le_bytes()); // disk number
+        archive.extend_from_slice(&last_disk.to_le_bytes()); // cd disk number
+        archive.extend_from_slice(&1u16.to_le_bytes()); // disk entries
+        archive.extend_from_slice(&1u16.to_le_bytes()); // total entries
+        archive.extend_from_slice(&(cd.len() as u32).to_le_bytes());
+        // CD offset relative to its disk (§4.4.15): the CD follows the
+        // entry data on disk 1, or sits at disk1.len() on a single disk.
+        archive.extend_from_slice(&(disk1.len() as u32).to_le_bytes());
+        archive.extend_from_slice(&0u16.to_le_bytes()); // comment length
+        archive
+    }
+
+    #[test]
+    fn test_zip64_disk_start_override() {
+        // disk_start = 0xFFFF sentinel; the real disk number (0) comes
+        // from the ZIP64 extra field (APPNOTE §4.4.13/§4.5.3).
+        let archive = build_disk_start_override_zip(&zip64_disk_extra(Some(0)), 0);
+        let entries = decode(&archive).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "disk.txt");
+        assert_eq!(entries[0].data, b"payload");
+    }
+
+    #[test]
+    fn test_zip64_disk_start_override_missing_field() {
+        // Sentinel set but no ZIP64 extra field at all.
+        let archive = build_disk_start_override_zip(&[], 0);
+        assert!(matches!(decode(&archive), Err(Error::InvalidData(_))));
+        // ZIP64 extra present but too short to hold the disk field.
+        let archive = build_disk_start_override_zip(&zip64_disk_extra(None), 0);
+        assert!(matches!(decode(&archive), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn test_zip64_disk_start_override_multidisk() {
+        // The override resolves to a non-zero disk: without a disk map
+        // this is a real multi-disk entry and stays Unsupported.
+        let archive = build_disk_start_override_zip(&zip64_disk_extra(Some(1)), 0);
+        assert!(matches!(
+            decode(&archive),
+            Err(Error::Unsupported("zip: multi-disk entries"))
+        ));
+
+        // Same override on a 2-disk layout: decode_parts resolves the
+        // disk-1-relative offset through the segment map.
+        let archive = build_disk_start_override_zip(&zip64_disk_extra(Some(1)), 16);
+        assert!(matches!(decode(&archive), Err(Error::Unsupported(_))));
+        let entries = decode_parts(&[&archive[..16], &archive[16..]]).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "disk.txt");
+        assert_eq!(entries[0].data, b"payload");
     }
 }

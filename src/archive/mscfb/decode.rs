@@ -14,6 +14,23 @@ const FREESECT: u32 = 0xFFFF_FFFF;
 const MAXREGSECT: u32 = 0xFFFF_FFFA;
 const NOSTREAM: u32 = 0xFFFF_FFFF;
 
+/// Directory-entry metadata ([MS-CFB] 2.6.1): the object CLSID,
+/// user-defined state bits, and the creation / modification
+/// FILETIMEs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CfbEntryMeta {
+    /// Object CLSID (16 raw bytes). Meaningful on the root storage
+    /// (2.6.2) and storage objects; usually all-zero on streams.
+    pub clsid: [u8; 16],
+    /// User-defined state bits.
+    pub state_bits: u32,
+    /// Creation time as a Windows FILETIME (100-ns intervals since
+    /// 1601-01-01 UTC); zero when unset.
+    pub created: u64,
+    /// Last modification time as a Windows FILETIME.
+    pub modified: u64,
+}
+
 /// A decoded stream entry. `name` is the storage-joined path
 /// (`"Storage1/Sub/Stream"`) with UTF-16 names decoded to UTF-8.
 #[derive(Debug, Clone)]
@@ -22,6 +39,8 @@ pub struct CfbEntry {
     pub name: String,
     /// Stream contents.
     pub data: Vec<u8>,
+    /// Directory-entry metadata (CLSID, state bits, FILETIMEs).
+    pub meta: CfbEntryMeta,
 }
 
 impl crate::traits::ArchiveEntry for CfbEntry {
@@ -59,6 +78,7 @@ struct DirEntry {
     left: u32,
     right: u32,
     child: u32,
+    meta: CfbEntryMeta,
     start: u32,
     size: u64,
 }
@@ -184,7 +204,11 @@ impl<'a> File<'a> {
                 }
                 p.push_str(&e.name);
                 let data = self.stream_data(e.start, e.size)?;
-                out.push(CfbEntry { name: p, data });
+                out.push(CfbEntry {
+                    name: p,
+                    data,
+                    meta: e.meta,
+                });
             }
             _ => {}
         }
@@ -192,11 +216,9 @@ impl<'a> File<'a> {
     }
 }
 
-/// Decode a compound file into a flat list of stream entries.
-///
-/// Storage objects contribute path components only; only stream
-/// objects produce entries.
-pub fn decode(input: &[u8]) -> Result<Vec<CfbEntry>, Error> {
+/// Parse the header, FAT chains, mini stream, and directory array of
+/// a compound file into an in-memory [File].
+fn parse(input: &[u8]) -> Result<File<'_>, Error> {
     if input.len() < 512 || input[..8] != SIGNATURE {
         return Err(Error::InvalidData("mscfb"));
     }
@@ -351,6 +373,12 @@ pub fn decode(input: &[u8]) -> Result<Vec<CfbEntry>, Error> {
             left: u32le(e, 68),
             right: u32le(e, 72),
             child: u32le(e, 76),
+            meta: CfbEntryMeta {
+                clsid: <[u8; 16]>::try_from(&e[80..96]).unwrap(),
+                state_bits: u32le(e, 96),
+                created: u64le(e, 100),
+                modified: u64le(e, 108),
+            },
             start: u32le(e, 116),
             size: u64le(e, 120),
         });
@@ -367,11 +395,27 @@ pub fn decode(input: &[u8]) -> Result<Vec<CfbEntry>, Error> {
         file.mini_stream = ms.get(..want).ok_or(Error::UnexpectedEof)?.to_vec();
     }
 
+    Ok(file)
+}
+
+/// Decode a compound file into a flat list of stream entries.
+///
+/// Storage objects contribute path components only; only stream
+/// objects produce entries.
+pub fn decode(input: &[u8]) -> Result<Vec<CfbEntry>, Error> {
+    let file = parse(input)?;
     let mut out = Vec::new();
     let mut visited = BTreeSet::new();
     visited.insert(0);
     file.walk(file.entries[0].child, "", &mut out, &mut visited, 0)?;
     Ok(out)
+}
+
+/// Return the root storage object's directory metadata
+/// ([MS-CFB] 2.6.2). The root entry is not emitted by decode; its
+/// CLSID identifies the compound file's content type.
+pub fn root_meta(input: &[u8]) -> Result<CfbEntryMeta, Error> {
+    Ok(parse(input)?.entries[0].meta)
 }
 
 #[cfg(test)]
@@ -711,6 +755,44 @@ mod tests {
         assert_eq!(out[0].data(), b"AAA");
         assert_eq!(out[1].name(), "B");
         assert_eq!(out[1].data(), b"BBB");
+    }
+
+    #[test]
+    fn exposes_stream_entry_metadata() {
+        let mut f = mini_file();
+        // directory sector 1, entry index 1
+        let e = 512 + 512 + 128;
+        let clsid: [u8; 16] = [
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD,
+            0xEE, 0xFF,
+        ];
+        f[e + 80..e + 96].copy_from_slice(&clsid);
+        f[e + 96..e + 100].copy_from_slice(&0xAABBCCDDu32.to_le_bytes());
+        f[e + 100..e + 108].copy_from_slice(&0x0102030405060708u64.to_le_bytes());
+        f[e + 108..e + 116].copy_from_slice(&0x1112131415161718u64.to_le_bytes());
+        let out = decode(&f).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].meta.clsid, clsid);
+        assert_eq!(out[0].meta.state_bits, 0xAABBCCDD);
+        assert_eq!(out[0].meta.created, 0x0102030405060708);
+        assert_eq!(out[0].meta.modified, 0x1112131415161718);
+    }
+
+    #[test]
+    fn root_meta_reads_root_entry() {
+        let mut f = mini_file();
+        // entry index 0 = root storage
+        let e = 512 + 512;
+        let clsid: [u8; 16] = [0x42; 16];
+        f[e + 80..e + 96].copy_from_slice(&clsid);
+        f[e + 96..e + 100].copy_from_slice(&7u32.to_le_bytes());
+        f[e + 100..e + 108].copy_from_slice(&123u64.to_le_bytes());
+        f[e + 108..e + 116].copy_from_slice(&456u64.to_le_bytes());
+        let m = root_meta(&f).unwrap();
+        assert_eq!(m.clsid, clsid);
+        assert_eq!(m.state_bits, 7);
+        assert_eq!(m.created, 123);
+        assert_eq!(m.modified, 456);
     }
 
     #[test]

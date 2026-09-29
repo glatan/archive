@@ -44,12 +44,19 @@ pub(crate) mod crc64;
 #[cfg(any(feature = "xz", feature = "sevenz"))]
 pub(crate) mod sha256;
 
-/// SHA-1 for ZIP AES key derivation and git pack object IDs/checksums.
-#[cfg(any(feature = "zip", feature = "git-pack", feature = "xar"))]
+/// SHA-1 for ZIP AES key derivation, git pack object IDs/checksums, and
+/// WARC digests.
+#[cfg(any(
+    feature = "zip",
+    feature = "git-pack",
+    feature = "xar",
+    feature = "warc"
+))]
 pub(crate) mod sha1;
 
-/// MD5 for lrzip file-level integrity verification and XAR checksums.
-#[cfg(any(feature = "lrzip", feature = "xar"))]
+/// MD5 for lrzip file-level integrity verification, XAR checksums, and
+/// ZIM trailer checksums.
+#[cfg(any(feature = "lrzip", feature = "xar", feature = "zim"))]
 pub(crate) mod md5;
 
 /// AES-256 helpers for encrypted 7z and ZIP streams.

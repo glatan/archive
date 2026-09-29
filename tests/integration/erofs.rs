@@ -71,6 +71,33 @@ fn test_erofs_mkfs_image_contents() {
 }
 
 #[test]
+fn test_erofs_mkfs_image_superblock() {
+    // Superblock metadata exposed via `ErofsImage::superblock`;
+    // values match the on-disk layout verified against erofs_fs.h
+    // (this image sets COMPAT_SB_CHKSUM | COMPAT_MTIME, no volume
+    // label or uuid, metadata at block 0).
+    let img = erofs::decode::decode(FIXTURE).unwrap();
+    let sb = &img.superblock;
+    assert_eq!(
+        sb.feature_compat,
+        erofs::decode::COMPAT_SB_CHKSUM | erofs::decode::COMPAT_MTIME
+    );
+    assert_eq!(sb.feature_incompat, 0);
+    assert_eq!(sb.inos, 8);
+    assert_eq!(sb.blocks, img.blocks);
+    assert_eq!(sb.meta_blkaddr, 0);
+    assert_eq!(sb.xattr_blkaddr, 0);
+    assert_eq!(sb.uuid, [0u8; 16]);
+    assert_eq!(sb.epoch, 0);
+    assert_eq!(sb.fixed_nsec, 0);
+    assert_eq!(sb.build_time, 0);
+    assert_eq!(sb.xattr_prefix_count, 0);
+    assert_eq!(sb.xattr_prefix_start, 0);
+    assert_eq!(sb.packed_nid, 0);
+    assert_eq!(sb.ishare_xattr_prefix_id, 0);
+}
+
+#[test]
 fn test_erofs_codec_trait() {
     let codec = erofs::ErofsCodec;
     use archive::traits::{ArchiveDecode, ArchiveEntry};
@@ -159,4 +186,104 @@ fn test_erofs_fsck_extract_matches_decode() {
         }
     }
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ============================================================
+// compressed (z_erofs) images produced by upstream mkfs.erofs
+// (erofs-utils 1.9.4). Source tree: hello.txt
+// ("hello compressed erofs\n") and big.txt (135000 bytes of a
+// repeating 45-byte pattern). Each fixture exercises a different
+// on-disk variant.
+// ============================================================
+
+/// mkfs.erofs -zlz4hc : compacted-2B compact indexes + LZ4.
+const FIXTURE_LZ4HC: &[u8] = include_bytes!("../fixtures/erofs/mkfs.lz4hc.img");
+/// mkfs.erofs -zlz4hc -C8192 : big pclusters (CBLKCNT nonheads).
+const FIXTURE_LZ4_BIG: &[u8] = include_bytes!("../fixtures/erofs/mkfs.lz4-bigpcluster.img");
+/// mkfs.erofs -zlz4 -Elegacy-compress : noncompact 8-byte indexes.
+const FIXTURE_LZ4_FULL: &[u8] = include_bytes!("../fixtures/erofs/mkfs.lz4-full-idx.img");
+/// mkfs.erofs -zlz4hc -E48bit : z_erofs_extent record layout.
+const FIXTURE_LZ4_EXT: &[u8] = include_bytes!("../fixtures/erofs/mkfs.lz4-extents.img");
+/// mkfs.erofs -zlzma : MicroLZMA with a compression-config record.
+#[cfg(any(
+    feature = "lzma-alone",
+    feature = "lzip",
+    feature = "xz",
+    feature = "sevenz",
+    feature = "lrzip"
+))]
+const FIXTURE_MICROLZMA: &[u8] = include_bytes!("../fixtures/erofs/mkfs.microlzma.img");
+/// mkfs.erofs -zlz4hc:lzma : per-pcluster HEAD1/HEAD2 algorithm
+/// selection across two algorithms.
+#[cfg(any(
+    feature = "lzma-alone",
+    feature = "lzip",
+    feature = "xz",
+    feature = "sevenz",
+    feature = "lrzip"
+))]
+const FIXTURE_MULTI: &[u8] = include_bytes!("../fixtures/erofs/mkfs.lz4hc-microlzma.img");
+
+fn big_txt_expected() -> Vec<u8> {
+    b"the quick brown fox jumps over the lazy dog. "
+        .iter()
+        .cycle()
+        .take(45 * 3000)
+        .copied()
+        .collect()
+}
+
+fn check_compressed_fixture(img: &[u8], label: &str) {
+    let d = erofs::decode::decode(img).unwrap_or_else(|e| panic!("{label}: {e}"));
+    let big = find(&d, "big.txt");
+    assert_eq!(big.data, big_txt_expected(), "{label}: big.txt mismatch");
+    assert_eq!(
+        find(&d, "hello.txt").data,
+        b"hello compressed erofs\n",
+        "{label}: hello.txt mismatch"
+    );
+}
+
+#[test]
+fn test_erofs_compressed_lz4hc_compact() {
+    check_compressed_fixture(FIXTURE_LZ4HC, "lz4hc-compact");
+}
+
+#[test]
+fn test_erofs_compressed_lz4_bigpcluster() {
+    check_compressed_fixture(FIXTURE_LZ4_BIG, "lz4-bigpcluster");
+}
+
+#[test]
+fn test_erofs_compressed_lz4_full_index() {
+    check_compressed_fixture(FIXTURE_LZ4_FULL, "lz4-full-index");
+}
+
+#[test]
+fn test_erofs_compressed_lz4_extents() {
+    check_compressed_fixture(FIXTURE_LZ4_EXT, "lz4-extents");
+}
+
+#[cfg(any(
+    feature = "lzma-alone",
+    feature = "lzip",
+    feature = "xz",
+    feature = "sevenz",
+    feature = "lrzip"
+))]
+#[test]
+fn test_erofs_compressed_microlzma() {
+    check_compressed_fixture(FIXTURE_MICROLZMA, "microlzma");
+}
+
+#[cfg(any(
+    feature = "lzma-alone",
+    feature = "lzip",
+    feature = "xz",
+    feature = "sevenz",
+    feature = "lrzip"
+))]
+#[test]
+fn test_erofs_compressed_multi_algorithm() {
+    check_compressed_fixture(FIXTURE_MULTI, "lz4hc+microlzma");
 }

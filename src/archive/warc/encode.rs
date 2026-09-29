@@ -228,7 +228,7 @@ fn labelled_sha1(data: &[u8]) -> String {
 const B32: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 /// RFC 4648 Base32 without padding.
-fn base32_into(data: &[u8], out: &mut String) {
+pub(crate) fn base32_into(data: &[u8], out: &mut String) {
     let mut acc = 0u32;
     let mut bits = 0u32;
     for &b in data {

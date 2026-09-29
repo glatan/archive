@@ -156,7 +156,7 @@
 | 85 | file name: forward slash のみ、drive letter 不可 | §4.4.17.1 | ✅ | エンコーダーでバックスラッシュ、ドライブレター、パストラバーサル reject。`test_path_validation_*` |
 | 86 | file name: NULL 終端ではない (length field で管理) | §4.4.17 | ✅ | length-based parsing |
 | 87 | ZIP64: offset 0xFFFFFFFF → extra field 0x0001 参照 | §4.4.16 | ✅ | `test_force_zip64_roundtrip` |
-| 88 | ZIP64: disk 0xFFFF → extra field 0x0001 参照 | §4.4.13 | ❌ | ZIP64 extra の disk-start override は未実装 (`decode_parts` は 16-bit `disk_start` フィールドのみ解決、0xFFFF sentinel は `Unsupported`) |
+| 88 | ZIP64: disk 0xFFFF → extra field 0x0001 参照 | §4.4.13 | ✅ | `parse_zip64_extra` が `need_disk` で 0x0001 内 disk start (4B) を解決し `disk_start == 0xFFFF` を override。`test_zip64_disk_start_override`, `test_zip64_disk_start_override_missing_field`, `test_zip64_disk_start_override_multidisk` |
 | 89 | internal file attributes bit 0 (ASCII text marker) | §4.4.14 | ✅ | `ZipEntry::internal_attributes` で公開 (bit 解釈はアプリケーション側) |
 | 90 | external file attributes (host-system dependent) | §4.4.15 | ✅ | `ZipEntry::external_attributes` で公開、任意値 write 可能 |
 | 150 | encode 時の auto-ZIP64 promotion (field overflow → 0xFFFF/0xFFFFFFFF 設定) | §4.4.1.4 | ✅ | `needs_zip64_entry()` で自動判定 |

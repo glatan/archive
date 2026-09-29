@@ -98,7 +98,7 @@
 | 47 | writer/decode の current supported filter chain | xz-file-format.txt: Filter list / crate scope | ✅ | `LZMA2` final filter の前段に x86 / PowerPC / IA64 / SPARC / ARM / ARM-Thumb / ARM64 / RISC-V BCJ、および Delta prefilter を置く構成を current scope とし、system interop tests で回帰化 |
 | 48 | registry 登録済み custom filter を含む arbitrary filter chain write と、未登録 custom filter reject | xz-file-format.txt: Filter list / crate scope | ✅ | `test_custom_filter_registry_roundtrip`, `test_custom_filter_registry_roundtrip_with_standard_filter_chain`, `test_custom_filter_passthrough_registry_roundtrip`, `test_custom_filter_passthrough_registry_roundtrip_with_standard_filter_chain`, `test_encode_with_unknown_filter_rejected`, `test_custom_filter_registry_decode_requires_registration` |
 
-### 未実装 / 部分実装
+### その他の要件
 
 | # | 仕様要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|---------|---------|------|----------------|

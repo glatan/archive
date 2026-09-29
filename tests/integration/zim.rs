@@ -117,3 +117,20 @@ fn test_zim_encoder_xz_stored() {
         assert_eq!(entries[0].data, vec![0xAB; 1000]);
     }
 }
+
+#[test]
+fn test_zim_encoder_v6_extended_with_redirect() {
+    use archive::archive::zim::encode::{ZimEncoder, ZimVersion};
+    let mut enc = ZimEncoder::new()
+        .with_version(ZimVersion::V6)
+        .with_extended_cluster();
+    enc.add_file("C/page.html", b"<html>v6 extended</html>");
+    enc.add_redirect("C/alias.html", "C/page.html");
+    let zim = enc.finish().unwrap();
+    assert_eq!(u16::from_le_bytes([zim[4], zim[5]]), 6);
+    let entries = archive::archive::zim::decode::decode(&zim).unwrap();
+    assert_eq!(entries.len(), 2);
+    for e in &entries {
+        assert_eq!(e.data, b"<html>v6 extended</html>");
+    }
+}

@@ -86,6 +86,7 @@
 | 57 | Numeric field overflow: binary encoding fallback (GNU) | GNU tar extensions | ✅ | item 18 |
 | 58 | GNU 'S' typeflag (sparse in-header, old style) | GNU tar extensions | ✅ | `FileType::GnuSparse`, `parse_gnu_sparse_entries()`, `test_gnu_sparse_in_header_decode` |
 | 59 | GNU binary mtime encoding (base-256、octal 範囲超の timestamp 用) | GNU tar extensions | ✅ | binary size encoding と同じ base-256 方式 |
+| 60 | GNU sparse 旧式 'S' ヘッダ + in-header sparse マップ (offset 386-482) の emit | GNU tar Sparse-Formats | ❌ intentional scope | sparse 生成は PAX モードの `GNU.sparse.*` (item 46) のみ。in-header マップの書き出し経路は持たない (decode は item 58 で対応) |
 
 ---
 
@@ -94,4 +95,5 @@
 | 状態 | 件数 |
 |------|------|
 | ✅ 実装+テスト済み | 59 |
-| **合計** | **59** |
+| ❌ 未対応 (intentional scope) | 1 |
+| **合計** | **60** |

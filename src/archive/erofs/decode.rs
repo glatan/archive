@@ -20,16 +20,48 @@ const INODE_EXTENDED: usize = 64;
 const DIRENT_SIZE: usize = 12;
 const NULL_ADDR: u64 = u64::MAX;
 
-const COMPAT_SB_CKSUM: u32 = 0x1;
+/// `feature_compat` bit: the superblock carries a CRC32C checksum
+/// (`EROFS_FEATURE_COMPAT_SB_CHKSUM`); always verified when set.
+pub const COMPAT_SB_CHKSUM: u32 = 0x1;
+/// `feature_compat` bit: `epoch`/`fixed_nsec`/`build_time` carry
+/// mkfs time information (`EROFS_FEATURE_COMPAT_MTIME`).
+pub const COMPAT_MTIME: u32 = 0x2;
+/// `feature_compat` bit: inode xattr headers may carry a 32-bit
+/// name bloom filter (`EROFS_FEATURE_COMPAT_XATTR_FILTER`). The
+/// filter only accelerates keyed xattr lookups, so it is reported
+/// in the bitmap but never interpreted.
+pub const COMPAT_XATTR_FILTER: u32 = 0x4;
+/// `feature_compat` bit: shared xattrs may live in the metabox
+/// inode (`EROFS_FEATURE_COMPAT_SHARED_EA_IN_METABOX`).
+pub const COMPAT_SHARED_EA_IN_METABOX: u32 = 0x8;
+/// `feature_compat` bit: long xattr name prefixes are literal
+/// strings rather than predefined indexes
+/// (`EROFS_FEATURE_COMPAT_PLAIN_XATTR_PFX`).
+pub const COMPAT_PLAIN_XATTR_PFX: u32 = 0x10;
+/// `feature_compat` bit: inodes may reference shared xattrs through
+/// `ishare_xattr_prefix_id` (`EROFS_FEATURE_COMPAT_ISHARE_XATTRS`).
+pub const COMPAT_ISHARE_XATTRS: u32 = 0x20;
 
-const INCOMPAT_DEVICE_TABLE: u32 = 0x8;
+const INCOMPAT_LZ4_0PADDING: u32 = 0x1;
+const INCOMPAT_COMPR_CFGS: u32 = 0x2;
+// The dedicated big-pcluster bit was folded into COMPR_CFGS upstream
+// (INCOMPAT_BIG_PCLUSTER aliases bit 0x2): big pclusters
+// are self-describing via per-inode advise bits and this feature only
+// gates their presence at mount time.
+const INCOMPAT_BIG_PCLUSTER: u32 = 0x2;
+// Bit 0x8 (INCOMPAT_DEVICE_TABLE) doubles as INCOMPAT_COMPR_HEAD2
+// since Linux 5.18: it only marks that compressed inodes may use the
+// second map-header algorithm and is harmless here; real multi-device
+// images remain rejected via `extra_devices != 0`.
 const INCOMPAT_ZTAILPACKING: u32 = 0x10;
 const INCOMPAT_FRAGMENTS: u32 = 0x20;
 const INCOMPAT_48BIT: u32 = 0x80;
 const INCOMPAT_METABOX: u32 = 0x100;
 
 const DATALAYOUT_FLAT_PLAIN: u8 = 0;
+pub(crate) const DATALAYOUT_COMPRESSED_FULL: u8 = 1;
 const DATALAYOUT_FLAT_INLINE: u8 = 2;
+pub(crate) const DATALAYOUT_COMPRESSED_COMPACT: u8 = 3;
 const DATALAYOUT_CHUNK_BASED: u8 = 4;
 
 const CHUNK_FORMAT_INDEXES: u16 = 0x20;
@@ -88,6 +120,59 @@ impl crate::traits::ArchiveEntry for ErofsEntry {
     }
 }
 
+/// Parsed `erofs_super_block` metadata: the on-disk fields that
+/// describe the volume but do not gate decoding. All values are
+/// little-endian-decoded from the superblock record at offset 1024.
+/// The xattr-related fields are bookkeeping only; xattr contents
+/// themselves are not interpreted (see module docs).
+#[derive(Debug, Clone)]
+pub struct ErofsSuperblock {
+    /// Raw `feature_compat` bitmap; see the `COMPAT_*` constants.
+    /// Compat features never gate decoding (`COMPAT_SB_CHKSUM` is
+    /// always verified when present).
+    pub feature_compat: u32,
+    /// Raw `feature_incompat` bitmap; images carrying unsupported
+    /// bits are rejected before this value can be observed.
+    pub feature_incompat: u32,
+    /// Total valid inode count (`inos`; `f_files - f_favail`).
+    pub inos: u64,
+    /// Total filesystem blocks (`blocks_lo`, extended by
+    /// `blocks_hi` when `INCOMPAT_48BIT` is set).
+    pub blocks: u64,
+    /// Start block address of the inode metadata area
+    /// (`meta_blkaddr`).
+    pub meta_blkaddr: u32,
+    /// Start block address of the shared xattr area
+    /// (`xattr_blkaddr`); `0` when the image has none.
+    pub xattr_blkaddr: u32,
+    /// 128-bit volume UUID (`uuid`); all-zero when unset.
+    pub uuid: [u8; 16],
+    /// Base seconds added to compact-inode `i_mtime` values
+    /// (`epoch`).
+    pub epoch: u64,
+    /// Fixed nanoseconds reported for compact-inode mtimes
+    /// (`fixed_nsec`).
+    pub fixed_nsec: u32,
+    /// mkfs timestamp as seconds on top of `epoch` (`build_time`);
+    /// meaningful when `feature_compat` has `COMPAT_MTIME`.
+    pub build_time: u32,
+    /// Number of long xattr name prefixes (`xattr_prefix_count`);
+    /// `0` disables the feature. The prefix records live in the
+    /// packed/meta inode at `xattr_prefix_start * 4` and are not
+    /// interpreted.
+    pub xattr_prefix_count: u8,
+    /// Long xattr name prefix table offset inside the packed/meta
+    /// inode, in 4-byte units (`xattr_prefix_start`).
+    pub xattr_prefix_start: u32,
+    /// Nid of the special packed inode (`packed_nid`); `0` when
+    /// the image carries none.
+    pub packed_nid: u64,
+    /// Base prefix id for inode-shared xattrs
+    /// (`ishare_xattr_prefix_id`); meaningful under
+    /// `COMPAT_ISHARE_XATTRS`.
+    pub ishare_xattr_prefix_id: u8,
+}
+
 /// Decoded erofs image.
 #[derive(Debug)]
 pub struct ErofsImage {
@@ -97,35 +182,38 @@ pub struct ErofsImage {
     pub blocks: u64,
     /// Filesystem block size in bytes.
     pub block_size: u32,
+    /// Superblock metadata that does not affect decoding (volume
+    /// UUID, mkfs build time, xattr bookkeeping, feature bitmaps).
+    pub superblock: ErofsSuperblock,
     /// Entries in depth-first directory order.
     pub entries: Vec<ErofsEntry>,
 }
 
-fn u16le(b: &[u8], o: usize) -> u16 {
+pub(crate) fn u16le(b: &[u8], o: usize) -> u16 {
     u16::from_le_bytes([b[o], b[o + 1]])
 }
 
-fn u32le(b: &[u8], o: usize) -> u32 {
+pub(crate) fn u32le(b: &[u8], o: usize) -> u32 {
     u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
 }
 
-fn u64le(b: &[u8], o: usize) -> u64 {
+pub(crate) fn u64le(b: &[u8], o: usize) -> u64 {
     let mut v = [0u8; 8];
     v.copy_from_slice(&b[o..o + 8]);
     u64::from_le_bytes(v)
 }
 
-struct Inode {
+pub(crate) struct Inode {
     /// Parsed inode core size (32 or 64).
-    isize: usize,
+    pub(crate) isize: usize,
     /// Inline xattr area size following the inode core.
-    xattr_isize: usize,
-    datalayout: u8,
+    pub(crate) xattr_isize: usize,
+    pub(crate) datalayout: u8,
     mode: u16,
     uid: u32,
     gid: u32,
     nlink: u32,
-    size: u64,
+    pub(crate) size: u64,
     mtime: i64,
     mtime_nsec: u32,
     /// Flat-layout start block, or `NULL_ADDR` for a fully-sparse
@@ -151,12 +239,37 @@ impl Inode {
     }
 }
 
-struct Img<'a> {
-    data: &'a [u8],
-    blksz: usize,
+pub(crate) struct Img<'a> {
+    pub(crate) data: &'a [u8],
+    pub(crate) blksz: usize,
+    /// Directory block size: `1 << dirblkbits`, or `blksz` when the
+    /// superblock `dirblkbits` field is zero.
+    dirblksz: usize,
     meta_blkaddr: u64,
     epoch: u64,
     fixed_nsec: u32,
+    /// `available_compr_algs` bitmap; `1 << LZ4` when the image
+    /// carries no compression-config records.
+    pub(crate) avail_compr_algs: u16,
+    /// `INCOMPAT_LZ4_0PADDING`: LZ4 streams are right-aligned inside
+    /// their pcluster with leading zero padding.
+    pub(crate) lz4_0padding: bool,
+    /// `INCOMPAT_BIG_PCLUSTER` superblock bit; required for
+    /// CBLKCNT multi-lcluster pclusters.
+    pub(crate) big_pcluster: bool,
+    /// LZMA dictionary size from the compression-config record
+    /// (`0` when no config is present).
+    #[cfg_attr(
+        not(any(
+            feature = "lzma-alone",
+            feature = "lzip",
+            feature = "xz",
+            feature = "sevenz",
+            feature = "lrzip"
+        )),
+        allow(dead_code)
+    )]
+    pub(crate) lzma_dict_size: u32,
 }
 
 impl Img<'_> {
@@ -404,9 +517,12 @@ impl Img<'_> {
     fn read_data(&self, ino: &Inode, ino_off: usize) -> Result<Vec<u8>, Error> {
         match ino.datalayout {
             DATALAYOUT_FLAT_PLAIN => self.read_flat(ino, ino_off, false),
+            DATALAYOUT_COMPRESSED_FULL | DATALAYOUT_COMPRESSED_COMPACT => {
+                super::z::read_compressed(self, ino, ino_off)
+            }
             DATALAYOUT_FLAT_INLINE => self.read_flat(ino, ino_off, true),
             DATALAYOUT_CHUNK_BASED => self.read_chunked(ino, ino_off),
-            _ => Err(Error::Unsupported("erofs compressed inode (z_erofs)")),
+            _ => Err(Error::Unsupported("erofs unknown datalayout")),
         }
     }
 }
@@ -446,7 +562,10 @@ fn walk_dir(
     let data = &data[..dsize.min(data.len())];
     let mut off = 0usize;
     while off < data.len() {
-        let block = &data[off..(off + img.blksz).min(data.len())];
+        // Each directory block (of `dirblksz` bytes, possibly a
+        // sub-page block when `dirblkbits` is nonzero) is a
+        // self-contained dirent/name area.
+        let block = &data[off..(off + img.dirblksz).min(data.len())];
         if block.len() < DIRENT_SIZE {
             return Err(Error::InvalidData("erofs truncated dirent block"));
         }
@@ -519,7 +638,7 @@ fn walk_dir(
             }
             i += 1;
         }
-        off += img.blksz;
+        off += img.dirblksz;
     }
     Ok(())
 }
@@ -542,7 +661,7 @@ pub fn decode(input: &[u8]) -> Result<ErofsImage, Error> {
     if input.len() < SUPER_OFF + sb_size || blksz < SUPER_OFF + sb_size {
         return Err(Error::UnexpectedEof);
     }
-    if feature_compat & COMPAT_SB_CKSUM != 0 {
+    if feature_compat & COMPAT_SB_CHKSUM != 0 {
         // CRC32C over `blksz - 1024` bytes starting at the superblock
         // offset, checksum field zeroed, seeded ~0 with no final
         // complement (`erofs_crc32c(~0, sb, len)`).
@@ -560,17 +679,83 @@ pub fn decode(input: &[u8]) -> Result<ErofsImage, Error> {
     }
     let feature_incompat = u32le(sb, 80);
     let extra_devices = u16le(sb, 86);
+    let dirblkbits = sb[90];
+    // Directory blocks are sub-page blocks of `1 << dirblkbits`
+    // bytes; 0 selects full filesystem blocks (the only size mkfs
+    // currently emits).
+    if dirblkbits != 0 && !(4..=blkszbits).contains(&dirblkbits) {
+        return Err(Error::InvalidData("erofs invalid dirblkbits"));
+    }
+    let dirblksz = if dirblkbits == 0 {
+        blksz
+    } else {
+        1usize << dirblkbits
+    };
     // Features that change metadata addressing or reference external
-    // blobs are out of scope. Per-inode compression is rejected at
-    // inode level; long xattr name prefixes and compression configs
-    // do not affect what this decoder interprets.
-    if feature_incompat
-        & (INCOMPAT_DEVICE_TABLE | INCOMPAT_ZTAILPACKING | INCOMPAT_FRAGMENTS | INCOMPAT_METABOX)
-        != 0
+    // blobs are out of scope. Long xattr name prefixes do not affect
+    // what this decoder interprets.
+    if feature_incompat & (INCOMPAT_ZTAILPACKING | INCOMPAT_FRAGMENTS | INCOMPAT_METABOX) != 0
         || extra_devices != 0
     {
         return Err(Error::Unsupported("erofs incompatible feature set"));
     }
+    // `INCOMPAT_COMPR_CFGS`: the `u1` union carries the
+    // `available_compr_algs` bitmap and each set algorithm is
+    // described by a 4-aligned `le16 len` + data record right after
+    // the superblock. Without configs the only available algorithm
+    // is LZ4 (default settings).
+    let (avail_compr_algs, lzma_dict_size) = if feature_incompat & INCOMPAT_COMPR_CFGS != 0 {
+        let algs = u16le(sb, 84);
+        if algs & !0xF != 0 {
+            return Err(Error::Unsupported("erofs unknown compression algorithms"));
+        }
+        let mut dict_size = 0u32;
+        let mut off = SUPER_OFF + sb_size;
+        let mut bits = algs;
+        let mut alg = 0u8;
+        while bits != 0 {
+            if bits & 1 != 0 {
+                off = (off + 3) & !3;
+                let hdr = input.get(off..off + 2).ok_or(Error::UnexpectedEof)?;
+                let len = match usize::from(u16le(hdr, 0)) {
+                    0 => 1 << 16, // a zero size encodes 65536
+                    v => v,
+                };
+                off += 2;
+                let cfg = input.get(off..off + len).ok_or(Error::UnexpectedEof)?;
+                match alg {
+                    1 => {
+                        // z_erofs_lzma_cfgs { dict_size, format }
+                        if len < 6 || u16le(cfg, 4) != 0 {
+                            return Err(Error::InvalidData("erofs lzma config"));
+                        }
+                        let d = u32le(cfg, 0);
+                        if !(4096..=8 * 1024 * 1024).contains(&d) {
+                            return Err(Error::Unsupported("erofs lzma dict size"));
+                        }
+                        dict_size = d;
+                    }
+                    2 => {
+                        // z_erofs_deflate_cfgs { windowbits }
+                        if len < 1 || cfg[0] > 15 {
+                            return Err(Error::Unsupported("erofs deflate windowbits"));
+                        }
+                    }
+                    // z_erofs_zstd_cfgs { format, windowlog }
+                    3 if len < 2 || cfg[0] != 0 => {
+                        return Err(Error::InvalidData("erofs zstd config"));
+                    }
+                    _ => {}
+                }
+                off += len;
+            }
+            bits >>= 1;
+            alg += 1;
+        }
+        (algs, dict_size)
+    } else {
+        (1u16, 0)
+    };
     let has_48bit = feature_incompat & INCOMPAT_48BIT != 0;
     let rootnid = if has_48bit && u64le(sb, 112) != 0 {
         u64le(sb, 112)
@@ -588,12 +773,35 @@ pub fn decode(input: &[u8]) -> Result<ErofsImage, Error> {
         let end = v.iter().position(|&c| c == 0).unwrap_or(v.len());
         String::from_utf8_lossy(&v[..end]).into_owned()
     };
+    let mut uuid = [0u8; 16];
+    uuid.copy_from_slice(&sb[48..64]);
+    let superblock = ErofsSuperblock {
+        feature_compat,
+        feature_incompat,
+        inos: u64le(sb, 16),
+        blocks,
+        meta_blkaddr: u32le(sb, 40),
+        xattr_blkaddr: u32le(sb, 44),
+        uuid,
+        epoch: u64le(sb, 24),
+        fixed_nsec: u32le(sb, 32),
+        build_time: u32le(sb, 108),
+        xattr_prefix_count: sb[91],
+        xattr_prefix_start: u32le(sb, 92),
+        packed_nid: u64le(sb, 96),
+        ishare_xattr_prefix_id: sb[105],
+    };
     let img = Img {
         data: input,
         blksz,
+        dirblksz,
         meta_blkaddr,
         epoch: u64le(sb, 24),
         fixed_nsec: u32le(sb, 32),
+        avail_compr_algs,
+        lz4_0padding: feature_incompat & INCOMPAT_LZ4_0PADDING != 0,
+        big_pcluster: feature_incompat & INCOMPAT_BIG_PCLUSTER != 0,
+        lzma_dict_size,
     };
     if img
         .iloc(rootnid)
@@ -609,6 +817,7 @@ pub fn decode(input: &[u8]) -> Result<ErofsImage, Error> {
         volume_name,
         blocks,
         block_size: blksz as u32,
+        superblock,
         entries,
     })
 }
@@ -861,10 +1070,129 @@ mod tests {
             nid
         }
 
+        /// Set superblock incompat feature bits.
+        #[allow(dead_code)]
+        fn set_incompat(&mut self, bits: u32) {
+            let cur = u32le(&self.data[SUPER_OFF..SUPER_OFF + SUPER_SIZE], 80);
+            self.data[SUPER_OFF + 80..SUPER_OFF + 84].copy_from_slice(&le32(cur | bits));
+        }
+
+        /// Write `available_compr_algs` + per-algorithm config
+        /// records (`le16 len` + data, 4-aligned) after the
+        /// superblock, in increasing algorithm order. Inode slots
+        /// are bumped past the records.
+        #[allow(dead_code)]
+        fn set_compr_cfgs(&mut self, algs: u16, cfgs: &[&[u8]]) {
+            self.set_incompat(INCOMPAT_COMPR_CFGS);
+            self.data[SUPER_OFF + 84..SUPER_OFF + 86].copy_from_slice(&le16(algs));
+            let mut off = SUPER_OFF + SUPER_SIZE;
+            for cfg in cfgs {
+                off = (off + 3) & !3;
+                let need = off + 2 + cfg.len();
+                if need > self.data.len() {
+                    self.data.resize(need, 0);
+                }
+                self.data[off..off + 2].copy_from_slice(&le16(cfg.len() as u16));
+                self.data[off + 2..off + 2 + cfg.len()].copy_from_slice(cfg);
+                off += 2 + cfg.len();
+            }
+            let min_slot = (off as u64).div_ceil(32);
+            if self.next_slot < min_slot {
+                self.next_slot = min_slot;
+            }
+        }
+
+        /// Allocate `n` contiguous data blocks; `bytes` fills them
+        /// from offset 0 and the rest is zero. Returns the first
+        /// block number.
+        fn add_pcluster(&mut self, bytes: &[u8], n: usize, right_align: bool) -> u64 {
+            assert!(bytes.len() <= n * BLK);
+            let blk = self.next_blk;
+            let off = blk as usize * BLK;
+            if self.data.len() < off + n * BLK {
+                self.data.resize(off + n * BLK, 0);
+            }
+            let pos = if right_align {
+                off + n * BLK - bytes.len()
+            } else {
+                off
+            };
+            self.data[pos..pos + bytes.len()].copy_from_slice(bytes);
+            self.next_blk += n as u64;
+            self.data[1060..1064].copy_from_slice(&le32(self.next_blk as u32));
+            blk
+        }
+
+        /// Add a compressed inode (datalayout 1 or 3) whose metadata
+        /// area (`z_erofs_map_header` + index records) is `meta`.
+        /// `iu` is written to the inode's `i_u` field.
+        fn add_zinode(&mut self, datalayout: u8, size: u32, meta: &[u8]) -> u64 {
+            let nid = self.add_inode(meta.len(), datalayout, 0o100644, 1, size, 0);
+            let off = self.inode_off(nid);
+            self.data[off + 32..off + 32 + meta.len()].copy_from_slice(meta);
+            nid
+        }
+
         fn build(mut self, root: u64) -> Vec<u8> {
             self.data[1038..1040].copy_from_slice(&le16(root as u16));
             self.data
         }
+    }
+
+    /// `z_erofs_map_header` (8 bytes): `[lo32, advise, algo, cbits]`.
+    fn zmap_header(advise: u16, algtype: u8, clusterbits: u8) -> [u8; 8] {
+        let mut h = [0u8; 8];
+        h[4..6].copy_from_slice(&le16(advise));
+        h[6] = algtype;
+        h[7] = clusterbits;
+        h
+    }
+
+    /// Non-compact `z_erofs_lcluster_index` head/plain entry.
+    fn zidx_head(advise: u16, clusterofs: u16, blkaddr: u32) -> [u8; 8] {
+        let mut d = [0u8; 8];
+        d[0..2].copy_from_slice(&le16(advise));
+        d[2..4].copy_from_slice(&le16(clusterofs));
+        d[4..8].copy_from_slice(&le32(blkaddr));
+        d
+    }
+
+    /// Non-compact NONHEAD index entry.
+    #[allow(dead_code)]
+    fn zidx_nonhead(delta0: u16, delta1: u16) -> [u8; 8] {
+        let mut d = [0u8; 8];
+        d[0..2].copy_from_slice(&le16(2)); // LCLUSTER_TYPE_NONHEAD
+        d[4..6].copy_from_slice(&le16(delta0));
+        d[6..8].copy_from_slice(&le16(delta1));
+        d
+    }
+
+    /// Bit-pack `entries` (`type << lobits | lo`) into one compacted
+    /// pack of `entry_bits`-wide fields followed by `base`.
+    fn zpack(entries: &[u16], entry_bits: u32, base: u32) -> Vec<u8> {
+        let mut pack = vec![0u8; 4 + entries.len() * entry_bits as usize / 8];
+        let mut pos = 0usize;
+        for &v in entries {
+            for bit in 0..entry_bits as usize {
+                if v >> bit & 1 != 0 {
+                    pack[(pos + bit) / 8] |= 1 << ((pos + bit) & 7);
+                }
+            }
+            pos += entry_bits as usize;
+        }
+        let n = pack.len();
+        pack[n - 4..].copy_from_slice(&le32(base));
+        pack
+    }
+
+    /// Compact 4-byte pack: two 16-bit entries + trailing `base`.
+    #[allow(dead_code)]
+    fn zpack4(e0: u16, e1: u16, base: u32) -> [u8; 8] {
+        let mut p = [0u8; 8];
+        p[0..2].copy_from_slice(&le16(e0));
+        p[2..4].copy_from_slice(&le16(e1));
+        p[4..8].copy_from_slice(&le32(base));
+        p
     }
 
     fn build_sample() -> Vec<u8> {
@@ -991,6 +1319,50 @@ mod tests {
     }
 
     #[test]
+    fn superblock_metadata_fields() {
+        // Superblock fields that are irrelevant to decoding still
+        // get parsed and exposed verbatim (erofs_fs.h offsets).
+        let mut b = ImgBuilder::new();
+        b.data[SUPER_OFF + 8..SUPER_OFF + 12]
+            .copy_from_slice(&le32(COMPAT_MTIME | COMPAT_XATTR_FILTER));
+        b.data[SUPER_OFF + 16..SUPER_OFF + 24].copy_from_slice(&le64(42)); // inos
+        b.data[SUPER_OFF + 32..SUPER_OFF + 36].copy_from_slice(&le32(987_654_321));
+        b.data[SUPER_OFF + 44..SUPER_OFF + 48].copy_from_slice(&le32(7)); // xattr_blkaddr
+        let uuid = [0xABu8; 16];
+        b.data[SUPER_OFF + 48..SUPER_OFF + 64].copy_from_slice(&uuid);
+        b.data[SUPER_OFF + 64..SUPER_OFF + 73].copy_from_slice(b"vol_erofs");
+        b.data[SUPER_OFF + 91] = 3; // xattr_prefix_count
+        b.data[SUPER_OFF + 92..SUPER_OFF + 96].copy_from_slice(&le32(0x1234));
+        b.data[SUPER_OFF + 96..SUPER_OFF + 104].copy_from_slice(&le64(55)); // packed_nid
+        b.data[SUPER_OFF + 105] = 9; // ishare_xattr_prefix_id
+        b.data[SUPER_OFF + 108..SUPER_OFF + 112].copy_from_slice(&le32(1_700_000_123));
+        let f = b.add_file(b"x");
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let out = decode(&img).expect("decode");
+        assert_eq!(out.volume_name, "vol_erofs");
+        let sb = &out.superblock;
+        assert_eq!(sb.feature_compat, COMPAT_MTIME | COMPAT_XATTR_FILTER);
+        assert_eq!(sb.feature_incompat, 0);
+        assert_eq!(sb.inos, 42);
+        assert_eq!(sb.blocks, out.blocks);
+        assert_eq!(sb.meta_blkaddr, 0);
+        assert_eq!(sb.xattr_blkaddr, 7);
+        assert_eq!(sb.uuid, uuid);
+        assert_eq!(sb.epoch, 1_600_000_000); // ImgBuilder default
+        assert_eq!(sb.fixed_nsec, 987_654_321);
+        assert_eq!(sb.build_time, 1_700_000_123);
+        assert_eq!(sb.xattr_prefix_count, 3);
+        assert_eq!(sb.xattr_prefix_start, 0x1234);
+        assert_eq!(sb.packed_nid, 55);
+        assert_eq!(sb.ishare_xattr_prefix_id, 9);
+    }
+
+    #[test]
     fn rejects_bad_magic() {
         let mut img = build_sample();
         img[1024] = 0;
@@ -1038,13 +1410,491 @@ mod tests {
     }
 
     #[test]
-    fn rejects_compressed_inode() {
+    fn rejects_dangling_nonhead() {
         let mut b = ImgBuilder::new();
-        // datalayout 3 = COMPRESSED_COMPACT
-        let f = b.add_inode(0, 3, 0o100644, 1, 100, 0);
+        // datalayout 3 = COMPRESSED_COMPACT whose first compacted
+        // index is a NONHEAD: a dangling reference with no owning
+        // head must be rejected rather than decoded.
+        let mut meta = zmap_header(0, 0, 0).to_vec();
+        meta.extend_from_slice(&zpack(&[2 << 12 | 1], 16, 0));
+        let f = b.add_zinode(3, 4096, &meta);
         let root = b.add_dir(&[DirEnt {
             nid: f,
             name: b"z.bin",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        assert!(decode(&img).is_err());
+    }
+
+    /// Compressible 8 KiB payload (two lclusters) for fixtures.
+    #[allow(dead_code)]
+    fn zdata() -> Vec<u8> {
+        let mut v = Vec::with_capacity(8192);
+        for i in 0..8192u32 {
+            v.push(b'a' + (i / 64 % 26) as u8);
+        }
+        v
+    }
+
+    #[test]
+    fn dirblksz_subpage_directory() {
+        // dirblkbits = 10 -> 1 KiB directory blocks; entries span
+        // two sub-page blocks inside one fs block.
+        let mut b = ImgBuilder::new();
+        b.data[SUPER_OFF + 90] = 10;
+        let f1 = b.add_file(b"first-data");
+        let f2 = b.add_file(b"second-data");
+        let d0 = ImgBuilder::dir_bytes(&[
+            DirEnt {
+                nid: 0,
+                name: b".",
+                ftype: 4,
+            },
+            DirEnt {
+                nid: 0,
+                name: b"..",
+                ftype: 4,
+            },
+            DirEnt {
+                nid: f1,
+                name: b"first",
+                ftype: 8,
+            },
+        ]);
+        let d1 = ImgBuilder::dir_bytes(&[DirEnt {
+            nid: f2,
+            name: b"second",
+            ftype: 8,
+        }]);
+        let mut dirdata = vec![0u8; 2048];
+        dirdata[..d0.len()].copy_from_slice(&d0);
+        dirdata[1024..1024 + d1.len()].copy_from_slice(&d1);
+        let blk = b.add_block(&dirdata);
+        let root = b.add_inode(0, DATALAYOUT_FLAT_PLAIN, 0o40755, 2, 2048, blk as u32);
+        let img = b.build(root);
+        let out = decode(&img).expect("decode");
+        let names: Vec<&str> = out.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["first", "second"]);
+        assert_eq!(out.entries[0].data, b"first-data");
+        assert_eq!(out.entries[1].data, b"second-data");
+    }
+
+    #[test]
+    fn rejects_dirblkbits_out_of_range() {
+        let mut b = ImgBuilder::new();
+        b.data[SUPER_OFF + 90] = 13; // > blkszbits (12)
+        let root = b.add_dir(&[]);
+        let img = b.build(root);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+        let mut b = ImgBuilder::new();
+        b.data[SUPER_OFF + 90] = 3; // 8-byte blocks cannot hold dirents
+        let root = b.add_dir(&[]);
+        let img = b.build(root);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    #[cfg(feature = "lz4")]
+    #[test]
+    fn compressed_full_lz4_nonhead() {
+        // One LZ4 pcluster whose extent covers two lclusters:
+        // HEAD1 at lcn0, NONHEAD at lcn1.
+        let mut b = ImgBuilder::new();
+        let data = vec![b'x'; 8192];
+        let c = crate::compress::lz4::encode::encode_block(&data);
+        assert!(c.len() <= BLK);
+        let p = b.add_pcluster(&c, 1, false);
+        let mut meta = zmap_header(0, 0, 0).to_vec();
+        // Z_EROFS_FULL_INDEX_START: 8 reserved bytes.
+        meta.extend_from_slice(&[0u8; 8]);
+        meta.extend_from_slice(&zidx_head(1, 0, p as u32));
+        meta.extend_from_slice(&zidx_nonhead(1, 0));
+        let f = b.add_zinode(1, 8192, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"z",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let out = decode(&img).expect("decode");
+        assert_eq!(out.entries[0].data, data);
+    }
+
+    #[cfg(feature = "lz4")]
+    #[test]
+    fn compressed_full_lz4_0padding() {
+        // INCOMPAT_LZ4_0PADDING: streams right-aligned in pclusters.
+        let mut b = ImgBuilder::new();
+        b.set_incompat(INCOMPAT_LZ4_0PADDING);
+        let data = vec![b'y'; 8192];
+        let c = crate::compress::lz4::encode::encode_block(&data);
+        let p = b.add_pcluster(&c, 1, true);
+        let mut meta = zmap_header(0, 0, 0).to_vec();
+        // Z_EROFS_FULL_INDEX_START: 8 reserved bytes.
+        meta.extend_from_slice(&[0u8; 8]);
+        meta.extend_from_slice(&zidx_head(1, 0, p as u32));
+        meta.extend_from_slice(&zidx_nonhead(1, 0));
+        let f = b.add_zinode(1, 8192, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"z",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let out = decode(&img).expect("decode");
+        assert_eq!(out.entries[0].data, data);
+    }
+
+    #[test]
+    fn compressed_plain_and_hole() {
+        // lcn0: PLAIN lcluster with raw data; lcn1: hole lcluster.
+        let mut b = ImgBuilder::new();
+        let raw = [0x5Au8; BLK];
+        let p = b.add_pcluster(&raw, 1, false);
+        let mut meta = zmap_header(0, 0, 0).to_vec();
+        // Z_EROFS_FULL_INDEX_START: 8 reserved bytes.
+        meta.extend_from_slice(&[0u8; 8]);
+        meta.extend_from_slice(&zidx_head(0, 0, p as u32)); // PLAIN
+        meta.extend_from_slice(&zidx_head(1 | 0x4000, 0, 0)); // HOLE
+        let f = b.add_zinode(1, 8192, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"z",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let out = decode(&img).expect("decode");
+        assert_eq!(out.entries[0].data[..BLK], raw);
+        assert!(out.entries[0].data[BLK..].iter().all(|&c| c == 0));
+    }
+
+    #[cfg(feature = "lz4")]
+    #[test]
+    fn compressed_head2_and_partial_ref() {
+        // lcn0 HEAD1 + PARTIAL_REF, lcn1 HEAD2; both algorithms LZ4.
+        let mut b = ImgBuilder::new();
+        let data = zdata();
+        let c0 = crate::compress::lz4::encode::encode_block(&data[..4096]);
+        let c1 = crate::compress::lz4::encode::encode_block(&data[4096..]);
+        let p0 = b.add_pcluster(&c0, 1, false);
+        let p1 = b.add_pcluster(&c1, 1, false);
+        let mut meta = zmap_header(0, 0, 0).to_vec(); // algos 0/0 = LZ4
+        // Z_EROFS_FULL_INDEX_START: 8 reserved bytes.
+        meta.extend_from_slice(&[0u8; 8]);
+        meta.extend_from_slice(&zidx_head(1 | 0x8000, 0, p0 as u32));
+        meta.extend_from_slice(&zidx_head(3, 0, p1 as u32)); // HEAD2
+        let f = b.add_zinode(1, 8192, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"z",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let out = decode(&img).expect("decode");
+        assert_eq!(out.entries[0].data, data);
+    }
+
+    #[cfg(feature = "lz4")]
+    #[test]
+    fn compressed_big_pcluster_cblkcnt() {
+        // advise BIG_PCLUSTER_1 + a CBLKCNT NONHEAD carrying a
+        // 2-block compressed length. The sb feature bit aliases
+        // COMPR_CFGS, so an LZ4 algorithm record is present.
+        let mut b = ImgBuilder::new();
+        b.set_compr_cfgs(0b0001, &[&[0u8; 14]]);
+        let data = vec![b'w'; 8192];
+        let c = crate::compress::lz4::encode::encode_block(&data);
+        let p = b.add_pcluster(&c, 2, false); // legacy left-aligned
+        let mut meta = zmap_header(0x0002, 0, 0).to_vec();
+        // Z_EROFS_FULL_INDEX_START: 8 reserved bytes.
+        meta.extend_from_slice(&[0u8; 8]);
+        meta.extend_from_slice(&zidx_head(1, 0, p as u32));
+        meta.extend_from_slice(&zidx_nonhead(2 | 0x0800, 0)); // CBLKCNT=2
+        let f = b.add_zinode(1, 8192, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"z",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let out = decode(&img).expect("decode");
+        assert_eq!(out.entries[0].data, data);
+    }
+
+    #[cfg(feature = "lz4")]
+    #[test]
+    fn compressed_compact_4b() {
+        // datalayout 3 (COMPRESSED_COMPACT): 4-byte packs hold two
+        // 16-bit entries plus a trailing base blkaddr. Every inode
+        // slot gives ebase % 32 == 8, so compacted_4b_initial = 6 and
+        // both indexes live in the first pack.
+        let mut b = ImgBuilder::new();
+        let data = zdata();
+        let c0 = crate::compress::lz4::encode::encode_block(&data[..4096]);
+        let c1 = crate::compress::lz4::encode::encode_block(&data[4096..]);
+        let p0 = b.add_pcluster(&c0, 1, false);
+        let p1 = b.add_pcluster(&c1, 1, false);
+        assert_eq!(p1, p0 + 1);
+        // entries: HEAD1/lo=0 -> v = 1 << 12; base = p0 - 1.
+        let mut meta = zmap_header(0, 0, 0).to_vec();
+        meta.extend_from_slice(&zpack4(1 << 12, 1 << 12, p0 as u32 - 1));
+        let f = b.add_zinode(3, 8192, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"z",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let out = decode(&img).expect("decode");
+        assert_eq!(out.entries[0].data, data);
+    }
+
+    #[cfg(feature = "lz4")]
+    #[test]
+    fn compressed_compact_2b() {
+        // COMPACTED_2B advise: 23 lclusters exercise the initial 4B
+        // packs (lcn 0..5), one 16-entry 2B pack (lcn 6..21) and the
+        // trailing 4B pack (lcn 22).
+        let mut b = ImgBuilder::new();
+        let nlcluster = 23;
+        let mut data = Vec::new();
+        let mut pclusters = Vec::new();
+        for i in 0..nlcluster {
+            let chunk = vec![b'0' + i as u8; BLK];
+            data.extend_from_slice(&chunk);
+            pclusters.push(crate::compress::lz4::encode::encode_block(&chunk));
+        }
+        let pstart = b.next_blk;
+        for c in &pclusters {
+            assert!(c.len() <= BLK);
+            b.add_pcluster(c, 1, false);
+        }
+        let head: u16 = 1 << 12; // HEAD1, lo = 0
+        let mut meta = zmap_header(0x0001, 0, 0).to_vec(); // COMPACTED_2B
+        // ebase % 32 == 8 -> c4b_init = 6 (packs at ebase+0/8/16)
+        meta.extend_from_slice(&zpack4(head, head, pstart as u32 - 1));
+        meta.extend_from_slice(&zpack4(head, head, pstart as u32 + 1));
+        meta.extend_from_slice(&zpack4(head, head, pstart as u32 + 3));
+        // 2B pack: 16 entries x 14 bits (lobits=12), base = last
+        // head blkaddr of the previous pack.
+        meta.extend_from_slice(&zpack(&[head; 16], 14, pstart as u32 + 5));
+        // trailing 4B pack with the last index.
+        meta.extend_from_slice(&zpack4(head, 0, pstart as u32 + 21));
+        let f = b.add_zinode(3, (nlcluster * BLK) as u32, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"z",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let out = decode(&img).expect("decode");
+        assert_eq!(out.entries[0].data, data);
+    }
+
+    #[cfg(feature = "lz4")]
+    #[test]
+    fn compressed_extents_recsz16() {
+        // ADVISE_EXTENTS with 16-byte z_erofs_extent records.
+        let mut b = ImgBuilder::new();
+        let data = vec![b'q'; 8192];
+        let c = crate::compress::lz4::encode::encode_block(&data);
+        let pb = b.add_pcluster(&c, 1, false);
+        let pa = pb as usize * BLK;
+        let mut meta = Vec::new();
+        // header: extents_lo=1, advise = EXTENTS | recszbits<<1
+        // (recsz=16 -> ilog2(16)-2 = 2 -> advise = 1 | 4 = 5).
+        let mut h = [0u8; 8];
+        h[0..4].copy_from_slice(&le32(1));
+        h[4..6].copy_from_slice(&le16(5));
+        meta.extend_from_slice(&h);
+        meta.resize(16, 0); // records are 16-aligned
+        let mut rec = [0u8; 16];
+        rec[0..4].copy_from_slice(&le32(c.len() as u32 | (1 << 28))); // fmt=1 -> LZ4
+        rec[4..8].copy_from_slice(&le32(pa as u32));
+        meta.extend_from_slice(&rec);
+        let f = b.add_zinode(1, 8192, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"z",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let out = decode(&img).expect("decode");
+        assert_eq!(out.entries[0].data, data);
+    }
+
+    #[cfg(feature = "lz4")]
+    #[test]
+    fn compressed_extents_recsz8() {
+        // Fixed-lcluster extent records: plen + pstart per 4K extent.
+        let mut b = ImgBuilder::new();
+        let data = zdata();
+        let c0 = crate::compress::lz4::encode::encode_block(&data[..4096]);
+        let c1 = crate::compress::lz4::encode::encode_block(&data[4096..]);
+        let p0 = b.add_pcluster(&c0, 1, false);
+        let p1 = b.add_pcluster(&c1, 1, false);
+        let mut meta = Vec::new();
+        // advise = EXTENTS | (ilog2(8)-2)<<1 = 1|2 = 3; clusterbits 0.
+        let mut h = [0u8; 8];
+        h[4..6].copy_from_slice(&le16(3));
+        meta.extend_from_slice(&h);
+        for (c, p) in [(&c0, p0), (&c1, p1)] {
+            let mut rec = [0u8; 8];
+            rec[0..4].copy_from_slice(&le32(c.len() as u32 | (1 << 28)));
+            rec[4..8].copy_from_slice(&le32(p as u32 * BLK as u32));
+            meta.extend_from_slice(&rec);
+        }
+        let f = b.add_zinode(1, 8192, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"z",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let out = decode(&img).expect("decode");
+        assert_eq!(out.entries[0].data, data);
+    }
+
+    #[cfg(feature = "deflate")]
+    #[test]
+    fn compressed_deflate() {
+        let mut b = ImgBuilder::new();
+        // algs = LZ4 | DEFLATE; cfg records in alg order.
+        let lz4cfg = [0u8; 14];
+        let deflatecfg = [15u8, 0, 0, 0, 0, 0]; // windowbits = 15
+        b.set_compr_cfgs(0b0101, &[&lz4cfg, &deflatecfg]);
+        let data = vec![b'v'; 4096];
+        let c = crate::compress::deflate::encode::encode(
+            &data,
+            crate::compress::deflate::encode::Level::Default,
+        );
+        let p = b.add_pcluster(&c, 1, true);
+        let mut meta = zmap_header(0, 2, 0).to_vec(); // algo = DEFLATE
+        // Z_EROFS_FULL_INDEX_START: 8 reserved bytes.
+        meta.extend_from_slice(&[0u8; 8]);
+        meta.extend_from_slice(&zidx_head(1, 0, p as u32));
+        let f = b.add_zinode(1, 4096, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"z",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let out = decode(&img).expect("decode");
+        assert_eq!(out.entries[0].data, data);
+    }
+
+    #[cfg(feature = "zstd")]
+    #[test]
+    fn compressed_zstd() {
+        let mut b = ImgBuilder::new();
+        let lz4cfg = [0u8; 14];
+        let zstdcfg = [0u8; 6]; // format 0
+        b.set_compr_cfgs(0b1001, &[&lz4cfg, &zstdcfg]);
+        let data = vec![b'u'; 4096];
+        let c = crate::compress::zstd::encode::encode(&data);
+        let p = b.add_pcluster(&c, 1, true);
+        let mut meta = zmap_header(0, 3, 0).to_vec(); // algo = ZSTD
+        // Z_EROFS_FULL_INDEX_START: 8 reserved bytes.
+        meta.extend_from_slice(&[0u8; 8]);
+        meta.extend_from_slice(&zidx_head(1, 0, p as u32));
+        let f = b.add_zinode(1, 4096, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"z",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let out = decode(&img).expect("decode");
+        assert_eq!(out.entries[0].data, data);
+    }
+
+    #[cfg(any(
+        feature = "lzma-alone",
+        feature = "lzip",
+        feature = "xz",
+        feature = "sevenz",
+        feature = "lrzip"
+    ))]
+    #[test]
+    fn compressed_microlzma() {
+        use crate::compress::lzma::LzmaProperties;
+
+        let mut b = ImgBuilder::new();
+        let lz4cfg = [0u8; 14];
+        let mut lzmacfg = [0u8; 14];
+        lzmacfg[0..4].copy_from_slice(&le32(8192)); // dict_size
+        b.set_compr_cfgs(0b0011, &[&lz4cfg, &lzmacfg]);
+        let data = vec![b't'; 4096];
+        let props = LzmaProperties::LZIP;
+        let mut stream = crate::compress::lzma::lzma_encode_with_props_no_eos(&data, 8192, props);
+        // MicroLZMA replaces the leading 0x00 with ~props.
+        stream[0] = !props.to_props_byte();
+        let p = b.add_pcluster(&stream, 1, true);
+        let mut meta = zmap_header(0, 1, 0).to_vec(); // algo = LZMA
+        // Z_EROFS_FULL_INDEX_START: 8 reserved bytes.
+        meta.extend_from_slice(&[0u8; 8]);
+        meta.extend_from_slice(&zidx_head(1, 0, p as u32));
+        let f = b.add_zinode(1, 4096, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"z",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let out = decode(&img).expect("decode");
+        assert_eq!(out.entries[0].data, data);
+    }
+
+    #[test]
+    fn rejects_unknown_algorithm() {
+        let mut b = ImgBuilder::new();
+        let p = b.add_pcluster(&[0u8; 16], 1, false);
+        let mut meta = zmap_header(0, 4, 0).to_vec(); // algo id >= MAX
+        // Z_EROFS_FULL_INDEX_START: 8 reserved bytes.
+        meta.extend_from_slice(&[0u8; 8]);
+        meta.extend_from_slice(&zidx_head(1, 0, p as u32));
+        let f = b.add_zinode(1, 4096, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"z",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        assert!(matches!(decode(&img), Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn rejects_unavailable_algorithm() {
+        // HEAD1 selects LZMA but the image only offers LZ4 (no
+        // compression configs -> default bitmap).
+        let mut b = ImgBuilder::new();
+        let p = b.add_pcluster(&[0u8; 16], 1, false);
+        let mut meta = zmap_header(0, 1, 0).to_vec();
+        // Z_EROFS_FULL_INDEX_START: 8 reserved bytes.
+        meta.extend_from_slice(&[0u8; 8]);
+        meta.extend_from_slice(&zidx_head(1, 0, p as u32));
+        let f = b.add_zinode(1, 4096, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"z",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn rejects_packed_inode_bit() {
+        let mut b = ImgBuilder::new();
+        let mut meta = zmap_header(0, 0, 0x80).to_vec(); // FRAGMENT_INODE_BIT
+        // Z_EROFS_FULL_INDEX_START: 8 reserved bytes.
+        meta.extend_from_slice(&[0u8; 8]);
+        meta.extend_from_slice(&zidx_head(1, 0, 1));
+        let f = b.add_zinode(1, 4096, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"z",
             ftype: 8,
         }]);
         let img = b.build(root);
