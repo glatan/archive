@@ -15,7 +15,7 @@
 | method 9 (Deflate64) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) §5.6 + Info-ZIP de facto | ✅ | ❌ | decode のみ |
 | method 12 (BZIP2) / 14 (LZMA) / 93 (Zstd) / 95 (XZ) / 98 (PPMd) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) §5.7-§5.10 | ✅ | ✅ | 各 feature で encode 対応 |
 | method 10 (DCL Implode) / 16 (CMPSC Entropy拡張) / 96 (JPEG) / 97 (WavPack) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ❌ | ❌ | intentional exclusion |
-| ZIP64 (§4.3.14-15, §4.3.20-22) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ✅ | ✅ | auto-promotion 対応 |
+| ZIP64 (§4.3.14-15 EOCD+locator, §4.5.3 extra field) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ✅ | ✅ | auto-promotion 対応 |
 | Traditional PKZIP encryption (§6) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ✅ | ✅ | |
 | WinZip AES-128/192/256 (Method 99, extra field 0x9901) | [WinZip AE-x spec](https://www.winzip.com/en/support/aes-encryption/) | ✅ | ✅ | |
 | Strong Encryption (§7) / Central Directory Encryption (§7.5) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ⚠️ | ❌ | パース・アルゴリズム識別のみ、復号は対象外 |
