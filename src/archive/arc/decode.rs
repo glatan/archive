@@ -4,26 +4,29 @@
 //! Enhancement Associates (arc specification / wotsit "arc" entry).
 //! Supported scope:
 //!
-//! - reading: method 1 (obsolete unpacked, no CRC) and method 2
-//!   (stored). Methods 3 (packed/RLE), 4 (squeezed), 5-8 (crunched /
-//!   non-ASCII crunched / crushed / distilled) and any higher method
-//!   are rejected with [`Error::Unsupported`];
-//! - writing: method 1 (obsolete unpacked) and method 2 (stored)
-//!   entries.
+//! - reading: method 1 (obsolete unpacked, no CRC), method 2
+//!   (stored) and method 3 (packed/RLE90). Methods 4 (squeezed),
+//!   5-8 (crunched / non-ASCII crunched / crushed / distilled) and
+//!   any higher method are rejected with [`Error::Unsupported`];
+//! - writing: method 1 (obsolete unpacked), method 2 (stored) and
+//!   method 3 (packed/RLE90) entries.
 //!
 //! Layout: each member starts with `0x1A` and a method byte; method 0
 //! marks end of archive. Method-1 records are
 //! `[name 13B][size u32le][data]`; methods >= 2 use
 //! `[name 13B][size u32le][date u16le][time u16le][crc16 u16le]
 //! [length u32le][data]` where `size` is the uncompressed size and
-//! `length` is the stored data size (equal for method 2). ARC has no
-//! directory entries and names are flat, NUL-padded, at most 12
-//! characters plus a terminator byte.
+//! `length` is the stored data size (equal for method 2; the RLE90
+//! packed size for method 3). The CRC-16 covers the uncompressed
+//! data. ARC has no directory entries and names are flat,
+//! NUL-padded, at most 12 characters plus a terminator byte.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::error::Error;
+
+use super::rle90;
 
 pub(crate) const MARKER: u8 = 0x1A;
 pub(crate) const NAME_LEN: usize = 13;
@@ -33,7 +36,7 @@ pub(crate) const NAME_LEN: usize = 13;
 pub struct ArcEntry {
     /// File name (no directory component; ARC is flat).
     pub name: String,
-    /// Member method byte as read (1 or 2).
+    /// Member method byte as read (1, 2 or 3).
     pub method: u8,
     /// DOS date field (0 when absent/unset).
     pub date: u16,
@@ -91,7 +94,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<ArcEntry>, Error> {
         if method == 0 {
             return Ok(entries);
         }
-        if method > 2 {
+        if method > 3 {
             return Err(Error::Unsupported("arc: unsupported method"));
         }
         if pos + NAME_LEN + 4 > input.len() {
@@ -118,12 +121,19 @@ pub fn decode(input: &[u8]) -> Result<Vec<ArcEntry>, Error> {
         if pos + length > input.len() {
             return Err(Error::InvalidData("arc: truncated member data"));
         }
-        let data = input[pos..pos + length].to_vec();
+        let packed = &input[pos..pos + length];
         pos += length;
-        if data.len() != size {
+        let data = if method == 3 {
+            // Packed member: RLE90-expand; output must match the
+            // declared uncompressed size.
+            rle90::decode(packed, size)?
+        } else {
             // For stored members length must equal uncompressed size.
-            return Err(Error::InvalidData("arc: size mismatch"));
-        }
+            if packed.len() != size {
+                return Err(Error::InvalidData("arc: size mismatch"));
+            }
+            packed.to_vec()
+        };
         if let Some(c) = crc16
             && crate::util::crc16::crc16(&data) != c
         {
@@ -218,7 +228,11 @@ mod tests {
     fn rejects_unsupported_encode_method() {
         let mut e = crate::archive::arc::encode::ArcEncoder::new();
         assert!(matches!(
-            e.add_file_with_method("F", b"", 0, 0, 3),
+            e.add_file_with_method("F", b"", 0, 0, 4),
+            Err(Error::Unsupported(_))
+        ));
+        assert!(matches!(
+            e.add_file_with_method("F", b"", 0, 0, 9),
             Err(Error::Unsupported(_))
         ));
         assert!(matches!(
@@ -229,10 +243,105 @@ mod tests {
 
     #[test]
     fn rejects_compressed_method() {
+        // Methods 4 and above remain out of scope.
+        for m in [4u8, 9, 0xFF] {
+            let mut a = Vec::new();
+            a.extend_from_slice(&[MARKER, m]);
+            a.extend_from_slice(&[0u8; NAME_LEN + 4]);
+            assert!(matches!(decode(&a), Err(Error::Unsupported(_))));
+        }
+    }
+
+    /// Build a method-3 member record from raw packed bytes.
+    fn build_method3_member(name: &str, orig_size: u32, crc: u16, packed: &[u8]) -> Vec<u8> {
         let mut a = Vec::new();
         a.extend_from_slice(&[MARKER, 3]);
-        a.extend_from_slice(&[0u8; NAME_LEN + 4]);
-        assert!(matches!(decode(&a), Err(Error::Unsupported(_))));
+        let mut field = [0u8; NAME_LEN];
+        field[..name.len()].copy_from_slice(name.as_bytes());
+        a.extend_from_slice(&field);
+        a.extend_from_slice(&orig_size.to_le_bytes());
+        a.extend_from_slice(&0x1234u16.to_le_bytes());
+        a.extend_from_slice(&0x5678u16.to_le_bytes());
+        a.extend_from_slice(&crc.to_le_bytes());
+        a.extend_from_slice(&(packed.len() as u32).to_le_bytes());
+        a.extend_from_slice(packed);
+        a.extend_from_slice(&[MARKER, 0]);
+        a
+    }
+
+    #[test]
+    fn method3_roundtrip() {
+        // Runs, a literal marker byte and plain literals mixed.
+        let mut data = Vec::new();
+        data.extend_from_slice(b"aaabbbbbbbbbbbbbbbbb");
+        data.push(0x90);
+        data.extend_from_slice(&[0x00; 300]);
+        data.extend_from_slice(b"tail");
+        let mut enc = crate::archive::arc::encode::ArcEncoder::new();
+        enc.add_file_with_method("RLE.BIN", &data, 0x21, 0x42, 3)
+            .unwrap();
+        let e = decode(&enc.finish()).unwrap();
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].name, "RLE.BIN");
+        assert_eq!(e[0].method, 3);
+        assert_eq!(e[0].date, 0x21);
+        assert_eq!(e[0].time, 0x42);
+        assert_eq!(e[0].data, data);
+        assert!(e[0].crc16.is_some());
+    }
+
+    #[test]
+    fn method3_member() {
+        // Hand-built method-3 (packed) member.
+        // original: a a a b 0x90 c c          (7 bytes)
+        // packed:   'a' 0x90 03 'b' 0x90 00 'c' 0x90 02
+        let orig = [b'a', b'a', b'a', b'b', 0x90, b'c', b'c'];
+        let packed = [b'a', 0x90, 0x03, b'b', 0x90, 0x00, b'c', 0x90, 0x02];
+        let a = build_method3_member(
+            "R3.BIN",
+            orig.len() as u32,
+            crate::util::crc16::crc16(&orig),
+            &packed,
+        );
+        let e = decode(&a).unwrap();
+        assert_eq!(e[0].name, "R3.BIN");
+        assert_eq!(e[0].method, 3);
+        assert_eq!(e[0].data, orig);
+        assert_eq!(e[0].date, 0x1234);
+        assert_eq!(e[0].crc16, Some(crate::util::crc16::crc16(&orig)));
+    }
+
+    #[test]
+    fn method3_rejects_bad_crc() {
+        // Corrupt the leading literal of the packed stream: it still
+        // expands to the right size but fails the CRC-16 check.
+        let mut enc = crate::archive::arc::encode::ArcEncoder::new();
+        enc.add_file_with_method("F", b"aaaaaaaa", 0, 0, 3).unwrap();
+        let mut a = enc.finish();
+        // Packed data is 3 bytes ('a' 0x90 0x08); flip the leading
+        // literal, which sits 5 bytes before the trailing terminator.
+        let n = a.len();
+        a[n - 5] = b'b';
+        assert!(decode(&a).is_err());
+    }
+
+    #[test]
+    fn method3_rejects_malformed_rle() {
+        // Dangling marker: packed stream ends with a lone 0x90.
+        let a = build_method3_member("F", 10, 0, &[b'a', 0x90]);
+        assert!(decode(&a).is_err());
+        // Run count with no preceding literal byte.
+        let a = build_method3_member("F", 5, 0, &[0x90, 0x05]);
+        assert!(decode(&a).is_err());
+        // Expansion does not match the declared uncompressed size.
+        let orig = b"aaaa";
+        let a = build_method3_member(
+            "F",
+            10,
+            crate::util::crc16::crc16(orig),
+            &[b'a', 0x90, 0x04],
+        );
+        assert!(decode(&a).is_err());
     }
 
     #[test]

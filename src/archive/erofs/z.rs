@@ -11,10 +11,13 @@
 //! Zstandard; the latter three require the matching crate codec
 //! feature (an `lzma`-family feature, `deflate`, `zstd`).
 //!
-//! Layouts that need the packed inode or inline tail-packing
-//! (`Z_EROFS_ADVISE_FRAGMENT_PCLUSTER`, `Z_EROFS_ADVISE_INLINE_PCLUSTER`,
-//! `h_clusterbits` bit 7) are reported as `Error::Unsupported`; the
-//! matching superblock features are already rejected by the caller.
+//! The tail extent may also live outside the file's own data blocks:
+//! with `Z_EROFS_ADVISE_INLINE_PCLUSTER` (`EROFS_FEATURE_INCOMPAT_
+//! ZTAILPACKING`) it is stored as inline data right after the index
+//! table (`m.nextpackoff`), and with `Z_EROFS_ADVISE_FRAGMENT_
+//! PCLUSTER` (`EROFS_FEATURE_INCOMPAT_FRAGMENTS`) it points into the
+//! packed inode. `h_clusterbits` bit 7 (`Z_EROFS_FRAGMENT_INODE_BIT`)
+//! marks a file stored entirely inside the packed inode.
 
 use alloc::vec::Vec;
 
@@ -99,6 +102,22 @@ struct Pend {
     cblks: Option<u32>,
     /// The first NONHEAD after a big-pcluster head lacked CBLKCNT.
     missing_cblkcnt: bool,
+}
+
+/// Where the tail extent of an indexed layout gets its data, as
+/// resolved from the map-header union (`h_idata_size` /
+/// `h_fragmentoff`).
+#[derive(Clone, Copy)]
+enum Tail {
+    /// Regular pcluster in the file's own data area.
+    Normal,
+    /// ZTAILPACKING inline data: `h_idata_size` bytes stored at
+    /// `m.nextpackoff` of the tail head's index entry.
+    Inline(u16),
+    /// FRAGMENTS tail: low 32 bits of the packed-inode offset; for
+    /// `COMPRESSED_FULL` the tail head index's `blkaddr` field
+    /// supplies the high 32 bits.
+    Fragment(u32),
 }
 
 fn align8(v: usize) -> usize {
@@ -445,6 +464,128 @@ fn check_extent_size(plen: u64, llen: u64) -> Result<(), Error> {
     Ok(())
 }
 
+/// `m.nextpackoff` of index entry `lcn`: the index entry end for
+/// `COMPRESSED_FULL`, the containing pack's end for
+/// `COMPRESSED_COMPACT`. Tail-packed inline data starts here.
+fn pack_end(zm: &ZMap, lcn: u64) -> Option<usize> {
+    if zm.c4b_init == usize::MAX {
+        return zm.index_base.checked_add(lcn as usize * 8 + 8);
+    }
+    let mut pos = zm.index_base;
+    let mut l = lcn as usize;
+    let shift: usize;
+    if l < zm.c4b_init {
+        shift = 2;
+    } else {
+        pos = pos.checked_add(zm.c4b_init * 4)?;
+        l -= zm.c4b_init;
+        if l < zm.c2b {
+            shift = 1;
+        } else {
+            pos = pos.checked_add(zm.c2b * 2)?;
+            l -= zm.c2b;
+            shift = 2;
+        }
+    }
+    pos = pos.checked_add(l << shift)?;
+    let vcnt: usize = if shift == 2 && zm.lclusterbits <= 14 {
+        2
+    } else if shift == 1 && zm.lclusterbits <= 12 {
+        16
+    } else {
+        return None;
+    };
+    let packsz = vcnt << shift;
+    // round_down(pos, packsz) + packsz
+    pos.checked_add(packsz - pos % packsz)
+}
+
+/// Copy `llen` bytes of packed-inode fragment data at `frag_off`
+/// into `out` (kernel `z_erofs_read_fragment`).
+fn emit_fragment(
+    img: &Img<'_>,
+    out: &mut [u8],
+    la: u64,
+    llen: u64,
+    frag_off: u64,
+) -> Result<(), Error> {
+    if llen > PCLUSTER_MAX_DSIZE {
+        return Err(Error::Unsupported("erofs oversized pcluster"));
+    }
+    let packed = img
+        .packed
+        .as_deref()
+        .ok_or(Error::InvalidData("erofs fragment w/o packed inode"))?;
+    let la = usize::try_from(la).map_err(|_| Error::InvalidData("erofs extent offset"))?;
+    let fo = usize::try_from(frag_off).map_err(|_| Error::InvalidData("erofs fragment offset"))?;
+    let ll = llen as usize;
+    if la + ll > out.len() {
+        return Err(Error::InvalidData("erofs extent out of range"));
+    }
+    let fend = fo
+        .checked_add(ll)
+        .ok_or(Error::InvalidData("erofs fragment range"))?;
+    let frag = packed
+        .get(fo..fend)
+        .ok_or(Error::InvalidData("erofs fragment out of range"))?;
+    out[la..la + ll].copy_from_slice(frag);
+    Ok(())
+}
+
+/// Emit the ZTAILPACKING inline tail `[p.la, p.la + llen)`: `idata`
+/// bytes stored at `pack_end` of the tail head's index entry.
+fn emit_inline(
+    img: &Img<'_>,
+    out: &mut [u8],
+    zm: &ZMap,
+    p: &Pend,
+    llen: u64,
+    idata_size: u16,
+) -> Result<(), Error> {
+    // FINDTAIL resolves the inline data at m.nextpackoff of the
+    // *last* index entry (lcn = totalidx - 1), not of the tail
+    // head itself.
+    let initial_lcn = zm.totalidx as u64 - 1;
+    let ioff = pack_end(zm, initial_lcn).ok_or(Error::InvalidData("erofs inline data overflow"))?;
+    // Kernel sanity check: idata must fit into its block's tail.
+    if ioff % img.blksz + usize::from(idata_size) > img.blksz {
+        return Err(Error::InvalidData(
+            "erofs invalid tail-packing pclustersize",
+        ));
+    }
+    check_extent_size(u64::from(idata_size), llen)?;
+    let iend = ioff
+        .checked_add(usize::from(idata_size))
+        .ok_or(Error::InvalidData("erofs inline data range"))?;
+    let region = img
+        .data
+        .get(ioff..iend)
+        .ok_or(Error::InvalidData("erofs inline data out of range"))?;
+    let la = usize::try_from(p.la).map_err(|_| Error::InvalidData("erofs extent offset"))?;
+    let ll = llen as usize;
+    if la + ll > out.len() {
+        return Err(Error::InvalidData("erofs extent out of range"));
+    }
+    if p.htype == LCLUSTER_PLAIN {
+        if ll > usize::from(idata_size) {
+            return Err(Error::InvalidData("erofs plain extent too small"));
+        }
+        out[la..la + ll].copy_from_slice(&region[..ll]);
+        return Ok(());
+    }
+    let alg = if p.htype == LCLUSTER_HEAD2 {
+        zm.algos[1]
+    } else {
+        zm.algos[0]
+    };
+    if img.avail_compr_algs & (1u16 << alg) == 0 {
+        return Err(Error::InvalidData("erofs inconsistent algorithmtype"));
+    }
+    let data = inflate(img, alg, region, ll)?;
+    out[la..la + ll].copy_from_slice(&data);
+    Ok(())
+}
+
 /// Copy raw (`PLAIN`/`SHIFTED`/`INTERLACED`) extent bytes into `out`.
 fn emit_raw(
     img: &Img<'_>,
@@ -483,7 +624,14 @@ fn emit_raw(
 }
 
 /// Emit a pending index-layout extent `[p.la, end)` into `out`.
-fn emit(img: &Img<'_>, out: &mut [u8], zm: &ZMap, p: Pend, end: u64) -> Result<(), Error> {
+fn emit(
+    img: &Img<'_>,
+    out: &mut [u8],
+    zm: &ZMap,
+    p: Pend,
+    end: u64,
+    tail: Tail,
+) -> Result<(), Error> {
     let blksz = img.blksz as u64;
     if end <= p.la {
         return Err(Error::InvalidData("erofs extent out of order"));
@@ -491,6 +639,27 @@ fn emit(img: &Img<'_>, out: &mut [u8], zm: &ZMap, p: Pend, end: u64) -> Result<(
     let llen = end - p.la;
     if p.hole {
         return Ok(()); // `out` is pre-zeroed
+    }
+    // The last logical extent (`z_tailextent_headlcn`) may live
+    // outside the data area: inline tail-packing or a packed-inode
+    // fragment.
+    if end == out.len() as u64 {
+        match tail {
+            Tail::Inline(idata_size) if idata_size != 0 => {
+                return emit_inline(img, out, zm, &p, llen, idata_size);
+            }
+            Tail::Fragment(lo) => {
+                // For COMPRESSED_FULL the tail head index's blkaddr
+                // supplies the high 32 bits of the fragment offset.
+                let fo = if zm.c4b_init == usize::MAX {
+                    u64::from(lo) | (p.pblk << 32)
+                } else {
+                    u64::from(lo)
+                };
+                return emit_fragment(img, out, p.la, llen, fo);
+            }
+            _ => {}
+        }
     }
     // Physical length bound of the pcluster. Non-big pclusters are
     // exactly one filesystem block (kernel defaults compressedblks
@@ -560,7 +729,7 @@ fn emit(img: &Img<'_>, out: &mut [u8], zm: &ZMap, p: Pend, end: u64) -> Result<(
 
 /// Sequential pass over the index layouts (a specialised whole-file
 /// equivalent of kernel `z_erofs_do_map_blocks`).
-fn read_indexed(img: &Img<'_>, zm: &ZMap, size: u64) -> Result<Vec<u8>, Error> {
+fn read_indexed(img: &Img<'_>, zm: &ZMap, size: u64, tail: Tail) -> Result<Vec<u8>, Error> {
     let mut out = alloc::vec![0u8; size as usize];
     let lsz = 1u64 << zm.lclusterbits;
     let mut pend: Option<Pend> = None;
@@ -612,12 +781,12 @@ fn read_indexed(img: &Img<'_>, zm: &ZMap, size: u64) -> Result<Vec<u8>, Error> {
                 // the inode size ends the extent list.
                 if la >= size {
                     if let Some(p) = pend.take() {
-                        emit(img, &mut out, zm, p, size)?;
+                        emit(img, &mut out, zm, p, size, tail)?;
                     }
                     return Ok(out);
                 }
                 if let Some(p) = pend.take() {
-                    emit(img, &mut out, zm, p, la)?;
+                    emit(img, &mut out, zm, p, la, tail)?;
                 }
                 pend = Some(Pend {
                     la,
@@ -632,7 +801,7 @@ fn read_indexed(img: &Img<'_>, zm: &ZMap, size: u64) -> Result<Vec<u8>, Error> {
         }
     }
     if let Some(p) = pend.take() {
-        emit(img, &mut out, zm, p, size)?;
+        emit(img, &mut out, zm, p, size, tail)?;
     }
     Ok(out)
 }
@@ -703,6 +872,7 @@ fn read_extents(
     let recsz = 4usize << ((zm.advise >> 1) & 3);
     let mut out = alloc::vec![0u8; size as usize];
     let interlaced = zm.advise & ADVISE_INTERLACED_PCLUSTER != 0;
+    let fragment = zm.advise & ADVISE_FRAGMENT_PCLUSTER != 0;
     let mut pos = (hpos + 8).div_ceil(recsz) * recsz;
     let lsz = 1u64 << zm.lclusterbits;
     if recsz <= 8 {
@@ -718,6 +888,19 @@ fn read_extents(
         for i in 0..nrec {
             let rec = img.data.get(pos..pos + recsz).ok_or(Error::UnexpectedEof)?;
             pos += recsz;
+            if fragment && i + 1 == nrec {
+                // The last record is a packed-inode fragment:
+                // plen carries the low 32 offset bits and (for
+                // recsz > 4) pstart_lo the high bits.
+                let fo = u64::from(u32le(rec, 0));
+                let fo = if recsz > 4 {
+                    fo | u64::from(u32le(rec, 4)) << 32
+                } else {
+                    fo
+                };
+                emit_fragment(img, &mut out, i * lsz, size - i * lsz, fo)?;
+                continue;
+            }
             let plen_raw = u32le(rec, 0);
             let pa = if recsz == 4 {
                 let p = pa_acc;
@@ -758,7 +941,17 @@ fn read_extents(
             (size, 0, 0)
         };
         if let Some((la, epa, eplen)) = pend.take() {
-            apply_extent(img, &mut out, interlaced, la, lstart.min(size), epa, eplen)?;
+            if fragment && i == nrec {
+                // Last record: packed-inode fragment offset in
+                // plen (low) and pstart_lo (high).
+                let lend = lstart.min(size);
+                if lend <= la {
+                    return Err(Error::InvalidData("erofs extent out of order"));
+                }
+                emit_fragment(img, &mut out, la, lend - la, u64::from(eplen) | (epa << 32))?;
+            } else {
+                apply_extent(img, &mut out, interlaced, la, lstart.min(size), epa, eplen)?;
+            }
         }
         if i < nrec {
             pend = Some((lstart, pa, plen_raw));
@@ -788,12 +981,46 @@ pub(crate) fn read_compressed(
     let h = img.data.get(hpos..hpos + 8).ok_or(Error::UnexpectedEof)?;
     if h[7] >> 7 != 0 {
         // Z_EROFS_FRAGMENT_INODE_BIT: the file lives inside the
-        // packed inode entirely.
-        return Err(Error::Unsupported("erofs packed-inode fragment"));
+        // packed inode entirely; the rest of the header is the
+        // 64-bit fragment offset (kernel z_erofs_fill_inode_lazy).
+        if !img.fragments {
+            return Err(Error::InvalidData("erofs fragment inode w/o sb feature"));
+        }
+        let packed = img
+            .packed
+            .as_deref()
+            .ok_or(Error::InvalidData("erofs fragment w/o packed inode"))?;
+        let off = u64le(h, 0) & !(1u64 << 63);
+        let off = usize::try_from(off).map_err(|_| Error::InvalidData("erofs fragment offset"))?;
+        let end = off
+            .checked_add(ino.size as usize)
+            .ok_or(Error::InvalidData("erofs fragment range"))?;
+        return packed
+            .get(off..end)
+            .map(<[u8]>::to_vec)
+            .ok_or(Error::InvalidData("erofs fragment out of range"));
     }
     let advise = u16le(h, 4);
-    if advise & (ADVISE_INLINE_PCLUSTER | ADVISE_FRAGMENT_PCLUSTER) != 0 {
-        return Err(Error::Unsupported("erofs tailpacked/fragment inode"));
+    // In the EXTENTS layout bytes 0-3 carry the extent count and
+    // advise bits 1-2 encode the record size; the h_fragmentoff /
+    // h_idata_size union is only parsed for index layouts (kernel
+    // z_erofs_fill_inode_lazy goes straight to done for EXTENTS).
+    let extents = ino.datalayout == DATALAYOUT_COMPRESSED_FULL && advise & ADVISE_EXTENTS != 0;
+    let fragment = !extents && advise & ADVISE_FRAGMENT_PCLUSTER != 0;
+    // The map-header union is h_fragmentoff for FRAGMENT advise,
+    // h_idata_size for INLINE advise.
+    let idata_size = if extents || fragment {
+        0
+    } else if advise & ADVISE_INLINE_PCLUSTER != 0 {
+        u16le(h, 2)
+    } else {
+        0
+    };
+    if fragment && !img.fragments {
+        return Err(Error::InvalidData("erofs fragment pcluster w/o sb feature"));
+    }
+    if idata_size != 0 && !img.tailpacking {
+        return Err(Error::InvalidData("erofs inline pcluster w/o sb feature"));
     }
     let mut zm = ZMap {
         advise,
@@ -806,7 +1033,6 @@ pub(crate) fn read_compressed(
     };
     // In the EXTENTS layout advise bits 1-2 encode the record size,
     // so the big-pcluster sanity check applies to index layouts only.
-    let extents = ino.datalayout == DATALAYOUT_COMPRESSED_FULL && advise & ADVISE_EXTENTS != 0;
     if !extents
         && advise & (ADVISE_BIG_PCLUSTER_1 | ADVISE_BIG_PCLUSTER_2) != 0
         && !img.big_pcluster
@@ -824,7 +1050,14 @@ pub(crate) fn read_compressed(
             // Z_EROFS_FULL_INDEX_START: a reserved 8-byte slot sits
             // between the map header and the 8-byte index table.
             zm.index_base += 8;
-            read_indexed(img, &zm, ino.size)
+            let tail = if fragment {
+                Tail::Fragment(u32le(h, 0))
+            } else if idata_size != 0 {
+                Tail::Inline(idata_size)
+            } else {
+                Tail::Normal
+            };
+            read_indexed(img, &zm, ino.size, tail)
         }
         DATALAYOUT_COMPRESSED_COMPACT => {
             if zm.algos[0] >= ALG_MAX || zm.algos[1] >= ALG_MAX {
@@ -845,7 +1078,14 @@ pub(crate) fn read_compressed(
             } else {
                 0
             };
-            read_indexed(img, &zm, ino.size)
+            let tail = if fragment {
+                Tail::Fragment(u32le(h, 0))
+            } else if idata_size != 0 {
+                Tail::Inline(idata_size)
+            } else {
+                Tail::Normal
+            };
+            read_indexed(img, &zm, ino.size, tail)
         }
         _ => Err(Error::Unsupported("erofs compressed inode (z_erofs)")),
     }

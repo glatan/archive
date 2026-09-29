@@ -13,17 +13,24 @@
 //! `available_compr_algs` superblock bitmap and compression-config
 //! records are honored; per-inode big pclusters, compacted 2-byte
 //! indexes, `Z_EROFS_ADVISE_EXTENTS` extent records and partial
-//! references are supported.
+//! references are supported. Tail data may live outside the file's
+//! own data blocks: `Z_EROFS_ADVISE_INLINE_PCLUSTER` inline
+//! tail-packing (`INCOMPAT_ZTAILPACKING`) and packed-inode fragments
+//! (`INCOMPAT_FRAGMENTS`, `Z_EROFS_ADVISE_FRAGMENT_PCLUSTER` tails,
+//! `Z_EROFS_FRAGMENT_INODE_BIT` whole-file records) are decoded
+//! through the `packed_nid` inode.
 //!
 //! Superblock metadata that does not affect decoding — the volume
 //! UUID, mkfs build time, feature bitmaps and xattr bookkeeping
 //! fields — is parsed and exposed via `decode::ErofsImage::superblock`.
+//! Extended attributes are interpreted per inode (inline ibody
+//! entries plus shared-xattr references, short and long name
+//! prefixes) and exposed as `decode::ErofsEntry::xattrs`.
 //!
-//! Multi-device images, metabox images, packed-fragment and
-//! ztailpacking images are intentionally out of scope; encountering
-//! them is reported as `Error::Unsupported`. Extended attributes are
-//! skipped without interpretation. Writing erofs images is
-//! intentionally out of scope (mkfs.erofs is the reference producer).
+//! Multi-device images and metabox images are intentionally out of
+//! scope; encountering them is reported as `Error::Unsupported`.
+//! Writing erofs images is intentionally out of scope (mkfs.erofs is
+//! the reference producer).
 
 use crate::error::Error;
 

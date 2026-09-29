@@ -10,14 +10,18 @@
 //! `NM` names from the primary volume tree, then UCS-2 Joliet names
 //! from a supplementary volume tree, then plain ISO9660 identifiers
 //! with the `;version` suffix stripped. Rock Ridge `PX` (POSIX
-//! attributes), `SL` (symlink), `TF` (timestamps) and `NM` entries,
-//! and SUSP `SP`/`CE`/`ST` framing are supported. Files carrying a
-//! zisofs `ZF` system use entry are transparently decompressed
-//! (`pz` algorithm: per-block zlib streams with the block pointer
-//! table; 32/64/128KiB block sizes).
+//! attributes), `PN` (device numbers), `SL` (symlink), `TF`
+//! (timestamps) and `NM` entries, SUSP `SP`/`CE`/`ST` framing, and the
+//! `CL`/`RE` deep-directory relocation links (RRIP §4.1.5; `PL` parent
+//! links are skipped, not needed by the path-based walk) are
+//! supported. Multi-extent files (ECMA-119 §9.1.6 File Flags bit 7)
+//! and interleaved files (`unit_size`/`gap_size`, §6.4.3) are
+//! reassembled transparently. Files carrying a zisofs `ZF` system
+//! use entry are transparently decompressed (`pz` algorithm:
+//! per-block zlib streams with the block pointer table; 32/64/128KiB
+//! block sizes).
 //!
-//! Multi-extent files, interleaved files (`unit_size`/`gap_size`),
-//! extended attribute records content, non-`pz` `ZF` compression
+//! Extended attribute record content, non-`pz` `ZF` compression
 //! algorithms, El Torito boot records, and writing ISO images are
 //! intentionally out of scope.
 

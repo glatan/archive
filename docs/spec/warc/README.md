@@ -57,6 +57,13 @@
 | 20 | `WARC/1.0` 版も emit 可能 (`warc10()`)。field name は token (printable ASCII・`:`/空白不可)、value は CR/LF 不許可、managed field (Type/ID/Date/Content-Length/Target-URI/Content-Type) の extra_fields 重複は reject | §named fields grammar | ✅ | `warc10_version`, `rejects_bad_fields` |
 | 27 | `WARC-Block-Digest` の decode 時検証 (sha1 + RFC 4648 base32 decode)。`WARC-Payload-Digest` は payload==block が確定できる record のみ検証 (application/http・revisit・segmented/truncated は skip)。sha1 以外の algo label は受理して検証しない | §WARC-Block-Digest / §WARC-Payload-Digest | ✅ | `verify_digest`/`verify_digests` (decode.rs)、`verifies_block_digest`, `rejects_wrong_block_digest`, `rejects_malformed_block_digest`, `skips_unknown_digest_algorithm`, `verifies_payload_digest_for_opaque_block`, `skips_payload_digest_when_payload_not_block` |
 
+### 検証 (record 単位)
+
+| # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
+|---|------|----------|-----------|----------------|
+| 28 | record type 別フィールド使用制約: `WARC-Concurrent-To`/`WARC-IP-Address` (warcinfo・conversion・continuation で禁止)、`WARC-Refers-To` 系 (revisit のみ)、`WARC-Warcinfo-ID` (warcinfo で禁止)、`WARC-Target-URI` (warcinfo 禁止・response 等で必須)、`WARC-Filename` (warcinfo only)、segment フィールド (continuation only) | WARC 1.1 §5 named fields | ✅ | `rejects_field_forbidden_on_record_type`, `accepts_field_on_allowed_record_type`, `rejects_missing_target_uri` |
+| 29 | segmentation 検証 (Clause 7): continuation は `WARC-Segment-Origin-ID`+`WARC-Segment-Number` (>=2) 必須、非 continuation の Segment-Number は 1 のみ、ファイル内系列で number 連番・Total-Length で系列クローズ・累積長照合。cross-file 系列の途中観測は寛容 | WARC 1.1 Clause 7 | ✅ | `accepts_segmented_series`, `rejects_continuation_missing_segment_fields`, `rejects_bad_segment_number`, `rejects_total_length_mismatch`, `rejects_segment_after_total_length`, `accepts_late_joined_segment_series` |
+
 ### CLI / fuzz 連携
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
@@ -72,5 +79,3 @@
 |---|------|------|
 | 25 | ❌ record 間の `WARC-Concurrent-To` / segment (`continuation`) 結合 | 各 record を独立エントリとして公開。結合は利用側の判断 |
 | 26 | ❌ record 内部の HTTP メッセージ解析 (response/request block の中身) | block は opaque octet 列として扱う (encode 側も payload 特定は caller 責務)。`WARC-Payload-Digest` が特定不能な record では digest 検証も skip (行 27 参照) |
-| 28 | ❌ record type 別のフィールド使用制約 (warcinfo/metadata の payload 不可等) の強制 | ヘッダ構文と必須フィールド存在のみ検証。type 別制約違反の record も opaque entry として受理 |
-| 29 | ❌ segmentation ルール (`continuation` / `WARC-Segment-Origin-ID` 必須性) の検証 | record 結合を行わない (行 25 と同根拠) |

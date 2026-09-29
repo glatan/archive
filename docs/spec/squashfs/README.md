@@ -71,6 +71,8 @@ mksquashfs 生成イメージの decode、`unsquashfs` による本 writer 出�
 | 30 | data block: bit24 = 非圧縮、size 0 = sparse zero block | §4 | ✅ | `read_data_block` |
 | 31 | fragment tail: frag table entry (start/size/unused) + frag_offset | §4/§7 | ✅ | `parses_fragment_tail` |
 | 32 | UID/GID は ID table 経由で解決 | §9 | ✅ | `lookup_id` |
+| 39 | xattr table (id table + lookup + key/value ブロック) の展開、`SquashfsEntry::xattrs` 公開 | §10 | ✅ | inline/out-of-line value、prefix (user./trusted./security.) を解決。lookup `size` は stat 用論理サイズ (upstream `get_xattr_id`) のため count 駆動で parse。`parses_xattr_table`, `rejects_bad_xattrs` |
+| 41 | directory index (拡張 dir inode の index_count 分の {index,start,name}) の read、`SquashfsEntry::dir_index` 公開 | §6.1 | ✅ | `parses_dir_index`, `rejects_truncated_dir_index`, `test_squashfs_decode_xattrs_and_dir_index` |
 
 ### システム相互運用
 
@@ -92,6 +94,5 @@ mksquashfs 生成イメージの decode、`unsquashfs` による本 writer 出�
 |---|------|----------|-----------|------|
 | 37 | write: xattr / export table の emit、device・IPC inode、sparse block、非 directory children 向け inode split | §7-§10 | ❌ | encoder は file+symlink+dir subset (intentional) |
 | 38 | LZMA1 (compressor id 2) payload の伸張 | §2.4 | ❌ | upstream deprecated。`Unsupported` を返す (intentional) |
-| 39 | xattr / export table の展開 | §8/§10 | ❌ | メタデータ解析は layout 検証まで。xattr 値の公開は intentional scope 外 |
 | 40 | filesystem セマンティクス (デバイス node 作成、パーミッション適用) | crate-local | ❌ | 抽出は name/content 列挙まで (intentional) |
-| 41 | directory index (§6.1: 拡張 dir inode 付随の readdir 高速化構造) の read/emit | §6.1 | ❌ | decode は位置独立アクセスで index を使わず index_count を無視する。emit もしない (intentional) |
+| 41b | directory index emit | §6.1 | ❌ | write 側は emit しない (intentional) |

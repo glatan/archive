@@ -9,6 +9,7 @@ use alloc::vec::Vec;
 
 use crate::compress::zlib;
 use crate::error::Error;
+use crate::util::crc32::Crc32;
 
 const MAGIC: u32 = 0x28cd_3d45;
 const SIGNATURE: &[u8; 16] = b"Compressed ROMFS";
@@ -19,6 +20,7 @@ const S_IFDIR: u16 = 0x4000;
 const S_IFREG: u16 = 0x8000;
 const S_IFLNK: u16 = 0xA000;
 
+const FLAG_FSID_VERSION_2: u32 = 0x001;
 const FLAG_HOLES: u32 = 0x100;
 const FLAG_WRONG_SIG: u32 = 0x200;
 const FLAG_SHIFTED_ROOT: u32 = 0x400;
@@ -79,6 +81,13 @@ pub struct CramfsImage {
     pub name: String,
     /// Entries in directory traversal order (depth-first over paths).
     pub entries: Vec<CramfsEntry>,
+    /// Result of verifying `super.fsid.crc`, present only when the
+    /// `CRAMFS_FLAG_FSID_VERSION_2` flag is set. `Some(true)` means the
+    /// stored checksum equals the CRC-32 of the image bytes (the crc
+    /// field itself counted as zero, as mkfs.cramfs writes it).
+    /// Informational only: a mismatch is not an error — the kernel
+    /// ignores fsid, and pre-v2 images carry no valid checksum here.
+    pub fsid_crc_ok: Option<bool>,
 }
 
 fn u16le(b: &[u8], o: usize) -> u16 {
@@ -311,6 +320,17 @@ pub fn decode(input: &[u8]) -> Result<CramfsImage, Error> {
     if base + size > input.len() || size < 76 {
         return Err(Error::UnexpectedEof);
     }
+    // fsid.crc (FSID_VERSION_2 only): mkfs.cramfs initializes the field
+    // to zero, then stores the zlib CRC-32 over the image bytes from
+    // the superblock to `size`. Verified for information only — never
+    // a decode error (the kernel ignores fsid entirely).
+    let fsid_crc_ok = (flags & FLAG_FSID_VERSION_2 != 0).then(|| {
+        let mut crc = Crc32::new();
+        crc.update(&input[base..base + 32]);
+        crc.update(&[0; 4]);
+        crc.update(&input[base + 36..base + size]);
+        crc.finish() == u32le(sb, 32)
+    });
     let root = parse_inode(sb, 64)?;
     if root.mode & S_IFMT != S_IFDIR {
         return Err(Error::InvalidData("cramfs root not a directory"));
@@ -327,6 +347,7 @@ pub fn decode(input: &[u8]) -> Result<CramfsImage, Error> {
     Ok(CramfsImage {
         name: lossy_name(&sb[48..64]),
         entries,
+        fsid_crc_ok,
     })
 }
 
@@ -334,6 +355,7 @@ pub fn decode(input: &[u8]) -> Result<CramfsImage, Error> {
 mod tests {
     use super::*;
     use crate::traits::ArchiveEntry;
+    use alloc::string::ToString;
 
     /// Build a little-endian cramfs image.
     /// : (path, mode, data). Entries are regrouped so each
@@ -552,6 +574,32 @@ mod tests {
         bad[0] = 0;
         assert!(decode(&bad).is_err());
         assert!(decode(&f[..f.len() / 2]).is_err());
+    }
+
+    #[test]
+    fn fsid_crc_verified_as_info() {
+        let mut f = build(&[("a", S_IFREG | 0o644, b"x")]);
+        // Without FSID_VERSION_2 the field is not a valid checksum.
+        assert_eq!(decode(&f).unwrap().fsid_crc_ok, None);
+        // Set the flag and store the mkfs.cramfs-style checksum.
+        let flags = u32le(&f, 8) | FLAG_FSID_VERSION_2;
+        f[8..12].copy_from_slice(&flags.to_le_bytes());
+        let mut crc = Crc32::new();
+        crc.update(&f[..32]);
+        crc.update(&[0; 4]);
+        crc.update(&f[36..]);
+        f[32..36].copy_from_slice(&crc.finish().to_le_bytes());
+        assert_eq!(decode(&f).unwrap().fsid_crc_ok, Some(true));
+        // A corrupt stored crc reports false but still decodes.
+        let mut bad = f.clone();
+        bad[32] ^= 0xFF;
+        let img = decode(&bad).unwrap();
+        assert_eq!(img.fsid_crc_ok, Some(false));
+        assert_eq!(img.entries[0].data, b"x");
+        // Corrupt image data (the unused `future` field) -> false.
+        let mut bad2 = f;
+        bad2[12] ^= 0xFF;
+        assert_eq!(decode(&bad2).unwrap().fsid_crc_ok, Some(false));
     }
 
     #[test]

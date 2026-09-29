@@ -16,6 +16,7 @@
 | 4 | `size` フィールド ≤ 入力長、`size >= 76` | cramfs_super.size | ✅ | `rejects_bad_magic_and_trailing_garbage` |
 | 5 | root inode (offset 64) は directory 必須 | cramfs_fs.h `cramfs_super.root` | ✅ | decode 時 assert |
 | 6 | オフセット/ポインタは 4B 単位 (`offset` field = byte_offset/4) | cramfs_fs.h `cramfs_inode.offset` コメント | ✅ | 全テスト |
+| 23 | fsid CRC 検証 | mkcramfs.c (crc32 over `[shift..size)`、fsid.crc フィールドは 0 扱い) | ✅ | `CramfsImage::fsid_crc_ok: Option<bool>` — `CRAMFS_FLAG_FSID_VERSION_2` 時のみ検証し結果を情報として公開 (kernel 同様 reject はしない)。`fsid_crc_verified_as_info`, `test_cramfs_fsid_crc_mismatch_is_informational` |
 
 ## inode・ディレクトリ層
 
@@ -47,13 +48,12 @@
 | 20 | big-endian image | ❌ intentional scope | kernel 自身が foreign-endian を拒否 (`host-endian format`)。LE image のみ受理 |
 | 21 | XIP メモリマップ実行 / MTD 直読み | ❌ intentional scope | `CRAMFS_MTD` はカーネル実装の話。データ展開としては DIRECT_PTR 対応で範囲内 |
 | 22 | timestamp/ctime (format に存在しない) | ❌ n/a | cramfs.rst: 全て epoch 扱い |
-| 23 | fsid CRC 検証 | ⚠️ 未検証 | super.fsid.crc は fs 同定用の付随情報。kernel も読み飛ばす |
 
 ## 集計
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 18 |
-| ⚠️ 部分対応 | 1 |
+| ✅ 実装+テスト済み | 19 |
+| ⚠️ 部分対応 | 0 |
 | ❌ 未対応 | 4 |
 | **合計** | **23** |

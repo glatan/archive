@@ -20,9 +20,20 @@
 //! byte stores `255 - offset`, so byte `0xff` (offset 0) is the
 //! end-of-stream marker.
 //!
-//! Backwards (`-b`), ignore-default-offset (`-z`), skip-length-increment
-//! (`-x`), and limited-length (`-y`) modes are outside the current scope.
+//! Variant flags are supported on the decode side:
+//! - `-z` (ignore default offset): [`decode_no_default_offset`] starts
+//!   with `last_offset = 0` instead of 1.
+//! - `-x` (skip length increment): [`decode_no_length_increment`] stores
+//!   new-offset block lengths as `elias(len)` without the -1 bias.
+//! - `-y` (limit block length) only constrains the encoder; such streams
+//!   decode with [`decode`].
+//! - `+N` prefix compression: [`decode_with_prefix`] lets match offsets
+//!   reach into caller-supplied external history.
+//! [`decode_variant`] covers arbitrary combinations of the above.
+//!
+//! Backwards (`-b`) mode is outside the current scope.
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::Error;
@@ -86,12 +97,95 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 
 /// Decode a ZX2 stream with an output size limit.
 pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
+    decode_impl(input, &[], max_output, 1, false)
+}
+
+/// Decode a ZX2 stream produced with `-z` (ignore default offset): the
+/// initial last-offset is 0, so a copy-from-last-offset is invalid until
+/// a new-offset block sets one.
+pub fn decode_no_default_offset(input: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_impl(input, &[], usize::MAX, 0, false)
+}
+
+/// Decode a ZX2 stream produced with `-x` (skip length increment):
+/// new-offset block lengths are stored as `elias(len)` without the
+/// usual -1 bias.
+pub fn decode_no_length_increment(input: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_impl(input, &[], usize::MAX, 1, true)
+}
+
+/// Decode a ZX2 stream whose match offsets may reach into `prefix`,
+/// external history logically prepended to the output (the upstream
+/// `+N` prefix option).
+pub fn decode_with_prefix(input: &[u8], prefix: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_impl(input, prefix, usize::MAX, 1, false)
+}
+
+/// Decode a ZX2 stream with arbitrary combinations of the upstream
+/// variant flags applied.
+///
+/// * `prefix` — external history logically prepended to the output
+///   (the `+N` option); may be empty.
+/// * `initial_offset` — initial last-offset value: 0 for `-z` streams,
+///   1 (the default) otherwise.
+/// * `skip_len_increment` — `true` for `-x` streams where new-offset
+///   block lengths are stored without the -1 bias.
+pub fn decode_variant(
+    input: &[u8],
+    prefix: &[u8],
+    initial_offset: usize,
+    skip_len_increment: bool,
+) -> Result<Vec<u8>, Error> {
+    decode_impl(
+        input,
+        prefix,
+        usize::MAX,
+        initial_offset,
+        skip_len_increment,
+    )
+}
+
+/// Append `len` bytes copied `offset` back in the virtual history
+/// `prefix ++ out`.
+fn copy_match(
+    prefix: &[u8],
+    out: &mut Vec<u8>,
+    offset: usize,
+    len: usize,
+    max_output: usize,
+    msg: &'static str,
+) -> Result<(), Error> {
+    let avail = prefix.len() + out.len();
+    if offset == 0 || offset > avail {
+        return Err(Error::InvalidData(msg));
+    }
+    if out.len() + len > max_output {
+        return Err(Error::OutputLimitExceeded { limit: max_output });
+    }
+    for vpos in (avail - offset)..(avail - offset + len) {
+        let b = if vpos < prefix.len() {
+            prefix[vpos]
+        } else {
+            out[vpos - prefix.len()]
+        };
+        out.push(b);
+    }
+    Ok(())
+}
+
+fn decode_impl(
+    input: &[u8],
+    prefix: &[u8],
+    max_output: usize,
+    initial_offset: usize,
+    skip_len_increment: bool,
+) -> Result<Vec<u8>, Error> {
     if input.is_empty() {
         return Ok(Vec::new());
     }
     let mut r = BitReader::new(input);
     let mut out: Vec<u8> = Vec::new();
-    let mut last_offset = 1usize; // INITIAL_OFFSET
+    let mut last_offset = initial_offset;
 
     // The first block is always a literal block without an indicator bit.
     let mut literals = true;
@@ -111,17 +205,14 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
             // After literals: 0 = copy from last offset, 1 = new offset.
             if r.read_bit()? == 0 {
                 let len = r.elias()? as usize;
-                if last_offset > out.len() {
-                    return Err(Error::InvalidData("zx2: offset before start"));
-                }
-                if out.len() + len > max_output {
-                    return Err(Error::OutputLimitExceeded { limit: max_output });
-                }
-                let start = out.len() - last_offset;
-                for i in 0..len {
-                    let b = out[start + i];
-                    out.push(b);
-                }
+                copy_match(
+                    prefix,
+                    &mut out,
+                    last_offset,
+                    len,
+                    max_output,
+                    "zx2: offset before start",
+                )?;
                 literals = r.read_bit()? == 0;
                 continue;
             }
@@ -138,18 +229,16 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
             return Ok(out);
         }
         last_offset = offset;
-        let len = r.elias()? as usize + 1;
-        if last_offset > out.len() {
-            return Err(Error::InvalidData("zx2: bad match offset"));
-        }
-        if out.len() + len > max_output {
-            return Err(Error::OutputLimitExceeded { limit: max_output });
-        }
-        let start = out.len() - last_offset;
-        for i in 0..len {
-            let b = out[start + i];
-            out.push(b);
-        }
+        // `-x` stores the length verbatim; the default stores len - 1.
+        let len = r.elias()? as usize + if skip_len_increment { 0 } else { 1 };
+        copy_match(
+            prefix,
+            &mut out,
+            last_offset,
+            len,
+            max_output,
+            "zx2: bad match offset",
+        )?;
         literals = r.read_bit()? == 0;
     }
 }
@@ -304,6 +393,51 @@ mod tests {
     fn rt(data: &[u8]) {
         let enc = encode(data);
         assert_eq!(decode(&enc).unwrap(), data);
+    }
+
+    #[test]
+    fn decode_no_default_offset_variant() {
+        // literal 'a', copy-from-last-offset len 3, EOF.
+        //   bits: elias(1)=`0` | 'a' | `0` lastoff | elias(3)=`1,1,0` |
+        //         `1` newoff | 0xff
+        let stream = [0x34, b'a', 0xff];
+        assert_eq!(decode(&stream).unwrap(), b"aaaa");
+        // With `-z` the initial last-offset is 0: the copy is invalid.
+        assert!(decode_no_default_offset(&stream).is_err());
+        // A new-offset block is still fine under `-z`.
+        //   bits: elias(1)=`0` | 'a' | `1` newoff | 0xfe (dist 1) |
+        //         len elias(2)=`1,0,0` | `1` newoff | 0xff
+        let stream = [0x64, b'a', 0xfe, 0xff];
+        assert_eq!(decode_no_default_offset(&stream).unwrap(), b"aaaa");
+        assert_eq!(decode(&stream).unwrap(), b"aaaa");
+    }
+
+    #[test]
+    fn decode_no_length_increment_variant() {
+        // `-x` stores the new-offset length without the -1 bias, so the
+        // same bytes mean a shorter match.
+        let stream = [0x64, b'a', 0xfe, 0xff];
+        assert_eq!(decode(&stream).unwrap(), b"aaaa"); // elias 2 -> len 3
+        assert_eq!(decode_no_length_increment(&stream).unwrap(), b"aaa"); // len 2
+        // Combined `-x -z` via decode_variant.
+        assert_eq!(decode_variant(&stream, &[], 0, true).unwrap(), b"aaa");
+        // elias 1 stores len 1 under `-x` (len 2 by default).
+        let stream = [0x50, b'a', 0xfe, 0xff];
+        assert_eq!(decode(&stream).unwrap(), b"aaa");
+        assert_eq!(decode_no_length_increment(&stream).unwrap(), b"aa");
+    }
+
+    #[test]
+    fn decode_prefix_history() {
+        // literal 'a', then a distance-4 len-3 match reaching into the
+        // 3-byte prefix "XYZ", then EOF.
+        //   bits: elias(1)=`0` | 'a' | `1` newoff | 0xfb (dist 4) |
+        //         len elias(2)=`1,0,0` | `1` newoff | 0xff
+        let stream = [0x64, b'a', 0xfb, 0xff];
+        assert!(decode(&stream).is_err());
+        assert_eq!(decode_with_prefix(&stream, b"XYZ").unwrap(), b"aXYZ");
+        // Same via the general variant form.
+        assert_eq!(decode_variant(&stream, b"XYZ", 1, false).unwrap(), b"aXYZ");
     }
 
     #[test]

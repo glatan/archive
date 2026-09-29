@@ -213,8 +213,10 @@ fn decode_body(lines: &[&[u8]], out: &mut Vec<u8>) -> Result<(), Error> {
 /// Text outside the `=ybegin`/`=yend` block is ignored; `=ybegin` lines
 /// that lack the required `size=`/`name=` parameters are treated as
 /// discussion text and skipped per spec. Header/trailer `size=` values,
-/// `=ypart` ranges, `crc32=`, and `pcrc32=` are verified; a mismatch is an
-/// error (the spec requires the decoded binary to be discarded then).
+/// `=ypart` ranges, `part=`/`total=` consistency (`part <= total`, and a
+/// last part's `end` must equal the whole-file `size`), `crc32=`, and
+/// `pcrc32=` are verified; a mismatch is an error (the spec requires the
+/// decoded binary to be discarded then).
 ///
 /// This function does not panic on malformed input.
 pub fn decode(input: &[u8]) -> Result<YEncEntry, Error> {
@@ -235,7 +237,16 @@ pub fn decode(input: &[u8]) -> Result<YEncEntry, Error> {
         }
     };
     let params = parse_params(header, b"=ybegin ");
-    let part = get_u64(&params, b"part").map(|v| v as u32);
+    let part = get_u64(&params, b"part");
+    // (1.2) `total=` declares the total number of parts; the header
+    // `part` number must not exceed it. Absence of `total` (pre-1.2
+    // writers) is accepted.
+    let total = get_u64(&params, b"total");
+    if let (Some(p), Some(t)) = (part, total)
+        && p > t
+    {
+        return Err(Error::InvalidData("yenc: part > total"));
+    }
     let name = String::from_utf8_lossy(name).into_owned();
 
     // Multipart: the next line must be =ypart begin=B end=E.
@@ -250,6 +261,11 @@ pub fn decode(input: &[u8]) -> Result<YEncEntry, Error> {
         let end = get_u64(&p, b"end").ok_or(Error::InvalidData("yenc: =ypart end"))?;
         if end < begin || end - begin + 1 > size {
             return Err(Error::InvalidData("yenc: =ypart range"));
+        }
+        // The last part must end at the declared whole-file `size`
+        // (begin/end are 1-based byte offsets).
+        if part == total && end != size {
+            return Err(Error::InvalidData("yenc: last part end != size"));
         }
         range = Some((begin, end));
     }
@@ -282,7 +298,7 @@ pub fn decode(input: &[u8]) -> Result<YEncEntry, Error> {
     }
     // Multipart trailer part number must match the header part.
     if let Some(n) = part
-        && get_u64(&tp, b"part") != Some(n as u64)
+        && get_u64(&tp, b"part") != Some(n)
     {
         return Err(Error::InvalidData("yenc: part mismatch"));
     }
@@ -296,7 +312,7 @@ pub fn decode(input: &[u8]) -> Result<YEncEntry, Error> {
     Ok(YEncEntry {
         name,
         data,
-        part,
+        part: part.map(|v| v as u32),
         range,
     })
 }
@@ -421,6 +437,55 @@ mod tests {
         let mut bad2 = doc.clone();
         bad2[pos + 5] = b'2';
         assert!(decode(&bad2).is_err());
+    }
+
+    #[test]
+    fn multipart_total_validation() {
+        // Hand-assembled multipart docs: encode_part() asserts
+        // part <= total, so the invalid headers cannot come from it.
+        let doc = |begin: &[u8], ypart: &[u8], trailer: &[u8]| {
+            let mut v = Vec::new();
+            v.extend_from_slice(begin);
+            v.push(b'\n');
+            v.extend_from_slice(ypart);
+            v.push(b'\n');
+            push_encoded(&mut v, b"12345678");
+            v.extend_from_slice(trailer);
+            v.push(b'\n');
+            v
+        };
+        // part > total -> rejected.
+        assert!(
+            decode(&doc(
+                b"=ybegin part=3 total=2 line=128 size=16 name=m",
+                b"=ypart begin=1 end=8",
+                b"=yend size=8 part=3"
+            ))
+            .is_err()
+        );
+        // part == total but =ypart end does not reach `size` -> rejected.
+        assert!(
+            decode(&doc(
+                b"=ybegin part=2 total=2 line=128 size=16 name=m",
+                b"=ypart begin=1 end=8",
+                b"=yend size=8 part=2"
+            ))
+            .is_err()
+        );
+        // Consistent total -> accepted (last part ends at `size`).
+        let ok = encode_part("m", 2, 2, 9, b"partdata", 16);
+        assert_eq!(decode(&ok).unwrap().range, Some((9, 16)));
+        // total absent (pre-1.2 writers) -> accepted.
+        assert_eq!(
+            decode(&doc(
+                b"=ybegin part=1 line=128 size=16 name=m",
+                b"=ypart begin=1 end=8",
+                b"=yend size=8 part=1"
+            ))
+            .unwrap()
+            .data,
+            b"12345678"
+        );
     }
 
     #[test]

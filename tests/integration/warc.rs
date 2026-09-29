@@ -94,12 +94,13 @@ fn test_warc_encode_roundtrip() {
 fn test_warc_gzip_write_roundtrip() {
     use archive::archive::warc::encode::{WarcRecord, encode};
 
-    let rec = WarcRecord::new(
+    let mut rec = WarcRecord::new(
         "resource",
         "urn:uuid:gz-1",
         "2024-06-01T00:00:00Z",
         b"gzip wrapped block",
     );
+    rec.target_uri = Some("http://x/".to_string());
     let stream = encode(&[rec]).unwrap();
     let compressed = archive::compress::gzip::encode::encode(
         &stream,

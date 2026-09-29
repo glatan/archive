@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | RFC 2118 パケット (flags + count + token stream) | RFC 2118 §3-4 | ✅ | ✅ | 単一パケット API と stateful な Encoder/Decoder の双方を提供 |
 | PPP カプセル化 (protocol `0x00FD`, CCP ネゴシエーション) | RFC 2118 §2, §3, §4.3 | ❌ | ❌ | intentional scope。パケット本体の codec のみで、リンク層の protocol field・CCP・Reset-Request/Ack 処理は対象外 |
-| RDP bulk compression 64KiB "big" 辞書バリアント | MS-RDPEGDI 系仕様 | ❌ | ❌ | intentional scope。RFC 2118 の 8192B 履歴のみ対象 |
+| RDP bulk compression (RDP 4.0 8KiB / RDP 5.0 64KiB) | [MS-RDPBCGR] §3.1.8.4 | ✅ | ✅ | `RdpDecoder`/`RdpEncoder`/`decode_rdp`/`encode_rdp`。flags は PDU ヘッダ由来で外部供給、下位ニブル CompressionTypeMask (8K=0/64K=1)。FreeRDP 生成ベクタ + 104KB ストリーム fixture で検証 |
 | MPPE 暗号 | RFC 3078/3079 | ❌ | ❌ | 別プロトコル |
 
 ## パケットヘッダ
@@ -82,7 +82,7 @@ MSB-first でパックされる (RFC 2118 §4.2)。
 ## Intentional scope / 既知制約
 
 - PPP カプセル化 (protocol `0x00FD`、CCP、Reset-Request/Ack) はリンク層の責任として対象外。
-- RDP MPPC の 64KiB 辞書モード・FLUSH semantics の RDP 固有差異は対象外 (RFC 2118 の 8KiB 履歴のみ)。
+- RFC 2118 の in-band 2B ヘッダ経路 (8KiB 履歴) に加え、MS-RDPBCGR §3.1.8.4 の外部 flags/type byte 経路 (`RdpDecoder`/`RdpEncoder`、RDP4 8KiB / RDP5 64KiB) を対応済み。RDP6/6.1 bulk compression は別 codec のため対象外。
 - エンコーダは greedy 単一ハッシュのベースライン品質 (圧縮率最適化は意図しない)。
 - RFC 2118 §1.1 の licensing statement (MPPC は PPP 実装製品かつ相互運用目的でのみ使用可、というフィールドオブユース制限) を記録する。本 crate は PPP 非実装の汎用ライブラリとして codec を単体公開しており、透明性のため THIRD_PARTY_NOTICES にも明記 (法的助言ではない)。
 - `decode(input)` は入力全体を 1 パケットとして扱う。パケット長フィールドが wire 上に存在しないため、連接ストリームの split は仕様上不可能 (パケット境界はリンク層情報)。

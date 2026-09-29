@@ -87,6 +87,13 @@ specifications or standards documents:
   mppc_compress encoder in 8K/RDP4 mode; the .pkt file prepends an
   RFC 2118 header (FRONT|COMPRESSED, count 0) equivalent to FreeRDP's
   wire flags PACKET_AT_FRONT|PACKET_COMPRESSED. No code was copied.
+  RDP 5.0 (64 KiB history) fixtures
+  `external_freerdp_bells_rdp5`/`external_freerdp_island_rdp5`/
+  `external_freerdp_ms_rdp5` (.pkt/.expected) likewise embed the
+  TEST_MPPC_BELLS_RDP5, TEST_MPPC_ISLAND_RDP5 and TEST_MPPC_MS_RDP5
+  streams from the same FreeRDP test source (flags and
+  CompressionTypeMask nibble supplied as the external RDP header).
+  No code was copied.
   Licensing statement note (not a patent): RFC 2118 section 1.1
   contains an explicit field-of-use statement: "MPPC can only be used
   in products that implement the Point to Point Protocol AND for the
@@ -249,6 +256,16 @@ specifications or standards documents:
   document.
   MSZIP payloads reuse the existing RFC 1951 DEFLATE decoder
   (`compress::deflate`); no new codec was ported.
+  LZX folder decompression is implemented in `compress::lzx` (shared
+  core with LZX DELTA) from Microsoft's "LZX Compressed Data Format"
+  documentation, with the errata semantics documented in
+  cabextract/libmspack `lzx.c` (LGPL 2.1, Stuart Caie) consulted for
+  behavioral confirmation only; no code was copied.
+  Test fixtures `tests/fixtures/mscab/lzx_mixed.cab` and
+  `lzx_large.cab` are the LZX folders of cabextract's test files
+  (libmspack repository cabextract/test/cabs/, LGPL 2.1); they are
+  checked in unmodified as known-answer decode inputs and are not
+  linked.
   Patent note: [MS-CAB] is published under the general Microsoft Open
   Specifications IPR notice. It is NOT listed on the Open Specification
   Promise (OSP) covered-specification list ([MS-DEVCENTLP], revised
@@ -364,7 +381,10 @@ specifications or standards documents:
   no code was copied. `erofs-utils` `mkfs.erofs`/`fsck.erofs`
   (GPL-2.0+) were built from source and used only to produce and
   cross-validate the checked-in test fixture
-  `tests/fixtures/erofs/mkfs.erofs.img`; they are not linked or
+  `tests/fixtures/erofs/mkfs.*.img` (uncompressed, lz4/zstd/
+  microlzma codecs, big pcluster, extents/full-index layouts,
+  ztailpacking and fragments images produced with
+  `mkfs.erofs -E` feature options); they are not linked or
   distributed.
 - iso9660: ECMA-119 4th edition (= ISO 9660; Ecma International),
   Linux kernel isofs documentation and on-disk header

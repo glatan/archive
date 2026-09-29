@@ -8,9 +8,11 @@
 //!
 //! The `encode` module writes an image (regular files, symlinks,
 //! implicit directories, one compressor, optional fragment table and
-//! multiple UID/GID ids; no xattr/export tables).
-//! Interpreting filesystem semantics (device nodes, xattrs) beyond
-//! name/content listing is intentionally out of scope.
+//! multiple UID/GID ids; no xattr/export tables). The decoder also
+//! resolves inode extended attributes (xattr table) and extended
+//! directory index entries; interpreting other filesystem semantics
+//! (device nodes) beyond name/content listing is intentionally out of
+//! scope.
 
 use alloc::vec::Vec;
 
@@ -21,8 +23,8 @@ pub mod decode;
 pub mod encode;
 
 pub use decode::{
-    SquashfsCompression, SquashfsEntry, SquashfsImage, SquashfsKind, SquashfsSuperblock, decode,
-    decode_with_limit,
+    SquashfsCompression, SquashfsDirIndex, SquashfsEntry, SquashfsImage, SquashfsKind,
+    SquashfsSuperblock, SquashfsXattr, decode, decode_with_limit,
 };
 
 /// Codec struct for trait-based `.squashfs` decode operations.

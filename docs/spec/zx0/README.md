@@ -11,7 +11,7 @@
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
 | v2 forward / non-inverted | [ZX0 README](https://github.com/einar-saukas/ZX0) + `dzx0.c` (BSD-3) | ✅ | ✅ | |
-| v1 (`-c` classic) | [ZX0 README](https://github.com/einar-saukas/ZX0) | ❌ | ❌ | intentional scope |
+| v1 (`-c` classic) | [ZX0 README](https://github.com/einar-saukas/ZX0) | ✅ | ❌ | `decode_classic` / `decode_classic_with_prefix` (offset-MSB Elias 非反転のみ差分) |
 | backward (`-b`) / inverted (`-i`) | [ZX0 README](https://github.com/einar-saukas/ZX0) | ❌ | ❌ | intentional scope |
 
 ## ストリーム構造
@@ -58,6 +58,6 @@
 
 - 参照実装 ZX0 v2.2 (Einar Saukas) は BSD 3-Clause。本実装は README のフォーマット記述と `dzx0.c` の動作解析から書かれた独立実装であり、コードの移植は行っていない。
 - 統合テストの `ZX0_*` は参照 C コンプレッサ (ZX0 v2.2) をローカルでコンパイルして生成した既知解答ベクタ (decode のみ検証): literal+match 混在、rep-offset、長マッチ連鎖を含む。
-- backwards モード (`-b`、後方読み)、inverted モード (`-i`)、classic v1 形式 (`-c`) は intentional scope 外。forward / v2 / non-inverted-literals のみ。
+- backwards モード (`-b`、後方読み)、inverted モード (`-i`) は intentional scope 外。classic v1 (`-c`、offset-MSB Elias 非反転) と prefix decode (`decode_with_prefix`/`decode_classic_with_prefix`) は対応済み。
 - ZX0 は ZX Spectrum 等のレトロプラットフォーム向けに設計された codec で、同一フォーマットの decompressor が Z80/6502/68k/x86 等多数のアセンブリ実装を持つ。
 - 実装メモ: Elias gamma 値には `1 << 20` の安全性ガードを設けている (無制限増大する malformed 入力の DoS 防止。フォーマット定義ではなく実装追加の制限)。

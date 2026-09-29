@@ -60,7 +60,7 @@
 //! | `zx2` (default) | ZX2 raw codec |
 //! | `zx5` (default) | ZX5 raw codec |
 //! | `vcdiff` (default) | VCDIFF (RFC 3284) delta codec |
-//! | `mppc` (default) | MPPC (RFC 2118) packet codec |
+//! | `mppc` (default) | MPPC packet codec (RFC 2118, RDP 4.0/5.0 bulk) |
 //! | `lzs` (default) | Stac LZS (RFC 2395) datagram codec |
 //! | `lzrw1` (default) | LZRW1 raw codec |
 //! | `lzrw1a` (default) | LZRW1-A raw codec |
@@ -71,7 +71,7 @@
 //! | `lzxd` (default) | LZX DELTA (MS-PATCH) codec (decode; uncompressed-block encode) |
 //! | `cmpsc` (default) | IBM CMPSC (z/Arch compression call) codec |
 //! | `packbits` (default) | PackBits RLE codec (Apple TN1023 / TIFF §9) |
-//! | `uuencode` (default) | uuencode historical algorithm (POSIX.1-2017) |
+//! | `uuencode` (default) | uuencode historical and Base64 algorithms (POSIX.1-2017) |
 //! | `ascii85` (default) | Ascii85 (Adobe ASCII85Decode + RFC 1924) |
 //! | `yenc` (default) | yEnc binary-to-text encoding (draft 1.3) |
 //! | `macbinary` (default) | MacBinary II container format |
@@ -82,7 +82,7 @@
 //! | `deb` (default) | Debian binary package (`.deb`) read/write support |
 //! | `rpm` (default) | RPM package (`.rpm`) read/write support |
 //! | `squashfs` (default) | SquashFS image read/write support |
-//! | `mscab` (default) | Microsoft Cabinet (`.cab`) read/write support (MSZIP/stored) |
+//! | `mscab` (default) | Microsoft Cabinet (`.cab`) read/write support (MSZIP/LZX/stored) |
 //! | `mscfb` (default) | Microsoft Compound File Binary (OLE2) read support |
 //! | `cramfs` (default) | Linux cramfs read-only filesystem image |
 //! | `romfs` (default) | Linux romfs read-only filesystem image |
@@ -97,7 +97,7 @@
 //! | `xar` (default) | XAR (`.xar`) archive read/write support |
 //! | `lha` (default) | LHA/LZH archive support (store methods; header levels 0-2) |
 //! | `arj` (default) | ARJ archive support (method 0 only) |
-//! | `arc` (default) | SEA ARC archive support (store methods only) |
+//! | `arc` (default) | SEA ARC archive support (method 1/2/3 read; method 1/2 write) |
 //! | `zip` | ZIP archive format |
 //! | `sevenz` | 7z archive format |
 //!

@@ -14,6 +14,20 @@
 //! segmented, or truncated records whose payload may not match the
 //! block). Only `sha1` digests are checked; other algorithms are
 //! ignored like other unknown fields.
+//!
+//! Per-record, the field-usage constraints of WARC 1.1 "named fields"
+//! are enforced for the eight defined record types (e.g.
+//! `WARC-Filename` is `warcinfo`-only, `WARC-Target-URI` is
+//! required on content records and forbidden on `warcinfo`), and
+//! Clause 7 record segmentation is validated: `continuation` records
+//! must carry `WARC-Segment-Origin-ID` plus a
+//! `WARC-Segment-Number` continuing the series by exactly one, and a
+//! series closed by `WARC-Segment-Total-Length` (which must equal the
+//! summed block lengths when the whole series is observed) accepts no
+//! further segments. A series first observed through a
+//! `continuation` record is tracked leniently because earlier
+//! segments may live in an earlier WARC file. Segment reassembly is
+//! not performed.
 
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
@@ -191,15 +205,300 @@ fn verify_digests(
     Ok(())
 }
 
+/// The eight record types defined by WARC 1.1. Records of unknown
+/// type are skipped per spec ("WARC processing software shall skip
+/// records of unknown type"), so the type-specific constraints below
+/// only apply to these.
+const KNOWN_TYPES: &[&str] = &[
+    "warcinfo",
+    "response",
+    "resource",
+    "request",
+    "metadata",
+    "revisit",
+    "conversion",
+    "continuation",
+];
+
+/// Field -> record types on which the field is forbidden, per the
+/// "shall not be used" lists of WARC 1.1 "named fields". Only the
+/// combinations the spec spells out are enforced.
+const FORBIDDEN_FIELD_TYPES: &[(&str, &[&str])] = &[
+    // WARC-Concurrent-To: "shall not be used in 'warcinfo',
+    // 'conversion', and 'continuation' records".
+    (
+        "WARC-Concurrent-To",
+        &["warcinfo", "conversion", "continuation"],
+    ),
+    // WARC-IP-Address: "shall not be used on 'warcinfo', 'conversion'
+    // or 'continuation' records".
+    (
+        "WARC-IP-Address",
+        &["warcinfo", "conversion", "continuation"],
+    ),
+    // WARC-Refers-To: "shall not be used in 'warcinfo', 'response',
+    // 'resource', 'request', and 'continuation' records".
+    (
+        "WARC-Refers-To",
+        &[
+            "warcinfo",
+            "response",
+            "resource",
+            "request",
+            "continuation",
+        ],
+    ),
+    // WARC-Refers-To-Target-URI and WARC-Refers-To-Date: "may be used
+    // in 'revisit' records and shall not be used in 'warcinfo',
+    // 'response', 'metadata', 'conversion', 'resource', 'request', and
+    // 'continuation' records".
+    (
+        "WARC-Refers-To-Target-URI",
+        &[
+            "warcinfo",
+            "response",
+            "metadata",
+            "conversion",
+            "resource",
+            "request",
+            "continuation",
+        ],
+    ),
+    (
+        "WARC-Refers-To-Date",
+        &[
+            "warcinfo",
+            "response",
+            "metadata",
+            "conversion",
+            "resource",
+            "request",
+            "continuation",
+        ],
+    ),
+    // WARC-Warcinfo-ID: "may be used in any record type except
+    // 'warcinfo'".
+    ("WARC-Warcinfo-ID", &["warcinfo"]),
+    // WARC-Target-URI: "A 'warcinfo' record shall not have a
+    // WARC-Target-URI field".
+    ("WARC-Target-URI", &["warcinfo"]),
+];
+
+/// Fields restricted to a single record type ("shall not be used for
+/// other record types" / "shall not be used elsewhere").
+const SINGLE_TYPE_FIELDS: &[(&str, &str)] = &[
+    ("WARC-Filename", "warcinfo"),
+    ("WARC-Segment-Origin-ID", "continuation"),
+    ("WARC-Segment-Total-Length", "continuation"),
+];
+
+/// Record types that shall carry a WARC-Target-URI field
+/// (WARC-Target-URI definition); 'metadata' may and 'warcinfo' shall
+/// not (handled above).
+const TARGET_URI_TYPES: &[&str] = &[
+    "response",
+    "resource",
+    "request",
+    "revisit",
+    "conversion",
+    "continuation",
+];
+
+fn type_is(record_type: &str, list: &[&str]) -> bool {
+    list.iter().any(|t| record_type.eq_ignore_ascii_case(t))
+}
+
+/// Enforce the per-record-type field constraints of WARC 1.1 "named
+/// fields": forbidden field/type combinations, single-type fields, and
+/// the mandatory WARC-Target-URI. Unknown record types pass unchecked,
+/// matching the "skip records of unknown type" rule.
+fn check_field_constraints(
+    fields: &BTreeMap<String, String>,
+    record_type: &str,
+) -> Result<(), Error> {
+    if !type_is(record_type, KNOWN_TYPES) {
+        return Ok(());
+    }
+    for (field, banned) in FORBIDDEN_FIELD_TYPES {
+        if fields.contains_key(*field) && type_is(record_type, banned) {
+            return Err(Error::InvalidData(
+                "warc: field not allowed on this record type",
+            ));
+        }
+    }
+    for (field, only) in SINGLE_TYPE_FIELDS {
+        if fields.contains_key(*field) && !record_type.eq_ignore_ascii_case(only) {
+            return Err(Error::InvalidData(
+                "warc: field restricted to another record type",
+            ));
+        }
+    }
+    if type_is(record_type, TARGET_URI_TYPES) && !fields.contains_key("WARC-Target-URI") {
+        return Err(Error::InvalidData("warc: missing WARC-Target-URI"));
+    }
+    Ok(())
+}
+
+/// Tracking state for one segmented-record series (WARC 1.1 Clause 7),
+/// keyed by the WARC-Record-ID of the first segment, which
+/// 'continuation' records repeat as WARC-Segment-Origin-ID.
+struct SegmentSeries {
+    /// Last observed WARC-Segment-Number in this stream.
+    last_number: u64,
+    /// Sum of the block lengths observed for this series.
+    block_total: u64,
+    /// WARC-Target-URI of the first observed segment; all segments of
+    /// a set shall carry identical target-URI values.
+    target_uri: Option<String>,
+    /// Whether the origin segment (number 1) was observed. Only then
+    /// can WARC-Segment-Total-Length be checked against
+    /// `block_total`; a series first seen mid-way may continue a
+    /// series started in another WARC file.
+    from_origin: bool,
+    /// WARC-Segment-Total-Length was seen: the series is closed and no
+    /// further segment may follow.
+    closed: bool,
+}
+
+/// Parse a `1*DIGIT` field value (WARC-Segment-Number,
+/// WARC-Segment-Total-Length).
+fn parse_digits(fields: &BTreeMap<String, String>, name: &str) -> Result<Option<u64>, Error> {
+    match fields.get(name) {
+        None => Ok(None),
+        Some(v) => {
+            let v = v.trim();
+            if v.is_empty() || !v.bytes().all(|b| b.is_ascii_digit()) {
+                return Err(Error::InvalidData("warc: bad numeric field"));
+            }
+            v.parse::<u64>()
+                .map(Some)
+                .map_err(|_| Error::InvalidData("warc: bad numeric field"))
+        }
+    }
+}
+
+/// Enforce the WARC 1.1 Clause 7 segmentation rules observable within
+/// a single stream. 'continuation' records must carry
+/// WARC-Segment-Origin-ID and a WARC-Segment-Number greater than 1
+/// that continues its series by exactly one; a non-'continuation'
+/// record carrying WARC-Segment-Number starts a series and must use
+/// value "1". WARC-Segment-Total-Length closes a series and, when the
+/// origin segment was observed, must equal the summed block lengths.
+/// A series whose first observed record is a 'continuation' is tracked
+/// leniently because earlier segments may live in another WARC file.
+fn check_segmentation(
+    fields: &BTreeMap<String, String>,
+    record_type: &str,
+    record_id: &str,
+    block_len: u64,
+    series: &mut BTreeMap<String, SegmentSeries>,
+) -> Result<(), Error> {
+    let number = parse_digits(fields, "WARC-Segment-Number")?;
+    let total_len = parse_digits(fields, "WARC-Segment-Total-Length")?;
+
+    if record_type.eq_ignore_ascii_case("continuation") {
+        let origin = fields
+            .get("WARC-Segment-Origin-ID")
+            .ok_or(Error::InvalidData(
+                "warc: continuation missing WARC-Segment-Origin-ID",
+            ))?;
+        let number = number.ok_or(Error::InvalidData(
+            "warc: continuation missing WARC-Segment-Number",
+        ))?;
+        if number < 2 {
+            // The first segment carries the original record type, not
+            // 'continuation'.
+            return Err(Error::InvalidData(
+                "warc: bad continuation WARC-Segment-Number",
+            ));
+        }
+        let target_uri = fields.get("WARC-Target-URI").cloned();
+        match series.get_mut(origin) {
+            Some(s) => {
+                if s.closed {
+                    return Err(Error::InvalidData(
+                        "warc: segment after WARC-Segment-Total-Length",
+                    ));
+                }
+                if number != s.last_number + 1 {
+                    return Err(Error::InvalidData(
+                        "warc: non-sequential WARC-Segment-Number",
+                    ));
+                }
+                if s.target_uri != target_uri {
+                    return Err(Error::InvalidData(
+                        "warc: inconsistent segment WARC-Target-URI",
+                    ));
+                }
+                s.last_number = number;
+                s.block_total += block_len;
+                if let Some(total) = total_len {
+                    if s.from_origin && total != s.block_total {
+                        return Err(Error::InvalidData(
+                            "warc: WARC-Segment-Total-Length mismatch",
+                        ));
+                    }
+                    s.closed = true;
+                }
+            }
+            None => {
+                // First observed record of this series is a
+                // 'continuation': earlier segments live in another
+                // WARC file. Track from here, but the total length
+                // cannot be verified.
+                series.insert(
+                    origin.clone(),
+                    SegmentSeries {
+                        last_number: number,
+                        block_total: block_len,
+                        target_uri,
+                        from_origin: false,
+                        closed: total_len.is_some(),
+                    },
+                );
+            }
+        }
+        return Ok(());
+    }
+
+    // Non-'continuation': a WARC-Segment-Number marks the first
+    // segment of a series and its value there is "1".
+    if let Some(n) = number {
+        if n != 1 {
+            return Err(Error::InvalidData(
+                "warc: first WARC-Segment-Number must be 1",
+            ));
+        }
+        if series.contains_key(record_id) {
+            return Err(Error::InvalidData("warc: duplicate segment origin"));
+        }
+        series.insert(
+            record_id.to_string(),
+            SegmentSeries {
+                last_number: 1,
+                block_total: block_len,
+                target_uri: fields.get("WARC-Target-URI").cloned(),
+                from_origin: true,
+                closed: false,
+            },
+        );
+    }
+    Ok(())
+}
+
 /// Decode a WARC record stream into entries.
 ///
 /// `input` must be a raw WARC stream (decompress `.warc.gz` first).
 /// Trailing whitespace between records is tolerated. `WARC-Block-Digest`
 /// (and `WARC-Payload-Digest` where the payload is the whole block) is
 /// verified for `sha1` digests; other digest algorithms are ignored.
+/// Record-type field constraints and intra-file segmentation rules
+/// (WARC 1.1 Clause 7) are enforced; records of unknown type are
+/// passed through per spec.
 pub fn decode(input: &[u8]) -> Result<Vec<WarcEntry>, Error> {
     let mut pos = 0usize;
     let mut entries = Vec::new();
+    let mut series: BTreeMap<String, SegmentSeries> = BTreeMap::new();
 
     loop {
         // Skip record separators / stray whitespace between records.
@@ -266,6 +565,14 @@ pub fn decode(input: &[u8]) -> Result<Vec<WarcEntry>, Error> {
         let name = target_uri.clone().unwrap_or_else(|| record_id.clone());
         let content_type = fields.get("Content-Type").cloned();
 
+        check_field_constraints(&fields, &record_type)?;
+        check_segmentation(
+            &fields,
+            &record_type,
+            &record_id,
+            block.len() as u64,
+            &mut series,
+        )?;
         verify_digests(&fields, &record_type, content_type.as_deref(), &block)?;
 
         entries.push(WarcEntry {
@@ -330,7 +637,7 @@ mod tests {
 
     #[test]
     fn tolerates_warc_1_0() {
-        let mut data = record("resource", None, b"x");
+        let mut data = record("resource", Some("http://e/"), b"x");
         data[..8].copy_from_slice(b"WARC/1.0");
         assert!(decode(&data).is_ok());
     }
@@ -442,17 +749,21 @@ mod tests {
         let d = sha1_label(b"body");
         let data = record_lines(
             "resource",
-            &[format!("WARC-Block-Digest: {d}").as_str()],
+            &[
+                "WARC-Target-URI: http://e/",
+                format!("WARC-Block-Digest: {d}").as_str(),
+            ],
             b"body",
         );
         assert_eq!(decode(&data).unwrap().len(), 1);
         // Encoder output carries a block digest and must decode.
-        let r = crate::archive::warc::encode::WarcRecord::new(
+        let mut r = crate::archive::warc::encode::WarcRecord::new(
             "resource",
             "urn:x",
             "2024-01-01T00:00:00Z",
             b"body",
         );
+        r.target_uri = Some("http://e/".to_string());
         let enc = crate::archive::warc::encode::encode(&[r]).unwrap();
         assert!(
             enc.windows(b"WARC-Block-Digest".len())
@@ -467,7 +778,10 @@ mod tests {
         let d = sha1_label(b"other");
         let data = record_lines(
             "resource",
-            &[format!("WARC-Block-Digest: {d}").as_str()],
+            &[
+                "WARC-Target-URI: http://e/",
+                format!("WARC-Block-Digest: {d}").as_str(),
+            ],
             b"body",
         );
         assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
@@ -481,7 +795,7 @@ mod tests {
             "WARC-Block-Digest: sha1:MY",  // decodes but wrong length
             "WARC-Block-Digest: sha1:M",   // impossible leftover bits
         ] {
-            let data = record_lines("resource", &[line], b"body");
+            let data = record_lines("resource", &["WARC-Target-URI: http://e/", line], b"body");
             assert!(
                 matches!(decode(&data), Err(Error::InvalidData(_))),
                 "accepted {line}"
@@ -495,6 +809,7 @@ mod tests {
         let data = record_lines(
             "resource",
             &[
+                "WARC-Target-URI: http://e/",
                 "WARC-Block-Digest: sha256:AAAA",
                 "WARC-Payload-Digest: md5:BBBB",
             ],
@@ -531,6 +846,7 @@ mod tests {
         let data = record_lines(
             "response",
             &[
+                "WARC-Target-URI: http://e/",
                 "Content-Type: application/http; msgtype=response",
                 field.as_str(),
             ],
@@ -541,7 +857,11 @@ mod tests {
         // revisit: digest refers to a payload stored elsewhere.
         let data = record_lines(
             "revisit",
-            &["Content-Type: text/plain", field.as_str()],
+            &[
+                "WARC-Target-URI: http://e/",
+                "Content-Type: text/plain",
+                field.as_str(),
+            ],
             b"headers only",
         );
         assert!(decode(&data).is_ok());
@@ -549,7 +869,11 @@ mod tests {
         // segmented record: payload spans multiple records.
         let data = record_lines(
             "resource",
-            &["WARC-Segment-Origin-ID: <urn:x:1>", field.as_str()],
+            &[
+                "WARC-Target-URI: http://e/",
+                "WARC-Segment-Number: 1",
+                field.as_str(),
+            ],
             b"body",
         );
         assert!(decode(&data).is_ok());
@@ -570,5 +894,361 @@ mod tests {
         let entries = decode(&two).unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].data, b"body");
+    }
+
+    /// Minimal otherwise-valid record for `rtype`: supplies the
+    /// mandatory `WARC-Target-URI` (content record types) and, for
+    /// `continuation`, the mandatory segment fields. `extra` lines are
+    /// appended last so they can override defaults.
+    fn valid_record(rtype: &str, extra: &[&str], block: &[u8]) -> Vec<u8> {
+        let mut lines: Vec<String> = Vec::new();
+        if matches!(
+            rtype,
+            "response" | "resource" | "request" | "revisit" | "conversion" | "continuation"
+        ) {
+            lines.push("WARC-Target-URI: http://e/".to_string());
+        }
+        if rtype == "continuation" {
+            // Joins the series originated by record_lines()
+            // (`WARC-Record-ID: <urn:uuid:test-1>`).
+            lines.push("WARC-Segment-Origin-ID: <urn:uuid:test-1>".to_string());
+            lines.push("WARC-Segment-Number: 2".to_string());
+        }
+        lines.extend(extra.iter().map(|s| (*s).to_string()));
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        record_lines(rtype, &refs, block)
+    }
+
+    #[test]
+    fn rejects_field_forbidden_on_record_type() {
+        // (field line, record types on which the field is banned) per
+        // the "shall not" lists of WARC 1.1 named fields.
+        let cases: &[(&str, &[&str])] = &[
+            (
+                "WARC-Concurrent-To: <urn:x:1>",
+                &["warcinfo", "conversion", "continuation"],
+            ),
+            (
+                "WARC-IP-Address: 192.0.2.1",
+                &["warcinfo", "conversion", "continuation"],
+            ),
+            (
+                "WARC-Refers-To: <urn:x:1>",
+                &[
+                    "warcinfo",
+                    "response",
+                    "resource",
+                    "request",
+                    "continuation",
+                ],
+            ),
+            (
+                "WARC-Refers-To-Target-URI: http://e/",
+                &[
+                    "warcinfo",
+                    "response",
+                    "metadata",
+                    "conversion",
+                    "resource",
+                    "request",
+                    "continuation",
+                ],
+            ),
+            (
+                "WARC-Refers-To-Date: 2024-01-01T00:00:00Z",
+                &[
+                    "warcinfo",
+                    "response",
+                    "metadata",
+                    "conversion",
+                    "resource",
+                    "request",
+                    "continuation",
+                ],
+            ),
+            ("WARC-Warcinfo-ID: <urn:x:w>", &["warcinfo"]),
+            ("WARC-Target-URI: http://e/", &["warcinfo"]),
+            (
+                "WARC-Filename: a.warc",
+                &[
+                    "response",
+                    "resource",
+                    "request",
+                    "metadata",
+                    "revisit",
+                    "conversion",
+                    "continuation",
+                ],
+            ),
+            (
+                "WARC-Segment-Origin-ID: <urn:x:o>",
+                &[
+                    "warcinfo",
+                    "response",
+                    "resource",
+                    "request",
+                    "metadata",
+                    "revisit",
+                    "conversion",
+                ],
+            ),
+            (
+                "WARC-Segment-Total-Length: 10",
+                &[
+                    "warcinfo",
+                    "response",
+                    "resource",
+                    "request",
+                    "metadata",
+                    "revisit",
+                    "conversion",
+                ],
+            ),
+        ];
+        for (field, banned) in cases {
+            for t in *banned {
+                let data = valid_record(t, &[*field], b"b");
+                assert!(
+                    matches!(decode(&data), Err(Error::InvalidData(_))),
+                    "accepted {field} on {t}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn accepts_field_on_allowed_record_type() {
+        // WARC-Concurrent-To: request/response/resource/metadata/revisit.
+        for t in ["request", "response", "resource", "metadata", "revisit"] {
+            let data = valid_record(t, &["WARC-Concurrent-To: <urn:x:1>"], b"b");
+            assert!(decode(&data).is_ok(), "rejected Concurrent-To on {t}");
+        }
+        // WARC-Refers-To: metadata/revisit/conversion.
+        for t in ["metadata", "revisit", "conversion"] {
+            let data = valid_record(t, &["WARC-Refers-To: <urn:x:1>"], b"b");
+            assert!(decode(&data).is_ok(), "rejected Refers-To on {t}");
+        }
+        // WARC-Refers-To-Target-URI / -Date: revisit only.
+        let data = valid_record(
+            "revisit",
+            &[
+                "WARC-Refers-To-Target-URI: http://e/",
+                "WARC-Refers-To-Date: 2024-01-01T00:00:00Z",
+            ],
+            b"b",
+        );
+        assert!(decode(&data).is_ok());
+        // WARC-Warcinfo-ID: any type except warcinfo.
+        for t in [
+            "response",
+            "resource",
+            "request",
+            "metadata",
+            "revisit",
+            "conversion",
+            "continuation",
+        ] {
+            let data = valid_record(t, &["WARC-Warcinfo-ID: <urn:x:w>"], b"b");
+            assert!(decode(&data).is_ok(), "rejected Warcinfo-ID on {t}");
+        }
+        // WARC-Filename: warcinfo only.
+        let data = valid_record("warcinfo", &["WARC-Filename: a.warc"], b"b");
+        assert!(decode(&data).is_ok());
+        // metadata may omit WARC-Target-URI.
+        assert!(decode(&valid_record("metadata", &[], b"b")).is_ok());
+        // Unknown record types are skipped: no field constraints apply.
+        let data = valid_record(
+            "extension-type",
+            &["WARC-Filename: a.warc", "WARC-Concurrent-To: <urn:x:1>"],
+            b"b",
+        );
+        assert!(decode(&data).is_ok());
+    }
+
+    #[test]
+    fn rejects_missing_target_uri() {
+        for t in [
+            "response",
+            "resource",
+            "request",
+            "revisit",
+            "conversion",
+            "continuation",
+        ] {
+            let extra: &[&str] = if t == "continuation" {
+                &[
+                    "WARC-Segment-Origin-ID: <urn:x:o>",
+                    "WARC-Segment-Number: 2",
+                ]
+            } else {
+                &[]
+            };
+            let data = record_lines(t, extra, b"b");
+            assert!(
+                matches!(decode(&data), Err(Error::InvalidData(_))),
+                "accepted {t} without WARC-Target-URI"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_segmented_series() {
+        // origin (resource, segment 1) + continuations 2,3 closed by a
+        // correct WARC-Segment-Total-Length (2+2+2 = 6).
+        let mut data = valid_record("resource", &["WARC-Segment-Number: 1"], b"AB");
+        data.extend_from_slice(&valid_record("continuation", &[], b"CD"));
+        data.extend_from_slice(&valid_record(
+            "continuation",
+            &["WARC-Segment-Number: 3", "WARC-Segment-Total-Length: 6"],
+            b"EF",
+        ));
+        let entries = decode(&data).unwrap();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[2].record_type, "continuation");
+    }
+
+    #[test]
+    fn rejects_continuation_missing_segment_fields() {
+        // Missing WARC-Segment-Origin-ID.
+        let data = record_lines(
+            "continuation",
+            &["WARC-Target-URI: http://e/", "WARC-Segment-Number: 2"],
+            b"b",
+        );
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
+        // Missing WARC-Segment-Number.
+        let data = record_lines(
+            "continuation",
+            &[
+                "WARC-Target-URI: http://e/",
+                "WARC-Segment-Origin-ID: <urn:x:o>",
+            ],
+            b"b",
+        );
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
+        // Number 1 is reserved for the original-type first segment.
+        let data = valid_record("continuation", &["WARC-Segment-Number: 1"], b"b");
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn rejects_bad_segment_number() {
+        // A non-continuation record's WARC-Segment-Number must be "1".
+        let data = valid_record("resource", &["WARC-Segment-Number: 3"], b"b");
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
+        // Non-numeric values are rejected outright.
+        let data = valid_record("resource", &["WARC-Segment-Number: x"], b"b");
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
+        // A gap in the sequence (1, 2, 4) is rejected.
+        let mut data = valid_record("resource", &["WARC-Segment-Number: 1"], b"AB");
+        data.extend_from_slice(&valid_record("continuation", &[], b"CD"));
+        data.extend_from_slice(&valid_record(
+            "continuation",
+            &["WARC-Segment-Number: 4"],
+            b"EF",
+        ));
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
+        // A repeated number (1, 2, 2) is rejected too.
+        let mut data = valid_record("resource", &["WARC-Segment-Number: 1"], b"AB");
+        data.extend_from_slice(&valid_record("continuation", &[], b"CD"));
+        data.extend_from_slice(&valid_record("continuation", &[], b"EF"));
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn rejects_total_length_mismatch() {
+        // Observed block lengths total 6, not 5.
+        let mut data = valid_record("resource", &["WARC-Segment-Number: 1"], b"AB");
+        data.extend_from_slice(&valid_record("continuation", &[], b"CD"));
+        data.extend_from_slice(&valid_record(
+            "continuation",
+            &["WARC-Segment-Number: 3", "WARC-Segment-Total-Length: 5"],
+            b"EF",
+        ));
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn rejects_segment_after_total_length() {
+        // The series closes at segment 2; a further segment violates it.
+        let mut data = valid_record("resource", &["WARC-Segment-Number: 1"], b"AB");
+        data.extend_from_slice(&valid_record(
+            "continuation",
+            &["WARC-Segment-Total-Length: 4"],
+            b"CD",
+        ));
+        data.extend_from_slice(&valid_record(
+            "continuation",
+            &["WARC-Segment-Number: 3"],
+            b"EF",
+        ));
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn rejects_duplicate_segment_origin() {
+        let mut data = valid_record("resource", &["WARC-Segment-Number: 1"], b"AB");
+        data.extend_from_slice(&valid_record(
+            "resource",
+            &["WARC-Segment-Number: 1"],
+            b"CD",
+        ));
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn rejects_segment_uri_mismatch() {
+        // All segments of a set shall carry identical target-URI values.
+        let mut data = valid_record("resource", &["WARC-Segment-Number: 1"], b"AB");
+        data.extend_from_slice(&valid_record(
+            "continuation",
+            &["WARC-Target-URI: http://f/"],
+            b"CD",
+        ));
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn accepts_late_joined_segment_series() {
+        // Cross-file continuation: the first observed record of this
+        // series is segment 3; earlier segments live in another file.
+        // The stream is tracked from here (Total-Length cannot be
+        // verified, so it is accepted unchecked).
+        let mut data = valid_record(
+            "continuation",
+            &[
+                "WARC-Segment-Origin-ID: <urn:x:o>",
+                "WARC-Segment-Number: 3",
+            ],
+            b"CD",
+        );
+        data.extend_from_slice(&valid_record(
+            "continuation",
+            &[
+                "WARC-Segment-Origin-ID: <urn:x:o>",
+                "WARC-Segment-Number: 4",
+                "WARC-Segment-Total-Length: 100",
+            ],
+            b"EF",
+        ));
+        assert_eq!(decode(&data).unwrap().len(), 2);
+        // But numbering still must be sequential once observed.
+        let mut data = valid_record(
+            "continuation",
+            &[
+                "WARC-Segment-Origin-ID: <urn:x:o>",
+                "WARC-Segment-Number: 3",
+            ],
+            b"CD",
+        );
+        data.extend_from_slice(&valid_record(
+            "continuation",
+            &[
+                "WARC-Segment-Origin-ID: <urn:x:o>",
+                "WARC-Segment-Number: 5",
+            ],
+            b"EF",
+        ));
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
     }
 }

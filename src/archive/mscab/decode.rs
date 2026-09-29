@@ -1,13 +1,14 @@
 //! Microsoft Cabinet (MSCAB) decoding.
 //!
 //! Parses `CFHEADER` / `CFFOLDER` / `CFFILE` / `CFDATA` structures from
-//! [MS-CAB] and extracts files for folders using `tcompTYPE_NONE` (stored)
-//! or `tcompTYPE_MSZIP` compression.
+//! [MS-CAB] and extracts files for folders using `tcompTYPE_NONE` (stored),
+//! `tcompTYPE_MSZIP` or `tcompTYPE_LZX` compression.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::compress::deflate;
+use crate::compress::lzx;
 use crate::error::Error;
 
 const MAGIC: &[u8; 4] = b"MSCF";
@@ -18,6 +19,12 @@ const FLAG_RESERVE_PRESENT: u16 = 0x0004;
 
 const COMPRESS_NONE: u16 = 0;
 const COMPRESS_MSZIP: u16 = 1;
+const COMPRESS_LZX: u16 = 3;
+
+/// Cabinet LZX window sizes are log2-encoded in `typeCompress` bits
+/// 8..12 (`(typeCompress >> 8) & 0x1f`, 15..=21 for 32 KiB..2 MiB).
+const LZX_WINDOW_BITS_MIN: u16 = 15;
+const LZX_WINDOW_BITS_MAX: u16 = 21;
 
 /// `iFolder` values reserved for files spanning cabinets (MS-CAB §2.3).
 const IFOLD_CONTINUED_FROM_PREV: usize = 0xfffd;
@@ -87,7 +94,11 @@ fn read_asciiz(data: &[u8], off: usize) -> Result<(String, usize), Error> {
     ))
 }
 
-/// Per-MS-CAB checksum: XOR of little-endian u32 words, tail zero-padded.
+/// Per-MS-CAB checksum: XOR of little-endian u32 words. A trailing
+/// 1-3 byte remainder is packed into a u32 with the first tail byte in
+/// the most significant used byte (libmspack's case-3/2/1 fallthrough
+/// into bits 16/8/0), not little-endian zero-padded; real cabinets
+/// such as cabextract's large-files-cab.cab depend on this.
 /// For CFDATA the checksum is seeded with the cbData and cbUncomp
 /// fields packed as a little-endian u32 and covers abReserve + ab.
 pub(crate) fn checksum(data: &[u8], seed: u32) -> u32 {
@@ -97,11 +108,25 @@ pub(crate) fn checksum(data: &[u8], seed: u32) -> u32 {
         sum ^= u32::from_le_bytes(*c);
     }
     if !rem.is_empty() {
-        let mut word = [0u8; 4];
-        word[..rem.len()].copy_from_slice(rem);
-        sum ^= u32::from_le_bytes(word);
+        let mut word = 0u32;
+        for &b in rem {
+            word = (word << 8) | b as u32;
+        }
+        sum ^= word;
     }
     sum
+}
+
+/// Accumulated input/expected-output counters for an LZX logical
+/// folder that may span cabinet members (the LZX bitstream is
+/// contiguous across folder fragments, so it can only be decoded once
+/// the last fragment is in).
+#[derive(Default)]
+struct LzxAccum {
+    /// Concatenated compressed CFDATA payloads.
+    data: Vec<u8>,
+    /// Sum of `cbUncomp` over the fragments seen so far.
+    expected: usize,
 }
 
 /// Decompress one CFFOLDER fragment into `stream`.
@@ -114,6 +139,11 @@ pub(crate) fn checksum(data: &[u8], seed: u32) -> u32 {
 /// across cabinets: per MS-CAB §2.4 a trailing CFDATA with
 /// `cbUncomp == 0` continues in the first CFDATA of the next
 /// cabinet's folder fragment, which reports the total size.
+///
+/// For LZX folders, `lzx_acc` accumulates the contiguous bitstream
+/// across the fragment's blocks (and across cabinet members while the
+/// folder continues, i.e. while `pending` is non-empty); decoding
+/// runs once the logical folder is complete.
 fn decompress_folder(
     input: &[u8],
     folder: &Folder,
@@ -121,12 +151,21 @@ fn decompress_folder(
     logical_start: usize,
     stream: &mut Vec<u8>,
     pending: &mut Vec<u8>,
+    lzx_acc: &mut LzxAccum,
 ) -> Result<(), Error> {
     let comp_type = folder.type_compress & 0x00ff;
-    if comp_type != COMPRESS_NONE && comp_type != COMPRESS_MSZIP {
+    if comp_type != COMPRESS_NONE && comp_type != COMPRESS_MSZIP && comp_type != COMPRESS_LZX {
         return Err(Error::Unsupported(
             "mscab: unsupported folder compression type",
         ));
+    }
+    let mut lzx_window = 0usize;
+    if comp_type == COMPRESS_LZX {
+        let bits = (folder.type_compress >> 8) & 0x1f;
+        if !(LZX_WINDOW_BITS_MIN..=LZX_WINDOW_BITS_MAX).contains(&bits) {
+            return Err(Error::InvalidData("mscab: LZX window size out of range"));
+        }
+        lzx_window = 1usize << bits;
     }
 
     let mut off = folder.coff_cab_start;
@@ -182,9 +221,22 @@ fn decompress_folder(
                 }
                 stream.extend_from_slice(&decoded);
             }
+            COMPRESS_LZX => {
+                // CFDATA records are byte containers only: LZX decoder
+                // state (bit position, Huffman trees, R0-R2, E8) is
+                // contiguous across them, so the payloads accumulate.
+                lzx_acc.data.extend_from_slice(&data);
+                lzx_acc.expected += cb_uncomp;
+            }
             _ => unreachable!(),
         }
         off = data_start + cb_data;
+    }
+    if comp_type == COMPRESS_LZX && pending.is_empty() {
+        // Logical folder complete: decode the contiguous LZX stream.
+        let decoded = lzx::decode_cabinet(&lzx_acc.data, lzx_window, lzx_acc.expected)?;
+        stream.extend_from_slice(&decoded);
+        *lzx_acc = LzxAccum::default();
     }
     Ok(())
 }
@@ -355,6 +407,7 @@ fn extract_cabs(cabs: &[&ParsedCab<'_>]) -> Result<Vec<MscabEntry>, Error> {
     let mut stream = Vec::new();
     let mut folder_base: Vec<Vec<usize>> = Vec::with_capacity(cabs.len());
     let mut pending: Vec<u8> = Vec::new();
+    let mut lzx_acc = LzxAccum::default();
     let mut cur_logical = 0usize;
     let mut prev_type = u16::MAX;
     for (k, cab) in cabs.iter().enumerate() {
@@ -384,6 +437,7 @@ fn extract_cabs(cabs: &[&ParsedCab<'_>]) -> Result<Vec<MscabEntry>, Error> {
                 cur_logical,
                 &mut stream,
                 &mut pending,
+                &mut lzx_acc,
             )?;
         }
         folder_base.push(bases);
@@ -468,6 +522,9 @@ mod tests {
         /// `FLAG_RESERVE_PRESENT` is set. The reserved areas are filled
         /// with non-zero dummy bytes so the decoder must actually skip them.
         reserve: (u16, u8, u8),
+        /// Per-block cbUncomp overrides for LZX folders, keyed by folder
+        /// index (compressed and uncompressed sizes differ there).
+        uncomp_overrides: Vec<(usize, Vec<u16>)>,
     }
 
     /// Filler byte for reserved areas (non-zero, never a valid structure).
@@ -482,7 +539,15 @@ mod tests {
                 files: Vec::new(),
                 flags: 0,
                 reserve: (0, 0, 0),
+                uncomp_overrides: Vec::new(),
             }
+        }
+
+        /// Push an LZX folder; `uncomps` carries each CFDATA block's
+        /// cbUncomp (the LZX payload length says nothing about it).
+        fn push_lzx(&mut self, type_compress: u16, blocks: Vec<Vec<u8>>, uncomps: Vec<u16>) {
+            self.uncomp_overrides.push((self.folders.len(), uncomps));
+            self.folders.push((type_compress, blocks));
         }
 
         fn mszip_block(payload: &[u8]) -> Vec<u8> {
@@ -555,7 +620,7 @@ mod tests {
                 // MSZIP history carried across CFDATA blocks in the folder, so
                 // blocks with cross-block back-references size correctly.
                 let mut history: Vec<u8> = Vec::new();
-                for b in &cfdatas[i] {
+                for (j, b) in cfdatas[i].iter().enumerate() {
                     let uncomp = if *ty == COMPRESS_MSZIP {
                         let dict_start = history.len().saturating_sub(MSZIP_WINDOW);
                         let decoded =
@@ -563,6 +628,13 @@ mod tests {
                                 .unwrap();
                         history.extend_from_slice(&decoded);
                         decoded.len()
+                    } else if let Some(v) = self
+                        .uncomp_overrides
+                        .iter()
+                        .find(|(idx, _)| *idx == i)
+                        .and_then(|(_, v)| v.get(j))
+                    {
+                        *v as usize
                     } else {
                         b.len()
                     };
@@ -1188,5 +1260,127 @@ mod tests {
             decode_parts(&[&c0, &c1]),
             Err(Error::InvalidData(_))
         ));
+    }
+    /// Build a small cabinet LZX (typeCompress 0x0f03, 32 KiB window)
+    /// verbatim-block stream for the given data.
+    fn lzx_stream(data: &[u8]) -> Vec<u8> {
+        lzx_stream_window(data, 1 << 15)
+    }
+
+    /// LZX stream for data at the given window size (the main tree's
+    /// element count depends on the position-slot count, which grows
+    /// with the window, so the encoding must match the decode window).
+    fn lzx_stream_window(data: &[u8], window: usize) -> Vec<u8> {
+        use crate::compress::lzx::cabtest::{Elem, Enc, nslots, trees_for};
+        let mut lits: Vec<usize> = data.iter().map(|&b| b as usize).collect();
+        lits.sort();
+        lits.dedup();
+        let trees = trees_for(&lits, &[], &[], &[], nslots(window));
+        let mut e = Enc::new(window, None);
+        let elems: Vec<Elem> = data.iter().map(|&b| Elem::Lit(b)).collect();
+        e.compressed(false, data.len() as u32, &trees, &elems);
+        e.finish()
+    }
+
+    const LZX_TC_32K: u16 = (15 << 8) | COMPRESS_LZX;
+
+    #[test]
+    fn parses_lzx_cabinet() {
+        let data = b"hello lzx cabinet";
+        let mut b = CabBuilder::new();
+        b.push_lzx(LZX_TC_32K, vec![lzx_stream(data)], vec![data.len() as u16]);
+        b.files.push((data.len(), 0, 0, "lzx.txt".into()));
+        let entries = decode(&b.build()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name(), "lzx.txt");
+        assert_eq!(entries[0].data(), data.as_slice());
+    }
+
+    #[test]
+    fn lzx_stream_spans_cfdata_blocks() {
+        // The LZX bitstream is contiguous across CFDATA records: split
+        // the compressed bytes at arbitrary positions; only the sum of
+        // cbUncomp matters.
+        let stream = lzx_stream(b"bitstream crosses record boundaries");
+        let total = 35u16;
+        let mid1 = stream.len() / 3;
+        let mid2 = 2 * stream.len() / 3;
+        let blocks = vec![
+            stream[..mid1].to_vec(),
+            stream[mid1..mid2].to_vec(),
+            stream[mid2..].to_vec(),
+        ];
+        let mut b = CabBuilder::new();
+        b.push_lzx(LZX_TC_32K, blocks, vec![10, 10, total - 20]);
+        b.files.push((total as usize, 0, 0, "x.bin".into()));
+        let entries = decode(&b.build()).unwrap();
+        assert_eq!(entries[0].data(), b"bitstream crosses record boundaries");
+    }
+
+    #[test]
+    fn lzx_uncompressed_block_cabinet() {
+        let data = b"stored through an LZX uncompressed block!";
+        let mut e = crate::compress::lzx::cabtest::Enc::new(1 << 15, None);
+        e.uncompressed(data, [1, 1, 1]);
+        let stream = e.finish();
+        let mut b = CabBuilder::new();
+        b.push_lzx(LZX_TC_32K, vec![stream], vec![data.len() as u16]);
+        b.files.push((data.len(), 0, 0, "raw.bin".into()));
+        let entries = decode(&b.build()).unwrap();
+        assert_eq!(entries[0].data(), data.as_slice());
+    }
+
+    #[test]
+    fn lzx_window_size_bits() {
+        let data = b"window bits check";
+        for bits in [15u16, 18, 21] {
+            let stream = lzx_stream_window(data, 1usize << bits);
+            let mut b = CabBuilder::new();
+            b.push_lzx((bits << 8) | COMPRESS_LZX, vec![stream.clone()], vec![17]);
+            b.files.push((17, 0, 0, "w.bin".into()));
+            let entries = decode(&b.build()).unwrap();
+            assert_eq!(entries[0].data(), data.as_slice());
+        }
+    }
+
+    #[test]
+    fn rejects_lzx_bad_window_bits() {
+        let stream = lzx_stream(b"xx");
+        for bits in [0u16, 14, 22, 31] {
+            let mut b = CabBuilder::new();
+            b.push_lzx((bits << 8) | COMPRESS_LZX, vec![stream.clone()], vec![2]);
+            b.files.push((2, 0, 0, "w.bin".into()));
+            assert!(matches!(decode(&b.build()), Err(Error::InvalidData(_))));
+        }
+    }
+
+    #[test]
+    fn decode_parts_lzx_folder_continues() {
+        // An LZX logical folder whose CFDATA block is split across two
+        // cabinet members: the compressed stream is contiguous.
+        let data = b"lzx folder split across cabinet members";
+        let stream = lzx_stream(data);
+        let cut = stream.len() / 2;
+
+        let mut first = CabBuilder::new();
+        first.i_cabinet = 0;
+        first.flags = FLAG_NEXT_CABINET;
+        first.push_lzx(LZX_TC_32K, vec![stream[..cut].to_vec()], vec![0]);
+        first.files.push((data.len(), 0, 0xfffe, "big.bin".into()));
+
+        let mut second = CabBuilder::new();
+        second.i_cabinet = 1;
+        second.flags = FLAG_PREV_CABINET;
+        second.push_lzx(
+            LZX_TC_32K,
+            vec![stream[cut..].to_vec()],
+            vec![data.len() as u16],
+        );
+        second.files.push((data.len(), 0, 0xfffd, "big.bin".into()));
+
+        let (c0, c1) = (first.build(), second.build());
+        let entries = decode_parts(&[&c0, &c1]).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].data(), data.as_slice());
     }
 }
