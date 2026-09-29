@@ -49,7 +49,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 24 | `type=file` はデータ持ち、`type=directory` は is_dir。symlink 等の `<link>` は保持 | §TOC example | ✅ | `decode_real`, `encode_roundtrip` |
-| 25 | `<mode>` `<user>` `<group>` `<mtime>` `<atime>` `<ctime>` 等は保持可能なものを entry メタデータとして露出 | 同上 | ✅ | `decode_real` (mode/user/mtime 露出) |
+| 25 | `<mode>` `<user>` `<group>` `<mtime>` `<atime>` `<ctime>` 等は保持可能なものを entry メタデータとして提供 | 同上 | ✅ | `decode_real` (mode/user/mtime 提供) |
 | 26 | encode: `/` 区切りパスをネスト `<file>` 木に変換し、sha1 チェックサム (TOC + extracted + archived) + gzip data で出力 | §TOC + §Heap | ✅ | `encode_roundtrip`, `encode_xml_escape` + oracle interop (実 `xar` 1.6.1 が `-tf`/`-xf` を受理) |
 | 27 | XML 特殊文字を含むファイル名は `&amp;`/`&lt;`/`&gt;`/`&quot;` にエスケープ | XML 規則 | ✅ | `encode_xml_escape` |
 

@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 形式概要 | Ross N. Williams の LZRW2 (1991) が使用する圧縮ストリーム。4 バイトの copy flag + グループ列。copy item は byte offset ではなく phrase table index を運ぶ。magic・チェックサムは持たない |
+| 形式概要 | Ross N. Williams の LZRW2 (1991) が使用する圧縮ストリーム。4 バイトの copy flag + グループ列。copy item は byte offset ではなく phrase table index を格納する。magic・チェックサムは持たない |
 | 基準仕様 | 参照実装 [`lzrw2.c`](https://ftp.funet.fi/pub/misc/compression/lzrw2.c) (Ross N. Williams, public domain、[ross.net/compression](http://www.ross.net/compression/lzrw2.html) / funet ミラー) の "DEFINITION OF COMPRESSED FILE FORMAT" 節 + `lzrw2.txt` (ローカルスナップショット: `docs/spec/sources/lzrw2.c` / `lzrw2.txt`) |
 | 実装 | `archive::compress::lzrw2` (decode / decode_bounded / encode)。pure-Rust 実装 |
 

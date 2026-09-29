@@ -44,8 +44,8 @@ Step 2b が「spec に載っているのにコードに存在しない実装」�
 2. **キャッシュがなければ**: `make fetch-spec-sources` の実行を指示する (agent は WebFetch しない)
 3. **URL 取得不可のフォーマット**: manifest の `no_url_available` に記載。コードコメントと spec を対比する
 
-**重要**: manifest.json に記載されたバージョンの仕様書のみを使用すること。
-最新版を勝手に取得してはならない。バージョンを変更する場合は manifest.json を更新する。
+manifest.json に記載されたバージョンの仕様書のみを使用する。
+最新版の任意取得は行わない。バージョンを変更する場合は manifest.json を更新する。
 
 ### 検証手法
 

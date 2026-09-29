@@ -32,9 +32,9 @@ archive list sample.tar.gz --json             # JSON 出力
 archive list sample.tar.gz --no-pager         # pager を無効化
 ```
 
-TTY 出力時は自動的に `$PAGER` (デフォルト `less -FRX`) を通します。
-1 画面に収まる場合は即表示、長い場合はスクロール可能です。
-`--no-pager` またはパイプ先がある場合は pager を使いません。
+TTY 出力時は自動的に `$PAGER` (デフォルト `less -FRX`) を通す。
+1 画面に収まる場合は即座に表示し、長い場合はスクロールできる。
+`--no-pager` の指定時やパイプへの出力時は pager を使用しない。
 
 ### `archive test <input>`
 
@@ -60,7 +60,7 @@ archive extract sample.rpm                              # cpio payload の内容
 archive extract image.sqfs                              # squashfs 内の regular file を展開
 ```
 
-`.deb` は `data.tar` の内容を展開します。生の member (`debian-binary` / `control.tar.*`) は `--format ar` で展開してください。
+`.deb` は `data.tar` の内容を展開する。生の member (`debian-binary` / `control.tar.*`) は `--format ar` で展開する。
 
 ### `archive pack <format> <input...> -o <output>`
 
@@ -102,23 +102,25 @@ archive compress lrzip data.bin -o data.bin.lrz --backend bzip2
 
 ## フォーマット自動検出
 
-magic bytes からフォーマットを自動検出します。
-`.deb` は `!<arch>\n` の直後の member 名 `debian-binary` で識別され、汎用 `ar` より優先されます。
-`.rpm` は Lead magic `ED AB EE DB` で識別されます (read のみ、署名検証は対象外)。
-`.squashfs` は `hsqs` magic で識別されます (read のみ、LZMA1 image は非対応)。
-`.cab` は `MSCF` magic で識別されます (read のみ、MSZIP/stored のみ対応、Quantum/LZX/マルチキャビネットは非対応)。
-`.zim` は magic `0x044D495A` で識別されます (read のみ、entry 名は namespace prefix 付き)。
-`.mtree` は `#mtree` signature で識別されます (manifest 形式のため `read` でメタデータ一覧、`extract` は非対応)。
-`.warc` は `WARC/1.0` / `WARC/1.1` version line で識別されます (read のみ。`.warc.gz` は gzip として伸張してから読み込みます)。
-`.pack` は `PACK` + version 2 ヘッダで識別されます (v3 は検出しません)。エントリ名は hex オブジェクト ID です。
-`.xar` は `xar!` magic で識別されます (stored/gzip エンコード対応、拡張属性・署名は対象外)。
-`.lzh` は offset 2 の `-l`-`-` メソッドマーカー + offset 20 の header level byte で識別されます (store メソッドのみ。`-lh5-` 等の圧縮エントリは非対応)。
-`.arj` は `0x60 0xEA` signature で識別されます (method 0 stored のみ。圧縮・暗号化エントリは非対応)。
-`.arc` は `0x1A` marker + method byte で識別されます (method 1/2 stored のみ。packed/squeezed/crunched は非対応)。
-lzsa ストリームは `7b 9e` magic + traits byte で識別されます (raw ブロックは検出不可のため `--format` が必要)。
-検出できない場合 (raw deflate, brotli, snappy, lzma, xpress, xpress-huff, lznt1, lzf, fastlz, lzrw1, lzrw1a, lzrw2, lzrw3, lzrw3a, zx0, zx1, zx2, zx5, mppc, lzs, lzxd, cmpsc など) は `--format` で明示してください。
-lzxd の decode はストリーム外パラメータのウィンドウサイズに最大値 (32MiB) を仮定します (小さいウィンドウで作られたストリームも正しく decode できます)。
-cmpsc は PKWARE APPNOTE method-16 コンテナ (辞書ヘッダ + 展開辞書 + CMPSC データ) を扱います。encode は alphabet-only 辞書を使うためデータは実質非圧縮です。
+magic bytes からフォーマットを自動検出する。
+
+- `.deb`: `!<arch>\n` 直後の member 名 `debian-binary` で識別（汎用 `ar` より優先）。
+- `.rpm`: Lead magic `ED AB EE DB` で識別（read のみ、署名検証は対象外）。
+- `.squashfs`: `hsqs` magic で識別（read のみ、LZMA1 image は非対応）。
+- `.cab`: `MSCF` magic で識別（read のみ、MSZIP/stored のみ対応、Quantum/LZX/マルチキャビネットは非対応）。
+- `.zim`: magic `0x044D495A` で識別（read のみ、entry 名は namespace prefix 付き）。
+- `.mtree`: `#mtree` signature で識別（manifest 形式のため `read` でメタデータ一覧取得、`extract` は非対応）。
+- `.warc`: `WARC/1.0` / `WARC/1.1` version line で識別（read のみ。`.warc.gz` は gzip として伸張後に読み込み）。
+- `.pack`: `PACK` + version 2 ヘッダで識別（v3 は未検出）。エントリ名は hex オブジェクト ID。
+- `.xar`: `xar!` magic で識別（stored/gzip エンコード対応、拡張属性・署名は対象外）。
+- `.lzh`: offset 2 の `-l`-`-` メソッドマーカー + offset 20 の header level byte で識別（store メソッドのみ。`-lh5-` 等の圧縮エントリは非対応）。
+- `.arj`: `0x60 0xEA` signature で識別（method 0 stored のみ。圧縮・暗号化エントリは非対応）。
+- `.arc`: `0x1A` marker + method byte で識別（method 1/2 stored のみ。packed/squeezed/crunched は非対応）。
+- lzsa ストリーム: `7b 9e` magic + traits byte で識別（raw ブロックは検出不可のため `--format` が必要）。
+
+自動検出に対応しない形式（raw deflate, brotli, snappy, lzma, xpress, xpress-huff, lznt1, lzf, fastlz, lzrw1, lzrw1a, lzrw2, lzrw3, lzrw3a, zx0, zx1, zx2, zx5, mppc, lzs, lzxd, cmpsc など）は `--format` で明示する。
+lzxd の decode は、ストリーム外パラメータであるウィンドウサイズに仕様上の最大値（32MiB）を仮定してデコードする。小さいウィンドウで生成されたストリームであっても、後方参照距離はそのウィンドウサイズ以下に収まるため正常に展開できる。
+cmpsc は PKWARE APPNOTE method-16 コンテナ（辞書ヘッダ + 展開辞書 + CMPSC データ）を扱う。encode は alphabet-only 辞書を使うためデータは実質非圧縮となる。
 
 ## ライセンス
 

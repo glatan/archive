@@ -28,11 +28,11 @@ cargo run --release -p archive-fuzz -- --pattern self
 cargo run --release -p archive-fuzz -- --pattern original-decompress
 ```
 
-外部ツールが見つからない場合、該当パターンは自動的にスキップされます。
+外部ツールが見つからない場合、該当パターンを自動的にスキップする。
 
 ## Coverage-guided モード
 
-`fuzz/corpus/` を seed に mutation し、新しい入力を探索します。
+`fuzz/corpus/` をシードとしてミューテーションを行い、新規入力を探索する。
 
 ```sh
 cargo run --release -p archive-fuzz -- \
@@ -43,24 +43,24 @@ cargo run --release -p archive-fuzz -- \
   --corpus-dir fuzz/corpus
 ```
 
-novel observation は `fuzz/corpus/<algorithm>/` に harvest されます。
-`make fuzz` (コンテナ実行) でも `fuzz/corpus/` をマウントするため、harvest された corpus はホスト側に残ります。
+新規に観測された入力（novel observation）は `fuzz/corpus/<algorithm>/` に収集する。
+`make fuzz`（コンテナ実行）でも `fuzz/corpus/` をマウントするため、収集したコーパスはホスト側に保持される。
 
 ## Special case matrix
 
-アーカイブ形式の metadata / encryption / encoded-header variation を deterministic に検証します。
+アーカイブ形式のメタデータ、暗号化、エンコード済みヘッダーの各バリエーションを決定論的に検証する。
 
 対象: `ar`, `tar`, `cpio`, `zip`, `7z` の long-name / metadata / encryption / encoded-header variation。
-通常の random fuzz の前に固定ケースとして実行されます。
+通常のランダムファズに先立ち、固定ケースとして実行する。
 
 ## Resource oracle
 
-正常終了したケースにも runtime / encoded size / decoded size の上限チェックを適用します。
-異常な膨張や過大 runtime は failure として artifact 化されます。
+正常終了したケースに対しても、実行時間・エンコード後サイズ・デコード後サイズの上限検査を適用する。
+想定を超える膨張や過大な実行時間を検出した場合は、失敗としてアーティファクトを生成する。
 
 ## Failure artifact
 
-各 failure は最小化・重複排除後に `.json` + `.bin` ペアとして保存されます。
+各失敗ケースは最小化および重複排除の後、`.json` と `.bin` のペアとして保存する。
 
 ```
 fuzz/failures/
@@ -85,14 +85,14 @@ cargo run --release -p archive-fuzz -- --export-regression fuzz/failures/run-...
 cargo run --release -p archive-fuzz -- --import-regression fuzz/failures/run-.../failure-....json
 ```
 
-`--export-regression` は fixture とテスト雛形だけを出力します。
-`--import-regression` はそれに加えて `tests/integration/generated/` の module index も更新します。
-external tool が必要な pattern は `#[ignore]` 付きの placeholder として生成されます。
+`--export-regression` はフィクスチャとテスト雛形のみを出力する。
+`--import-regression` はそれに加えて `tests/integration/generated/` のモジュールインデックスも更新する。
+外部ツールを要するパターンは `#[ignore]` 属性付きのプレースホルダーとして生成する。
 
 ## Known issues
 
-`fuzz/src/known_issues.rs` で意図的な非互換性を管理しています。
-これらに該当する failure はリグレッション報告から除外されます。
+`fuzz/src/known_issues.rs` で意図的な非互換性を管理している。
+これらに該当する失敗ケースは、リグレッション報告の対象から除外する。
 
 | アルゴリズム | パターン | フィルタ理由 |
 |------------|---------|-----------|
@@ -104,8 +104,8 @@ external tool が必要な pattern は `#[ignore]` 付きの placeholder とし�
 
 ## Resource oracle の注意点
 
-アルゴリズムごとに encoded size の下限 (`min_encoded_floor`) が異なります。
-特に `tar-gnu`, `tar-ustar`, `tar-pax` は GNU tar が常に 20 ブロック × 512 バイト = 10240 バイト以上を書き出すため、下限を 10240 に設定しています。
+アルゴリズムごとにエンコード後サイズの下限（`min_encoded_floor`）が異なる。
+特に `tar-gnu`, `tar-ustar`, `tar-pax` は、GNU tar が常に 20 ブロック × 512 バイト = 10,240 バイト以上を出力するため、下限を 10,240 に設定している。
 
 ## 対応アルゴリズム
 

@@ -40,7 +40,7 @@ model: swe-2
    - `docs/spec/sources/manifest.json` を読み、対象フォーマットの `filename` を取得
    - `docs/spec/sources/<filename>` を Read で読む
    - **ファイルが存在しない場合**: 「`make fetch-spec-sources` を実行してください」と報告して中断
-   - **WebFetch で勝手に取得してはならない** (バージョンが変わる可能性があるため)
+   - **WebFetch による自動取得は行わない** (バージョンが変わる可能性があるため)
    - `no_url_available` のフォーマットは `src/` のコードコメントと spec を対比する
 
 2. **MUST/SHALL/REQUIRED 要件を抽出**: 仕様書のセクション構成を走査し、

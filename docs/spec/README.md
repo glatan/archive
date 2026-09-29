@@ -40,7 +40,7 @@
 | `archive-fuzz` self pattern | crate 内 encode/decode roundtrip を広く反復検証 | compression + archive formats の public fuzz target 群 | failure は signature 単位で dedupe し、最小化後に `.json` + `.bin` artifact として保存 |
 | `archive-fuzz` original-compress / original-decompress | system tool との相互運用回帰 | external tool が存在する format の canonical CLI path | `known_issues` に列挙した intentional filter を除き、残存 failure は回帰候補として扱う |
 | `archive-fuzz` coverage-guided mode | structured seed + persistent corpus mutation による input variation 拡張 | `fuzz/corpus/` を読む guided lane、novel observation harvest | run ごとに `manifest.json` / `summary.json` / `matrix.json` を出力 |
-| `archive-fuzz` special case matrix | archive metadata / encryption / encoded-header variation の deterministic 検証 | `ar` / `tar` / `cpio` / `zip` / `7z` の long-name / metadata / encryption variation | random fuzz の前に固定ケースとして回し、通常 failure と同じ artifact pipeline に流す |
+| `archive-fuzz` special case matrix | archive metadata / encryption / encoded-header variation の deterministic 検証 | `ar` / `tar` / `cpio` / `zip` / `7z` の long-name / metadata / encryption variation | 通常のランダムファズに先立ち固定ケースとして実行し、通常の failure と同一の artifact パイプラインで処理する |
 | resource oracle | 正常終了ケースの異常な膨張や過大 runtime を failure 化 | runtime / encoded size / decoded size の bounded check | 成功扱いでも oracle 違反なら failure artifact を残す |
 
 ---
