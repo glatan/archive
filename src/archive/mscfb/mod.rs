@@ -6,7 +6,10 @@
 //! in-header DIFAT plus chained DIFAT sectors, FAT sector chains, the
 //! directory entry array with storage/stream enumeration via child and
 //! sibling stream IDs, the mini FAT and mini stream for streams below
-//! the 4096-byte cutoff, and UTF-16LE name decoding.
+//! the 4096-byte cutoff, and UTF-16LE name decoding. Stream
+//! entries expose their directory metadata (CLSID, state bits,
+//! creation/modification FILETIMEs); the root storage's metadata
+//! is available via root_meta.
 //!
 //! Writing compound files, transactions, the range lock sector, and
 //! structured-storage property semantics are intentionally out of scope.

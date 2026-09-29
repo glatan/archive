@@ -980,6 +980,45 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_dynamic_all_literals_roundtrip() {
+        // All-literals input: a byte string over an 8-symbol alphabet in which
+        // no 3-byte sequence repeats, so the LZ77 stage emits only Literal
+        // tokens. The dynamic block therefore has zero distance-code usage;
+        // per RFC 1951 §3.2.7 the encoder emits a dummy 1-bit distance code
+        // (a 0-bit code would be invalid for a single used distance code).
+        let mut input = Vec::new();
+        let mut used = [false; 512]; // used[a*64 + b*8 + c] tracks 3-grams
+        input.extend_from_slice(&[0u8, 1]);
+        while input.len() < 300 {
+            let a = input[input.len() - 2] as usize;
+            let b = input[input.len() - 1] as usize;
+            let mut next = None;
+            for c in 0..8usize {
+                if !used[a * 64 + b * 8 + c] {
+                    used[a * 64 + b * 8 + c] = true;
+                    next = Some(c);
+                    break;
+                }
+            }
+            match next {
+                Some(c) => input.push(c as u8),
+                None => break,
+            }
+        }
+
+        let encoded = encode(&input, Level::Default);
+        // First block must be a dynamic Huffman block (BFINAL=1, BTYPE=10):
+        // bits are packed LSB-first, so byte0 bits 1-2 hold BTYPE.
+        assert_eq!(
+            (encoded[0] >> 1) & 0b11,
+            0b10,
+            "expected dynamic Huffman block (BTYPE=10)"
+        );
+        let decoded = decode::decode(&encoded).unwrap();
+        assert_eq!(decoded, input);
+    }
+
+    #[test]
     fn test_encode_length() {
         let (code, extra, val) = encode_length(3);
         assert_eq!(code, 257);

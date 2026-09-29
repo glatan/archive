@@ -36,7 +36,7 @@
 | 14 | ストリームタグ: アーカイブ先頭〜EOA トリガまでのハッシュ | `update_control_algo`/`write_auth` | ✅ | 対応ハッシュで検証 (oracle) |
 | 15 | ボリュームタグ: ファイル末尾のハッシュを照合、末尾ごみを拒否 | `write_volume_check` | ✅ | `test_pea_rejects_truncated` |
 | 16 | 検証可能アルゴリズム: ADLER32/CRC32/CRC64/MD5/SHA1/SHA256 (crate 実装分) | decode_control_algo コード表 | ✅ | `rejects_tampered_tag` |
-| 17 | RIPEMD160/SHA512/WHIRLPOOL/SHA3/BLAKE2: タグを読み飛ばす (未検証) | 同上 | ⚠️ | parse のみ。crate にハッシュ実装がない |
+| 17 | RIPEMD160/SHA512/WHIRLPOOL/SHA3/BLAKE2: タグを読み飛ばす | 同上 | ✅ | crate にハッシュ実装がないため `tag_size()` 分だけ読み飛ばして未検証で受理。`skips_unverified_object_tags`, `skips_unverified_object_tags_compressed`, `rejects_truncated_object_tag` |
 
 ## 意図的な scope 制約
 
@@ -51,7 +51,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 16 |
-| ⚠️ 部分対応 | 1 |
+| ✅ 実装+テスト済み | 17 |
+| ⚠️ 部分対応 | 0 |
 | ❌ 未対応 | 4 |
 | **合計** | **21** |

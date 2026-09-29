@@ -71,6 +71,20 @@ impl crate::traits::ArchiveEntry for IsoEntry {
     }
 }
 
+/// One record of the ISO 9660 Path Table (ECMA-119 §9.4): a
+/// breadth-first index of every directory on the volume, redundant
+/// with the directory-record tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathTableEntry {
+    /// Raw directory identifier bytes. The root directory is a
+    /// single `\x00` byte.
+    pub name: Vec<u8>,
+    /// Extent (logical block number) of the directory.
+    pub extent: u32,
+    /// 1-based index of the parent record in the path table.
+    pub parent: u16,
+}
+
 /// Decoded ISO 9660 image.
 #[derive(Debug)]
 pub struct IsoImage {
@@ -84,6 +98,10 @@ pub struct IsoImage {
     pub has_joliet: bool,
     /// Entries in depth-first directory order.
     pub entries: Vec<IsoEntry>,
+    /// Type-L path table records from the primary volume descriptor
+    /// (ECMA-119 §9.4), in table order. Empty when the descriptor
+    /// does not reference a usable table.
+    pub path_table: Vec<PathTableEntry>,
 }
 
 fn u16le(b: &[u8], o: usize) -> u16 {
@@ -224,8 +242,8 @@ struct RrInfo {
     sl_continue: bool,
     /// TF modify time.
     tf_modify: Option<i64>,
-    /// ZF (zisofs) seen.
-    compressed: bool,
+    /// ZF (zisofs) parameters, when the entry is compressed.
+    zisofs: Option<ZfParams>,
 }
 
 fn parse_susp(img: &[u8], blksz: usize, mut area: &[u8], depth: usize) -> Result<RrInfo, Error> {
@@ -339,7 +357,23 @@ fn parse_susp(img: &[u8], blksz: usize, mut area: &[u8], depth: usize) -> Result
                 }
                 let _ = idx;
             }
-            b"ZF" => rr.compressed = true,
+            b"ZF" => {
+                // zisofs transparent compression entry (16 bytes):
+                // algorithm "pz" + parms (header size in 4-byte
+                // words, log2 block size) + both-endian uncompressed
+                // size. See zisofs_inflate for the format references.
+                if len < 16 {
+                    return Err(Error::InvalidData("iso9660 short ZF entry"));
+                }
+                if e[4] != b'p' || e[5] != b'z' {
+                    return Err(Error::Unsupported("iso9660 unsupported ZF algorithm"));
+                }
+                rr.zisofs = Some(ZfParams {
+                    header_words: e[6],
+                    block_shift: e[7],
+                    uncompressed_size: both32(e, 8)?,
+                });
+            }
             _ => {} // PD, ER, ES, PN, RR, AS, unknown: skip
         }
         area = &area[len..];
@@ -387,7 +421,9 @@ fn parse_susp(img: &[u8], blksz: usize, mut area: &[u8], depth: usize) -> Result
         if rr.tf_modify.is_none() {
             rr.tf_modify = cont_rr.tf_modify;
         }
-        rr.compressed |= cont_rr.compressed;
+        if rr.zisofs.is_none() {
+            rr.zisofs = cont_rr.zisofs;
+        }
     }
     Ok(rr)
 }
@@ -396,6 +432,10 @@ struct VolDesc {
     volume_id: String,
     volume_blocks: u32,
     logical_block_size: usize,
+    /// Type-L path table extent (logical block) and byte size from
+    /// the volume descriptor; `0` when absent.
+    path_table_extent: u32,
+    path_table_size: u32,
     root: DirRecOwned,
 }
 
@@ -430,6 +470,10 @@ fn parse_vd(sec: &[u8], joliet: bool) -> Result<VolDesc, Error> {
     if !lbs.is_power_of_two() || !(512..=32 * 1024).contains(&lbs) {
         return Err(Error::InvalidData("iso9660 bad logical block size"));
     }
+    // Path table size is a both-endian 32-bit field (ECMA-119
+    // §9.4.8); the type-L table extent is little-endian (§9.4.9).
+    let path_table_size = both32(sec, 132)?;
+    let path_table_extent = u32le(sec, 140);
     // Root directory record (ECMA-119 §9.1), fixed 34 bytes at 156.
     let r = &sec[156..190];
     if r[0] != 34 {
@@ -439,6 +483,8 @@ fn parse_vd(sec: &[u8], joliet: bool) -> Result<VolDesc, Error> {
         volume_id,
         volume_blocks,
         logical_block_size: lbs,
+        path_table_extent,
+        path_table_size,
         root: DirRecOwned {
             extent: both32(r, 2)?,
             ext_attr_len: r[1],
@@ -449,15 +495,65 @@ fn parse_vd(sec: &[u8], joliet: bool) -> Result<VolDesc, Error> {
     })
 }
 
-fn decode_ucs2(b: &[u8]) -> String {
-    let mut s = String::new();
-    let (pairs, _) = b.as_chunks::<2>();
-    for pair in pairs {
-        let c = u16::from_be_bytes(*pair);
-        if c == 0 {
+/// Parse a type-L (little-endian) path table (ECMA-119 §9.4).
+/// Records are `len_di(1) + ext_attr_len(1) + extent(4,LE) +
+/// parent(2,LE) + dir_id(len_di)`, with dir_id padded to an even
+/// length. Trailing padding or a malformed record ends the table
+/// (tolerated, matching the directory-record policy).
+fn parse_path_table(data: &[u8]) -> Vec<PathTableEntry> {
+    let mut entries = Vec::new();
+    let mut pos = 0usize;
+    while pos + 8 <= data.len() {
+        let len_di = data[pos] as usize;
+        if len_di == 0 || pos + 8 + len_di > data.len() {
             break;
         }
-        s.push(char::from_u32(u32::from(c)).unwrap_or('\u{FFFD}'));
+        entries.push(PathTableEntry {
+            name: data[pos + 8..pos + 8 + len_di].to_vec(),
+            extent: u32le(data, pos + 2),
+            parent: u16le(data, pos + 6),
+        });
+        pos += 8 + len_di + usize::from(len_di % 2 == 1);
+    }
+    entries
+}
+
+/// Read and parse the type-L path table referenced by a volume
+/// descriptor. The table is redundant with the directory tree
+/// walk, so a missing or out-of-range table yields an empty
+/// vector instead of an error.
+fn read_path_table(img: &[u8], vd: &VolDesc) -> Vec<PathTableEntry> {
+    if vd.path_table_extent == 0 || vd.path_table_size == 0 {
+        return Vec::new();
+    }
+    let Some(start) = u64::from(vd.path_table_extent)
+        .checked_mul(vd.logical_block_size as u64)
+        .and_then(|v| usize::try_from(v).ok())
+    else {
+        return Vec::new();
+    };
+    let Some(bytes) = start
+        .checked_add(vd.path_table_size as usize)
+        .and_then(|end| img.get(start..end))
+    else {
+        return Vec::new();
+    };
+    parse_path_table(bytes)
+}
+
+fn decode_ucs2(b: &[u8]) -> String {
+    let (pairs, _) = b.as_chunks::<2>();
+    // Joliet names are UCS-2BE but writers may emit UTF-16 surrogate
+    // pairs for non-BMP code points; `char::decode_utf16` combines
+    // them and maps lone surrogates to U+FFFD.
+    let mut s = String::new();
+    for r in char::decode_utf16(
+        pairs
+            .iter()
+            .map(|p| u16::from_be_bytes(*p))
+            .take_while(|&u| u != 0),
+    ) {
+        s.push(r.unwrap_or(char::REPLACEMENT_CHARACTER));
     }
     s.trim_end().to_string()
 }
@@ -516,6 +612,105 @@ impl<'a> Tree<'a> {
             .ok_or(Error::InvalidData("iso9660 extent out of range"))?
             .to_vec())
     }
+}
+
+/// zisofs compressed file magic (H. Peter Anvin's zisofs format;
+/// the same byte string is checked by Linux `fs/isofs` and
+/// zisofs-tools `mkzftree`/`uncompress.c`).
+const ZISOFS_MAGIC: [u8; 8] = [0x37, 0xE4, 0x53, 0x96, 0xC9, 0xDB, 0xD6, 0x07];
+
+/// Parameters carried by a Rock Ridge `ZF` system use entry
+/// (zisofs). Field names follow the zisofs spec: the `pz`
+/// algorithm's `parms[0]` is the on-file header size in 4-byte
+/// words and `parms[1]` is the log2 of the uncompressed block size.
+#[derive(Debug, Clone, Copy)]
+struct ZfParams {
+    /// Block pointer table offset within the file, in 4-byte words
+    /// (`parms[0]`; 4 for the current 16-byte header).
+    header_words: u8,
+    /// log2 of the uncompressed block size (`parms[1]`).
+    block_shift: u8,
+    /// Uncompressed file size (both-endian field of the ZF entry).
+    uncompressed_size: u32,
+}
+
+/// Transparently decompress a zisofs `ZF`/`pz` file extent.
+///
+/// Layout (zisofs format by H. Peter Anvin, as implemented by
+/// Linux `fs/isofs/compress.c` and zisofs-tools `mkzftree`): the
+/// file starts with a 16-byte header — `ZISOFS_MAGIC` (8), the
+/// uncompressed size (4, little-endian), `header_words` (1),
+/// `block_shift` (1), and 2 reserved bytes — followed at byte
+/// offset `header_words * 4` by a table of `nblocks + 1`
+/// little-endian u32 absolute byte offsets into the file, then one
+/// zlib (RFC 1950) stream per uncompressed block. A block whose
+/// two pointers are equal is defined as all zeroes.
+fn zisofs_inflate(data: &[u8], zf: ZfParams) -> Result<Vec<u8>, Error> {
+    // "pz" requires a 32KiB block (shift 15); 64/128KiB (16/17) are
+    // also defined. Other shifts are outside the profile.
+    if !(15..=17).contains(&zf.block_shift) {
+        return Err(Error::Unsupported("iso9660 zisofs block size"));
+    }
+    let block_size = 1usize << zf.block_shift;
+    let usize_ = zf.uncompressed_size as usize;
+    if data.len() < 16 || data[..8] != ZISOFS_MAGIC {
+        return Err(Error::InvalidData("iso9660 bad zisofs header"));
+    }
+    // The file header repeats the ZF entry parameters; the spec
+    // requires both to be consistent and correct.
+    if u32le(data, 8) != zf.uncompressed_size
+        || data[12] != zf.header_words
+        || data[13] != zf.block_shift
+    {
+        return Err(Error::InvalidData("iso9660 zisofs header mismatch"));
+    }
+    let pt_off = usize::from(zf.header_words) * 4;
+    if pt_off < 16 {
+        return Err(Error::InvalidData("iso9660 bad zisofs header size"));
+    }
+    let nblocks = usize_.div_ceil(block_size);
+    let pt_end = pt_off
+        .checked_add(
+            (nblocks + 1)
+                .checked_mul(4)
+                .ok_or(Error::InvalidData("iso9660 zisofs table overflow"))?,
+        )
+        .ok_or(Error::InvalidData("iso9660 zisofs table overflow"))?;
+    let pt = data.get(pt_off..pt_end).ok_or(Error::InvalidData(
+        "iso9660 zisofs pointer table out of range",
+    ))?;
+
+    let mut out = Vec::with_capacity(usize_);
+    let mut remaining = usize_;
+    for i in 0..nblocks {
+        let cstart = u32le(pt, i * 4) as usize;
+        let cend = u32le(pt, (i + 1) * 4) as usize;
+        let csize = cend
+            .checked_sub(cstart)
+            .ok_or(Error::InvalidData("iso9660 zisofs pointers reversed"))?;
+        if cend > data.len() {
+            return Err(Error::InvalidData("iso9660 zisofs block out of range"));
+        }
+        let want = remaining.min(block_size);
+        if csize == 0 {
+            // Equal pointers: the block is all zeroes.
+            out.resize(out.len() + want, 0);
+        } else {
+            // Sanity bound on the stored stream (mkzftree uses
+            // 2 * block_size).
+            if csize > 2 * block_size {
+                return Err(Error::InvalidData("iso9660 zisofs block too large"));
+            }
+            let blk =
+                crate::compress::zlib::decode::decode_bounded(&data[cstart..cend], block_size)?;
+            if blk.len() < want || (remaining > block_size && blk.len() != block_size) {
+                return Err(Error::InvalidData("iso9660 zisofs block size mismatch"));
+            }
+            out.extend_from_slice(&blk[..want]);
+        }
+        remaining -= want;
+    }
+    Ok(out)
 }
 
 /// Directory tree walker: carries the mutable traversal state so
@@ -608,15 +803,19 @@ impl Walker<'_, '_> {
             } else {
                 IsoKind::Other(sfmt)
             };
-            if rr.compressed {
-                return Err(Error::Unsupported("iso9660 zisofs-compressed file"));
-            }
             let entry_data = match kind {
                 IsoKind::Directory => Vec::new(),
                 IsoKind::Symlink => rr.symlink.clone().unwrap_or_default(),
-                _ => self
-                    .tree
-                    .read_file(rec.extent, rec.ext_attr_len, rec.size, rec.flags)?,
+                _ => {
+                    let raw =
+                        self.tree
+                            .read_file(rec.extent, rec.ext_attr_len, rec.size, rec.flags)?;
+                    match rr.zisofs {
+                        // zisofs `ZF`: transparent decompression.
+                        Some(zf) => zisofs_inflate(&raw, zf)?,
+                        None => raw,
+                    }
+                }
             };
             let mtime = rr.tf_modify.unwrap_or(rec.mtime);
             self.entries.push(IsoEntry {
@@ -677,6 +876,9 @@ pub fn decode(input: &[u8]) -> Result<IsoImage, Error> {
         off += SECTOR;
     }
     let pvd = pvd.ok_or(Error::InvalidData("iso9660 missing PVD"))?;
+    // Type-L path table (ECMA-119 §9.4). Contents are redundant
+    // with the directory tree walk, which stays authoritative.
+    let path_table = read_path_table(input, &pvd);
     let tree = Tree {
         input,
         blksz: pvd.logical_block_size,
@@ -740,6 +942,7 @@ pub fn decode(input: &[u8]) -> Result<IsoImage, Error> {
         has_rock_ridge: use_rr,
         has_joliet: joliet_svd.is_some(),
         entries,
+        path_table,
     })
 }
 
@@ -812,27 +1015,102 @@ mod tests {
             s
         }
 
-        /// Install PVD (and optional terminator) with `root` record
-        /// pointing at sector of root dir.
-        fn finish(mut self, root_extent: u32, root_size: u32) -> Vec<u8> {
+        /// Allocate payload spanning as many sectors as needed.
+        fn alloc_span(&mut self, bytes: &[u8]) -> u32 {
+            let s = self.next_sector;
+            let sectors = bytes.len().div_ceil(SECTOR).max(1);
+            let off = s as usize * SECTOR;
+            if self.data.len() < off + sectors * SECTOR {
+                self.data.resize(off + sectors * SECTOR, 0);
+            }
+            self.data[off..off + bytes.len()].copy_from_slice(bytes);
+            self.next_sector += sectors as u32;
+            s
+        }
+
+        /// Write one volume descriptor sector (`ty` 1 = primary,
+        /// 2 = Joliet supplementary). `pt` is the type-L path table
+        /// `(extent, size)` to advertise in the descriptor.
+        fn write_vd(
+            &mut self,
+            sector: usize,
+            ty: u8,
+            root_extent: u32,
+            root_size: u32,
+            pt: Option<(u32, u32)>,
+        ) {
             let p = self.next_sector; // volume size marker
-            let s = 16 * SECTOR;
-            self.data[s] = 1;
+            let s = sector * SECTOR;
+            self.data[s] = ty;
             self.data[s + 1..s + 6].copy_from_slice(b"CD001");
             self.data[s + 6] = 1;
-            self.data[s + 40..s + 45].copy_from_slice(b"TESTV");
+            if ty == 2 {
+                // Joliet SVD: UCS-2BE volume id + level-3 escape.
+                for (i, u) in "TESTV".encode_utf16().enumerate() {
+                    self.data[s + 40 + i * 2..s + 42 + i * 2].copy_from_slice(&u.to_be_bytes());
+                }
+                self.data[s + 88..s + 91].copy_from_slice(b"%/E");
+            } else {
+                self.data[s + 40..s + 45].copy_from_slice(b"TESTV");
+            }
             self.data[s + 80..s + 84].copy_from_slice(&p.to_le_bytes());
             self.data[s + 84..s + 88].copy_from_slice(&p.to_be_bytes());
             self.data[s + 128..s + 130].copy_from_slice(&2048u16.to_le_bytes());
             self.data[s + 130..s + 132].copy_from_slice(&2048u16.to_be_bytes());
+            if let Some((pt_extent, pt_size)) = pt {
+                self.data[s + 132..s + 136].copy_from_slice(&pt_size.to_le_bytes());
+                self.data[s + 136..s + 140].copy_from_slice(&pt_size.to_be_bytes());
+                self.data[s + 140..s + 144].copy_from_slice(&pt_extent.to_le_bytes());
+                self.data[s + 148..s + 152].copy_from_slice(&pt_extent.to_be_bytes());
+            }
             let rec = Self::dirent(root_extent, root_size, 2, &[0], &[]);
             self.data[s + 156..s + 156 + 34].copy_from_slice(&rec[..34]);
-            let t = 17 * SECTOR;
+        }
+
+        /// Install PVD (and terminator) with `root` record pointing
+        /// at sector of root dir.
+        fn finish(self, root_extent: u32, root_size: u32) -> Vec<u8> {
+            self.finish_ext(root_extent, root_size, None, None)
+        }
+
+        /// `finish` variant: optionally install a Joliet SVD pointing
+        /// at a separate root tree, and path table fields `pt`.
+        fn finish_ext(
+            mut self,
+            root_extent: u32,
+            root_size: u32,
+            joliet_root: Option<(u32, u32)>,
+            pt: Option<(u32, u32)>,
+        ) -> Vec<u8> {
+            let mut sec = 16;
+            self.write_vd(sec, 1, root_extent, root_size, pt);
+            sec += 1;
+            if let Some((je, js)) = joliet_root {
+                self.write_vd(sec, 2, je, js, pt);
+                sec += 1;
+            }
+            if self.data.len() < (sec + 1) * SECTOR {
+                self.data.resize((sec + 1) * SECTOR, 0);
+            }
+            let t = sec * SECTOR;
             self.data[t] = 255;
             self.data[t + 1..t + 6].copy_from_slice(b"CD001");
             self.data[t + 6] = 1;
             self.data
         }
+    }
+
+    /// Type-L path table record (ECMA-119 §9.4): little-endian
+    /// multi-byte fields, dir_id padded to an even length.
+    fn path_table_record(extent: u32, parent: u16, name: &[u8]) -> Vec<u8> {
+        let mut r = vec![name.len() as u8, 0];
+        r.extend_from_slice(&extent.to_le_bytes());
+        r.extend_from_slice(&parent.to_le_bytes());
+        r.extend_from_slice(name);
+        if name.len() % 2 == 1 {
+            r.push(0);
+        }
+        r
     }
 
     fn plain_iso() -> Vec<u8> {
@@ -980,5 +1258,269 @@ mod tests {
         let out = decode(&img).unwrap();
         assert_eq!(out.entries[0].kind, IsoKind::Symlink);
         assert_eq!(out.entries[0].data, b"hello.txt");
+    }
+
+    #[test]
+    fn joliet_surrogate_pair_names() {
+        // Joliet tree carries UCS-2BE identifiers; a surrogate pair
+        // must combine into one non-BMP char and a lone surrogate
+        // must decode as U+FFFD.
+        let mut b = IsoBuilder::new();
+        let f = b.alloc(b"DATA");
+        // "A\u{20BB7}.TXT;1" — U+20BB7 is encoded as the pair D842 DFB7.
+        let mut n1 = Vec::new();
+        for u in "A\u{20BB7}.TXT;1".encode_utf16() {
+            n1.extend_from_slice(&u.to_be_bytes());
+        }
+        // "B<lone lead surrogate>C.DAT;1"
+        let mut n2 = Vec::new();
+        for u in [
+            0x0042u16, 0xD800, 0x0043, 0x002E, 0x0044, 0x0041, 0x0054, 0x003B, 0x0031,
+        ] {
+            n2.extend_from_slice(&u.to_be_bytes());
+        }
+        let jd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(f, 4, 0, &n1, &[]),
+            IsoBuilder::dirent(f, 4, 0, &n2, &[]),
+        ]);
+        let jroot = b.alloc(&jd);
+        let pd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(f, 4, 0, b"FILE.TXT;1", &[]),
+        ]);
+        let proot = b.alloc(&pd);
+        let img = b.finish_ext(proot, SECTOR as u32, Some((jroot, SECTOR as u32)), None);
+        let out = decode(&img).unwrap();
+        assert!(out.has_joliet);
+        assert!(!out.has_rock_ridge);
+        let names: Vec<&str> = out.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["A\u{20BB7}.TXT", "B\u{FFFD}C.DAT"]);
+    }
+
+    /// Build a zisofs file extent: 16-byte header (magic +
+    /// uncompressed size + header_words + block_shift + reserved),
+    /// a block pointer table of `nblocks + 1` little-endian u32
+    /// absolute offsets, then one zlib stream per non-zero block.
+    /// Returns `(extent_data, zf_susp_entry)`.
+    fn zisofs_payload(plain: &[u8], block_shift: u8) -> (Vec<u8>, Vec<u8>) {
+        let block_size = 1usize << block_shift;
+        let nblocks = plain.len().div_ceil(block_size);
+        let mut blocks: Vec<Vec<u8>> = Vec::new();
+        for i in 0..nblocks {
+            let chunk = &plain[i * block_size..plain.len().min((i + 1) * block_size)];
+            if chunk.iter().all(|&b| b == 0) {
+                blocks.push(Vec::new()); // all-zero block
+            } else {
+                blocks.push(crate::compress::zlib::encode::encode(chunk));
+            }
+        }
+        let mut data = Vec::new();
+        data.extend_from_slice(&ZISOFS_MAGIC);
+        data.extend_from_slice(&(plain.len() as u32).to_le_bytes());
+        data.push(4); // header_words: 16-byte header >> 2
+        data.push(block_shift);
+        data.extend_from_slice(&[0, 0]); // reserved
+        let mut pos = 16 + (nblocks + 1) * 4;
+        let mut ptrs = Vec::with_capacity(nblocks + 1);
+        for b in &blocks {
+            ptrs.push(pos as u32);
+            pos += b.len();
+        }
+        ptrs.push(pos as u32);
+        for p in ptrs {
+            data.extend_from_slice(&p.to_le_bytes());
+        }
+        for b in &blocks {
+            data.extend_from_slice(b);
+        }
+        // ZF system use entry: sig + len 16 + ver 1 + "pz" +
+        // parms (header words, block shift) + both-endian size.
+        let mut zf = vec![b'Z', b'F', 16, 1, b'p', b'z', 4, block_shift];
+        zf.extend_from_slice(&(plain.len() as u32).to_le_bytes());
+        zf.extend_from_slice(&(plain.len() as u32).to_be_bytes());
+        (data, zf)
+    }
+
+    /// Single-file Rock Ridge image whose file extent is `data` and
+    /// whose directory record carries `susp` after the `NM` name.
+    fn zisofs_iso(data: &[u8], susp: &[u8]) -> Vec<u8> {
+        let mut b = IsoBuilder::new();
+        let f = b.alloc_span(data);
+        let sp = &[b'S', b'P', 7, 1, 0xBE, 0xEF, 0];
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], sp),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(f, data.len() as u32, 0, b"FILE.BIN;1", susp),
+        ]);
+        let root = b.alloc(&rootd);
+        b.finish(root, SECTOR as u32)
+    }
+
+    #[test]
+    fn zisofs_roundtrip() {
+        // Three-block file (32KiB blocks): text, all-zero, tail.
+        let mut plain = vec![b'A'; 32768];
+        plain.extend_from_slice(&[0; 32768]);
+        plain.extend_from_slice(b"tail!");
+        let (zdata, zf) = zisofs_payload(&plain, 15);
+        let img = zisofs_iso(&zdata, &zf);
+        let out = decode(&img).unwrap();
+        assert_eq!(out.entries.len(), 1);
+        assert_eq!(out.entries[0].name, "FILE.BIN");
+        assert_eq!(out.entries[0].kind, IsoKind::File);
+        assert_eq!(out.entries[0].data, plain);
+    }
+
+    #[test]
+    fn zisofs_small_file() {
+        // Single partial block.
+        let plain = b"compress me please".repeat(100);
+        let (zdata, zf) = zisofs_payload(&plain, 15);
+        let img = zisofs_iso(&zdata, &zf);
+        let out = decode(&img).unwrap();
+        assert_eq!(out.entries[0].data, plain);
+    }
+
+    #[test]
+    fn zisofs_rejects_bad_header() {
+        let plain = b"hello zisofs".repeat(10);
+        let (zdata, zf) = zisofs_payload(&plain, 15);
+        // Corrupt the magic.
+        let mut bad = zdata.clone();
+        bad[0] ^= 0xFF;
+        assert!(matches!(
+            decode(&zisofs_iso(&bad, &zf)),
+            Err(Error::InvalidData(_))
+        ));
+        // Uncompressed size disagrees with the ZF entry.
+        let mut bad = zdata.clone();
+        bad[8] ^= 0x01;
+        assert!(matches!(
+            decode(&zisofs_iso(&bad, &zf)),
+            Err(Error::InvalidData(_))
+        ));
+        let mut bad = zdata.clone();
+        bad[12] = 8; // header_words mismatch
+        assert!(matches!(
+            decode(&zisofs_iso(&bad, &zf)),
+            Err(Error::InvalidData(_))
+        ));
+    }
+
+    #[test]
+    fn zisofs_rejects_bad_pointers() {
+        let plain = b"some content here".repeat(40);
+        let (zdata, zf) = zisofs_payload(&plain, 15);
+        // Pointer runs past the end of the extent.
+        let mut bad = zdata.clone();
+        bad[16..20].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+        assert!(matches!(
+            decode(&zisofs_iso(&bad, &zf)),
+            Err(Error::InvalidData(_))
+        ));
+        // Reversed pointers (end < start).
+        let mut bad = zdata.clone();
+        let p0 = u32::from_le_bytes([zdata[16], zdata[17], zdata[18], zdata[19]]);
+        bad[20..24].copy_from_slice(&(p0 - 4).to_le_bytes());
+        assert!(matches!(
+            decode(&zisofs_iso(&bad, &zf)),
+            Err(Error::InvalidData(_))
+        ));
+        // Truncated zlib stream inside the block.
+        let bad = zdata[..zdata.len() - 4].to_vec();
+        assert!(decode(&zisofs_iso(&bad, &zf)).is_err());
+    }
+
+    #[test]
+    fn zisofs_rejects_bad_params() {
+        let plain = b"parameter test".repeat(10);
+        let (zdata, zf) = zisofs_payload(&plain, 15);
+        // Block shift outside the defined 15..=17 profile.
+        let mut bad_zf = zf.clone();
+        bad_zf[7] = 14;
+        assert!(matches!(
+            decode(&zisofs_iso(&zdata, &bad_zf)),
+            Err(Error::Unsupported(_))
+        ));
+        // Unknown algorithm signature (not "pz").
+        let mut bad_zf = zf.clone();
+        bad_zf[4] = b'x';
+        assert!(matches!(
+            decode(&zisofs_iso(&zdata, &bad_zf)),
+            Err(Error::Unsupported(_))
+        ));
+        // Short ZF entry.
+        let mut bad_zf = zf[..8].to_vec();
+        bad_zf[2] = 8;
+        assert!(matches!(
+            decode(&zisofs_iso(&zdata, &bad_zf)),
+            Err(Error::InvalidData(_))
+        ));
+    }
+
+    #[test]
+    fn path_table_matches_tree() {
+        let mut b = IsoBuilder::new();
+        let f = b.alloc(b"DATA");
+        let subd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(f, 4, 0, b"ONE.DAT;1", &[]),
+        ]);
+        let sub = b.alloc(&subd);
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(sub, SECTOR as u32, 2, b"SUB", &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        // Breadth-first table: root (self-parented), then SUB.
+        let mut pt = Vec::new();
+        pt.extend(path_table_record(root, 1, &[0]));
+        pt.extend(path_table_record(sub, 1, b"SUB"));
+        let pt_len = pt.len() as u32;
+        let pt_ext = b.alloc(&pt);
+        let img = b.finish_ext(root, SECTOR as u32, None, Some((pt_ext, pt_len)));
+        let out = decode(&img).unwrap();
+        assert_eq!(
+            out.path_table,
+            [
+                PathTableEntry {
+                    name: vec![0],
+                    extent: root,
+                    parent: 1,
+                },
+                PathTableEntry {
+                    name: b"SUB".to_vec(),
+                    extent: sub,
+                    parent: 1,
+                },
+            ]
+        );
+        // The walked tree contains the same directory.
+        let sub_e = out
+            .entries
+            .iter()
+            .find(|e| e.name == "SUB")
+            .expect("SUB entry");
+        assert_eq!(sub_e.kind, IsoKind::Directory);
+    }
+
+    #[test]
+    fn path_table_absent_or_bad_extent_is_tolerated() {
+        // No path table fields set -> empty table, decode still ok.
+        let out = decode(&plain_iso()).unwrap();
+        assert!(out.path_table.is_empty());
+        // Point the type-L extent past the end of the image.
+        let mut img = plain_iso();
+        let s = 16 * SECTOR;
+        img[s + 132..s + 136].copy_from_slice(&8u32.to_le_bytes());
+        img[s + 136..s + 140].copy_from_slice(&8u32.to_be_bytes());
+        img[s + 140..s + 144].copy_from_slice(&0xFFFFu32.to_le_bytes());
+        let out = decode(&img).unwrap();
+        assert!(out.path_table.is_empty());
     }
 }

@@ -79,6 +79,14 @@ specifications or standards documents:
   copied. FreeRDP's mppc.c (Apache-2.0) and rdesktop's mppc.c were
   consulted for behavioral semantics only (e.g. that uncompressed
   packets do not update the history).
+  External-encoder fixture: tests/fixtures/mppc/external_freerdp_bells
+  (.pkt/.expected) embeds the TEST_MPPC_BELLS plaintext and
+  TEST_MPPC_BELLS_RDP4 compressed token stream constants from FreeRDP's
+  libfreerdp/codec/test/TestFreeRDPCodecMppc.c (Apache-2.0,
+  https://github.com/FreeRDP/FreeRDP), produced by FreeRDP's own
+  mppc_compress encoder in 8K/RDP4 mode; the .pkt file prepends an
+  RFC 2118 header (FRONT|COMPRESSED, count 0) equivalent to FreeRDP's
+  wire flags PACKET_AT_FRONT|PACKET_COMPRESSED. No code was copied.
   Licensing statement note (not a patent): RFC 2118 section 1.1
   contains an explicit field-of-use statement: "MPPC can only be used
   in products that implement the Point to Point Protocol AND for the

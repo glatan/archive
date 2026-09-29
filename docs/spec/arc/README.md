@@ -10,7 +10,7 @@
 
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
-| method 1 (obsolete unpacked) | ARC spec | ✅ | ❌ | CRC-16 フィールドなし |
+| method 1 (obsolete unpacked) | ARC spec | ✅ | ✅ | CRC-16 フィールドなし |
 | method 2 (stored) | ARC spec | ✅ | ✅ | CRC-16 検証 |
 | method 3-9 (packed/squeezed/crunched/crushed/distilled/squashed) | ARC spec | ❌ | ❌ | intentional scope: 圧縮内部仕様の書面文書なし |
 
@@ -40,6 +40,7 @@
 |---|------|----------|-----------|----------------|
 | 11 | `ArcEncoder::add_file` / `encode`: method-2 member + name 1-12B・NUL/パス区切りなし | ARC spec | ✅ | `roundtrip`, `rejects_long_name` |
 | 12 | 終端 `0x1A 0x00` を付与 | ARC spec | ✅ | 往復テスト |
+| 16 | method-1 member の emit: `add_file_with_method(name, data, date, time, 1)` — `[0x1A][1][name 13B][size u32le][data]` (CRC/date/time/length なし) | ARC spec | ✅ | `method1_roundtrip`, `method1_header_layout`, `rejects_unsupported_encode_method`, `test_arc_method1_encode_decode_roundtrip`, `test_arc_method1_header_layout`, `test_arc_rejects_unsupported_encode_method` |
 
 ### CLI / fuzz 連携
 
@@ -53,5 +54,4 @@
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
 | 15 | method 3-8+ (packed/squeezed/crunched/crushed/distilled/squashed) の decode は非対応 | ❌ | `Error::Unsupported` を返す |
-| 16 | write は method-2 のみ | ❌ | method-1 生成は非対応 |
 | 17 | 外部ツールとの相互運用検証なし | ❌ | コンテナに ARC 対応ツール (unar 等) がないため、自己往復 + 手組みベクタのみ |

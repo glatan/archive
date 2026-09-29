@@ -6,21 +6,31 @@
 //! `0xE0F5E1E2` magic at offset 1024, compact (32-byte) and extended
 //! (64-byte) inodes located at `meta_blkaddr * block_size + 32 * nid`,
 //! dirent blocks with `erofs_dirent` headers followed by packed names,
-//! flat data layouts with optional tail-packing inline data, and
-//! chunk-based files for deduplication.
+//! flat data layouts with optional tail-packing inline data,
+//! chunk-based files for deduplication, and `z_erofs` compressed
+//! inodes (datalayout 1 `COMPRESSED_FULL` and 3 `COMPRESSED_COMPACT`)
+//! backed by the LZ4, MicroLZMA, DEFLATE and Zstandard codecs. The
+//! `available_compr_algs` superblock bitmap and compression-config
+//! records are honored; per-inode big pclusters, compacted 2-byte
+//! indexes, `Z_EROFS_ADVISE_EXTENTS` extent records and partial
+//! references are supported.
 //!
-//! Compressed inodes (`z_erofs`: LZ4, MicroLZMA, DEFLATE, Zstandard
-//! pcluster layouts 1 and 3), multi-device images, metabox images,
-//! packed-fragment and ztailpacking images are intentionally out of
-//! scope; encountering them is reported as `Error::Unsupported`.
-//! Extended attributes are skipped without interpretation. Writing
-//! erofs images is intentionally out of scope (mkfs.erofs is the
-//! reference producer).
+//! Superblock metadata that does not affect decoding — the volume
+//! UUID, mkfs build time, feature bitmaps and xattr bookkeeping
+//! fields — is parsed and exposed via `decode::ErofsImage::superblock`.
+//!
+//! Multi-device images, metabox images, packed-fragment and
+//! ztailpacking images are intentionally out of scope; encountering
+//! them is reported as `Error::Unsupported`. Extended attributes are
+//! skipped without interpretation. Writing erofs images is
+//! intentionally out of scope (mkfs.erofs is the reference producer).
 
 use crate::error::Error;
 
 /// Linux erofs filesystem image decoding.
 pub mod decode;
+
+mod z;
 
 /// Codec struct for trait-based erofs decode operations.
 pub struct ErofsCodec;

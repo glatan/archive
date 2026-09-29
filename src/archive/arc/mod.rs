@@ -8,7 +8,8 @@
 //!   (stored). Methods 3 (packed/RLE), 4 (squeezed), 5-8 (crunched /
 //!   non-ASCII crunched / crushed / distilled) and any higher method
 //!   are rejected with [`Error::Unsupported`];
-//! - writing: method 2 (stored) entries only.
+//! - writing: method 1 (obsolete unpacked) and method 2 (stored)
+//!   entries.
 //!
 //! Layout: each member starts with `0x1A` and a method byte; method 0
 //! marks end of archive. Method-1 records are

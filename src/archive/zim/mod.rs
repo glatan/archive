@@ -1,14 +1,16 @@
 //! ZIM archive (`.zim`) format support.
 //!
 //! Decoder for the ZIM file format used by Kiwix/openZIM, plus a
-//! minimal v5 writer. Supports major versions 5 and 6, stored and
+//! minimal v5/v6 writer. Supports major versions 5 and 6, stored and
 //! xz/zstd-compressed clusters, extended (8-byte offset) clusters,
 //! and redirect entry resolution. `decode_parts` reads split
 //! `.zimaa`/`.zimab` archives, and the archive MD5 checksum is
 //! verified when present. The writer emits a single-cluster archive
-//! with an MD5 checksum trailer. Entries expose MIME type and title
-//! metadata, and `decode_title_order` lists entries in title-pointer
-//! order; fulltext index search is intentionally out of scope.
+//! with an MD5 checksum trailer; major version 6, extended
+//! clusters, and redirect/deprecated dirents can be emitted.
+//! Entries expose MIME type and title metadata, and
+//! `decode_title_order` lists entries in title-pointer order;
+//! fulltext index search is intentionally out of scope.
 
 use alloc::vec::Vec;
 

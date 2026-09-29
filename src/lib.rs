@@ -86,11 +86,11 @@
 //! | `mscfb` (default) | Microsoft Compound File Binary (OLE2) read support |
 //! | `cramfs` (default) | Linux cramfs read-only filesystem image |
 //! | `romfs` (default) | Linux romfs read-only filesystem image |
-//! | `erofs` (default) | Linux erofs read-only filesystem image (uncompressed) |
+//! | `erofs` (default) | Linux erofs read-only filesystem image (incl. z_erofs LZ4/MicroLZMA/DEFLATE/Zstd) |
 //! | `iso9660` (default) | ISO 9660 CD-ROM image (Rock Ridge / Joliet) |
 //! | `crx3` (default) | Chrome extension package (CRX3) read support |
 //! | `pea` (default) | PEA (Pack, Encrypt, Authenticate) archive read support |
-//! | `zim` (default) | ZIM archive (`.zim`) read/write support (v5 write) |
+//! | `zim` (default) | ZIM archive (`.zim`) read/write support (v5/v6 write) |
 //! | `mtree` (default) | mtree(5) manifest read/write support |
 //! | `warc` (default) | WARC (`.warc`) record read/write support |
 //! | `git-pack` (default) | Git pack (`pack-*.pack`/`pack-*.idx`) read/write support |

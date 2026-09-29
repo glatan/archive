@@ -7,9 +7,11 @@
 //! members — decompress with [`crate::compress::gzip`] first.
 //! The encoder emits records with the mandatory fields plus a SHA-1
 //! `WARC-Block-Digest` (and `WARC-Payload-Digest` when the caller
-//! supplies the payload bytes). Payload semantics (HTTP header
-//! parsing, record segmentation reassembly, digest verification on
-//! decode) are intentionally out of scope.
+//! supplies the payload bytes). On decode, `sha1` digests are
+//! verified: `WARC-Block-Digest` always, and `WARC-Payload-Digest`
+//! when the payload is known to be the whole record block.
+//! Payload semantics beyond that (HTTP header parsing, record
+//! segmentation reassembly) are intentionally out of scope.
 
 use alloc::vec::Vec;
 

@@ -74,7 +74,7 @@
 
 | フォーマット | 基準仕様 | ✅ | ⚠️ | ❌ | 合計 |
 |---|---|---|---|---|---|
-| [DEFLATE](deflate/README.md) | RFC 1951 | 57 | 1 | 0 | 58 |
+| [DEFLATE](deflate/README.md) | RFC 1951 | 58 | 0 | 0 | 58 |
 | [gzip](gzip/README.md) | RFC 1952 | 40 | 0 | 0 | 40 |
 | [zstd](zstd/README.md) | RFC 8878 | 126 | 0 | 0 | 126 |
 | [zstd-seekable](zstd-seekable/README.md) | Zstandard Seekable Format v0.1.0 | 23 | 0 | 0 | 23 |
@@ -95,7 +95,7 @@
 | [zx2](zx2/README.md) | ZX2 README (BSD-3) | 20 | 0 | 0 | 20 |
 | [zx5](zx5/README.md) | ZX5 README (BSD-3) | 24 | 0 | 0 | 24 |
 | [vcdiff](vcdiff/README.md) | RFC 3284 | 30 | 0 | 0 | 30 |
-| [mppc](mppc/README.md) | RFC 2118 | 31 | 1 | 0 | 32 |
+| [mppc](mppc/README.md) | RFC 2118 | 32 | 0 | 0 | 32 |
 | [lzs](lzs/README.md) | RFC 2395 (§2.2 = ANSI X3.241 informational 転記) | 26 | 0 | 0 | 26 |
 | [lzrw1](lzrw1/README.md) | lzrw1.c 参照実装 (public domain) | 21 | 0 | 0 | 21 |
 | [lzrw1a](lzrw1a/README.md) | lzrw1-a.c 参照実装 (public domain) | 20 | 0 | 0 | 20 |
@@ -115,29 +115,29 @@
 
 | フォーマット | 基準仕様 | ✅ | ⚠️ | ❌ | 合計 |
 |---|---|---|---|---|---|
-| [tar](tar/README.md) | POSIX.1-1988 ustar / GNU tar / POSIX.1-2001 PAX | 59 | 0 | 0 | 59 |
+| [tar](tar/README.md) | POSIX.1-1988 ustar / GNU tar / POSIX.1-2001 PAX | 59 | 0 | 1 | 60 |
 | [cpio](cpio/README.md) | POSIX `odc` / SVR4 `newc`/`newcrc`/`bin` | 42 | 1 | 0 | 43 |
 | [ar](ar/README.md) | IEEE Std 1003.1 / GNU ar / BSD ar | 27 | 0 | 0 | 27 |
 | [deb](deb/README.md) | deb(5) (dpkg) | 25 | 0 | 2 | 27 |
 | [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 33 | 0 | 2 | 35 |
 | [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 37 | 0 | 6 | 43 |
 | [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 24 | 0 | 3 | 27 |
-| [mscfb](mscfb/README.md) | [MS-CFB] Compound File Binary File Format v20210625 | 18 | 1 | 4 | 23 |
+| [mscfb](mscfb/README.md) | [MS-CFB] Compound File Binary File Format v20210625 | 19 | 1 | 3 | 23 |
 | [cramfs](cramfs/README.md) | Linux kernel cramfs.rst + fs/cramfs/README + cramfs_fs.h | 18 | 1 | 4 | 23 |
 | [romfs](romfs/README.md) | Linux kernel romfs.rst | 20 | 0 | 3 | 23 |
-| [erofs](erofs/README.md) | Linux kernel erofs.rst + erofs_fs.h (+ erofs-utils include/erofs_fs.h) | 27 | 2 | 4 | 33 |
-| [iso9660](iso9660/README.md) | ECMA-119 + SUSP 1.10 + RRIP 1.12 + Joliet | 32 | 2 | 8 | 42 |
+| [erofs](erofs/README.md) | Linux kernel erofs.rst + erofs_fs.h (+ erofs-utils include/erofs_fs.h) | 30 | 0 | 3 | 33 |
+| [iso9660](iso9660/README.md) | ECMA-119 + SUSP 1.10 + RRIP 1.12 + Joliet | 35 | 0 | 7 | 42 |
 | [crx3](crx3/README.md) | Chromium components/crx_file/crx3.proto | 13 | 0 | 4 | 17 |
-| [pea](pea/README.md) | PEA file format spec (pea_help.pdf) + PeaZip pea.pas/pea_utils.pas | 16 | 1 | 4 | 21 |
-| [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 24 | 0 | 3 | 27 |
+| [pea](pea/README.md) | PEA file format spec (pea_help.pdf) + PeaZip pea.pas/pea_utils.pas | 17 | 0 | 4 | 21 |
+| [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 25 | 0 | 2 | 27 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
-| [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 24 | 0 | 5 | 29 |
+| [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 25 | 0 | 4 | 29 |
 | [lha](lha/README.md) | lha header documentation (apphead / lzh_note) | 21 | 0 | 2 | 23 |
 | [arj](arj/README.md) | ARJ technical note (ARJ 2.x) | 18 | 0 | 4 | 22 |
-| [arc](arc/README.md) | SEA ARC file format description | 14 | 0 | 3 | 17 |
+| [arc](arc/README.md) | SEA ARC file format description | 15 | 0 | 2 | 17 |
 | [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 38 | 0 | 5 | 43 |
 | [xar](xar/README.md) | xarformat (mackyle/xar wiki) | 32 | 0 | 6 | 38 |
-| [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 151 | 0 | 2 | 154 |
+| [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 152 | 0 | 1 | 154 |
 | [7z](sevenz/README.md) | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) | 120 | 0 | 0 | 120 |
 
 ### エンコードフォーマット
@@ -160,9 +160,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 2180 |
-| ⚠️ 部分実装 | 10 |
-| ❌ 未実装 | 92 |
-| **合計** | **2282** |
+| ✅ 実装+テスト済み | 2194 |
+| ⚠️ 部分実装 | 3 |
+| ❌ 未実装 | 86 |
+| **合計** | **2283** |
 
-**全体カバー率**: 2180 / 2282 = **95.5%** (intentional exclusion 除外後: 2180 / 2191 = **99.5%**)
+**全体カバー率**: 2194 / 2283 = **96.1%** (intentional exclusion 除外後: 2194 / 2197 = **99.9%**)

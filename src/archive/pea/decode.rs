@@ -353,8 +353,10 @@ mod tests {
     }
 
     fn tag(algo: PeaAlgo, covered: &[u8]) -> Vec<u8> {
+        // unverifiable algorithms get a nonzero garbage tag, proving
+        // the decoder skips tag bytes instead of checking them
         algo.compute(covered)
-            .unwrap_or_else(|| alloc::vec![0u8; algo.tag_size()])
+            .unwrap_or_else(|| alloc::vec![0xA5u8; algo.tag_size()])
     }
 
     fn build(entries: &[(&str, bool, &[u8])], obj_algo: PeaAlgo, compression: u8) -> Vec<u8> {
@@ -370,9 +372,20 @@ mod tests {
         f.push(2); // stream algo: CRC32
         f.push(match obj_algo {
             PeaAlgo::None => 0,
+            PeaAlgo::Adler32 => 1,
             PeaAlgo::Crc32 => 2,
+            PeaAlgo::Crc64 => 3,
+            PeaAlgo::Md5 => 16,
+            PeaAlgo::Ripemd160 => 17,
+            PeaAlgo::Sha1 => 18,
             PeaAlgo::Sha256 => 19,
-            _ => 0,
+            PeaAlgo::Sha512 => 20,
+            PeaAlgo::Whirlpool => 21,
+            PeaAlgo::Sha3_256 => 22,
+            PeaAlgo::Sha3_512 => 23,
+            PeaAlgo::Blake2s => 24,
+            PeaAlgo::Blake2b => 25,
+            PeaAlgo::Encrypted(_) => unreachable!("encrypted object algorithm"),
         });
         for (name, is_dir, data) in entries {
             w16(name.len() as u16, &mut f);
@@ -458,5 +471,54 @@ mod tests {
         // corrupt one byte inside the covered object region
         f[25] ^= 0xFF;
         assert!(decode(&f).is_err());
+    }
+
+    #[test]
+    fn skips_unverified_object_tags() {
+        // Algorithms we parse but cannot verify (codes 17, 20-25):
+        // the tag is filled with garbage bytes by `build` and must be
+        // skipped at exactly tag_size() length, not checked.
+        for algo in [
+            PeaAlgo::Ripemd160,
+            PeaAlgo::Sha512,
+            PeaAlgo::Whirlpool,
+            PeaAlgo::Sha3_256,
+            PeaAlgo::Sha3_512,
+            PeaAlgo::Blake2s,
+            PeaAlgo::Blake2b,
+        ] {
+            let f = build(
+                &[("dir", true, &[]), ("f.bin", false, b"tagged data")],
+                algo,
+                0,
+            );
+            let img = decode(&f).unwrap();
+            assert_eq!(img.entries.len(), 2);
+            assert!(img.entries[0].is_dir);
+            assert_eq!(img.entries[1].name, "f.bin");
+            assert_eq!(img.entries[1].data, b"tagged data");
+        }
+    }
+
+    #[test]
+    fn skips_unverified_object_tags_compressed() {
+        // Same skip behaviour with compressed object data.
+        let data = b"compress and tag me compress and tag me";
+        for algo in [PeaAlgo::Sha512, PeaAlgo::Blake2b] {
+            let f = build(&[("f.bin", false, data)], algo, 2);
+            let img = decode(&f).unwrap();
+            assert_eq!(img.entries[0].data, data);
+        }
+    }
+
+    #[test]
+    fn rejects_truncated_object_tag() {
+        // 64-byte SHA-512 object tag: hdr(10) + stream hdr(10) +
+        // name_len(2) + name(5) + mtime(4) + attr(4) + fsize(8) + data(4)
+        let f = build(&[("f.bin", false, b"data")], PeaAlgo::Sha512, 0);
+        let tag_off = 10 + 10 + 2 + 5 + 4 + 4 + 8 + 4;
+        let mut short = f.clone();
+        short.drain(tag_off..tag_off + 32);
+        assert!(decode(&short).is_err());
     }
 }

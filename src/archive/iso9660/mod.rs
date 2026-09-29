@@ -11,12 +11,15 @@
 //! from a supplementary volume tree, then plain ISO9660 identifiers
 //! with the `;version` suffix stripped. Rock Ridge `PX` (POSIX
 //! attributes), `SL` (symlink), `TF` (timestamps) and `NM` entries,
-//! and SUSP `SP`/`CE`/`ST` framing are supported.
+//! and SUSP `SP`/`CE`/`ST` framing are supported. Files carrying a
+//! zisofs `ZF` system use entry are transparently decompressed
+//! (`pz` algorithm: per-block zlib streams with the block pointer
+//! table; 32/64/128KiB block sizes).
 //!
 //! Multi-extent files, interleaved files (`unit_size`/`gap_size`),
-//! extended attribute records content, zisofs `ZF` compression,
-//! El Torito boot records, and writing ISO images are intentionally
-//! out of scope.
+//! extended attribute records content, non-`pz` `ZF` compression
+//! algorithms, El Torito boot records, and writing ISO images are
+//! intentionally out of scope.
 
 use crate::error::Error;
 

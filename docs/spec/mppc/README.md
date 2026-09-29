@@ -77,7 +77,7 @@ MSB-first でパックされる (RFC 2118 §4.2)。
 |---|------|------|
 | 30 | エンコード方向 interop: 本 crate エンコーダの出力パケット列を rdesktop の MPPC デコーダ (GPL-3.0、テスト時オラクルのみ) でデコードし、10 ケース全件一致を確認 (リテラル・コピー各 offset クラス・重複コピー・FLUSHED/FRONT・expansion fallback・8192B フルパケット・マルチパケット) | ✅ (`.local/mppc_oracle/`。git 管理外のローカル検証であり、clone 後の再現は rdesktop 取得が前提) |
 | 31 | fixture: `tests/fixtures/mppc/` に単一パケット `*.pkt` + `*.expected` 6 組と `[u16 LE len][packet]` 連接 `*.pkts` + `*.expected` 2 組。全件本 crate エンコーダ生成 + rdesktop オラクル検証済み | ✅ |
-| 32 | デコード方向 interop: 外部 MPPC エンコーダ生成ベクタ | ⚠️ 未確保 (rdesktop/FreeRDP に利用可能な standalone encoder がなく、KAT + 双方向自己検証で代替) |
+| 32 | デコード方向 interop: 外部 MPPC エンコーダ生成ベクタ | ✅ `tests/fixtures/mppc/external_freerdp_bells.{pkt,expected}` — FreeRDP (Apache-2.0) `mppc_compress` の 8K/RDP4 モード出力ベクタ (`TEST_MPPC_BELLS`/`TEST_MPPC_BELLS_RDP4`、RFC 2118 ヘッダは fixture 化時に付与)。`decode_single_packet_fixtures` |
 
 ## Intentional scope / 既知制約
 

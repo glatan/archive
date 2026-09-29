@@ -41,6 +41,14 @@ fn decode_single_packet_fixtures() {
         "overlap",
         "expanded",
         "max_size",
+        // External-encoder vector: TEST_MPPC_BELLS_RDP4 token stream from
+        // FreeRDP's libfreerdp/codec/test/TestFreeRDPCodecMppc.c
+        // (Apache-2.0), decompressed in FreeRDP's own test with
+        // PACKET_AT_FRONT|PACKET_COMPRESSED on a fresh context. The
+        // fixture prepends the equivalent RFC 2118 header
+        // (FRONT|COMPRESSED, count 0 -> 0x60 0x00); the FreeRDP blob
+        // itself carries no packet header.
+        "external_freerdp_bells",
     ] {
         let packet = fixture(&format!("{name}.pkt"));
         let expected = fixture(&format!("{name}.expected"));

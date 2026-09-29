@@ -88,6 +88,63 @@ fn test_iso9660_joliet_image() {
 }
 
 #[test]
+fn test_iso9660_path_table() {
+    // All three bsdtar fixtures carry the same 4-entry type-L path
+    // table (ECMA-119 §9.4): root + ISO_TREE + SUB + DEEP.
+    for bytes in [PLAIN, RR, JOLIET] {
+        let img = iso9660::decode::decode(bytes).unwrap();
+        let pt = &img.path_table;
+        assert_eq!(pt.len(), 4);
+        // record 1 is the root, self-parented, identifier 0x00
+        assert_eq!(pt[0].name, [0]);
+        assert_eq!(pt[0].parent, 1);
+        let names: Vec<&[u8]> = pt[1..].iter().map(|e| e.name.as_slice()).collect();
+        assert_eq!(
+            names,
+            [
+                b"ISO_TREE".as_slice(),
+                b"SUB".as_slice(),
+                b"DEEP".as_slice()
+            ]
+        );
+        assert_eq!((pt[1].parent, pt[2].parent, pt[3].parent), (1, 2, 3));
+        // parent indices always point at an earlier record
+        for (i, e) in pt.iter().enumerate().skip(1) {
+            assert!((e.parent as usize) <= i, "entry {i} parent out of range");
+        }
+        // each extent names a directory whose "." record points
+        // back at the same extent (cross-check vs. the tree walk)
+        for e in pt {
+            let off = e.extent as usize * 2048;
+            let rec = &bytes[off..off + 34];
+            assert_eq!(u32::from_le_bytes(rec[2..6].try_into().unwrap()), e.extent);
+            assert_eq!(u32::from_be_bytes(rec[6..10].try_into().unwrap()), e.extent);
+            assert_eq!(rec[25] & 0x02, 0x02, "path table extent is not a directory");
+            assert_eq!(rec[32], 1, "first record is not \".\"");
+        }
+    }
+    // path table directory names match the walked directory tree
+    // (primary-tree d-characters, same set as entry leaf names)
+    let img = iso9660::decode::decode(PLAIN).unwrap();
+    let mut walked: Vec<&str> = img
+        .entries
+        .iter()
+        .filter(|e| e.kind == iso9660::decode::IsoKind::Directory)
+        .map(|e| e.name.rsplit('/').next().unwrap())
+        .collect();
+    walked.sort_unstable();
+    let mut table: Vec<&[u8]> = img.path_table[1..]
+        .iter()
+        .map(|e| e.name.as_slice())
+        .collect();
+    table.sort_unstable();
+    assert_eq!(
+        table,
+        walked.iter().map(|s| s.as_bytes()).collect::<Vec<&[u8]>>()
+    );
+}
+
+#[test]
 fn test_iso9660_codec_trait() {
     use archive::traits::{ArchiveDecode, ArchiveEntry};
     let codec = iso9660::Iso9660Codec;

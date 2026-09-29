@@ -12,7 +12,7 @@
 
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
-| format v5 / v6 | [ZIM file format wiki](https://wiki.openzim.org/wiki/ZIM_file_format) | ✅ | ✅ | write は v5 のみ (extended cluster / redirect / deprecated entry は出力しない) |
+| format v5 / v6 | [ZIM file format wiki](https://wiki.openzim.org/wiki/ZIM_file_format) | ✅ | ✅ | v5/v6 とも write 可。extended cluster (bit5 + 8B offset table)・redirect (0xffff)・deprecated (0xfffe/0xfffd) dirent の emit に対応 (`ZimEncoder::with_version`/`with_extended_cluster`/`add_redirect`/`add_deprecated`) |
 | compression none (1) / xz-lzma2 (4) / zstd (5) | [ZIM file format wiki](https://wiki.openzim.org/wiki/ZIM_file_format) | ✅ | — | |
 | compression zlib (2) / bzip2 (3) | [ZIM file format wiki](https://wiki.openzim.org/wiki/ZIM_file_format) | ❌ | — | legacy id → `Unsupported` |
 | extended cluster (8B offset) | [ZIM file format wiki](https://wiki.openzim.org/wiki/ZIM_file_format) | ✅ | — | cluster info bit5 |
@@ -60,6 +60,7 @@
 | 21a | split archive (.zimaa/.zimab...) の decode | Split ZIM archives | ✅ | `decode_parts(&[&[u8]])` が part を連結して decode (分割可能位置は cluster 境界のみだが reader は任意境界でも受理)。`split_parts_roundtrip`, `split_parts_rejects_empty` |
 | 21b | title pointer list 順の entry 列 API | Title Pointer List | ✅ | `decode_title_order` が titlePtrPos の u32 index 列でソート (欠落/不正なら path 順)。`title_order_uses_title_pointer_list`, `title_order_falls_back_on_invalid_list` |
 | 21c | MIME type メタデータと title の公開 | MIME Type List, Directory Entries | ✅ | `ZimEntry::mime_type` (MIME list 参照、redirect は空) / `ZimEntry::title` (空 title は bare path にフォールバック、未終端の切り詰め title は空として扱う許容動作)。`exposes_mime_type_and_title`, `resolves_redirect` |
+| 25 | v6 write / extended cluster の出力、redirect・deprecated entry の出力 | Directory Entries, Clusters | ✅ | `ZimVersion::{V5,V6}` + `with_extended_cluster` + `add_redirect` + `add_deprecated`。`v6_extended_cluster_roundtrip`, `v6_plain_cluster_roundtrip`, `extended_cluster_requires_v6`, `redirect_roundtrip`, `redirect_missing_target_rejected`, `redirect_to_non_content_rejected`, `deprecated_entries_skipped_on_decode`, `v6_extended_with_redirect_and_deprecated`, `test_zim_encoder_v6_extended_with_redirect` |
 
 ### Intentional scope (実装対象外)
 
@@ -67,4 +68,3 @@
 |---|------|----------|-----------|------|
 | 22 | fulltext index 検索 API | openzim wiki (format doc 外) | ❌ | title pointer list 順の列挙は `decode_title_order` で提供 (21b)。fulltext index そのものの検索は対象外 |
 | 26 | `X/listing/titleordered/v0` title index | Title Pointer List (titlePtrPos は obsolete 注記あり) | ❌ | titlePtrPos ベースの `decode_title_order` のみ対応。仮想 dirent 経由の title index は対象外 |
-| 25 | v6 write / extended cluster の出力、redirect・deprecated entry の出力 | Directory Entries, Clusters | ❌ | write は v5 content entry のみ |

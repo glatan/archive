@@ -792,6 +792,160 @@ mod tests {
     }
 
     #[test]
+    fn test_dynamic_huffman_all_literals_empty_dist_tree() {
+        // RFC 1951 §3.2.7: a dynamic Huffman block whose distance code lengths
+        // are all zero (empty distance tree) must be accepted as an
+        // all-literals stream, as long as no length/distance pair is used.
+        //
+        // Same lit/len alphabet as test_dynamic_huffman_direct
+        // ('A' = length 1, EOB = length 1), but HDIST=2 (3 distance codes)
+        // with every distance code length set to 0 via code 17.
+        //
+        // Code length alphabet (same as test_dynamic_huffman_direct):
+        //   code 17 (repeat 0 for 3-10):  Huffman length 1 → MSB code "0"
+        //   code 18 (repeat 0 for 11-138): Huffman length 2 → MSB code "11"
+        //   code  1 (literal code length): Huffman length 2 → MSB code "10"
+        let mut w = TestBitWriter::new();
+
+        // Block header
+        w.write_bits(1, 1); // BFINAL = 1
+        w.write_bits(0b10, 2); // BTYPE = 10 (dynamic Huffman)
+
+        // HLIT = 0 → 257 lit/len codes (symbols 0..=256)
+        w.write_bits(0, 5);
+        // HDIST = 2 → 3 distance codes
+        w.write_bits(2, 5);
+        // HCLEN = 14 → 18 code length codes
+        w.write_bits(14, 4);
+
+        // Code length code lengths, 3 bits each, in CODE_LENGTH_ORDER:
+        // [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]
+        let cl_code_lengths: [u8; 18] = [
+            0, // index 0: code 16
+            1, // index 1: code 17
+            2, // index 2: code 18
+            0, // index 3: code 0
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // indices 4..16
+            2, // index 17: code 1
+        ];
+        for &len in &cl_code_lengths {
+            w.write_bits(len as u32, 3);
+        }
+
+        // Lit/len code lengths (257 symbols, 0..=256):
+        // symbols 0-64: 65 zeros via code 18
+        w.write_huffman(0b11, 2); // code 18
+        w.write_bits(54, 7); // extra: 65 - 11 = 54
+
+        // symbol 65 ('A'): code length 1
+        w.write_huffman(0b10, 2); // CL code for "1"
+
+        // symbols 66-255: 190 zeros = 138 + 52
+        w.write_huffman(0b11, 2); // code 18
+        w.write_bits(127, 7); // extra: 138 - 11 = 127
+        w.write_huffman(0b11, 2); // code 18
+        w.write_bits(41, 7); // extra: 52 - 11 = 41
+
+        // symbol 256 (EOB): code length 1
+        w.write_huffman(0b10, 2); // CL code for "1"
+
+        // Distance code lengths (3 codes): all zero via code 17
+        // (repeat 0 for 3 times, extra = 3 - 3 = 0). This produces an empty
+        // distance Huffman table, which is legal per RFC 1951 §3.2.7 when the
+        // stream contains no length/distance pairs.
+        w.write_huffman(0b0, 1); // code 17
+        w.write_bits(0, 3); // extra: 3 - 3 = 0
+
+        // Lit/len Huffman tree (canonical, 2 symbols both length 1):
+        //   symbol 65 ('A'): code "0";  symbol 256 (EOB): code "1"
+        w.write_huffman(0b0, 1); // 'A'
+        w.write_huffman(0b1, 1); // EOB
+
+        let result = decode(&w.finish()).unwrap();
+        assert_eq!(result, b"A");
+    }
+
+    #[test]
+    fn test_dynamic_huffman_empty_dist_tree_rejects_match() {
+        // Companion to test_dynamic_huffman_all_literals_empty_dist_tree:
+        // an empty distance tree is only legal while unused. A stream that
+        // emits a length/distance pair must be rejected.
+        //
+        // Lit/len alphabet: 'A' = length 2, EOB = length 1, sym 257 = length 2.
+        // Distance codes (3): all lengths zero → empty distance table.
+        //
+        // Code length alphabet: symbols {1, 2, 17, 18} all Huffman length 2.
+        // Canonical MSB codes: 1 → "00", 2 → "01", 17 → "10", 18 → "11".
+        let mut w = TestBitWriter::new();
+
+        // Block header
+        w.write_bits(1, 1); // BFINAL = 1
+        w.write_bits(0b10, 2); // BTYPE = 10 (dynamic Huffman)
+
+        // HLIT = 1 → 258 lit/len codes (symbols 0..=257)
+        w.write_bits(1, 5);
+        // HDIST = 2 → 3 distance codes
+        w.write_bits(2, 5);
+        // HCLEN = 14 → 18 code length codes
+        w.write_bits(14, 4);
+
+        // Code length code lengths in CODE_LENGTH_ORDER
+        // [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15]:
+        //   code 17 = 2, code 18 = 2, code 2 = 2, code 1 = 2; all others 0.
+        let cl_code_lengths: [u8; 18] = [
+            0, // index 0: code 16
+            2, // index 1: code 17
+            2, // index 2: code 18
+            0, // index 3: code 0
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // indices 4..14
+            2, // index 15: code 2
+            0, // index 16: code 14
+            2, // index 17: code 1
+        ];
+        for &len in &cl_code_lengths {
+            w.write_bits(len as u32, 3);
+        }
+
+        // Lit/len code lengths (258 symbols, 0..=257):
+        // symbols 0-64: 65 zeros via code 18
+        w.write_huffman(0b11, 2); // code 18
+        w.write_bits(54, 7); // extra: 65 - 11 = 54
+
+        // symbol 65 ('A'): code length 2
+        w.write_huffman(0b01, 2); // CL code for "2"
+
+        // symbols 66-255: 190 zeros = 138 + 52
+        w.write_huffman(0b11, 2); // code 18
+        w.write_bits(127, 7); // extra: 138 - 11 = 127
+        w.write_huffman(0b11, 2); // code 18
+        w.write_bits(41, 7); // extra: 52 - 11 = 41
+
+        // symbol 256 (EOB): code length 1
+        w.write_huffman(0b00, 2); // CL code for "1"
+
+        // symbol 257 (length 3): code length 2
+        w.write_huffman(0b01, 2); // CL code for "2"
+
+        // Distance code lengths (3 codes): all zero via code 17
+        w.write_huffman(0b10, 2); // code 17
+        w.write_bits(0, 3); // extra: 3 - 3 = 0
+
+        // Lit/len canonical codes: EOB (len 1) → "0"; 'A' (len 2) → "10";
+        // symbol 257 (len 2) → "11".
+        w.write_huffman(0b10, 2); // literal 'A'
+        w.write_huffman(0b11, 2); // length symbol 257 (len 3, 0 extra bits)
+        // Decoder now attempts dist_table.decode() on the empty table.
+
+        let data = w.finish();
+        let result = decode(&data);
+        assert!(
+            matches!(result, Err(Error::InvalidData(msg)) if msg.contains("empty Huffman table")),
+            "expected InvalidData about empty Huffman table, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
     fn test_huffman_rfc1951_example() {
         // RFC 1951 §3.2.2 example: bit lengths [3,3,3,3,3,2,4,4]
         // Expected codes (MSB-first): A=010, B=011, C=100, D=101, E=110, F=00, G=1110, H=1111

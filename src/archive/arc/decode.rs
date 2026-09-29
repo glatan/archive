@@ -8,7 +8,8 @@
 //!   (stored). Methods 3 (packed/RLE), 4 (squeezed), 5-8 (crunched /
 //!   non-ASCII crunched / crushed / distilled) and any higher method
 //!   are rejected with [`Error::Unsupported`];
-//! - writing: method 2 (stored) entries only.
+//! - writing: method 1 (obsolete unpacked) and method 2 (stored)
+//!   entries.
 //!
 //! Layout: each member starts with `0x1A` and a method byte; method 0
 //! marks end of archive. Method-1 records are
@@ -174,6 +175,56 @@ mod tests {
         assert_eq!(e[0].name, "F.B");
         assert_eq!(e[0].data, b"xyz");
         assert_eq!(e[0].crc16, None);
+    }
+
+    #[test]
+    fn method1_roundtrip() {
+        let mut enc = crate::archive::arc::encode::ArcEncoder::new();
+        enc.add_file_with_method("OLD.TXT", b"raw data", 0, 0, 1)
+            .unwrap();
+        enc.add_file("NEW.TXT", b"stored", 0, 0).unwrap();
+        let e = decode(&enc.finish()).unwrap();
+        assert_eq!(e.len(), 2);
+        assert_eq!(e[0].name, "OLD.TXT");
+        assert_eq!(e[0].method, 1);
+        assert_eq!(e[0].crc16, None);
+        assert_eq!(e[0].data, b"raw data");
+        assert_eq!(e[1].name, "NEW.TXT");
+        assert_eq!(e[1].method, 2);
+        assert!(e[1].crc16.is_some());
+    }
+
+    #[test]
+    fn method1_header_layout() {
+        // Method-1 record: marker + method=1 + name[13] + size u32le +
+        // data. No date/time/CRC-16/length fields follow the size.
+        let mut enc = crate::archive::arc::encode::ArcEncoder::new();
+        enc.add_file_with_method("F.B", b"xyz", 0x1234, 0x5678, 1)
+            .unwrap();
+        let a = enc.finish();
+        assert_eq!(a[0], MARKER);
+        assert_eq!(a[1], 1);
+        let mut field = [0u8; NAME_LEN];
+        field[..3].copy_from_slice(b"F.B");
+        assert_eq!(&a[2..2 + NAME_LEN], &field);
+        assert_eq!(&a[2 + NAME_LEN..2 + NAME_LEN + 4], &3u32.to_le_bytes());
+        // Data immediately follows the size field, then terminator.
+        assert_eq!(&a[2 + NAME_LEN + 4..2 + NAME_LEN + 7], b"xyz");
+        assert_eq!(&a[2 + NAME_LEN + 7..], &[MARKER, 0]);
+        assert_eq!(a.len(), 2 + NAME_LEN + 4 + 3 + 2);
+    }
+
+    #[test]
+    fn rejects_unsupported_encode_method() {
+        let mut e = crate::archive::arc::encode::ArcEncoder::new();
+        assert!(matches!(
+            e.add_file_with_method("F", b"", 0, 0, 3),
+            Err(Error::Unsupported(_))
+        ));
+        assert!(matches!(
+            e.add_file_with_method("F", b"", 0, 0, 0),
+            Err(Error::Unsupported(_))
+        ));
     }
 
     #[test]

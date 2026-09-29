@@ -50,7 +50,7 @@
 | ❌ 未対応 | 0 |
 | **合計** | **17** |
 
-variant 表の btoa (encode ❌) は集計対象外の intentional scope。
+variant 表の btoa (decode ⚠️※ / encode ❌) は集計対象外の intentional scope。`y` 省略と `xbtoa Begin/End` 行はいずれも非対応のまま (`y` は `Error::Unsupported` で明示拒否)。
 
 ## 出典 / 検証メモ
 
