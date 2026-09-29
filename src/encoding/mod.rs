@@ -6,7 +6,7 @@
 //! input. Format-specific scope details live in each module doc comment and
 //! in `docs/spec/`.
 
-/// uuencode (POSIX.1-2017 historical algorithm).
+/// uuencode (POSIX.1-2017 historical and Base64 algorithms).
 #[cfg(feature = "uuencode")]
 pub mod uuencode;
 

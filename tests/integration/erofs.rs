@@ -287,3 +287,110 @@ fn test_erofs_compressed_microlzma() {
 fn test_erofs_compressed_multi_algorithm() {
     check_compressed_fixture(FIXTURE_MULTI, "lz4hc+microlzma");
 }
+
+// ============================================================
+// ztailpacking / fragments / xattr images produced by upstream
+// mkfs.erofs (erofs-utils 1.9.4). Common source tree:
+//   big.txt  = "The quick brown fox jumps over the lazy dog. " x3200
+//              (user.comment="fixture hello xattr", user.rating="7")
+//   small.txt= "small file content for tail packing\n" x37
+//   tiny.txt = "tiny frag\n" (user.empty="")
+//   mid.bin  = bytes i % 251 for 4173 (security.selinux="system_u:object_r:test_t:s0")
+//   sub/nested.txt = "nested " x200 (user.tag="nestedxattr")
+//   link.txt -> "big.txt"
+// ============================================================
+
+/// mkfs.erofs -zlz4 -Eztailpacking : inline tail-packing (COMPACT).
+const FIXTURE_ZTAILPACKING: &[u8] = include_bytes!("../fixtures/erofs/mkfs.ztailpacking.img");
+/// mkfs.erofs -zlz4 -Efragments : packed-inode fragment tails (FULL).
+const FIXTURE_FRAGMENTS: &[u8] = include_bytes!("../fixtures/erofs/mkfs.fragments.img");
+/// mkfs.erofs -zlz4 -Eall-fragments : whole-file packed-inode records.
+const FIXTURE_ALLFRAGMENTS: &[u8] = include_bytes!("../fixtures/erofs/mkfs.all-fragments.img");
+/// mkfs.erofs -zlz4 -Eztailpacking,fragments : combined feature set.
+const FIXTURE_TAILFRAG: &[u8] = include_bytes!("../fixtures/erofs/mkfs.tailfrag.img");
+
+fn check_fixture_tree(img: &erofs::decode::ErofsImage) {
+    let big = find(img, "big.txt");
+    assert_eq!(big.kind, erofs::decode::ErofsKind::File);
+    assert_eq!(big.data.len(), 144000);
+    let chunk = b"The quick brown fox jumps over the lazy dog. ";
+    let want: Vec<u8> = chunk.repeat(3200);
+    assert_eq!(big.data, want);
+
+    let small = find(img, "small.txt");
+    assert_eq!(small.data.len(), 36 * 37);
+    assert!(
+        small
+            .data
+            .starts_with(b"small file content for tail packing\n")
+    );
+
+    assert_eq!(find(img, "tiny.txt").data, b"tiny frag\n");
+    assert_eq!(find(img, "mid.bin").data.len(), 4173);
+    assert_eq!(find(img, "sub/nested.txt").data.len(), 200 * 7);
+    assert_eq!(find(img, "link.txt").data, b"big.txt");
+}
+
+fn xattr<'a>(e: &'a erofs::decode::ErofsEntry, name: &str) -> Option<&'a [u8]> {
+    e.xattrs
+        .iter()
+        .find(|x| x.name == name)
+        .map(|x| x.value.as_slice())
+}
+
+fn check_fixture_xattrs(img: &erofs::decode::ErofsImage) {
+    let big = find(img, "big.txt");
+    assert_eq!(big.xattrs.len(), 2);
+    assert_eq!(
+        xattr(big, "user.comment"),
+        Some(b"fixture hello xattr".as_slice())
+    );
+    assert_eq!(xattr(big, "user.rating"), Some(b"7".as_slice()));
+    let mid = find(img, "mid.bin");
+    assert_eq!(
+        xattr(mid, "security.selinux"),
+        Some(b"system_u:object_r:test_t:s0".as_slice())
+    );
+    assert_eq!(
+        xattr(find(img, "tiny.txt"), "user.empty"),
+        Some(b"".as_slice())
+    );
+    assert_eq!(
+        xattr(find(img, "sub/nested.txt"), "user.tag"),
+        Some(b"nestedxattr".as_slice())
+    );
+}
+
+#[test]
+fn test_erofs_ztailpacking() {
+    let img = erofs::decode::decode(FIXTURE_ZTAILPACKING).unwrap();
+    assert_eq!(img.superblock.packed_nid, 0);
+    check_fixture_tree(&img);
+    check_fixture_xattrs(&img);
+}
+
+#[test]
+fn test_erofs_fragments() {
+    let img = erofs::decode::decode(FIXTURE_FRAGMENTS).unwrap();
+    assert_ne!(img.superblock.packed_nid, 0);
+    check_fixture_tree(&img);
+    check_fixture_xattrs(&img);
+}
+
+#[test]
+fn test_erofs_all_fragments() {
+    // Every file data block lives inside the packed inode
+    // (Z_EROFS_FRAGMENT_INODE_BIT on each compressed inode).
+    let img = erofs::decode::decode(FIXTURE_ALLFRAGMENTS).unwrap();
+    assert_ne!(img.superblock.packed_nid, 0);
+    check_fixture_tree(&img);
+    check_fixture_xattrs(&img);
+}
+
+#[test]
+fn test_erofs_ztailpacking_fragments() {
+    let img = erofs::decode::decode(FIXTURE_TAILFRAG).unwrap();
+    assert_ne!(img.superblock.packed_nid, 0);
+    check_fixture_tree(&img);
+    check_fixture_xattrs(&img);
+}

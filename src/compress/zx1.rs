@@ -20,8 +20,13 @@
 //! reflected encoding centred on MAX_OFFSET+1; any decoded offset <= 0 is
 //! the end-of-stream marker.
 //!
+//! Streams produced with the `+N` prefix option can be decoded via
+//! [`decode_with_prefix`], which lets match offsets reach into
+//! caller-supplied external history.
+//!
 //! Backwards (`-b`) mode is outside the current scope.
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::Error;
@@ -85,6 +90,45 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 
 /// Decode a ZX1 stream with an output size limit.
 pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
+    decode_impl(input, &[], max_output)
+}
+
+/// Decode a ZX1 stream whose match offsets may reach into `prefix`,
+/// external history logically prepended to the output (the upstream
+/// `+N` prefix option).
+pub fn decode_with_prefix(input: &[u8], prefix: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_impl(input, prefix, usize::MAX)
+}
+
+/// Append `len` bytes copied `offset` back in the virtual history
+/// `prefix ++ out`.
+fn copy_match(
+    prefix: &[u8],
+    out: &mut Vec<u8>,
+    offset: usize,
+    len: usize,
+    max_output: usize,
+    msg: &'static str,
+) -> Result<(), Error> {
+    let avail = prefix.len() + out.len();
+    if offset == 0 || offset > avail {
+        return Err(Error::InvalidData(msg));
+    }
+    if out.len() + len > max_output {
+        return Err(Error::OutputLimitExceeded { limit: max_output });
+    }
+    for vpos in (avail - offset)..(avail - offset + len) {
+        let b = if vpos < prefix.len() {
+            prefix[vpos]
+        } else {
+            out[vpos - prefix.len()]
+        };
+        out.push(b);
+    }
+    Ok(())
+}
+
+fn decode_impl(input: &[u8], prefix: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
     if input.is_empty() {
         return Ok(Vec::new());
     }
@@ -110,17 +154,14 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
             // After literals: 0 = copy from last offset, 1 = new offset.
             if r.read_bit()? == 0 {
                 let len = r.elias()? as usize;
-                if last_offset > out.len() {
-                    return Err(Error::InvalidData("zx1: offset before start"));
-                }
-                if out.len() + len > max_output {
-                    return Err(Error::OutputLimitExceeded { limit: max_output });
-                }
-                let start = out.len() - last_offset;
-                for i in 0..len {
-                    let b = out[start + i];
-                    out.push(b);
-                }
+                copy_match(
+                    prefix,
+                    &mut out,
+                    last_offset,
+                    len,
+                    max_output,
+                    "zx1: offset before start",
+                )?;
                 literals = r.read_bit()? == 0;
                 continue;
             }
@@ -144,17 +185,14 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
         }
         last_offset = offset as usize;
         let len = r.elias()? as usize + 1;
-        if last_offset > out.len() {
-            return Err(Error::InvalidData("zx1: bad match offset"));
-        }
-        if out.len() + len > max_output {
-            return Err(Error::OutputLimitExceeded { limit: max_output });
-        }
-        let start = out.len() - last_offset;
-        for i in 0..len {
-            let b = out[start + i];
-            out.push(b);
-        }
+        copy_match(
+            prefix,
+            &mut out,
+            last_offset,
+            len,
+            max_output,
+            "zx1: bad match offset",
+        )?;
         literals = r.read_bit()? == 0;
     }
 }
@@ -316,6 +354,26 @@ mod tests {
     fn rt(data: &[u8]) {
         let enc = encode(data);
         assert_eq!(decode(&enc).unwrap(), data);
+    }
+
+    #[test]
+    fn decode_prefix_history() {
+        // literal 'a', then a distance-6 len-3 match reaching into the
+        // 5-byte prefix "HELLO", then EOF. Distance 6 uses the 1-byte
+        // offset form: byte = 256 - 2*6 = 0xf4.
+        let stream = [0x64, b'a', 0xf4, 0xff, 0xff];
+        assert!(decode(&stream).is_err());
+        assert_eq!(decode_with_prefix(&stream, b"HELLO").unwrap(), b"aHEL");
+    }
+
+    #[test]
+    fn decode_prefix_match_crosses_boundary() {
+        // literal 'a', distance 3 len 4: the match starts in the 2-byte
+        // prefix and continues into produced output.
+        //   bits: elias(1)=`0` | 'a' | `1` newoff | 0xfa |
+        //         len elias(3)=`1`,`1`,`0` | `1` EOF | 0xff 0xff
+        let stream = [0x74, b'a', 0xfa, 0xff, 0xff];
+        assert_eq!(decode_with_prefix(&stream, b"AB").unwrap(), b"aABaA");
     }
 
     #[test]

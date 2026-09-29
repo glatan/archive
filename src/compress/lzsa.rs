@@ -14,7 +14,14 @@
 //! decoder computes a positive distance via `dist = (stored ^ mask) + 1`.
 //! LZSA1 commands are `<O|LLL|MMMM>`; LZSA2 commands are `<XYZ|LL|MMM>`
 //! with a shared nibble stream spanning the block.
+//!
+//! Streams produced with the upstream `-D` dictionary option (matches
+//! reaching before the start of the decoded data) decode via
+//! [`decode_with_prefix`]; raw-block equivalents are
+//! [`decode_lzsa1_block_with_prefix`] and [`decode_lzsa2_block_with_prefix`].
+//! The backwards `-b` mode is outside the current scope.
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::Error;
@@ -35,6 +42,17 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 
 /// Decode an LZSA stream with an output size limit.
 pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
+    decode_impl(input, &[], max_output)
+}
+
+/// Decode an LZSA stream whose match offsets may reach into `prefix`,
+/// external history logically prepended to the output (the upstream
+/// `-D` dictionary option).
+pub fn decode_with_prefix(input: &[u8], prefix: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_impl(input, prefix, usize::MAX)
+}
+
+fn decode_impl(input: &[u8], prefix: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
     if input.is_empty() {
         return Ok(Vec::new());
     }
@@ -82,9 +100,9 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
             }
             out.extend_from_slice(block);
         } else if level2 {
-            decode_lzsa2_commands(block, &mut out, max_output, false)?;
+            decode_lzsa2_commands(block, &mut out, max_output, false, prefix)?;
         } else {
-            decode_lzsa1_commands(block, &mut out, max_output, false)?;
+            decode_lzsa1_commands(block, &mut out, max_output, false, prefix)?;
         }
     }
     Ok(out)
@@ -93,15 +111,61 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
 /// Decode a raw LZSA1 block (terminated by the EOD marker).
 pub fn decode_lzsa1_block(input: &[u8]) -> Result<Vec<u8>, Error> {
     let mut out = Vec::new();
-    decode_lzsa1_commands(input, &mut out, usize::MAX, true)?;
+    decode_lzsa1_commands(input, &mut out, usize::MAX, true, &[])?;
+    Ok(out)
+}
+
+/// Decode a raw LZSA1 block whose match offsets may reach into `prefix`,
+/// external history logically prepended to the output (the upstream
+/// `-D` dictionary option).
+pub fn decode_lzsa1_block_with_prefix(input: &[u8], prefix: &[u8]) -> Result<Vec<u8>, Error> {
+    let mut out = Vec::new();
+    decode_lzsa1_commands(input, &mut out, usize::MAX, true, prefix)?;
     Ok(out)
 }
 
 /// Decode a raw LZSA2 block (terminated by the EOD marker).
 pub fn decode_lzsa2_block(input: &[u8]) -> Result<Vec<u8>, Error> {
     let mut out = Vec::new();
-    decode_lzsa2_commands(input, &mut out, usize::MAX, true)?;
+    decode_lzsa2_commands(input, &mut out, usize::MAX, true, &[])?;
     Ok(out)
+}
+
+/// Decode a raw LZSA2 block whose match offsets may reach into `prefix`,
+/// external history logically prepended to the output (the upstream
+/// `-D` dictionary option).
+pub fn decode_lzsa2_block_with_prefix(input: &[u8], prefix: &[u8]) -> Result<Vec<u8>, Error> {
+    let mut out = Vec::new();
+    decode_lzsa2_commands(input, &mut out, usize::MAX, true, prefix)?;
+    Ok(out)
+}
+
+/// Append `len` bytes copied `distance` back in the virtual history
+/// `prefix ++ out`.
+fn copy_match(
+    prefix: &[u8],
+    out: &mut Vec<u8>,
+    distance: usize,
+    len: usize,
+    max_output: usize,
+    msg: &'static str,
+) -> Result<(), Error> {
+    let avail = prefix.len() + out.len();
+    if distance == 0 || distance > avail {
+        return Err(Error::InvalidData(msg));
+    }
+    if out.len() + len > max_output {
+        return Err(Error::OutputLimitExceeded { limit: max_output });
+    }
+    for vpos in (avail - distance)..(avail - distance + len) {
+        let b = if vpos < prefix.len() {
+            prefix[vpos]
+        } else {
+            out[vpos - prefix.len()]
+        };
+        out.push(b);
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +177,7 @@ fn decode_lzsa1_commands(
     out: &mut Vec<u8>,
     max_output: usize,
     raw: bool,
+    prefix: &[u8],
 ) -> Result<(), Error> {
     let mut pos = 0usize;
     loop {
@@ -216,17 +281,14 @@ fn decode_lzsa1_commands(
         }
         let _ = &mut m;
 
-        if distance > out.len() {
-            return Err(Error::InvalidData("lzsa1: bad match offset"));
-        }
-        if out.len() + len > max_output {
-            return Err(Error::OutputLimitExceeded { limit: max_output });
-        }
-        let start = out.len() - distance;
-        for i in 0..len {
-            let b = out[start + i];
-            out.push(b);
-        }
+        copy_match(
+            prefix,
+            out,
+            distance,
+            len,
+            max_output,
+            "lzsa1: bad match offset",
+        )?;
     }
 }
 
@@ -273,6 +335,7 @@ fn decode_lzsa2_commands(
     out: &mut Vec<u8>,
     max_output: usize,
     raw: bool,
+    prefix: &[u8],
 ) -> Result<(), Error> {
     let mut r = NibbleReader::new(input);
     let mut last_dist = 0usize;
@@ -360,17 +423,14 @@ fn decode_lzsa2_commands(
             }
         }
 
-        if distance == 0 || distance > out.len() {
-            return Err(Error::InvalidData("lzsa2: bad match offset"));
-        }
-        if out.len() + len > max_output {
-            return Err(Error::OutputLimitExceeded { limit: max_output });
-        }
-        let start = out.len() - distance;
-        for i in 0..len {
-            let b = out[start + i];
-            out.push(b);
-        }
+        copy_match(
+            prefix,
+            out,
+            distance,
+            len,
+            max_output,
+            "lzsa2: bad match offset",
+        )?;
     }
 }
 
@@ -813,6 +873,42 @@ mod tests {
         let raw = [0xef, b'a', 0xf0, 232];
         assert_eq!(decode_lzsa2_block(&raw).unwrap(), b"a");
         assert!(decode_lzsa2_block(&raw[..2]).is_err());
+    }
+
+    #[test]
+    fn decode_lzsa1_block_with_dict() {
+        // token 0x10: L=1 'a', 1-byte offset 0xfa (distance 6 reaches
+        // into the 5-byte dictionary "HELLO"), match len 3; then EOD.
+        let raw = [0x10, b'a', 0xfa, 0x0f, 0x00, 238, 0x00, 0x00];
+        assert!(decode_lzsa1_block(&raw).is_err());
+        assert_eq!(
+            decode_lzsa1_block_with_prefix(&raw, b"HELLO").unwrap(),
+            b"aHEL"
+        );
+    }
+
+    #[test]
+    fn decode_lzsa2_block_with_dict() {
+        // token 0x29: XYZ=001 L=1 M=1; 'a'; offset nibble 0xd ->
+        // distance 6, match len 3; then rep-match token 0xe7 +
+        // nibble 15 + byte 232 = EOD.
+        let raw = [0x29, b'a', 0xdf, 0xe7, 0xe8];
+        assert!(decode_lzsa2_block(&raw).is_err());
+        assert_eq!(
+            decode_lzsa2_block_with_prefix(&raw, b"HELLO").unwrap(),
+            b"aHEL"
+        );
+    }
+
+    #[test]
+    fn decode_stream_with_dict() {
+        // LZSA1 frame: one command = literal 'a' + match distance 6
+        // len 3 reaching into the dictionary.
+        let stream = [
+            0x7b, 0x9e, 0x00, 0x03, 0x00, 0x00, 0x10, b'a', 0xfa, 0x00, 0x00, 0x00,
+        ];
+        assert!(decode(&stream).is_err());
+        assert_eq!(decode_with_prefix(&stream, b"HELLO").unwrap(), b"aHEL");
     }
 
     #[test]

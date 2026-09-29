@@ -60,18 +60,19 @@
 | 32 | Joliet ツリーは primary ツリーで Rock Ridge 名が得られなかった場合のみ使用 | 優先順位設計 | ✅ | RR fixture が RR 名で decode されることで確認 |
 | 41 | UTF-16 surrogate ペア・Joliet level 3 超の UCS-2 拡張 | Joliet spec (UCS-2 規定 + 規格外入力の防御) | ✅ | `decode_ucs2` が `char::decode_utf16` で非 BMP を合成 (孤立 surrogate は `U+FFFD`)。`joliet_surrogate_pair_names` |
 | 42 | Path Table の読み出し | ECMA-119 §8.4, §9.2 | ✅ | type-L path table を `PathTableEntry` として parse・`IsoImage.path_table` で公開 (欠落・範囲外は空で寛容、木走査が authoritative)。`path_table_matches_tree`, `path_table_absent_or_bad_extent_is_tolerated`, `test_iso9660_path_table` |
+| 33 | multi-extent file (File Flags bit7: >4GiB 分割記録) | ECMA-119 §9.1.6 Table 10, §9.2 | ✅ | 同一 File Identifier の連続レコードをグループ化し extent を連結 (flags/unit/gap 不一致・未終端は reject)。`multi_extent_file`, `multi_extent_rejects_unterminated` |
+| 34 | interleaved file (file unit size / interleave gap ≠ 0) | ECMA-119 §6.4.3, §9.1.7/8 | ✅ | unit ブロックを (unit+gap) 間隔で読み連結。`interleaved_file`, `interleave_gap_without_unit_rejected` |
+| 39 | RRIP `PN`/`CL`/`RE` (PL は informational で読み飛ばし) | RRIP 1.12 §4.1.2, §4.1.5 | ✅ | `dev_t` を `IsoEntry` に公開、CL で relocated dir の実体 walk、RE 複製は列挙スキップ。`rr_pn_device`, `rr_cl_re_relocated_dir`, `rr_cl_rejects_bad_target` |
 
 ## 意図的な scope 制約
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 33 | multi-extent file (flags bit7: >4GiB 分割記録) | ❌ intentional scope | `Error::Unsupported` |
-| 34 | interleaved file (file unit size / interleave gap ≠ 0) | ❌ intentional scope | `Error::Unsupported`。Video-CD 向け |
 
 | 36 | El Torito boot catalog / Boot Record の解釈 | ❌ intentional scope | VD type 0 は読み飛ばし |
 | 37 | extended attribute record の内容解釈 | ❌ intentional scope | extent 開始ブロックへの加算のみ (読み飛ばし) |
 | 38 | multi-session / UDF bridge / HFS ハイブリッドの別ツリー | ❌ intentional scope | primary + Joliet SVD のみ |
-| 39 | RRIP `PN`/`CL`/`PL`/`RE`/`RR` 以外の残エントリ (hardlink dev/inode 等) | ❌ intentional scope | 読み飛ばし (decode に必須でない)。`NM`/`PX`/`SL`/`TF`/`CE`/`SP`/`ST`/`ER` 系のみ処理 |
+| 39b | RRIP `PN`/`CL`/`RE`/`NM`/`PX`/`SL`/`TF`/`CE`/`SP`/`ST`/`ER` 以外の残エントリ (hardlink dev/inode 等) | ❌ intentional scope | 読み飛ばし (decode に必須でない) |
 | 40 | ISO 9660 write | ❌ intentional scope | mkisofs/xorriso の領域 |
 
 ## Fixture / interop

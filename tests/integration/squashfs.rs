@@ -69,6 +69,93 @@ fn test_squashfs_decode_mksquashfs_image() {
     }
 }
 
+// spec #39/#41: decode a real mksquashfs image carrying an xattr table and,
+// for a large directory, §6.1 directory index entries. Skips gracefully when
+// mksquashfs is unavailable or the filesystem rejects user xattrs.
+#[test]
+fn test_squashfs_decode_xattrs_and_dir_index() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_sqfs_xattr_{uniq}"));
+    let src_dir = dir.join("src");
+    let big_dir = src_dir.join("bigdir");
+    std::fs::create_dir_all(&big_dir).unwrap();
+    std::fs::write(src_dir.join("hello.txt"), b"hello squashfs").unwrap();
+    // Enough entries to force an extended directory inode with an index.
+    for i in 0..400 {
+        std::fs::write(big_dir.join(format!("file_{i:04}.txt")), b"x").unwrap();
+    }
+
+    // Best effort: attach a user xattr; tmpfs/overlayfs may reject it.
+    let xattr_set = Command::new("setfattr")
+        .args(["-n", "user.comment", "-v", "integration-test"])
+        .arg(src_dir.join("hello.txt"))
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    let image_path = dir.join("test.sqfs");
+    let output = Command::new("mksquashfs")
+        .arg(&src_dir)
+        .arg(&image_path)
+        .args(["-comp", "gzip", "-b", "4096", "-noappend", "-no-progress"])
+        .output();
+    let Ok(result) = output else {
+        let _ = std::fs::remove_dir_all(&dir);
+        return;
+    };
+    assert!(
+        result.status.success(),
+        "mksquashfs failed: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let image = std::fs::read(&image_path).unwrap();
+    let decoded = squashfs::decode::decode(&image).unwrap();
+
+    // Big directory was decoded and, when mksquashfs emitted an extended
+    // directory inode, its parsed index entries reference real children.
+    let big = decoded
+        .entries
+        .iter()
+        .find(|e| e.name == "bigdir")
+        .expect("bigdir missing");
+    if !big.dir_index.is_empty() {
+        for entry in &big.dir_index {
+            assert!(
+                decoded
+                    .entries
+                    .iter()
+                    .any(|e| e.name == format!("bigdir/{}", entry.name)),
+                "index entry names a missing child: {}",
+                entry.name
+            );
+        }
+    }
+
+    if xattr_set {
+        let hello = decoded
+            .entries
+            .iter()
+            .find(|e| e.name == "hello.txt")
+            .expect("hello.txt missing");
+        assert!(
+            hello
+                .xattrs
+                .iter()
+                .any(|x| x.name == "user.comment" && x.value == b"integration-test"),
+            "user.comment xattr not decoded: {:?}",
+            hello.xattrs
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn test_squashfs_encoder_roundtrip() {
     let mut enc = squashfs::encode::SquashfsEncoder::new();

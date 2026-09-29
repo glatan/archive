@@ -322,7 +322,8 @@ mod tests {
 
     #[test]
     fn record_id_gets_brackets() {
-        let es = decode::decode(&encode(&[rec("resource", None, b"x")]).unwrap()).unwrap();
+        let es =
+            decode::decode(&encode(&[rec("resource", Some("http://e/"), b"x")]).unwrap()).unwrap();
         assert_eq!(es[0].record_id, "<urn:uuid:enc-1>");
         // Already-bracketed IDs pass through unchanged.
         let mut r = rec("resource", None, b"x");

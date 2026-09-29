@@ -48,6 +48,8 @@ fn cleanup(dir: &std::path::Path) {
 fn test_cramfs_decode_mkfs_image() {
     let (dir, image) = mkfs_image();
     let img = cramfs::decode::decode(&image).unwrap();
+    // mkfs.cramfs always emits FSID_VERSION_2 and a valid fsid.crc.
+    assert_eq!(img.fsid_crc_ok, Some(true));
 
     let find = |path: &str| {
         img.entries
@@ -65,6 +67,18 @@ fn test_cramfs_decode_mkfs_image() {
     assert_eq!(link.data, b"dir1/file.bin");
     assert_eq!(find("dir1").kind, cramfs::decode::CramfsKind::Directory);
     assert_eq!(find("dir1/sub").kind, cramfs::decode::CramfsKind::Directory);
+    cleanup(&dir);
+}
+
+#[test]
+fn test_cramfs_fsid_crc_mismatch_is_informational() {
+    let (dir, mut image) = mkfs_image();
+    // Corrupt the fsid.crc field itself: the image must still decode
+    // (the kernel ignores fsid), only the informational flag flips.
+    image[32] ^= 0xFF;
+    let img = cramfs::decode::decode(&image).unwrap();
+    assert_eq!(img.fsid_crc_ok, Some(false));
+    assert!(!img.entries.is_empty());
     cleanup(&dir);
 }
 

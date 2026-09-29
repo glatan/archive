@@ -7,11 +7,14 @@
 //! relative to the current position (VCD_HERE), or against the near/same
 //! address caches defined by the format.
 //!
+//! A window indicator of `VCD_TARGET` (RFC 3284 Section 4.2) selects the
+//! window's source segment from the already-decoded target file rather than
+//! from the caller-supplied source; address-space and COPY semantics are
+//! identical to `VCD_SOURCE`.
+//!
 //! Intentional scope (matching the reference xdelta3 implementation, which
 //! also leaves these unimplemented):
 //!
-//! - `VCD_TARGET` source windows (source segment taken from the previously
-//!   decoded target file) are rejected.
 //! - `VCD_CODETABLE` application-defined code tables are rejected; only the
 //!   default code table (`s_near = 4`, `s_same = 3`) is supported.
 //! - `VCD_DECOMPRESS` secondary compression of the data/instruction/address
@@ -405,7 +408,16 @@ pub fn decode_bounded(source: &[u8], input: &[u8], max_output: usize) -> Result<
                 .get(sp..end)
                 .ok_or(Error::InvalidData("vcdiff: source out of range"))?
         } else if win & VCD_TARGET != 0 {
-            return Err(Error::Unsupported("vcdiff: VCD_TARGET window"));
+            // RFC 3284 Section 4.2: the source segment addresses
+            // already-decoded target output instead of the caller-supplied
+            // source. Address-space and COPY semantics are unchanged.
+            let size = read_varint(input, &mut pos)?;
+            let tp = read_varint(input, &mut pos)?;
+            let end = tp
+                .checked_add(size)
+                .ok_or(Error::InvalidData("vcdiff: target position overflow"))?;
+            out.get(tp..end)
+                .ok_or(Error::InvalidData("vcdiff: target source out of range"))?
         } else {
             &[]
         };
@@ -700,10 +712,6 @@ mod tests {
         // VCD_CODETABLE
         d[4] = 2;
         assert!(matches!(decode(&d), Err(Error::Unsupported(_))));
-        // VCD_TARGET window
-        let mut d = encode(b"x");
-        d[5] = 2;
-        assert!(matches!(decode(&d), Err(Error::Unsupported(_))));
     }
 
     #[test]
@@ -769,6 +777,106 @@ mod tests {
         w.extend_from_slice(&d1[5..]);
         w.extend_from_slice(&d2[5..]);
         assert_eq!(decode(&stream(&w)).unwrap(), b"first second");
+    }
+
+    /// Assemble a window: indicator, optional source segment (size,
+    /// position), then the delta body length and body.
+    fn window(win_ind: u8, seg: Option<(usize, usize)>, enc: &[u8]) -> Vec<u8> {
+        let mut w = Vec::new();
+        w.push(win_ind);
+        if let Some((size, pos)) = seg {
+            write_varint(&mut w, size);
+            write_varint(&mut w, pos);
+        }
+        write_varint(&mut w, enc.len());
+        w.extend_from_slice(enc);
+        w
+    }
+
+    #[test]
+    fn vcd_target_window() {
+        // RFC 3284 Section 4.2: window 2 takes its source segment from the
+        // already-decoded target output of window 1.
+        let d1 = encode(b"abcdefgh");
+        let mut w = Vec::new();
+        w.extend_from_slice(&d1[5..]);
+        let enc: &[u8] = &[
+            8, // target_len
+            0, // delta indicator
+            0, 2, 1, // data / inst / addr lengths
+            19, 8, // COPY mode 0, size coded separately = 8
+            0, // addr = source[0]
+        ];
+        w.extend_from_slice(&window(VCD_TARGET, Some((8, 0)), enc));
+        assert_eq!(decode(&stream(&w)).unwrap(), b"abcdefghabcdefgh");
+    }
+
+    #[test]
+    fn vcd_target_segment_offset() {
+        // The target source segment may start at a nonzero position.
+        let d1 = encode(b"abcdef");
+        let mut w = Vec::new();
+        w.extend_from_slice(&d1[5..]);
+        let enc: &[u8] = &[
+            3, // target_len
+            0, // delta indicator
+            0, 2, 1, // data / inst / addr lengths
+            19, 3, // COPY mode 0, size coded separately = 3
+            0, // addr = source[0] -> "cde"
+        ];
+        w.extend_from_slice(&window(VCD_TARGET, Some((3, 2)), enc));
+        assert_eq!(decode(&stream(&w)).unwrap(), b"abcdefcde");
+    }
+
+    #[test]
+    fn vcd_target_self_copy_overlap() {
+        // Within a VCD_TARGET window, a COPY may still reference the
+        // window's own output with overlap (legal per RFC 3284).
+        let d1 = encode(b"ab");
+        let mut w = Vec::new();
+        w.extend_from_slice(&d1[5..]);
+        let enc: &[u8] = &[
+            5, // target_len = 1 ADD + 4 COPY
+            0, // delta indicator
+            1, 1, 1,    // data / inst / addr lengths
+            b'x', // data
+            163,  // combined entry: ADD 1 + COPY 4 mode 0
+            2,    // addr = source_len -> target[0], overlaps itself
+        ];
+        w.extend_from_slice(&window(VCD_TARGET, Some((2, 0)), enc));
+        assert_eq!(decode(&stream(&w)).unwrap(), b"abxxxxx");
+    }
+
+    #[test]
+    fn rejects_target_source_out_of_range() {
+        // The VCD_TARGET segment must lie within already-decoded output.
+        let d1 = encode(b"ab");
+        let mut w = Vec::new();
+        w.extend_from_slice(&d1[5..]);
+        let enc: &[u8] = &[1, 0, 1, 1, 0, b'z', 2];
+        w.extend_from_slice(&window(VCD_TARGET, Some((8, 0)), enc));
+        assert!(matches!(decode(&stream(&w)), Err(Error::InvalidData(_))));
+
+        // A leading VCD_TARGET window has no prior output to draw from.
+        let w2 = window(VCD_TARGET, Some((1, 0)), enc);
+        assert!(matches!(decode(&stream(&w2)), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn rejects_target_copy_spanning_boundary() {
+        // The same source/target boundary rule as VCD_SOURCE applies.
+        let d1 = encode(b"abc");
+        let mut w = Vec::new();
+        w.extend_from_slice(&d1[5..]);
+        let enc: &[u8] = &[
+            4, // target_len
+            0, // delta indicator
+            0, 1, 1,  // data / inst / addr lengths
+            20, // COPY mode 0 size 4
+            1,  // addr 1: spans source end (3) / target start
+        ];
+        w.extend_from_slice(&window(VCD_TARGET, Some((3, 0)), enc));
+        assert!(matches!(decode(&stream(&w)), Err(Error::InvalidData(_))));
     }
 
     #[test]

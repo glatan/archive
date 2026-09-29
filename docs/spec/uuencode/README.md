@@ -11,7 +11,7 @@
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
 | historical algorithm | POSIX.1-2017 STDOUT "uuencode Historical Algorithm" | ✅ | ✅ | 既定アルゴリズム |
-| base64 algorithm (`begin-base64` / `====`) | POSIX.1-2017 STDOUT "uuencode Base64 Algorithm" | ❌ | ❌ | intentional scope (MIME base64 は別 codec の領域。`begin-base64` は `Error::Unsupported` で拒否) |
+| base64 algorithm (`begin-base64` / `====`) | POSIX.1-2017 STDOUT "uuencode Base64 Algorithm" | ✅ | ✅ | `util::base64` (RFC 4648 canonical)。`encode_base64(name, mode, data)` |
 | zero 表現: `` ` `` (0x60) / ` ` (0x20) | de facto (GNU sharutils / CPython binascii) | ✅ | ✅※ | decode は両方受理、encode は `` ` `` を emit (POSIX は 0x20 も許容) |
 
 ## begin/end 行
@@ -59,7 +59,7 @@
 | ❌ 未対応 | 0 |
 | **合計** | **21** |
 
-variant 表の base64 algorithm (decode/encode 両 ❌) は集計対象外の intentional scope。
+
 
 ## 出典 / 検証メモ
 

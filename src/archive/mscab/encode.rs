@@ -241,6 +241,8 @@ mod tests {
     use super::*;
     use crate::archive::mscab::decode::decode;
     use crate::traits::ArchiveEntry;
+    use alloc::format;
+    use alloc::vec;
 
     #[test]
     fn stored_roundtrip() {

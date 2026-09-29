@@ -1,3 +1,16 @@
-target/
-.git/
+# Allowlist: exclude everything, then re-include only build inputs.
+*
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!Makefile
+!Containerfile
+!src/
+!tests/
+!benches/
+!archive-cli/
+!fuzz/
+!pkg/
+
+# Generated fuzz artifacts stay out even inside allowed dirs.
 fuzz/failures/

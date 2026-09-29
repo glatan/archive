@@ -120,18 +120,18 @@
 | [ar](ar/README.md) | IEEE Std 1003.1 / GNU ar / BSD ar | 27 | 0 | 0 | 27 |
 | [deb](deb/README.md) | deb(5) (dpkg) | 25 | 0 | 2 | 27 |
 | [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 33 | 0 | 2 | 35 |
-| [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 37 | 0 | 6 | 43 |
-| [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 24 | 0 | 3 | 27 |
+| [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 39 | 0 | 5 | 44 |
+| [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 25 | 0 | 2 | 27 |
 | [mscfb](mscfb/README.md) | [MS-CFB] Compound File Binary File Format v20210625 | 19 | 1 | 3 | 23 |
-| [cramfs](cramfs/README.md) | Linux kernel cramfs.rst + fs/cramfs/README + cramfs_fs.h | 18 | 1 | 4 | 23 |
+| [cramfs](cramfs/README.md) | Linux kernel cramfs.rst + fs/cramfs/README + cramfs_fs.h | 19 | 0 | 4 | 23 |
 | [romfs](romfs/README.md) | Linux kernel romfs.rst | 20 | 0 | 3 | 23 |
-| [erofs](erofs/README.md) | Linux kernel erofs.rst + erofs_fs.h (+ erofs-utils include/erofs_fs.h) | 30 | 0 | 3 | 33 |
-| [iso9660](iso9660/README.md) | ECMA-119 + SUSP 1.10 + RRIP 1.12 + Joliet | 35 | 0 | 7 | 42 |
+| [erofs](erofs/README.md) | Linux kernel erofs.rst + erofs_fs.h (+ erofs-utils include/erofs_fs.h) | 32 | 0 | 2 | 34 |
+| [iso9660](iso9660/README.md) | ECMA-119 + SUSP 1.10 + RRIP 1.12 + Joliet | 38 | 0 | 5 | 43 |
 | [crx3](crx3/README.md) | Chromium components/crx_file/crx3.proto | 13 | 0 | 4 | 17 |
 | [pea](pea/README.md) | PEA file format spec (pea_help.pdf) + PeaZip pea.pas/pea_utils.pas | 17 | 0 | 4 | 21 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 25 | 0 | 2 | 27 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
-| [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 25 | 0 | 4 | 29 |
+| [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 27 | 0 | 2 | 29 |
 | [lha](lha/README.md) | lha header documentation (apphead / lzh_note) | 21 | 0 | 2 | 23 |
 | [arj](arj/README.md) | ARJ technical note (ARJ 2.x) | 18 | 0 | 4 | 22 |
 | [arc](arc/README.md) | SEA ARC file format description | 15 | 0 | 2 | 17 |
@@ -146,7 +146,7 @@
 |---|---|---|---|---|---|
 | [uuencode](uuencode/README.md) | IEEE Std 1003.1-2017 uuencode | 21 | 0 | 0 | 21 |
 | [ascii85](ascii85/README.md) | PDF 32000-1:2008 §7.4.3 + RFC 1924 | 17 | 0 | 0 | 17 |
-| [yenc](yenc/README.md) | yEnc revised draft 1.3 (yenc.org) | 22 | 0 | 4 | 26 |
+| [yenc](yenc/README.md) | yEnc revised draft 1.3 (yenc.org) | 23 | 0 | 3 | 26 |
 | [macbinary](macbinary/README.md) | MacBinary II Standard Proposal (24-Jul-1987) | 14 | 0 | 5 | 19 |
 | [binhex](binhex/README.md) | BinHex 4.0 Definition (Peter N Lewis 1991) + RFC 1741 | 20 | 0 | 4 | 24 |
 
@@ -160,9 +160,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 2194 |
-| ⚠️ 部分実装 | 3 |
-| ❌ 未実装 | 86 |
-| **合計** | **2283** |
+| ✅ 実装+テスト済み | 2206 |
+| ⚠️ 部分実装 | 2 |
+| ❌ 未実装 | 73 |
+| **合計** | **2281** |
 
-**全体カバー率**: 2194 / 2283 = **96.1%** (intentional exclusion 除外後: 2194 / 2197 = **99.9%**)
+**全体カバー率**: 2206 / 2281 = **96.7%** (intentional exclusion 除外後: 2206 / 2208 = **99.9%**)

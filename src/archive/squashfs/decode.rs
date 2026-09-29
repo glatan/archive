@@ -1,9 +1,10 @@
 //! `.squashfs` image decoding.
 //!
 //! Parses the SquashFS 4.0 on-disk format: superblock, metadata block runs
-//! (inode / directory tables), lookup tables (fragment / ID / export), and
-//! data/fragment blocks. All six compressor IDs are recognized; LZMA 1 (id 2,
-//! deprecated upstream) is rejected as unsupported.
+//! (inode / directory tables), lookup tables (fragment / ID / xattr),
+//! extended-directory index entries (section 6.1), and data/fragment blocks.
+//! All six compressor IDs are recognized; LZMA 1 (id 2, deprecated upstream)
+//! is rejected as unsupported.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -22,6 +23,12 @@ const NO_INDEX: u32 = u32::MAX;
 const TABLE_ABSENT: u64 = u64::MAX;
 
 const FLAG_COMPRESSOR_OPTIONS: u16 = 0x0400;
+
+const XATTR_OOL_FLAG: u16 = 0x0100;
+const XATTR_PREFIX_MASK: u16 = 0x00ff;
+/// Out-of-line xattr value references point at plain value structures, which
+/// cannot themselves be references, so resolution is bounded to a single hop.
+const MAX_XATTR_OOL_DEPTH: usize = 1;
 
 const TYPE_BASIC_DIR: u16 = 1;
 const TYPE_BASIC_FILE: u16 = 2;
@@ -135,6 +142,31 @@ pub enum SquashfsKind {
     Socket,
 }
 
+/// A resolved extended attribute (§10). `name` carries its namespace prefix
+/// (`user.` / `trusted.` / `security.`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SquashfsXattr {
+    /// Full attribute name including the namespace prefix.
+    pub name: String,
+    /// Attribute value bytes.
+    pub value: Vec<u8>,
+}
+
+/// A directory index entry (§6.1) attached to an extended directory inode;
+/// it names the first entry after a directory header and locates the
+/// metadata block holding that header.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SquashfsDirIndex {
+    /// Byte offset of the indexed header relative to the first header of
+    /// this listing in the uncompressed directory stream.
+    pub index: u32,
+    /// Start of the directory-table metadata block holding the indexed
+    /// header, relative to the directory table start.
+    pub start: u32,
+    /// Name of the first entry following the indexed header.
+    pub name: String,
+}
+
 /// A filesystem object extracted from the image.
 #[derive(Debug, Clone)]
 pub struct SquashfsEntry {
@@ -155,6 +187,12 @@ pub struct SquashfsEntry {
     pub inode: u32,
     /// File contents; the symlink target for symlinks; empty for other kinds.
     pub data: Vec<u8>,
+    /// Extended attributes resolved through the xattr table (§10); empty
+    /// when the inode has none or the image carries no xattr table.
+    pub xattrs: Vec<SquashfsXattr>,
+    /// Directory index entries (§6.1) parsed from an extended directory
+    /// inode; empty for basic directories and non-directories.
+    pub dir_index: Vec<SquashfsDirIndex>,
 }
 
 impl crate::traits::ArchiveEntry for SquashfsEntry {
@@ -220,6 +258,99 @@ impl MetaRun {
 
     fn resolve_dir(&self, block_index: u32, block_offset: u16) -> Result<usize, Error> {
         self.resolve((u64::from(block_index) << 16) | u64::from(block_offset))
+    }
+}
+
+/// Decoded xattr id table (section 10): the 16-byte lookup entries plus the
+/// metadata run holding the key/value pairs they reference.
+struct XattrTable {
+    /// Decompressed, concatenated lookup-table blocks (16 bytes per entry:
+    /// xattr_ref u64, count u32, size u32).
+    lookup: Vec<u8>,
+    /// Number of lookup entries.
+    count: usize,
+    /// Key/value metadata run; references are relative to kv_start, the
+    /// run's first block.
+    kv_run: MetaRun,
+}
+
+impl XattrTable {
+    /// Resolve the key/value pairs addressed by lookup entry index.
+    fn pairs(&self, index: u32) -> Result<Vec<SquashfsXattr>, Error> {
+        if index as usize >= self.count {
+            return Err(Error::InvalidData("squashfs: xattr index out of range"));
+        }
+        let base = index as usize * 16;
+        let kv_ref = le64(&self.lookup, base)?;
+        let count = le32(&self.lookup, base + 8)? as usize;
+        // The size field is not a serialized byte count: upstream
+        // mksquashfs writes the sum of strlen(full_name)+1+vsize for stat
+        // purposes, and the kernel ignores it during parsing. Pairs are
+        // therefore walked by `count` within the key/value run.
+        let _size = le32(&self.lookup, base + 12)?;
+        let start = self.kv_run.resolve(kv_ref)?;
+        let block = self
+            .kv_run
+            .data
+            .get(start..)
+            .ok_or(Error::InvalidData("squashfs: xattr data out of range"))?;
+        let mut pos = 0;
+        let mut out = Vec::with_capacity(count.min(64));
+        for _ in 0..count {
+            let raw_type = le16(block, pos)?;
+            let name_size = usize::from(le16(block, pos + 2)?);
+            pos += 4;
+            let prefix = match raw_type & XATTR_PREFIX_MASK {
+                0 => "user.",
+                1 => "trusted.",
+                2 => "security.",
+                _ => {
+                    return Err(Error::InvalidData("squashfs: unknown xattr prefix"));
+                }
+            };
+            let name_bytes = block
+                .get(pos..pos + name_size)
+                .ok_or(Error::UnexpectedEof)?;
+            let name = alloc::format!("{prefix}{}", String::from_utf8_lossy(name_bytes));
+            pos += name_size;
+            let value_size = le32(block, pos)? as usize;
+            pos += 4;
+            let value = if raw_type & XATTR_OOL_FLAG != 0 {
+                if value_size != 8 {
+                    return Err(Error::InvalidData("squashfs: bad out-of-line xattr value"));
+                }
+                let value_ref = le64(block, pos)?;
+                pos += 8;
+                self.ool_value(value_ref, 0)?
+            } else {
+                let value = block
+                    .get(pos..pos + value_size)
+                    .ok_or(Error::UnexpectedEof)?
+                    .to_vec();
+                pos += value_size;
+                value
+            };
+            out.push(SquashfsXattr { name, value });
+        }
+        Ok(out)
+    }
+
+    /// Resolve an out-of-line value reference (u32 size + bytes) inside the
+    /// key/value run. The depth parameter enforces MAX_XATTR_OOL_DEPTH: a
+    /// value structure cannot itself be a reference, so a single hop
+    /// suffices and anything deeper indicates a malformed table.
+    fn ool_value(&self, value_ref: u64, depth: usize) -> Result<Vec<u8>, Error> {
+        if depth >= MAX_XATTR_OOL_DEPTH {
+            return Err(Error::InvalidData("squashfs: xattr value ref too deep"));
+        }
+        let pos = self.kv_run.resolve(value_ref)?;
+        let size = le32(&self.kv_run.data, pos)? as usize;
+        let start = pos + 4;
+        let end = start
+            .checked_add(size)
+            .filter(|&e| e <= self.kv_run.data.len())
+            .ok_or(Error::InvalidData("squashfs: xattr value out of range"))?;
+        Ok(self.kv_run.data[start..end].to_vec())
     }
 }
 
@@ -293,6 +424,27 @@ impl Reader<'_> {
         Ok(table)
     }
 
+    /// Parse the xattr id-table header at table_start (section 10):
+    /// kv_start u64, count u32, unused u32, then the absolute locations of
+    /// the lookup-table metadata blocks (512 16-byte entries each). The
+    /// key/value metadata blocks occupy [kv_start, table_start) and are
+    /// decompressed as one run so references -- metadata block offsets
+    /// relative to kv_start -- resolve through MetaRun::resolve.
+    fn read_xattr_table(&self, table_start: usize) -> Result<XattrTable, Error> {
+        let kv_start = le64(self.input, table_start)? as usize;
+        let count = le32(self.input, table_start + 8)? as usize;
+        let lookup = self.read_lookup_table(table_start + 16, 16, count)?;
+        if kv_start >= table_start {
+            return Err(Error::InvalidData("squashfs: bad xattr table"));
+        }
+        let kv_run = self.read_meta_run(kv_start, table_start)?;
+        Ok(XattrTable {
+            lookup,
+            count,
+            kv_run,
+        })
+    }
+
     /// Read a data or fragment block. `size` is the raw `block_sizes` value
     /// (bit 24 = stored uncompressed, lower 24 bits = on-disk size).
     fn read_data_block(
@@ -344,11 +496,14 @@ impl InodeHeader {
 }
 
 /// Location of a directory listing within the directory table.
-#[derive(Clone, Copy)]
+#[derive(Clone, Debug)]
 struct DirListing {
     block_index: u32,
     block_offset: u16,
     size: u32,
+    /// §6.1 index entries following an extended directory inode (empty for
+    /// basic directories).
+    index: Vec<SquashfsDirIndex>,
 }
 
 enum InodeBody {
@@ -366,34 +521,78 @@ enum InodeBody {
 }
 
 /// Parse the type-specific inode body. `pos` points just past the common
-/// header inside the decompressed inode table.
-fn parse_inode_body(data: &[u8], pos: usize, header: &InodeHeader) -> Result<InodeBody, Error> {
+/// header inside the decompressed inode table. Returns the body and the
+/// inode's xattr index (`NO_INDEX` when the inode type carries none).
+fn parse_inode_body(
+    data: &[u8],
+    pos: usize,
+    header: &InodeHeader,
+) -> Result<(InodeBody, u32), Error> {
     match header.inode_type {
-        TYPE_BASIC_DIR => Ok(InodeBody::Dir(DirListing {
-            block_index: le32(data, pos)?,
-            // link_count at pos+4, file_size (listing+3) at pos+8
-            block_offset: le16(data, pos + 10)?,
-            size: u32::from(le16(data, pos + 8)?).saturating_sub(3),
-        })),
-        TYPE_EXT_DIR => Ok(InodeBody::Dir(DirListing {
+        TYPE_BASIC_DIR => Ok((
+            InodeBody::Dir(DirListing {
+                block_index: le32(data, pos)?,
+                // link_count at pos+4, file_size (listing+3) at pos+8
+                block_offset: le16(data, pos + 10)?,
+                size: u32::from(le16(data, pos + 8)?).saturating_sub(3),
+                index: Vec::new(),
+            }),
+            NO_INDEX,
+        )),
+        TYPE_EXT_DIR => {
             // link_count u32, file_size u32, block_index u32, parent u32,
-            // index_count u16, block_offset u16, xattr u32
-            size: le32(data, pos + 4)?.saturating_sub(3),
-            block_index: le32(data, pos + 8)?,
-            block_offset: le16(data, pos + 18)?,
-        })),
+            // index_count u16, block_offset u16, xattr u32; `index_count`
+            // §6.1 index entries follow the inode.
+            let index_count = usize::from(le16(data, pos + 16)?);
+            let mut index = Vec::with_capacity(index_count);
+            let mut ipos = pos + 24;
+            for _ in 0..index_count {
+                let name_size = le32(data, ipos + 8)? as usize + 1;
+                let name = data
+                    .get(ipos + 12..ipos + 12 + name_size)
+                    .ok_or(Error::UnexpectedEof)?;
+                index.push(SquashfsDirIndex {
+                    index: le32(data, ipos)?,
+                    start: le32(data, ipos + 4)?,
+                    name: String::from_utf8_lossy(name).into_owned(),
+                });
+                ipos += 12 + name_size;
+            }
+            Ok((
+                InodeBody::Dir(DirListing {
+                    size: le32(data, pos + 4)?.saturating_sub(3),
+                    block_index: le32(data, pos + 8)?,
+                    block_offset: le16(data, pos + 18)?,
+                    index,
+                }),
+                le32(data, pos + 20)?,
+            ))
+        }
         TYPE_BASIC_SYMLINK | TYPE_EXT_SYMLINK => {
             let target_size = le32(data, pos + 4)? as usize;
             let target = data
                 .get(pos + 8..pos + 8 + target_size)
                 .ok_or(Error::UnexpectedEof)?
                 .to_vec();
-            Ok(InodeBody::Symlink(target))
+            // Extended symlinks append an xattr index after the target.
+            let xattr = if header.inode_type == TYPE_EXT_SYMLINK {
+                le32(data, pos + 8 + target_size)?
+            } else {
+                NO_INDEX
+            };
+            Ok((InodeBody::Symlink(target), xattr))
         }
-        TYPE_BASIC_BLKDEV | TYPE_BASIC_CHRDEV | TYPE_EXT_BLKDEV | TYPE_EXT_CHRDEV => {
-            Ok(InodeBody::Device(le32(data, pos + 4)?))
+        // link_count u32, rdev u32[, xattr u32 on extended inodes]
+        TYPE_BASIC_BLKDEV | TYPE_BASIC_CHRDEV => {
+            Ok((InodeBody::Device(le32(data, pos + 4)?), NO_INDEX))
         }
-        TYPE_BASIC_FIFO | TYPE_BASIC_SOCKET | TYPE_EXT_FIFO | TYPE_EXT_SOCKET => Ok(InodeBody::Ipc),
+        TYPE_EXT_BLKDEV | TYPE_EXT_CHRDEV => Ok((
+            InodeBody::Device(le32(data, pos + 4)?),
+            le32(data, pos + 8)?,
+        )),
+        // link_count u32[, xattr u32 on extended inodes]
+        TYPE_BASIC_FIFO | TYPE_BASIC_SOCKET => Ok((InodeBody::Ipc, NO_INDEX)),
+        TYPE_EXT_FIFO | TYPE_EXT_SOCKET => Ok((InodeBody::Ipc, le32(data, pos + 4)?)),
         _ => Err(Error::InvalidData("squashfs: unknown inode type")),
     }
 }
@@ -419,52 +618,58 @@ fn le_block_sizes(
     Ok(sizes)
 }
 
-/// Parse one inode; returns the common header, the body, and the stream
-/// offset just past the inode.
+/// Parse one inode; returns the common header, the body, and the inode's
+/// xattr index (`NO_INDEX` for inode types without an xattr field).
 fn parse_inode(
     data: &[u8],
     pos: usize,
     block_size: u32,
-) -> Result<(InodeHeader, InodeBody), Error> {
+) -> Result<(InodeHeader, InodeBody, u32), Error> {
     let header = InodeHeader::parse(data, pos)?;
-    let body = match header.inode_type {
+    let (body, xattr) = match header.inode_type {
         TYPE_BASIC_FILE => {
             let frag_index = le32(data, pos + 16 + 4)?;
             let file_size = u64::from(le32(data, pos + 16 + 12)?);
-            InodeBody::File {
-                blocks_start: u64::from(le32(data, pos + 16)?),
-                frag_index,
-                frag_offset: le32(data, pos + 16 + 8)?,
-                file_size,
-                block_sizes: le_block_sizes(
-                    data,
-                    pos + 16 + 16,
-                    file_size,
+            (
+                InodeBody::File {
+                    blocks_start: u64::from(le32(data, pos + 16)?),
                     frag_index,
-                    block_size,
-                )?,
-            }
+                    frag_offset: le32(data, pos + 16 + 8)?,
+                    file_size,
+                    block_sizes: le_block_sizes(
+                        data,
+                        pos + 16 + 16,
+                        file_size,
+                        frag_index,
+                        block_size,
+                    )?,
+                },
+                NO_INDEX,
+            )
         }
         TYPE_EXT_FILE => {
             let frag_index = le32(data, pos + 16 + 28)?;
             let file_size = le64(data, pos + 16 + 8)?;
-            InodeBody::File {
-                blocks_start: le64(data, pos + 16)?,
-                frag_index,
-                frag_offset: le32(data, pos + 16 + 32)?,
-                file_size,
-                block_sizes: le_block_sizes(
-                    data,
-                    pos + 16 + 40,
-                    file_size,
+            (
+                InodeBody::File {
+                    blocks_start: le64(data, pos + 16)?,
                     frag_index,
-                    block_size,
-                )?,
-            }
+                    frag_offset: le32(data, pos + 16 + 32)?,
+                    file_size,
+                    block_sizes: le_block_sizes(
+                        data,
+                        pos + 16 + 40,
+                        file_size,
+                        frag_index,
+                        block_size,
+                    )?,
+                },
+                le32(data, pos + 16 + 36)?,
+            )
         }
         _ => parse_inode_body(data, pos + 16, &header)?,
     };
-    Ok((header, body))
+    Ok((header, body, xattr))
 }
 
 fn basic_type(inode_type: u16) -> Result<u16, Error> {
@@ -588,6 +793,11 @@ pub fn decode_with_limit(input: &[u8], _max_output: Option<usize>) -> Result<Squ
     } else {
         reader.read_lookup_table(id_table_start as usize, 4, usize::from(id_count))?
     };
+    let xattr_table = if xattr_table_start == TABLE_ABSENT {
+        None
+    } else {
+        Some(reader.read_xattr_table(xattr_table_start as usize)?)
+    };
 
     let mut entries = Vec::new();
     let mut visited = 0u32;
@@ -597,6 +807,7 @@ pub fn decode_with_limit(input: &[u8], _max_output: Option<usize>) -> Result<Squ
         &dir_run,
         &frag_table,
         &id_table,
+        xattr_table.as_ref(),
         root_inode_ref,
         String::new(),
         &mut entries,
@@ -625,6 +836,17 @@ fn lookup_id(id_table: &[u8], index: u16) -> Result<u32, Error> {
     le32(id_table, usize::from(index) * 4)
 }
 
+/// Resolve an inode's xattr index through the (optional) xattr table.
+fn read_xattrs(table: Option<&XattrTable>, index: u32) -> Result<Vec<SquashfsXattr>, Error> {
+    match (table, index) {
+        (_, NO_INDEX) => Ok(Vec::new()),
+        (Some(table), index) => table.pairs(index),
+        (None, _) => Err(Error::InvalidData(
+            "squashfs: inode xattr index without xattr table",
+        )),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn walk_dir(
     reader: &Reader<'_>,
@@ -632,6 +854,7 @@ fn walk_dir(
     dir_run: &MetaRun,
     frag_table: &[u8],
     id_table: &[u8],
+    xattr_table: Option<&XattrTable>,
     inode_ref: u64,
     path: String,
     entries: &mut Vec<SquashfsEntry>,
@@ -643,7 +866,7 @@ fn walk_dir(
         return Err(Error::InvalidData("squashfs: inode count exceeded"));
     }
     let pos = inode_run.resolve(inode_ref)?;
-    let (header, body) = parse_inode(&inode_run.data, pos, reader.block_size as u32)?;
+    let (header, body, xattr_idx) = parse_inode(&inode_run.data, pos, reader.block_size as u32)?;
     let uid = lookup_id(id_table, header.uid_idx).unwrap_or(0);
     let gid = lookup_id(id_table, header.gid_idx).unwrap_or(0);
     let basic = basic_type(header.inode_type)?;
@@ -654,7 +877,7 @@ fn walk_dir(
     };
 
     let (data, listing): (Vec<u8>, Option<DirListing>) = match &body {
-        InodeBody::Dir(listing) => (Vec::new(), Some(*listing)),
+        InodeBody::Dir(listing) => (Vec::new(), Some(listing.clone())),
         InodeBody::File {
             blocks_start,
             frag_index,
@@ -687,10 +910,15 @@ fn walk_dir(
         mtime: header.mtime,
         inode: header.inode,
         data,
+        xattrs: read_xattrs(xattr_table, xattr_idx)?,
+        dir_index: listing
+            .as_ref()
+            .map(|l| l.index.clone())
+            .unwrap_or_default(),
     });
 
     if let Some(listing) = listing {
-        let children = read_dir_listing(dir_run, listing)?;
+        let children = read_dir_listing(dir_run, &listing)?;
         for (child_ref, child_type, child_name) in children {
             let child_path = if path.is_empty() {
                 child_name.clone()
@@ -698,7 +926,7 @@ fn walk_dir(
                 alloc::format!("{path}/{child_name}")
             };
             let child_pos = inode_run.resolve(child_ref)?;
-            let (child_header, _) =
+            let (child_header, child_body, child_xattr) =
                 parse_inode(&inode_run.data, child_pos, reader.block_size as u32)?;
             if basic_type(child_header.inode_type)? != child_type {
                 return Err(Error::InvalidData("squashfs: directory type mismatch"));
@@ -711,6 +939,7 @@ fn walk_dir(
                     dir_run,
                     frag_table,
                     id_table,
+                    xattr_table,
                     child_ref,
                     child_path,
                     entries,
@@ -722,8 +951,7 @@ fn walk_dir(
                 if *visited > inode_count {
                     return Err(Error::InvalidData("squashfs: inode count exceeded"));
                 }
-                let (ch, body) = parse_inode(&inode_run.data, child_pos, reader.block_size as u32)?;
-                let data = match &body {
+                let data = match &child_body {
                     InodeBody::File {
                         blocks_start,
                         frag_index,
@@ -745,13 +973,15 @@ fn walk_dir(
                 };
                 entries.push(SquashfsEntry {
                     name: child_path,
-                    kind: kind_of(basic_type(ch.inode_type)?),
-                    mode: ch.mode,
-                    uid: lookup_id(id_table, ch.uid_idx).unwrap_or(0),
-                    gid: lookup_id(id_table, ch.gid_idx).unwrap_or(0),
-                    mtime: ch.mtime,
-                    inode: ch.inode,
+                    kind: kind_of(basic_type(child_header.inode_type)?),
+                    mode: child_header.mode,
+                    uid: lookup_id(id_table, child_header.uid_idx).unwrap_or(0),
+                    gid: lookup_id(id_table, child_header.gid_idx).unwrap_or(0),
+                    mtime: child_header.mtime,
+                    inode: child_header.inode,
                     data,
+                    xattrs: read_xattrs(xattr_table, child_xattr)?,
+                    dir_index: Vec::new(),
                 });
             }
         }
@@ -763,7 +993,7 @@ fn walk_dir(
 /// given directory-table location.
 fn read_dir_listing(
     dir_run: &MetaRun,
-    listing: DirListing,
+    listing: &DirListing,
 ) -> Result<Vec<(u64, u16, String)>, Error> {
     if listing.size == 0 {
         return Ok(Vec::new());
@@ -889,6 +1119,11 @@ mod tests {
         next_inode: u32,
         /// Emit directories as extended directory inodes (TYPE_EXT_DIR).
         ext_dirs: bool,
+        /// Uncompressed xattr key/value pair stream (section 10); emitted
+        /// as metadata blocks when xattr_lookup is non-empty.
+        xattr_stream: Vec<u8>,
+        /// 16-byte xattr lookup entries (xattr_ref, count, size).
+        xattr_lookup: Vec<u8>,
     }
 
     impl Builder {
@@ -904,6 +1139,8 @@ mod tests {
                 block_size: 4096,
                 next_inode: 1,
                 ext_dirs: false,
+                xattr_stream: Vec::new(),
+                xattr_lookup: Vec::new(),
             }
         }
 
@@ -1149,6 +1386,28 @@ mod tests {
             let mut dir_meta = Vec::new();
             self.emit_meta_run(&mut dir_meta, &self.dir_stream.clone());
             img.extend_from_slice(&dir_meta);
+            // xattr section (section 10): key/value metadata blocks, then
+            // the lookup-table metadata blocks, then the uncompressed
+            // id-table header (kv_start, count, unused, locations[]).
+            let xattr_table_start = if self.xattr_lookup.is_empty() {
+                TABLE_ABSENT
+            } else {
+                let kv_start = img.len() as u64;
+                self.emit_meta_run(&mut img, &self.xattr_stream.clone());
+                let mut locations = Vec::new();
+                for chunk in self.xattr_lookup.chunks(META_BLOCK_SIZE) {
+                    locations.push(img.len() as u64);
+                    self.emit_meta_run(&mut img, chunk);
+                }
+                let table_start = img.len() as u64;
+                img.extend_from_slice(&kv_start.to_le_bytes());
+                img.extend_from_slice(&((self.xattr_lookup.len() / 16) as u32).to_le_bytes());
+                img.extend_from_slice(&0u32.to_le_bytes()); // unused
+                for location in locations {
+                    img.extend_from_slice(&location.to_le_bytes());
+                }
+                table_start
+            };
             let frag_table_start = img.len();
             if frag_count > 0 {
                 // location list (1 u64) + meta block with the table entry
@@ -1182,7 +1441,7 @@ mod tests {
             img[32..40].copy_from_slice(&root_ref.to_le_bytes());
             img[40..48].copy_from_slice(&bytes_used.to_le_bytes());
             img[48..56].copy_from_slice(&(id_table_start as u64).to_le_bytes());
-            img[56..64].copy_from_slice(&TABLE_ABSENT.to_le_bytes()); // xattr
+            img[56..64].copy_from_slice(&xattr_table_start.to_le_bytes());
             img[64..72].copy_from_slice(&(inode_table_start as u64).to_le_bytes());
             img[72..80].copy_from_slice(&(dir_table_start as u64).to_le_bytes());
             if frag_count > 0 {
@@ -1297,9 +1556,10 @@ mod tests {
         body.extend_from_slice(&0x0765u16.to_le_bytes()); // block_offset
         body.extend_from_slice(&NO_INDEX.to_le_bytes()); // xattr
         let pos = b.emit_inode(TYPE_EXT_DIR, 0o750, &body);
-        let (header, parsed) = parse_inode(&b.inode_stream, pos, b.block_size).unwrap();
+        let (header, parsed, xattr_idx) = parse_inode(&b.inode_stream, pos, b.block_size).unwrap();
         assert_eq!(header.inode_type, TYPE_EXT_DIR);
         assert_eq!(header.mode, 0o750);
+        assert_eq!(xattr_idx, NO_INDEX);
         assert_eq!(
             kind_of(basic_type(header.inode_type).unwrap()),
             SquashfsKind::Directory
@@ -1309,6 +1569,7 @@ mod tests {
                 assert_eq!(listing.size, 0x1234);
                 assert_eq!(listing.block_index, 0xabcd);
                 assert_eq!(listing.block_offset, 0x0765);
+                assert!(listing.index.is_empty());
             }
             _ => panic!("expected directory body"),
         }
@@ -1373,7 +1634,8 @@ mod tests {
         body.extend_from_slice(&NO_INDEX.to_le_bytes()); // xattr
         body.extend_from_slice(&le32_body(&[0x100, BLOCK_UNCOMPRESSED | 4096]));
         let pos = b.emit_inode(TYPE_EXT_FILE, 0o600, &body);
-        let (header, parsed) = parse_inode(&b.inode_stream, pos, b.block_size).unwrap();
+        let (header, parsed, xattr_idx) = parse_inode(&b.inode_stream, pos, b.block_size).unwrap();
+        assert_eq!(xattr_idx, NO_INDEX);
         assert_eq!(
             kind_of(basic_type(header.inode_type).unwrap()),
             SquashfsKind::File
@@ -1479,5 +1741,240 @@ mod tests {
                 ("sock-ext", SquashfsKind::Socket, 0o755, vec![]),
             ]
         );
+    }
+
+    /// Extended file inode body (section 5.3) for an empty file carrying the
+    /// given xattr index.
+    fn ext_file_body(xattr: u32) -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(&0u64.to_le_bytes()); // blocks_start
+        body.extend_from_slice(&0u64.to_le_bytes()); // file_size
+        body.extend_from_slice(&0u64.to_le_bytes()); // sparse
+        body.extend_from_slice(&1u32.to_le_bytes()); // link_count
+        body.extend_from_slice(&NO_INDEX.to_le_bytes()); // frag_index
+        body.extend_from_slice(&0u32.to_le_bytes()); // block_offset
+        body.extend_from_slice(&xattr.to_le_bytes());
+        body
+    }
+
+    /// spec #39: xattr table decode (section 10) -- id-table header
+    /// (kv_start, count, locations[]), 16-byte lookup entries, and key/value
+    /// pairs with inline and out-of-line values resolved through inode
+    /// indexes.
+    #[test]
+    fn parses_xattr_table() {
+        // Key/value stream: a pair block at offset 0 and an out-of-line
+        // value structure at offset 48.
+        let mut kv = Vec::new();
+        // pair 1: inline "user.comment" = "hello"
+        kv.extend_from_slice(&0u16.to_le_bytes()); // type: "user." prefix
+        kv.extend_from_slice(&7u16.to_le_bytes()); // name size
+        kv.extend_from_slice(b"comment");
+        kv.extend_from_slice(&5u32.to_le_bytes()); // value size
+        kv.extend_from_slice(b"hello");
+        // pair 2: out-of-line "security.selinux" -> value ref at offset 48
+        kv.extend_from_slice(&(2u16 | XATTR_OOL_FLAG).to_le_bytes());
+        kv.extend_from_slice(&7u16.to_le_bytes());
+        kv.extend_from_slice(b"selinux");
+        kv.extend_from_slice(&8u32.to_le_bytes()); // out-of-line => size 8
+        kv.extend_from_slice(&48u64.to_le_bytes()); // kv block 0, offset 48
+        let pair_size = kv.len();
+        kv.resize(48, 0);
+        kv.extend_from_slice(&11u32.to_le_bytes());
+        kv.extend_from_slice(b"targetvalue");
+
+        // Lookup entry 0: kv ref to block 0 offset 0, 2 pairs, pair_size.
+        let mut lookup = Vec::new();
+        lookup.extend_from_slice(&0u64.to_le_bytes());
+        lookup.extend_from_slice(&2u32.to_le_bytes());
+        lookup.extend_from_slice(&(pair_size as u32).to_le_bytes());
+
+        let mut b = Builder::new(false);
+        b.xattr_stream = kv;
+        b.xattr_lookup = lookup;
+        let img = b.build(vec![
+            Node::Raw("tagged", TYPE_EXT_FILE, 0o644, ext_file_body(0)),
+            Node::File("plain", b"no attrs", false),
+        ]);
+        let image = decode(&img).unwrap();
+        let tagged = image.entries.iter().find(|e| e.name == "tagged").unwrap();
+        assert_eq!(
+            tagged.xattrs,
+            [
+                SquashfsXattr {
+                    name: "user.comment".into(),
+                    value: b"hello".to_vec(),
+                },
+                SquashfsXattr {
+                    name: "security.selinux".into(),
+                    value: b"targetvalue".to_vec(),
+                },
+            ]
+        );
+        let plain = image.entries.iter().find(|e| e.name == "plain").unwrap();
+        assert!(plain.xattrs.is_empty());
+        assert!(plain.dir_index.is_empty());
+    }
+
+    /// spec #39: a second lookup entry indexes a distinct pair block, and a
+    /// "trusted." prefix is mapped.
+    #[test]
+    fn parses_xattr_second_lookup_entry() {
+        let mut kv = Vec::new();
+        // entry 0's pair: "user.a" = "x" (10 bytes)
+        kv.extend_from_slice(&0u16.to_le_bytes());
+        kv.extend_from_slice(&1u16.to_le_bytes());
+        kv.extend_from_slice(b"a");
+        kv.extend_from_slice(&1u32.to_le_bytes());
+        kv.extend_from_slice(b"x");
+        // entry 1's pair block at offset 10: "trusted.key" = "val" (14 bytes)
+        kv.extend_from_slice(&1u16.to_le_bytes());
+        kv.extend_from_slice(&3u16.to_le_bytes());
+        kv.extend_from_slice(b"key");
+        kv.extend_from_slice(&3u32.to_le_bytes());
+        kv.extend_from_slice(b"val");
+
+        let mut lookup = Vec::new();
+        for (kv_ref, size) in [(0u64, 10u32), (10u64, 14u32)] {
+            lookup.extend_from_slice(&kv_ref.to_le_bytes());
+            lookup.extend_from_slice(&1u32.to_le_bytes());
+            lookup.extend_from_slice(&size.to_le_bytes());
+        }
+
+        let mut b = Builder::new(false);
+        b.xattr_stream = kv;
+        b.xattr_lookup = lookup;
+        let img = b.build(vec![Node::Raw(
+            "tagged",
+            TYPE_EXT_FILE,
+            0o644,
+            ext_file_body(1),
+        )]);
+        let image = decode(&img).unwrap();
+        let tagged = image.entries.iter().find(|e| e.name == "tagged").unwrap();
+        assert_eq!(
+            tagged.xattrs,
+            [SquashfsXattr {
+                name: "trusted.key".into(),
+                value: b"val".to_vec(),
+            }]
+        );
+    }
+
+    /// spec #39: malformed xattr references are rejected.
+    #[test]
+    fn rejects_bad_xattrs() {
+        // Inode xattr index without an xattr table (superblock TABLE_ABSENT).
+        let img = Builder::new(false).build(vec![Node::Raw(
+            "tagged",
+            TYPE_EXT_FILE,
+            0o644,
+            ext_file_body(0),
+        )]);
+        assert!(decode(&img).is_err());
+
+        // Inode xattr index beyond the lookup entry count.
+        let mut lookup = Vec::new();
+        lookup.extend_from_slice(&0u64.to_le_bytes());
+        lookup.extend_from_slice(&0u32.to_le_bytes());
+        lookup.extend_from_slice(&0u32.to_le_bytes());
+        let mut b = Builder::new(false);
+        b.xattr_stream = vec![0; 4];
+        b.xattr_lookup = lookup;
+        let img = b.build(vec![Node::Raw(
+            "tagged",
+            TYPE_EXT_FILE,
+            0o644,
+            ext_file_body(5),
+        )]);
+        assert!(decode(&img).is_err());
+
+        // Out-of-line value reference pointing outside the kv run.
+        let mut kv = Vec::new();
+        kv.extend_from_slice(&XATTR_OOL_FLAG.to_le_bytes());
+        kv.extend_from_slice(&1u16.to_le_bytes());
+        kv.extend_from_slice(b"a");
+        kv.extend_from_slice(&8u32.to_le_bytes());
+        kv.extend_from_slice(&(0xffffu64 << 16).to_le_bytes()); // bogus block
+        let pair_size = kv.len();
+        let mut lookup = Vec::new();
+        lookup.extend_from_slice(&0u64.to_le_bytes());
+        lookup.extend_from_slice(&1u32.to_le_bytes());
+        lookup.extend_from_slice(&(pair_size as u32).to_le_bytes());
+        let mut b = Builder::new(false);
+        b.xattr_stream = kv;
+        b.xattr_lookup = lookup;
+        let img = b.build(vec![Node::Raw(
+            "tagged",
+            TYPE_EXT_FILE,
+            0o644,
+            ext_file_body(0),
+        )]);
+        assert!(decode(&img).is_err());
+    }
+
+    /// spec #41: directory index read (section 6.1) -- index_count entries
+    /// following an extended directory inode are parsed and exposed.
+    #[test]
+    fn parses_dir_index() {
+        let mut body = Vec::new();
+        body.extend_from_slice(&2u32.to_le_bytes()); // link_count
+        body.extend_from_slice(&3u32.to_le_bytes()); // file_size < 4 => empty
+        body.extend_from_slice(&0u32.to_le_bytes()); // block_index
+        body.extend_from_slice(&1u32.to_le_bytes()); // parent
+        body.extend_from_slice(&2u16.to_le_bytes()); // index_count
+        body.extend_from_slice(&0u16.to_le_bytes()); // block_offset
+        body.extend_from_slice(&NO_INDEX.to_le_bytes()); // xattr
+        // index entry 0
+        body.extend_from_slice(&0u32.to_le_bytes()); // index offset
+        body.extend_from_slice(&0u32.to_le_bytes()); // start
+        body.extend_from_slice(&2u32.to_le_bytes()); // name_size = 3 - 1
+        body.extend_from_slice(b"aaa");
+        // index entry 1
+        body.extend_from_slice(&40u32.to_le_bytes());
+        body.extend_from_slice(&8192u32.to_le_bytes());
+        body.extend_from_slice(&3u32.to_le_bytes());
+        body.extend_from_slice(b"bbbb");
+        let img = Builder::new(false).build(vec![Node::Raw("big", TYPE_EXT_DIR, 0o755, body)]);
+        let image = decode(&img).unwrap();
+        let dir = image.entries.iter().find(|e| e.name == "big").unwrap();
+        assert_eq!(dir.kind, SquashfsKind::Directory);
+        assert_eq!(
+            dir.dir_index,
+            [
+                SquashfsDirIndex {
+                    index: 0,
+                    start: 0,
+                    name: "aaa".into(),
+                },
+                SquashfsDirIndex {
+                    index: 40,
+                    start: 8192,
+                    name: "bbbb".into(),
+                },
+            ]
+        );
+        // The basic root directory carries no index.
+        assert!(image.entries[0].dir_index.is_empty());
+    }
+
+    /// spec #41: a truncated index entry is rejected.
+    #[test]
+    fn rejects_truncated_dir_index() {
+        let mut b = Builder::new(false);
+        let mut body = Vec::new();
+        body.extend_from_slice(&2u32.to_le_bytes());
+        body.extend_from_slice(&3u32.to_le_bytes());
+        body.extend_from_slice(&0u32.to_le_bytes());
+        body.extend_from_slice(&1u32.to_le_bytes());
+        body.extend_from_slice(&1u16.to_le_bytes()); // index_count
+        body.extend_from_slice(&0u16.to_le_bytes());
+        body.extend_from_slice(&NO_INDEX.to_le_bytes());
+        body.extend_from_slice(&0u32.to_le_bytes());
+        body.extend_from_slice(&0u32.to_le_bytes());
+        body.extend_from_slice(&8u32.to_le_bytes()); // name_size = 9 bytes
+        body.extend_from_slice(b"ab"); // but only 2 follow
+        let pos = b.emit_inode(TYPE_EXT_DIR, 0o755, &body);
+        assert!(parse_inode(&b.inode_stream, pos, b.block_size).is_err());
     }
 }

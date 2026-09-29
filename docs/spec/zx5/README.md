@@ -11,10 +11,10 @@
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
 | v2 forward / inverted offset-MSB | [ZX5 README](https://github.com/einar-saukas/ZX5) + `dzx5.c` (BSD-3) | ✅ | ✅ | |
-| classic v1 (`-c`) | [ZX5 README](https://github.com/einar-saukas/ZX5) | ❌ | ❌ | intentional scope (offset-MSB elias 非反転) |
+| classic v1 (`-c`) | [ZX5 README](https://github.com/einar-saukas/ZX5) | ✅ | ❌ | `decode_classic` / `decode_classic_with_prefix` (offset-MSB elias 非反転) |
 | backwards (`-b`) | [ZX5 README](https://github.com/einar-saukas/ZX5) | ❌ | ❌ | intentional scope |
-| quick (`-q`, ZX7 offset 制限) | [ZX5 README](https://github.com/einar-saukas/ZX5) | ❌ | ❌ | intentional scope (エンコード側のみ、offset<=2176) |
-| prefix (`+N` skip) / suffix 圧縮 | [ZX5 README](https://github.com/einar-saukas/ZX5) "Advanced Features" | ❌ | ❌ | intentional scope (エンコーダ専用機能、ワイヤ形式に影響なし) |
+| quick (`-q`, ZX7 offset 制限) | [ZX5 README](https://github.com/einar-saukas/ZX5) | ✅ | ❌ | エンコーダ側制約のみ、wire 形式は不変 (decode は既存経路で網羅) |
+| prefix (`+N` skip) / suffix 圧縮 | [ZX5 README](https://github.com/einar-saukas/ZX5) "Advanced Features" | ✅ | ❌ | `decode_with_prefix` で外部履歴を前置。suffix 圧縮はエンコーダ側概念のため対象外 |
 
 ## ストリーム構造
 
@@ -64,6 +64,6 @@
 
 - 参照実装 ZX5 v2.0 (Einar Saukas) は BSD 3-Clause。本実装は README のフォーマット記述と `dzx5.c` / `compress.c` の動作解析から書かれた独立実装であり、コードの移植は行っていない。
 - 統合テストの `ZX5_*` は参照 C コンプレッサ (ZX5 v2.0) をローカルでコンパイルして生成した既知解答ベクタ (decode のみ検証): literal+match 混在、rep-offset、長マッチ連鎖、2nd/3rd-last offset、マルチビット offset MSB を含む。
-- backwards モード (`-b`)、classic v1 形式 (`-c`、非反転 offset-MSB)、quick モード (`-q`、エンコード時 offset <=2176 の制限) は intentional scope 外。v2 forward / inverted offset-MSB のみ対応。prefix/suffix 圧縮 (圧縮時に外部データを match 参照範囲にするエンコーダ機能) も intentional scope 外で、デコード形式には影響しない。
+- backwards モード (`-b`) は intentional scope 外。classic v1 (`-c`、非反転 offset-MSB) と prefix (`decode_with_prefix`) は対応済み。`-q` はエンコーダ側制約のみで wire 形式は不変。
 - ZX5 は ZX0 の派生で 5 ブロック型を持つが、作者自身が「compressor is very much slower and consumes too much memory therefore it's not very practical」「highly recommended to use ZX0 instead」と明記する experimental 形式。
 - 実装メモ: Elias gamma 値には `1 << 20` の安全性ガードを設けている (無制限増大する malformed 入力の DoS 防止。フォーマット定義ではなく実装追加の制限)。

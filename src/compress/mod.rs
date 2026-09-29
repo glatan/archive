@@ -205,6 +205,14 @@ pub mod cmpsc;
 /// [MS-PATCH]: https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-patch/
 #[cfg(feature = "lzxd")]
 pub mod lzxd;
+
+/// Shared LZX decompression core for the Cabinet ([MS-CAB]
+/// tcompTYPE_LZX) and LZX DELTA ([MS-PATCH]) variants.
+///
+/// [MS-CAB]: https://learn.microsoft.com/en-us/previous-versions/bb417343(v=msdn.10)
+/// [MS-PATCH]: https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-patch/
+#[cfg(any(feature = "lzxd", feature = "mscab"))]
+pub(crate) mod lzx;
 /// PackBits run-length encoding (Apple TN1023 / TIFF 6.0 §9).
 #[cfg(feature = "packbits")]
 pub mod packbits;

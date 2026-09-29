@@ -49,6 +49,7 @@
 | 20 | part の期待サイズは `end-begin+1`、trailer `size=` と実データ長と照合 | draft "recompute the expected part size from the begin and end keyword values" | ✅ | `multipart_roundtrip` |
 | 21 | `pcrc32=` があれば照合 | draft §multipart | ✅ | `encode_part` が emit + decode 検証 |
 | 22 | `=ypart` range が全体サイズを超える場合は拒否 | バリデーション | ✅ | `decode` 内 range チェック |
+| 25 | `total=` の部分検証: `part > total` を reject、`part == total` なら `=ypart end` == `=ybegin size` を照合 (不在は受理) | draft "(1.2) should be also added" 推奨項目 | ✅ | `multipart_total_validation`。全 part の集計照合は結合が必要なため対象外 (項目 23) |
 
 ## 意図的な scope 制約
 
@@ -56,14 +57,13 @@
 |---|------|------|------|
 | 23 | part の結合・順序付け・missing part 検出 | ❌ intentional scope | 呼び出し側が `YEncEntry::part`/`range` から行う |
 | 24 | Subject 行規約 (`"file" 12345 yEnc bytes`) | ❌ intentional scope | transport (NNTP) 層の規約で、文書本体の外 |
-| 25 | `total=` の検証 | ❌ intentional scope | draft は "(1.2) should be also added" の推奨項目。decode は受理するが照合はしない |
 | 26 | MIME/メッセージコンテナ内埋め込み | ❌ intentional scope | yenc.org develop.htm の埋め込みガイドは transport 層 |
 
 ## 集計
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 22 |
+| ✅ 実装+テスト済み | 23 |
 | ⚠️ 部分対応 | 0 |
-| ❌ 未対応 | 4 |
+| ❌ 未対応 | 3 |
 | **合計** | **26** |

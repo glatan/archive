@@ -148,3 +148,38 @@ fn zx5_rejects_malformed() {
     c.push(0xaa);
     assert!(zx5::decode(&c).is_err());
 }
+
+// ---------------------------------------------------------------
+// Variant coverage: v1 classic (-c) and +N prefix streams.
+// ---------------------------------------------------------------
+
+#[test]
+fn zx5_prefix_history() {
+    // literal 'a' + match (distance 4, len 3) reaching into the 3-byte
+    // prefix "XYZ", then EOF.
+    let stream = [0xeb, b'a', 0xfc, 0x95, 0x55, 0x60];
+    assert!(zx5::decode(&stream).is_err());
+    assert_eq!(zx5::decode_with_prefix(&stream, b"XYZ").unwrap(), b"aXYZ");
+}
+
+#[test]
+fn zx5_classic_v1_stream() {
+    // literal 'a', new-offset match at distance 257 len 3, EOF.
+    // Offset MSB 2 carries a data bit so the v1 (-c, non-inverted)
+    // and v2 (inverted) encodings differ; a 256-byte prefix supplies
+    // the match source.
+    let prefix: Vec<u8> = (0..256u16).map(|i| i as u8).collect();
+    let v1 = [0xe2, b'a', 0xff, 0xe0, 0x00, 0x08];
+    let v2 = [0xe6, b'a', 0xff, 0xe5, 0x55, 0x58];
+    assert_ne!(v1, v2);
+    let mut expected = b"a".to_vec();
+    expected.extend_from_slice(&prefix[..3]);
+    assert_eq!(
+        zx5::decode_classic_with_prefix(&v1, &prefix).unwrap(),
+        expected
+    );
+    assert_eq!(zx5::decode_with_prefix(&v2, &prefix).unwrap(), expected);
+    // Each decoder rejects the other variant's stream.
+    assert!(zx5::decode_with_prefix(&v1, &prefix).is_err());
+    assert!(zx5::decode_classic_with_prefix(&v2, &prefix).is_err());
+}

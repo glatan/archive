@@ -2,7 +2,7 @@
 //! and Joliet supplementary volume support.
 
 use alloc::collections::BTreeSet;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use crate::error::Error;
@@ -54,6 +54,11 @@ pub struct IsoEntry {
     pub gid: u32,
     /// Hard link count (Rock Ridge `PX`; 1 otherwise).
     pub nlink: u32,
+    /// Device number for character/block special files (Rock Ridge
+    /// `PN`, RRIP §4.1.2); `None` when no `PN` entry is present.
+    /// Only meaningful when `kind` is `IsoKind::Other` with a
+    /// device `S_IFMT`.
+    pub dev_t: Option<u64>,
     /// Modification time, seconds since the Unix epoch (7-byte
     /// directory record time or Rock Ridge `TF` modify time).
     pub mtime: i64,
@@ -171,6 +176,11 @@ struct DirRec<'a> {
     ext_attr_len: u8,
     size: u32,
     flags: u8,
+    /// File Unit Size in logical blocks (BP27; `0` = not
+    /// interleaved).
+    unit_size: u8,
+    /// Interleave Gap Size in logical blocks (BP28).
+    gap_size: u8,
     mtime: i64,
     /// Raw file identifier bytes (`\x00` = ".", `\x01` = "..").
     name: &'a [u8],
@@ -210,14 +220,13 @@ fn parse_dirents<'a>(
         } else {
             &[][..]
         };
-        if r[26] != 0 || r[27] != 0 {
-            return Err(Error::Unsupported("iso9660 interleaved file"));
-        }
         f(DirRec {
             extent: both32(r, 2)?,
             ext_attr_len: r[1],
             size: both32(r, 10)?,
             flags: r[25],
+            unit_size: r[26],
+            gap_size: r[27],
             mtime: dec_datetime(r, 18),
             name,
             susp,
@@ -244,6 +253,14 @@ struct RrInfo {
     tf_modify: Option<i64>,
     /// ZF (zisofs) parameters, when the entry is compressed.
     zisofs: Option<ZfParams>,
+    /// PN device number for char/block devices (RRIP §4.1.2).
+    dev_t: Option<u64>,
+    /// CL child link: logical block of the extent holding this
+    /// directory's real records (RRIP §4.1.5 relocation).
+    cl: Option<u32>,
+    /// RE marker: this record is a relocated directory's copy in
+    /// the relocation directory and is not enumerated.
+    relocated: bool,
 }
 
 fn parse_susp(img: &[u8], blksz: usize, mut area: &[u8], depth: usize) -> Result<RrInfo, Error> {
@@ -374,7 +391,28 @@ fn parse_susp(img: &[u8], blksz: usize, mut area: &[u8], depth: usize) -> Result
                     uncompressed_size: both32(e, 8)?,
                 });
             }
-            _ => {} // PD, ER, ES, PN, RR, AS, unknown: skip
+            b"PN" => {
+                // RRIP §4.1.2: both-endian Dev_t High then Dev_t
+                // Low; the device number for char/block inodes.
+                if len < 20 {
+                    return Err(Error::InvalidData("iso9660 bad PN entry"));
+                }
+                let high = u64::from(both32(e, 4)?);
+                let low = u64::from(both32(e, 12)?);
+                rr.dev_t = Some(high << 32 | low);
+            }
+            b"CL" => {
+                // RRIP §4.1.5: both-endian LBN of the extent that
+                // really holds this (relocated) child directory.
+                if len < 12 {
+                    return Err(Error::InvalidData("iso9660 bad CL entry"));
+                }
+                rr.cl = Some(both32(e, 4)?);
+            }
+            b"RE" => rr.relocated = true,
+            // PL (RRIP §4.1.5 parent link on `..`), PD, ER, ES,
+            // RR, AS, unknown: informational for a path-based walk.
+            _ => {}
         }
         area = &area[len..];
     }
@@ -424,6 +462,13 @@ fn parse_susp(img: &[u8], blksz: usize, mut area: &[u8], depth: usize) -> Result
         if rr.zisofs.is_none() {
             rr.zisofs = cont_rr.zisofs;
         }
+        if rr.dev_t.is_none() {
+            rr.dev_t = cont_rr.dev_t;
+        }
+        if rr.cl.is_none() {
+            rr.cl = cont_rr.cl;
+        }
+        rr.relocated = rr.relocated || cont_rr.relocated;
     }
     Ok(rr)
 }
@@ -439,11 +484,15 @@ struct VolDesc {
     root: DirRecOwned,
 }
 
+#[derive(Clone, Copy)]
 struct DirRecOwned {
     extent: u32,
     ext_attr_len: u8,
     size: u32,
     flags: u8,
+    /// File Unit Size / Interleave Gap Size (BP27/BP28).
+    unit_size: u8,
+    gap_size: u8,
     mtime: i64,
 }
 
@@ -490,6 +539,8 @@ fn parse_vd(sec: &[u8], joliet: bool) -> Result<VolDesc, Error> {
             ext_attr_len: r[1],
             size: both32(r, 10)?,
             flags: r[25],
+            unit_size: r[26],
+            gap_size: r[27],
             mtime: dec_datetime(r, 18),
         },
     })
@@ -587,30 +638,100 @@ struct Tree<'a> {
 }
 
 impl<'a> Tree<'a> {
-    fn read_file(
-        &self,
-        extent: u32,
-        ext_attr_len: u8,
-        size: u32,
-        flags: u8,
-    ) -> Result<Vec<u8>, Error> {
-        if flags & FLAG_MULTI_EXTENT != 0 {
-            return Err(Error::Unsupported("iso9660 multi-extent file"));
-        }
-        let start = u64::from(extent)
-            .checked_add(u64::from(ext_attr_len))
+    /// Read `size` bytes starting at logical block
+    /// `extent + ext_attr_len`, honoring interleaved recording
+    /// (ECMA-119 §6.4.3, §9.1.7/§9.1.8): when `unit_size` is
+    /// nonzero the data is stored in File Units of `unit_size`
+    /// blocks separated by `gap_size` skipped blocks.
+    fn read_file(&self, rec: &DirRecOwned) -> Result<Vec<u8>, Error> {
+        let start = u64::from(rec.extent)
+            .checked_add(u64::from(rec.ext_attr_len))
             .and_then(|v| v.checked_mul(self.blksz as u64))
             .ok_or(Error::InvalidData("iso9660 extent offset overflow"))?;
         let start = usize::try_from(start)
             .map_err(|_| Error::InvalidData("iso9660 extent offset overflow"))?;
-        let end = start
-            .checked_add(size as usize)
-            .ok_or(Error::InvalidData("iso9660 extent out of range"))?;
-        Ok(self
+        if rec.unit_size == 0 {
+            // A nonzero gap without a File Unit is contradictory.
+            if rec.gap_size != 0 {
+                return Err(Error::InvalidData(
+                    "iso9660 interleave gap without file unit",
+                ));
+            }
+            let end = start
+                .checked_add(rec.size as usize)
+                .ok_or(Error::InvalidData("iso9660 extent out of range"))?;
+            return Ok(self
+                .input
+                .get(start..end)
+                .ok_or(Error::InvalidData("iso9660 extent out of range"))?
+                .to_vec());
+        }
+        let unit = usize::from(rec.unit_size) * self.blksz;
+        let stride = (usize::from(rec.unit_size) + usize::from(rec.gap_size)) * self.blksz;
+        let mut out = Vec::with_capacity(rec.size as usize);
+        let mut off = start;
+        let mut remaining = rec.size as usize;
+        while remaining > 0 {
+            let want = remaining.min(unit);
+            let end = off
+                .checked_add(want)
+                .ok_or(Error::InvalidData("iso9660 extent out of range"))?;
+            out.extend_from_slice(
+                self.input
+                    .get(off..end)
+                    .ok_or(Error::InvalidData("iso9660 extent out of range"))?,
+            );
+            remaining -= want;
+            off = off
+                .checked_add(stride)
+                .ok_or(Error::InvalidData("iso9660 extent out of range"))?;
+        }
+        Ok(out)
+    }
+
+    /// Concatenate the extents of a (possibly multi-extent) file
+    /// (ECMA-119 §9.1.6 bit 7 / §9.2). Single-extent files have a
+    /// one-element `parts` slice.
+    fn read_parts(&self, parts: &[DirRecOwned]) -> Result<Vec<u8>, Error> {
+        let mut out = Vec::new();
+        for p in parts {
+            out.extend_from_slice(&self.read_file(p)?);
+        }
+        Ok(out)
+    }
+
+    /// Read the `.` record of the directory at logical block
+    /// `lbn` and return it as the record describing that
+    /// directory. Used to resolve a Rock Ridge `CL` child link
+    /// (RRIP §4.1.5), which carries only the target extent's LBN.
+    fn dir_dot(&self, lbn: u32) -> Result<DirRecOwned, Error> {
+        let start = u64::from(lbn)
+            .checked_mul(self.blksz as u64)
+            .ok_or(Error::InvalidData("iso9660 CL target out of range"))?;
+        let start = usize::try_from(start)
+            .map_err(|_| Error::InvalidData("iso9660 CL target out of range"))?;
+        let end = start.saturating_add(self.blksz).min(self.input.len());
+        let blk = self
             .input
             .get(start..end)
-            .ok_or(Error::InvalidData("iso9660 extent out of range"))?
-            .to_vec())
+            .ok_or(Error::InvalidData("iso9660 CL target out of range"))?;
+        let len = blk.first().copied().unwrap_or(0) as usize;
+        if len < 34 || len > blk.len() {
+            return Err(Error::InvalidData("iso9660 bad CL target"));
+        }
+        let r = &blk[..len];
+        if r[32] != 1 || r[33] != 0 || r[25] & FLAG_DIR == 0 {
+            return Err(Error::InvalidData("iso9660 bad CL target"));
+        }
+        Ok(DirRecOwned {
+            extent: both32(r, 2)?,
+            ext_attr_len: r[1],
+            size: both32(r, 10)?,
+            flags: r[25],
+            unit_size: r[26],
+            gap_size: r[27],
+            mtime: dec_datetime(r, 18),
+        })
     }
 }
 
@@ -729,24 +850,26 @@ struct Walker<'a, 'b> {
 }
 
 impl Walker<'_, '_> {
-    /// Walk a directory tree depth-first.
-    fn walk(
-        &mut self,
-        extent: u32,
-        ext_attr_len: u8,
-        size: u32,
-        path: &str,
-        depth: usize,
-    ) -> Result<(), Error> {
+    /// Walk one directory depth-first: reads the directory's own
+    /// records and emits its entries. `dir` is the record
+    /// holding the directory's extent (or the `.` record a
+    /// Rock Ridge `CL` link resolves to).
+    fn walk(&mut self, dir: &DirRecOwned, path: &str, depth: usize) -> Result<(), Error> {
         if depth > 64 {
             return Err(Error::InvalidData("iso9660 directory nesting too deep"));
         }
-        if !self.visited.insert((extent, size)) {
+        if !self.visited.insert((dir.extent, dir.size)) {
             return Err(Error::InvalidData("iso9660 directory cycle"));
         }
-        let data = self.tree.read_file(extent, ext_attr_len, size, 0)?;
+        let data = self.tree.read_file(dir)?;
+        self.scan(&data, path, depth)
+    }
+
+    /// Emit the entries of one directory's record data, recursing
+    /// into child directories.
+    fn scan(&mut self, data: &[u8], path: &str, depth: usize) -> Result<(), Error> {
         let mut recs: Vec<(DirRecOwned, Vec<u8>, RrInfo)> = Vec::new();
-        parse_dirents(&data, self.tree.blksz, |r| {
+        parse_dirents(data, self.tree.blksz, |r| {
             let rr = if self.susp_active && !r.susp.is_empty() {
                 parse_susp(self.tree.input, self.tree.blksz, r.susp, 0)?
             } else {
@@ -758,6 +881,8 @@ impl Walker<'_, '_> {
                     ext_attr_len: r.ext_attr_len,
                     size: r.size,
                     flags: r.flags,
+                    unit_size: r.unit_size,
+                    gap_size: r.gap_size,
                     mtime: r.mtime,
                 },
                 r.name.to_vec(),
@@ -765,15 +890,44 @@ impl Walker<'_, '_> {
             ));
             Ok(())
         })?;
-        for (rec, raw_name, rr) in recs {
+        let mut i = 0usize;
+        while i < recs.len() {
+            let (rec, raw_name, rr) = &recs[i];
             // "." and ".." records carry file identifiers 0x00 / 0x01.
-            if raw_name == [0] || raw_name == [1] {
+            if raw_name.as_slice() == [0] || raw_name.as_slice() == [1] {
+                i += 1;
+                continue;
+            }
+            // Multi-extent file (ECMA-119 §9.1.6 File Flags bit 7,
+            // §9.2): consecutive records sharing one File Identifier
+            // form a single file's extent list; bit 7 is clear on
+            // the last record of the group.
+            let mut n_ext = 1usize;
+            while recs[i + n_ext - 1].0.flags & FLAG_MULTI_EXTENT != 0 {
+                let Some((next, next_name, _)) = recs.get(i + n_ext) else {
+                    return Err(Error::InvalidData("iso9660 unterminated multi-extent file"));
+                };
+                if next_name != raw_name
+                    || (next.flags & !FLAG_MULTI_EXTENT) != (rec.flags & !FLAG_MULTI_EXTENT)
+                    || next.unit_size != rec.unit_size
+                    || next.gap_size != rec.gap_size
+                {
+                    return Err(Error::InvalidData("iso9660 bad multi-extent record"));
+                }
+                n_ext += 1;
+            }
+            // Rock Ridge `RE` (RRIP §4.1.5): this record is a
+            // relocated directory's copy inside the relocation
+            // directory; the real entry is enumerated at the
+            // original path via its parent's `CL` link.
+            if rr.relocated {
+                i += n_ext;
                 continue;
             }
             let mut base = if self.joliet {
-                joliet_name(&raw_name)
+                joliet_name(raw_name)
             } else {
-                iso_name(&raw_name)
+                iso_name(raw_name)
             };
             if !rr.name.is_empty() {
                 base = String::from_utf8_lossy(&rr.name).into_owned();
@@ -792,6 +946,11 @@ impl Walker<'_, '_> {
                 p
             };
             let is_dir = rec.flags & FLAG_DIR != 0;
+            if is_dir && n_ext > 1 {
+                // Multi-extent applies to file sections; a directory
+                // is always a single extent (ECMA-119 §9.2).
+                return Err(Error::InvalidData("iso9660 multi-extent directory"));
+            }
             let mode = rr.mode.unwrap_or(if is_dir { 0o040555 } else { 0o100444 });
             let sfmt = mode & 0o170000;
             let kind = if is_dir {
@@ -807,9 +966,8 @@ impl Walker<'_, '_> {
                 IsoKind::Directory => Vec::new(),
                 IsoKind::Symlink => rr.symlink.clone().unwrap_or_default(),
                 _ => {
-                    let raw =
-                        self.tree
-                            .read_file(rec.extent, rec.ext_attr_len, rec.size, rec.flags)?;
+                    let parts: Vec<DirRecOwned> = recs[i..i + n_ext].iter().map(|t| t.0).collect();
+                    let raw = self.tree.read_parts(&parts)?;
                     match rr.zisofs {
                         // zisofs `ZF`: transparent decompression.
                         Some(zf) => zisofs_inflate(&raw, zf)?,
@@ -825,12 +983,22 @@ impl Walker<'_, '_> {
                 uid: rr.uid.unwrap_or(0),
                 gid: rr.gid.unwrap_or(0),
                 nlink: rr.nlink.unwrap_or(1),
+                dev_t: rr.dev_t,
                 mtime,
                 data: entry_data,
             });
             if kind == IsoKind::Directory {
-                self.walk(rec.extent, rec.ext_attr_len, rec.size, &cpath, depth + 1)?;
+                let target = match rr.cl {
+                    // `CL` child link (RRIP §4.1.5): the
+                    // directory's real records live at the linked
+                    // extent; its `.` record carries extent
+                    // and size.
+                    Some(lbn) => self.tree.dir_dot(lbn)?,
+                    None => *rec,
+                };
+                self.walk(&target, &cpath, depth + 1)?;
             }
+            i += n_ext;
         }
         Ok(())
     }
@@ -888,7 +1056,7 @@ pub fn decode(input: &[u8]) -> Result<IsoImage, Error> {
     // directory (SUSP 5.3).
     let mut susp_active = false;
     {
-        let root_data = tree.read_file(pvd.root.extent, pvd.root.ext_attr_len, pvd.root.size, 0)?;
+        let root_data = tree.read_file(&pvd.root)?;
         if root_data.len() >= 41 && root_data[0] >= 34 {
             let r = &root_data[..root_data[0] as usize];
             let name_len = r[32] as usize;
@@ -913,7 +1081,7 @@ pub fn decode(input: &[u8]) -> Result<IsoImage, Error> {
         entries: Vec::new(),
         use_rr: false,
     };
-    walker.walk(pvd.root.extent, pvd.root.ext_attr_len, pvd.root.size, "", 0)?;
+    walker.walk(&pvd.root, "", 0)?;
     let use_rr = walker.use_rr;
     let mut entries = walker.entries;
 
@@ -932,7 +1100,7 @@ pub fn decode(input: &[u8]) -> Result<IsoImage, Error> {
             entries: Vec::new(),
             use_rr: false,
         };
-        jw.walk(svd.root.extent, svd.root.ext_attr_len, svd.root.size, "", 0)?;
+        jw.walk(&svd.root, "", 0)?;
         entries = jw.entries;
     }
 
@@ -991,6 +1159,23 @@ mod tests {
             while r.len() < len {
                 r.push(0);
             }
+            r
+        }
+
+        /// `dirent` with File Unit Size / Interleave Gap Size
+        /// set (BP27/BP28, ECMA-119 §9.1.7/§9.1.8).
+        fn dirent_ug(
+            extent: u32,
+            size: u32,
+            flags: u8,
+            unit: u8,
+            gap: u8,
+            name: &[u8],
+            susp: &[u8],
+        ) -> Vec<u8> {
+            let mut r = Self::dirent(extent, size, flags, name, susp);
+            r[26] = unit;
+            r[27] = gap;
             r
         }
 
@@ -1522,5 +1707,294 @@ mod tests {
         img[s + 140..s + 144].copy_from_slice(&0xFFFFu32.to_le_bytes());
         let out = decode(&img).unwrap();
         assert!(out.path_table.is_empty());
+    }
+
+    /// Rock Ridge `PX` entry (44 bytes): both-endian mode,
+    /// nlink, uid, gid, serial.
+    fn susp_px(mode: u32) -> Vec<u8> {
+        let mut px = vec![b'P', b'X', 44, 1];
+        for v in [mode, 1, 0, 0, 1] {
+            px.extend_from_slice(&v.to_le_bytes());
+            px.extend_from_slice(&v.to_be_bytes());
+        }
+        px
+    }
+
+    /// Rock Ridge `PN` entry (20 bytes): both-endian Dev_t
+    /// High then Dev_t Low (RRIP §4.1.2).
+    fn susp_pn(high: u32, low: u32) -> Vec<u8> {
+        let mut pn = vec![b'P', b'N', 20, 1];
+        pn.extend_from_slice(&high.to_le_bytes());
+        pn.extend_from_slice(&high.to_be_bytes());
+        pn.extend_from_slice(&low.to_le_bytes());
+        pn.extend_from_slice(&low.to_be_bytes());
+        pn
+    }
+
+    /// Rock Ridge `CL` child link (12 bytes): both-endian LBN
+    /// of the relocated child directory's extent (RRIP §4.1.5).
+    fn susp_cl(lbn: u32) -> Vec<u8> {
+        let mut cl = vec![b'C', b'L', 12, 1];
+        cl.extend_from_slice(&lbn.to_le_bytes());
+        cl.extend_from_slice(&lbn.to_be_bytes());
+        cl
+    }
+
+    /// Rock Ridge `PL` parent link (12 bytes): both-endian LBN
+    /// of the original parent, carried by the relocated dir's `..`.
+    fn susp_pl(lbn: u32) -> Vec<u8> {
+        let mut pl = vec![b'P', b'L', 12, 1];
+        pl.extend_from_slice(&lbn.to_le_bytes());
+        pl.extend_from_slice(&lbn.to_be_bytes());
+        pl
+    }
+
+    /// Rock Ridge `RE` relocated-entry marker (4 bytes).
+    fn susp_re() -> Vec<u8> {
+        vec![b'R', b'E', 4, 1]
+    }
+
+    /// Multi-extent file (ECMA-119 §9.1.6 File Flags bit 7, §9.2):
+    /// consecutive records with the same File Identifier form one
+    /// file's extent list; bit 7 is clear on the last record.
+    #[test]
+    fn multi_extent_file() {
+        let mut b = IsoBuilder::new();
+        let f = b.alloc(b"TAIL");
+        let e1 = b.alloc(b"part-1 ");
+        let e2 = b.alloc(b"part-2 ");
+        let e3 = b.alloc(b"part-3");
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(e1, 7, FLAG_MULTI_EXTENT, b"BIG.BIN;1", &[]),
+            IsoBuilder::dirent(e2, 7, FLAG_MULTI_EXTENT, b"BIG.BIN;1", &[]),
+            IsoBuilder::dirent(e3, 6, 0, b"BIG.BIN;1", &[]),
+            // an entry after the group is still enumerated normally
+            IsoBuilder::dirent(f, 4, 0, b"TAIL.TXT;1", &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        let out = decode(&img).unwrap();
+        let names: Vec<&str> = out.entries.iter().map(|e| e.name.as_str()).collect();
+        // continuation records are not enumerated as extra entries
+        assert_eq!(names, ["BIG.BIN", "TAIL.TXT"]);
+        assert_eq!(out.entries[0].kind, IsoKind::File);
+        assert_eq!(out.entries[0].data, b"part-1 part-2 part-3");
+        assert_eq!(out.entries[1].data, b"TAIL");
+    }
+
+    #[test]
+    fn multi_extent_rejects_unterminated() {
+        // bit 7 set on the last record of the directory.
+        let mut b = IsoBuilder::new();
+        let e1 = b.alloc(b"part-1");
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(e1, 6, FLAG_MULTI_EXTENT, b"BIG.BIN;1", &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+
+        // continuation record carries a different File Identifier.
+        let mut b = IsoBuilder::new();
+        let e1 = b.alloc(b"part-1");
+        let e2 = b.alloc(b"other");
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(e1, 6, FLAG_MULTI_EXTENT, b"BIG.BIN;1", &[]),
+            IsoBuilder::dirent(e2, 5, 0, b"OTHER;1", &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+
+        // bit 7 on a directory record is rejected.
+        let mut b = IsoBuilder::new();
+        let subd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+        ]);
+        let sub = b.alloc(&subd);
+        let e2 = b.alloc(b"more");
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(sub, SECTOR as u32, 2 | FLAG_MULTI_EXTENT, b"SUB", &[]),
+            IsoBuilder::dirent(e2, 4, 2, b"SUB", &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    /// Interleaved file (ECMA-119 §6.4.3, §9.1.7/§9.1.8): File
+    /// Units of `unit_size` blocks separated by `gap_size`
+    /// skipped blocks are concatenated; the last unit may be partial.
+    #[test]
+    fn interleaved_file() {
+        let mut b = IsoBuilder::new();
+        // layout: [unit0][gap][unit1][gap][unit2]
+        let mut u0 = vec![0u8; SECTOR];
+        u0[..4].copy_from_slice(b"blk0");
+        let mut u1 = vec![0u8; SECTOR];
+        u1[..4].copy_from_slice(b"blk1");
+        let mut u2 = vec![0u8; SECTOR];
+        u2[..5].copy_from_slice(b"blk2!");
+        let mut layout = Vec::new();
+        layout.extend_from_slice(&u0);
+        layout.extend_from_slice(&[0xEE; SECTOR]);
+        layout.extend_from_slice(&u1);
+        layout.extend_from_slice(&[0xEE; SECTOR]);
+        layout.extend_from_slice(&u2);
+        let ext = b.alloc_span(&layout);
+        // 2 full 2048-byte units + 10 bytes of the third unit.
+        let size = (2 * SECTOR + 10) as u32;
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent_ug(ext, size, 0, 1, 1, b"INTERL.BIN;1", &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        let out = decode(&img).unwrap();
+        assert_eq!(out.entries.len(), 1);
+        let d = &out.entries[0].data;
+        assert_eq!(d.len(), 2 * SECTOR + 10);
+        assert_eq!(&d[..4], b"blk0");
+        assert_eq!(&d[SECTOR..SECTOR + 4], b"blk1");
+        assert_eq!(&d[2 * SECTOR..2 * SECTOR + 5], b"blk2!");
+        // gap bytes must not leak into the file data
+        assert!(!d.contains(&0xEE));
+    }
+
+    #[test]
+    fn interleave_gap_without_unit_rejected() {
+        // gap_size nonzero with unit_size = 0 is contradictory
+        // (ECMA-119 §9.1.8 requires interleaved mode fields to be
+        // consistent).
+        let mut b = IsoBuilder::new();
+        let f = b.alloc(b"data");
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent_ug(f, 4, 0, 0, 1, b"BAD.BIN;1", &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    /// Rock Ridge `PN` (RRIP §4.1.2): the device number of a
+    /// char/block special file is exposed as `dev_t`.
+    #[test]
+    fn rr_pn_device() {
+        let mut b = IsoBuilder::new();
+        let sp = &[b'S', b'P', 7, 1, 0xBE, 0xEF, 0];
+        // block device 0o060644 + PN high=1 low=0x820
+        let mut susp = susp_px(0o060644);
+        susp.extend_from_slice(&susp_pn(1, 0x820));
+        let ext = b.alloc(&[]);
+        // a plain file in the same dir reports no dev_t
+        let f = b.alloc(b"plain");
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], sp),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(ext, 0, 0, b"DEV.BIN;1", &susp),
+            IsoBuilder::dirent(f, 5, 0, b"PLAIN.TXT;1", &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        let out = decode(&img).unwrap();
+        assert_eq!(out.entries[0].name, "DEV.BIN");
+        assert_eq!(out.entries[0].kind, IsoKind::Other(0o060000));
+        assert_eq!(out.entries[0].dev_t, Some((1 << 32) | 0x820));
+        assert_eq!(out.entries[1].name, "PLAIN.TXT");
+        assert_eq!(out.entries[1].dev_t, None);
+    }
+
+    #[test]
+    fn rr_pn_rejects_short_entry() {
+        let mut b = IsoBuilder::new();
+        let sp = &[b'S', b'P', 7, 1, 0xBE, 0xEF, 0];
+        // truncated PN (len 8 < 20)
+        let susp = vec![b'P', b'N', 8, 1, 0, 0, 0, 0];
+        let ext = b.alloc(&[]);
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], sp),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(ext, 0, 0, b"DEV.BIN;1", &susp),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    /// Rock Ridge deep-directory relocation (RRIP §4.1.5): the
+    /// `CL` child link exposes the relocated directory at its
+    /// original path; the `RE`-marked copy under the relocation
+    /// directory is not enumerated; `PL` on its `..` is
+    /// skipped.
+    #[test]
+    fn rr_cl_re_relocated_dir() {
+        let mut b = IsoBuilder::new();
+        let sp = &[b'S', b'P', 7, 1, 0xBE, 0xEF, 0];
+        let f = b.alloc(b"deep!");
+        // the relocated dir lives in its own extent; "." must carry
+        // the real extent/size for the CL resolution.
+        let deep = b.next_sector;
+        let a = deep + 1; // allocated next
+        let deepd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(deep, SECTOR as u32, 2, &[0], &[]),
+            IsoBuilder::dirent(a, SECTOR as u32, 2, &[1], &susp_pl(a)),
+            IsoBuilder::dirent(f, 5, 0, b"FILE.TXT;1", &[]),
+        ]);
+        assert_eq!(b.alloc(&deepd), deep);
+        // parent dir: the "DEEP" record is a placeholder carrying CL.
+        let ad = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(0, 0, 2, b"DEEP", &susp_cl(deep)),
+        ]);
+        assert_eq!(b.alloc(&ad), a);
+        // relocation dir: the real record is marked RE.
+        let rrd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(deep, SECTOR as u32, 2, b"DEEP", &susp_re()),
+        ]);
+        let rrm = b.alloc(&rrd);
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], sp),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(a, SECTOR as u32, 2, b"A", &[]),
+            IsoBuilder::dirent(rrm, SECTOR as u32, 2, b"RR_MOVED", &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        let out = decode(&img).unwrap();
+        let names: Vec<&str> = out.entries.iter().map(|e| e.name.as_str()).collect();
+        // no double enumeration under the relocation directory
+        assert_eq!(names, ["A", "A/DEEP", "A/DEEP/FILE.TXT", "RR_MOVED"]);
+        assert_eq!(out.entries[1].kind, IsoKind::Directory);
+        assert_eq!(out.entries[2].data, b"deep!");
+    }
+
+    #[test]
+    fn rr_cl_rejects_bad_target() {
+        let mut b = IsoBuilder::new();
+        let sp = &[b'S', b'P', 7, 1, 0xBE, 0xEF, 0];
+        // CL points past the end of the image.
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], sp),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(0, 0, 2, b"DEEP", &susp_cl(0xFFFF)),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
     }
 }

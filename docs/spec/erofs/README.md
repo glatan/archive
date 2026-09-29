@@ -50,20 +50,21 @@
 | 26 | ディレクトリ循環・自己参照・過剰ネスト (深さ 64) を拒否 | 防御的検証 | ✅ | `rejects_dir_cycle` |
 | 27 | inode/data/name への全ポインタの範囲検査 | 防御的検証 | ✅ | `rejects_truncated`、`rejects_name_oob`、`test_erofs_rejects_truncation` |
 | 32 | `dirblkbits ≠ 0` の sub-page directory block: dir file を `1<<dirblkbits` 単位で再分割して走査 | erofs_fs.h `dirblkbits` (sb offset 90) | ✅ | 非ゼロ時は sub-page 分割、不正値は `InvalidData`。`dirblksz_subpage_directory`, `rejects_dirblkbits_out_of_range` |
+| 34 | z_erofs tail-packing: `Z_EROFS_ADVISE_INLINE_PCLUSTER` (ZTAILPACKING feature) の inline 末尾データ、`ADVISE_FRAGMENT_PCLUSTER` / `FRAGMENT_INODE_BIT` (FRAGMENTS feature) の packed inode 参照 | erofs_fs.h `z_erofs_map_header` union (`h_idata_size`/`h_fragmentoff`)、erofs.rst | ✅ | feature bit 未設定の wire マーカーは reject。mkfs.erofs `-Eztailpacking`/`-Efragments` fixture 4 件。`ztailpacking_inline_*`, `fragment_*`, `test_erofs_ztailpacking`, `test_erofs_fragments`, `test_erofs_all_fragments`, `test_erofs_ztailpacking_fragments` |
+| 31 | xattr 解釈 (inline/shared/long prefix) | erofs_fs.h `erofs_xattr_ibody_header`/`erofs_xattr_entry`/`erofs_xattr_long_prefix`、erofs.rst | ✅ | `ErofsEntry::xattrs: Vec<ErofsXattr>`。inline entry + shared xattr (xattr_blkaddr 経由) + long prefix (xattr_prefix_start)。metabox 内 shared/long prefix は graceful skip。`xattr_inline_entries`, `xattr_shared_entry`, `rejects_*xattr*` |
 
 ## 意図的な scope 制約
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 29 | METABOX / ZTAILPACKING / FRAGMENTS・DEDUPE / DEVICE_TABLE イメージ、z_erofs の packed inode (bit7)・fragment pcluster・inline tail-packing | ❌ intentional scope | 通常と異なるメタデータアドレッシング構造を持つか、外部 blob を要するため。superblock / mapheader で早期拒否 |
+| 29 | METABOX / DEVICE_TABLE (`extra_devices != 0`) / DEDUPE イメージ | ❌ intentional scope | METABOX はメタデータ全体の別アドレッシング、DEVICE_TABLE は外部 blob 参照で単一 `&[u8]` 入力モデルと不整合。superblock feature で早期拒否 |
 | 30 | erofs write | ❌ intentional scope | mkfs.erofs の領域。read が主用途 |
-| 31 | xattr 内容の解釈・ACL 復元 (inline/shared/long prefix) | ❌ intentional scope | ibody サイズは skip のため計算するが名前・値は展開しない |
 
 ## 集計
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 30 |
+| ✅ 実装+テスト済み | 32 |
 | ⚠️ 部分対応 | 0 |
-| ❌ 未対応 | 3 |
-| **合計** | **33** |
+| ❌ 未対応 | 2 |
+| **合計** | **34** |

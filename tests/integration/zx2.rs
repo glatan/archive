@@ -152,3 +152,38 @@ fn zx2_rejects_malformed() {
     c.push(0xaa);
     assert!(zx2::decode(&c).is_err());
 }
+
+// ---------------------------------------------------------------
+// Variant coverage: -z / -x flags and +N prefix streams.
+// ---------------------------------------------------------------
+
+#[test]
+fn zx2_no_default_offset() {
+    // -z: initial last-offset is 0. literal 'a' + copy-from-last
+    // (len 3) is invalid until a new-offset block sets the offset.
+    let rep = [0x34, b'a', 0xff];
+    assert_eq!(zx2::decode(&rep).unwrap(), b"aaaa");
+    assert!(zx2::decode_no_default_offset(&rep).is_err());
+    // A stream using a new-offset block decodes under both modes.
+    let newoff = [0x64, b'a', 0xfe, 0xff];
+    assert_eq!(zx2::decode_no_default_offset(&newoff).unwrap(), b"aaaa");
+    assert_eq!(zx2::decode(&newoff).unwrap(), b"aaaa");
+}
+
+#[test]
+fn zx2_no_length_increment() {
+    // -x: new-offset length is stored without the -1 bias, so the
+    // same bytes decode to a one-byte-shorter match.
+    let stream = [0x64, b'a', 0xfe, 0xff];
+    assert_eq!(zx2::decode(&stream).unwrap(), b"aaaa");
+    assert_eq!(zx2::decode_no_length_increment(&stream).unwrap(), b"aaa");
+}
+
+#[test]
+fn zx2_prefix_history() {
+    // literal 'a' + match (distance 4, len 3) reaching into the 3-byte
+    // prefix "XYZ", then EOF.
+    let stream = [0x64, b'a', 0xfb, 0xff];
+    assert!(zx2::decode(&stream).is_err());
+    assert_eq!(zx2::decode_with_prefix(&stream, b"XYZ").unwrap(), b"aXYZ");
+}

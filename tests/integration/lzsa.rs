@@ -94,3 +94,45 @@ fn multi_frame_roundtrip() {
     assert_eq!(lzsa::decode(&lzsa::encode(&data)).unwrap(), data);
     assert_eq!(lzsa::decode(&lzsa::encode_lzsa2(&data)).unwrap(), data);
 }
+
+// ---------------------------------------------------------------
+// Variant coverage: -D dictionary (external history prefix).
+// ---------------------------------------------------------------
+
+#[test]
+fn lzsa1_block_with_dictionary() {
+    // token 0x10: L=1 'a'; 1-byte offset 0xfa -> distance 6 reaching
+    // into the 5-byte dictionary "HELLO"; match len 3; then EOD.
+    let raw = [0x10, b'a', 0xfa, 0x0f, 0x00, 238, 0x00, 0x00];
+    assert!(lzsa::decode_lzsa1_block(&raw).is_err());
+    assert_eq!(
+        lzsa::decode_lzsa1_block_with_prefix(&raw, b"HELLO").unwrap(),
+        b"aHEL"
+    );
+}
+
+#[test]
+fn lzsa2_block_with_dictionary() {
+    // token 0x29: XYZ=001 L=1 M=1; 'a'; offset nibble 0xd -> distance
+    // 6, len 3; rep-match token 0xe7 + nibble 15 + 232 = EOD.
+    let raw = [0x29, b'a', 0xdf, 0xe7, 0xe8];
+    assert!(lzsa::decode_lzsa2_block(&raw).is_err());
+    assert_eq!(
+        lzsa::decode_lzsa2_block_with_prefix(&raw, b"HELLO").unwrap(),
+        b"aHEL"
+    );
+}
+
+#[test]
+fn lzsa_stream_with_dictionary() {
+    // LZSA1 frame: one command = literal 'a' + match distance 6 len 3
+    // reaching into the dictionary.
+    let stream = [
+        0x7b, 0x9e, 0x00, 0x03, 0x00, 0x00, 0x10, b'a', 0xfa, 0x00, 0x00, 0x00,
+    ];
+    assert!(lzsa::decode(&stream).is_err());
+    assert_eq!(
+        lzsa::decode_with_prefix(&stream, b"HELLO").unwrap(),
+        b"aHEL"
+    );
+}

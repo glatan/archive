@@ -83,6 +83,19 @@ pub enum ErofsKind {
     Other(u8),
 }
 
+/// One decoded extended attribute (erofs_xattr_entry), resolved to
+/// a full prefix.name string. Names whose prefix cannot be resolved
+/// (unknown name index, or a long-prefix record that cannot be
+/// located) degrade to erofs.xattr.<index> instead of failing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ErofsXattr {
+    /// Full attribute name including the namespace prefix
+    /// (user./trusted./security./system.posix_acl_*).
+    pub name: String,
+    /// Attribute value bytes.
+    pub value: Vec<u8>,
+}
+
 /// A decoded erofs entry. `name` is the full path relative to the
 /// volume root (components joined with `/`).
 #[derive(Debug, Clone)]
@@ -108,6 +121,11 @@ pub struct ErofsEntry {
     /// File contents or symlink target; empty for directories and
     /// special files.
     pub data: Vec<u8>,
+    /// Extended attributes from the inode xattr ibody plus the
+    /// shared-xattr area (inline entries first, then shared
+    /// references, matching kernel iteration order). Empty when the
+    /// inode carries no xattrs.
+    pub xattrs: Vec<ErofsXattr>,
 }
 
 impl crate::traits::ArchiveEntry for ErofsEntry {
@@ -257,6 +275,31 @@ pub(crate) struct Img<'a> {
     /// `INCOMPAT_BIG_PCLUSTER` superblock bit; required for
     /// CBLKCNT multi-lcluster pclusters.
     pub(crate) big_pcluster: bool,
+    /// INCOMPAT_ZTAILPACKING superblock bit; gates inline
+    /// tail-packing (h_idata_size) on the last pcluster.
+    pub(crate) tailpacking: bool,
+    /// INCOMPAT_FRAGMENTS superblock bit; gates fragment extents
+    /// and packed_nid whole-file references.
+    pub(crate) fragments: bool,
+    /// Start block of the shared xattr area (xattr_blkaddr); each
+    /// shared xattr id selects a 4-byte slot there.
+    xattr_blkaddr: u64,
+    /// COMPAT_PLAIN_XATTR_PFX: long xattr prefixes live in the
+    /// plain image area rather than the packed/metabox inode.
+    plain_xattr_pfx: bool,
+    /// COMPAT_SHARED_EA_IN_METABOX: shared xattrs live in the
+    /// (unsupported) metabox inode and cannot be resolved.
+    shared_ea_metabox: bool,
+    /// Number of long xattr prefix records (xattr_prefix_count).
+    xattr_prefix_count: u8,
+    /// Prefix table offset in 4-byte units (xattr_prefix_start),
+    /// inside the packed inode (or the plain image area under
+    /// COMPAT_PLAIN_XATTR_PFX).
+    xattr_prefix_start: u32,
+    /// Decoded contents of the packed inode (packed_nid), when the
+    /// superblock names one. Source for packed-inode fragments and
+    /// non-plain long xattr prefixes.
+    pub(crate) packed: Option<Vec<u8>>,
     /// LZMA dictionary size from the compression-config record
     /// (`0` when no config is present).
     #[cfg_attr(
@@ -525,6 +568,182 @@ impl Img<'_> {
             _ => Err(Error::Unsupported("erofs unknown datalayout")),
         }
     }
+
+    /// Short xattr name prefixes indexed by e_name_index (erofs_fs.h
+    /// name indexes; kernel xattr_types[]). Indexes 0 and 5 (lustre)
+    /// carry no upstream prefix.
+    fn short_prefix(index: u8) -> Option<&'static str> {
+        match index {
+            1 => Some("user."),
+            2 => Some("system.posix_acl_access"),
+            3 => Some("system.posix_acl_default"),
+            4 => Some("trusted."),
+            6 => Some("security."),
+            _ => None,
+        }
+    }
+
+    /// Resolve a long xattr prefix (e_name_index bits 0-6 when bit 7
+    /// is set) to short_prefix(base_index) + infix. Prefix items are
+    /// 4-aligned le16-length + erofs_xattr_long_prefix records
+    /// (erofs_read_metadata), located at xattr_prefix_start*4 inside
+    /// the packed inode, or in the plain image area under
+    /// COMPAT_PLAIN_XATTR_PFX. Returns None when the table or record
+    /// cannot be resolved (kernel xattr_iter skips such entries); the
+    /// caller degrades instead.
+    fn long_prefix(&self, idx: u8) -> Option<String> {
+        if usize::from(idx) >= usize::from(self.xattr_prefix_count) {
+            return None;
+        }
+        let src: &[u8] = if self.plain_xattr_pfx {
+            self.data
+        } else {
+            self.packed.as_deref()?
+        };
+        let mut pos = usize::try_from(self.xattr_prefix_start)
+            .ok()?
+            .checked_mul(4)?;
+        for i in 0..=usize::from(idx) {
+            pos = pos.checked_add(3)? & !3;
+            let len = usize::from(u16le(src.get(pos..pos.checked_add(2)?)?, 0));
+            // erofs_read_metadata payloads are a long_prefix record
+            // (1-byte base_index + infix) of at most NAME_LEN+1 bytes.
+            if !(1..=256).contains(&len) {
+                return None;
+            }
+            let item = src.get(pos + 2..pos + 2 + len)?;
+            if i == usize::from(idx) {
+                let mut name = String::from(Self::short_prefix(item[0])?);
+                name.push_str(&String::from_utf8_lossy(&item[1..]));
+                return Some(name);
+            }
+            pos += 2 + len;
+        }
+        None
+    }
+
+    /// Decode one erofs_xattr_entry (header + name + value) from the
+    /// front of e, resolving the name prefix. This is the
+    /// erofs_listxattr_foreach path; name bytes are kept lossily
+    /// since upstream names are not necessarily UTF-8.
+    fn xattr_entry(&self, e: &[u8]) -> Result<Option<ErofsXattr>, Error> {
+        let name_len = usize::from(e[0]);
+        let index = e[1];
+        let value_len = usize::from(u16le(e, 2));
+        let name = e
+            .get(4..4 + name_len)
+            .ok_or(Error::InvalidData("erofs truncated xattr name"))?;
+        let value = e
+            .get(4 + name_len..4 + name_len + value_len)
+            .ok_or(Error::InvalidData("erofs truncated xattr value"))?;
+        let prefix: Option<String> = if index & 0x80 != 0 {
+            // EROFS_XATTR_LONG_PREFIX: an out-of-range prefix id is
+            // skipped like the kernel does; a table that cannot be
+            // resolved at all degrades to a marker name.
+            let idx = index & 0x7f;
+            if usize::from(idx) >= usize::from(self.xattr_prefix_count) {
+                None
+            } else {
+                Some(
+                    self.long_prefix(idx)
+                        .unwrap_or_else(|| alloc::format!("erofs.xattr.{}", idx)),
+                )
+            }
+        } else if (1..=6).contains(&index) {
+            // Kernel skips base_index 0 and >= 7 entries; index 5
+            // (lustre) carries an empty prefix upstream.
+            Some(String::from(Self::short_prefix(index).unwrap_or("")))
+        } else {
+            None
+        };
+        let Some(mut full) = prefix else {
+            return Ok(None);
+        };
+        full.push_str(&String::from_utf8_lossy(name));
+        Ok(Some(ErofsXattr {
+            name: full,
+            value: value.to_vec(),
+        }))
+    }
+
+    /// Decode the inode xattr ibody (erofs_xattr_ibody_header +
+    /// inline erofs_xattr_entry list) plus the shared xattrs it
+    /// references — inline entries first, then shared references,
+    /// matching erofs_listxattr's iteration order.
+    fn read_xattrs(&self, ino: &Inode, ino_off: usize) -> Result<Vec<ErofsXattr>, Error> {
+        let isize = ino.xattr_isize;
+        if isize == 0 {
+            return Ok(Vec::new());
+        }
+        // erofs_init_inode_xattrs: a header-only ibody (12 bytes,
+        // i_xattr_icount == 1) is an unsupported on-disk layout.
+        if isize == 12 {
+            return Err(Error::InvalidData("erofs unsupported xattr ibody size"));
+        }
+        let xoff = ino_off
+            .checked_add(ino.isize)
+            .ok_or(Error::InvalidData("erofs xattr offset overflow"))?;
+        let xend = xoff
+            .checked_add(isize)
+            .ok_or(Error::InvalidData("erofs xattr range overflow"))?;
+        let body = self.data.get(xoff..xend).ok_or(Error::UnexpectedEof)?;
+        let shared_count = usize::from(body[4]);
+        let header_sz = 12 + 4 * shared_count;
+        if header_sz > isize {
+            return Err(Error::InvalidData("erofs bad xattr ibody header"));
+        }
+        let mut out = Vec::new();
+        // Inline entries (erofs_xattr_iter_inline): 4-byte aligned
+        // erofs_xattr_entry records until the ibody is exhausted.
+        let mut pos = header_sz;
+        let mut remaining = isize - header_sz;
+        while remaining > 0 {
+            let hdr = body.get(pos..pos + 4).ok_or(Error::UnexpectedEof)?;
+            let raw = 4 + usize::from(hdr[0]) + usize::from(u16le(hdr, 2));
+            let esz = raw
+                .checked_add(3)
+                .ok_or(Error::InvalidData("erofs xattr entry size"))?
+                & !3;
+            if esz > remaining {
+                return Err(Error::InvalidData("erofs xattr entry beyond ibody"));
+            }
+            if let Some(x) = self.xattr_entry(&body[pos..pos + esz])? {
+                out.push(x);
+            }
+            pos += esz;
+            remaining -= esz;
+        }
+        if self.shared_ea_metabox {
+            // Shared xattr ids point into the metabox inode, which is
+            // out of scope; inline entries remain decoded.
+            return Ok(out);
+        }
+        // Shared entries (erofs_xattr_iter_shared): each id selects a
+        // 4-byte slot in the shared xattr area.
+        let shared_base = self
+            .xattr_blkaddr
+            .checked_mul(self.blksz as u64)
+            .ok_or(Error::InvalidData("erofs shared xattr offset"))?;
+        for i in 0..shared_count {
+            let id = u32le(body, 12 + 4 * i);
+            let pos = shared_base
+                .checked_add(u64::from(id) * 4)
+                .ok_or(Error::InvalidData("erofs shared xattr offset"))?;
+            let pos = usize::try_from(pos)
+                .map_err(|_| Error::InvalidData("erofs shared xattr offset"))?;
+            let e = self
+                .data
+                .get(pos..)
+                .ok_or(Error::InvalidData("erofs shared xattr out of range"))?;
+            if e.len() < 4 {
+                return Err(Error::InvalidData("erofs shared xattr out of range"));
+            }
+            if let Some(x) = self.xattr_entry(e)? {
+                out.push(x);
+            }
+        }
+        Ok(out)
+    }
 }
 
 fn kind_of(ino: &Inode, file_type: u8) -> ErofsKind {
@@ -632,6 +851,7 @@ fn walk_dir(
                 mtime: c_ino.mtime,
                 mtime_nsec: c_ino.mtime_nsec,
                 data: cdata,
+                xattrs: img.read_xattrs(&c_ino, c_off)?,
             });
             if kind == ErofsKind::Directory {
                 walk_dir(img, child_nid, &cpath, depth + 1, visited, entries)?;
@@ -692,11 +912,10 @@ pub fn decode(input: &[u8]) -> Result<ErofsImage, Error> {
         1usize << dirblkbits
     };
     // Features that change metadata addressing or reference external
-    // blobs are out of scope. Long xattr name prefixes do not affect
+    // blobs are out of scope. ZTAILPACKING and FRAGMENTS are handled
+    // by the z_erofs decoder; long xattr name prefixes do not affect
     // what this decoder interprets.
-    if feature_incompat & (INCOMPAT_ZTAILPACKING | INCOMPAT_FRAGMENTS | INCOMPAT_METABOX) != 0
-        || extra_devices != 0
-    {
+    if feature_incompat & INCOMPAT_METABOX != 0 || extra_devices != 0 {
         return Err(Error::Unsupported("erofs incompatible feature set"));
     }
     // `INCOMPAT_COMPR_CFGS`: the `u1` union carries the
@@ -791,7 +1010,7 @@ pub fn decode(input: &[u8]) -> Result<ErofsImage, Error> {
         packed_nid: u64le(sb, 96),
         ishare_xattr_prefix_id: sb[105],
     };
-    let img = Img {
+    let mut img = Img {
         data: input,
         blksz,
         dirblksz,
@@ -801,8 +1020,26 @@ pub fn decode(input: &[u8]) -> Result<ErofsImage, Error> {
         avail_compr_algs,
         lz4_0padding: feature_incompat & INCOMPAT_LZ4_0PADDING != 0,
         big_pcluster: feature_incompat & INCOMPAT_BIG_PCLUSTER != 0,
+        tailpacking: feature_incompat & INCOMPAT_ZTAILPACKING != 0,
+        fragments: feature_incompat & INCOMPAT_FRAGMENTS != 0,
+        xattr_blkaddr: u64::from(u32le(sb, 44)),
+        plain_xattr_pfx: feature_compat & COMPAT_PLAIN_XATTR_PFX != 0,
+        shared_ea_metabox: feature_compat & COMPAT_SHARED_EA_IN_METABOX != 0,
+        xattr_prefix_count: sb[91],
+        xattr_prefix_start: u32le(sb, 92),
+        packed: None,
         lzma_dict_size,
     };
+    let packed_nid = u64le(sb, 96);
+    if packed_nid != 0 {
+        // The packed inode is a regular (possibly compressed) inode
+        // invisible to dirents; decode it once for fragment extents
+        // and non-plain long xattr prefixes. A fragment extent
+        // *inside* the packed inode itself is rejected because
+        // img.packed is still unset at that point.
+        let (p_off, p_ino) = img.read_inode(packed_nid)?;
+        img.packed = Some(img.read_data(&p_ino, p_off)?);
+    }
     if img
         .iloc(rootnid)
         .is_ok_and(|o| o + INODE_SLOT > input.len())
@@ -1067,6 +1304,36 @@ mod tests {
                 let toff = off + 64;
                 self.data[toff..toff + tail.len()].copy_from_slice(tail);
             }
+            nid
+        }
+
+        /// Set the superblock packed_nid field.
+        #[allow(dead_code)]
+        fn set_packed_nid(&mut self, nid: u64) {
+            self.data[SUPER_OFF + 96..SUPER_OFF + 104].copy_from_slice(&le64(nid));
+        }
+
+        /// Set the superblock xattr_blkaddr field.
+        #[allow(dead_code)]
+        fn set_xattr_blkaddr(&mut self, blk: u32) {
+            self.data[SUPER_OFF + 44..SUPER_OFF + 48].copy_from_slice(&le32(blk));
+        }
+
+        /// Add an empty regular file carrying body as its xattr
+        /// ibody (12-byte header + shared-id array + inline entries);
+        /// icount is the i_xattr_icount value in 4-byte units.
+        #[allow(dead_code)]
+        fn add_xattr_file(&mut self, icount: u16, body: &[u8]) -> u64 {
+            let isize = if icount == 0 {
+                0
+            } else {
+                12 + 4 * (usize::from(icount) - 1)
+            };
+            assert!(body.len() <= isize);
+            let nid = self.add_inode(isize, DATALAYOUT_FLAT_PLAIN, 0o100644, 1, 0, 0xFFFF_FFFF);
+            let off = self.inode_off(nid);
+            self.data[off + 2..off + 4].copy_from_slice(&le16(icount));
+            self.data[off + 32..off + 32 + body.len()].copy_from_slice(body);
             nid
         }
 
@@ -1885,7 +2152,9 @@ mod tests {
     }
 
     #[test]
-    fn rejects_packed_inode_bit() {
+    fn rejects_packed_inode_bit_wo_feature() {
+        // Z_EROFS_FRAGMENT_INODE_BIT without the FRAGMENTS superblock
+        // bit is rejected before any packed-inode lookup.
         let mut b = ImgBuilder::new();
         let mut meta = zmap_header(0, 0, 0x80).to_vec(); // FRAGMENT_INODE_BIT
         // Z_EROFS_FULL_INDEX_START: 8 reserved bytes.
@@ -1897,7 +2166,267 @@ mod tests {
             name: b"z",
             ftype: 8,
         }]);
+
         let img = b.build(root);
-        assert!(matches!(decode(&img), Err(Error::Unsupported(_))));
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    // ---- ztailpacking / fragments / xattr tests ----
+
+    /// Inline tail-packing with a raw (PLAIN) tail: the last logical
+    /// extent is stored verbatim at the tail index's nextpackoff.
+    #[test]
+    fn ztailpacking_inline_raw_tail() {
+        let mut b = ImgBuilder::new();
+        b.set_incompat(INCOMPAT_ZTAILPACKING);
+        let blk = b.add_pcluster(&vec![0xAAu8; BLK], 1, false);
+        // size = BLK + 16 -> 2 lclusters: lcluster0 from the pcluster,
+        // lcluster1 (16 bytes) from inline data after the index.
+        let mut h = zmap_header(0x8, 0, 0); // ADVISE_INLINE_PCLUSTER
+        h[2..4].copy_from_slice(&le16(16)); // h_idata_size
+        let mut meta = h.to_vec();
+        meta.extend_from_slice(&[0u8; 8]); // FULL_INDEX_START slot
+        meta.extend_from_slice(&zidx_head(0, 0, blk as u32)); // PLAIN lcn0
+        meta.extend_from_slice(&zidx_head(0, 0, 0)); // PLAIN tail head
+        meta.extend_from_slice(&[0x55; 16]); // idata at nextpackoff
+        let f = b.add_zinode(1, 4112, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let img = decode(&img).unwrap();
+        let e = img.entries.iter().find(|e| e.name == "f").unwrap();
+        let mut want = vec![0xAAu8; BLK];
+        want.extend_from_slice(&[0x55; 16]);
+        assert_eq!(e.data, want);
+    }
+
+    /// Inline tail-packing with a compressed (HEAD1/LZ4) tail.
+    #[test]
+    fn ztailpacking_inline_lz4_tail() {
+        let mut b = ImgBuilder::new();
+        b.set_incompat(INCOMPAT_ZTAILPACKING);
+        let blk = b.add_pcluster(&vec![0xAAu8; BLK], 1, false);
+        // LZ4 literal-only block for "0123456789ABCDEF" (16 bytes):
+        // token 0xF0 + len ext 0x01 + 16 literals.
+        let mut idata = vec![0xF0u8, 0x01];
+        idata.extend_from_slice(b"0123456789ABCDEF");
+        let mut h = zmap_header(0x8, 0, 0);
+        h[2..4].copy_from_slice(&le16(idata.len() as u16));
+        let mut meta = h.to_vec();
+        meta.extend_from_slice(&[0u8; 8]);
+        meta.extend_from_slice(&zidx_head(0, 0, blk as u32)); // PLAIN lcn0
+        meta.extend_from_slice(&zidx_head(1, 0, 0)); // HEAD1 tail head
+        meta.extend_from_slice(&idata);
+        let f = b.add_zinode(1, 4112, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let img = decode(&img).unwrap();
+        let e = img.entries.iter().find(|e| e.name == "f").unwrap();
+        let mut want = vec![0xAAu8; BLK];
+        want.extend_from_slice(b"0123456789ABCDEF");
+        assert_eq!(e.data, want);
+    }
+
+    /// INLINE advise without the ZTAILPACKING superblock bit is
+    /// rejected as inconsistent.
+    #[test]
+    fn rejects_inline_wo_feature() {
+        let mut b = ImgBuilder::new();
+        let blk = b.add_pcluster(&[0u8; 16], 1, false);
+        let mut h = zmap_header(0x8, 0, 0);
+        h[2..4].copy_from_slice(&le16(4));
+        let mut meta = h.to_vec();
+        meta.extend_from_slice(&[0u8; 8]);
+        meta.extend_from_slice(&zidx_head(1, 0, blk as u32));
+        let f = b.add_zinode(1, 4096, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    /// Whole-file packed-inode fragment (h_clusterbits bit 7).
+    #[test]
+    fn fragment_whole_file() {
+        let mut b = ImgBuilder::new();
+        b.set_incompat(INCOMPAT_FRAGMENTS);
+        let packed_data: Vec<u8> = (0..64u8).collect();
+        let pk = b.add_file(&packed_data);
+        b.set_packed_nid(pk);
+        // Whole file at packed offset 16, size 32.
+        let meta = le64(16 | (1u64 << 63)).to_vec();
+        let f = b.add_zinode(1, 32, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let img = decode(&img).unwrap();
+        let e = img.entries.iter().find(|e| e.name == "f").unwrap();
+        assert_eq!(e.data, packed_data[16..48]);
+    }
+
+    /// Fragment tail on a COMPRESSED_FULL index layout: the last
+    /// extent is read from the packed inode (lo32 in h_fragmentoff,
+    /// high bits from the tail head's blkaddr field).
+    #[test]
+    fn fragment_tail_full_layout() {
+        let mut b = ImgBuilder::new();
+        b.set_incompat(INCOMPAT_FRAGMENTS);
+        let blk = b.add_pcluster(&vec![0xAAu8; BLK], 1, false);
+        let packed_data: Vec<u8> = (0..64u8).collect();
+        let pk = b.add_file(&packed_data);
+        b.set_packed_nid(pk);
+        let mut h = zmap_header(0x20, 0, 0); // ADVISE_FRAGMENT_PCLUSTER
+        h[0..4].copy_from_slice(&le32(16)); // h_fragmentoff low bits
+        let mut meta = h.to_vec();
+        meta.extend_from_slice(&[0u8; 8]);
+        meta.extend_from_slice(&zidx_head(0, 0, blk as u32)); // PLAIN lcn0
+        meta.extend_from_slice(&zidx_head(1, 0, 0)); // tail head, pblk=0 -> off 16
+        let f = b.add_zinode(1, 4112, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let img = decode(&img).unwrap();
+        let e = img.entries.iter().find(|e| e.name == "f").unwrap();
+        let mut want = vec![0xAAu8; BLK];
+        want.extend_from_slice(&packed_data[16..32]);
+        assert_eq!(e.data, want);
+    }
+
+    /// FRAGMENT advise without the FRAGMENTS superblock bit is
+    /// rejected as inconsistent.
+    #[test]
+    fn rejects_fragment_wo_feature() {
+        let mut b = ImgBuilder::new();
+        let blk = b.add_pcluster(&[0u8; 16], 1, false);
+        let mut h = zmap_header(0x20, 0, 0);
+        h[0..4].copy_from_slice(&le32(0));
+        let mut meta = h.to_vec();
+        meta.extend_from_slice(&[0u8; 8]);
+        meta.extend_from_slice(&zidx_head(1, 0, blk as u32));
+        let f = b.add_zinode(1, 4096, &meta);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    /// Inline xattr ibody entries are resolved to prefix.name pairs.
+    #[test]
+    fn xattr_inline_entries() {
+        let mut b = ImgBuilder::new();
+        // icount = 5 -> isize 28: 12-byte header + two 8-byte entries.
+        let mut body = vec![0u8; 28];
+        body[4] = 0; // h_shared_count
+        // entry 1: user.a = "b"  (nl=1 idx=1 vl=1)
+        body[12] = 1;
+        body[13] = 1;
+        body[14..16].copy_from_slice(&le16(1));
+        body[16] = b'a';
+        body[17] = b'b';
+        // entry 2: security. = "xy" (nl=0 idx=6 vl=2)
+        body[20] = 0;
+        body[21] = 6;
+        body[22..24].copy_from_slice(&le16(2));
+        body[24] = b'x';
+        body[25] = b'y';
+        let f = b.add_xattr_file(5, &body);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let img = decode(&img).unwrap();
+        let e = img.entries.iter().find(|e| e.name == "f").unwrap();
+        assert_eq!(e.xattrs.len(), 2);
+        assert_eq!(e.xattrs[0].name, "user.a");
+        assert_eq!(e.xattrs[0].value, b"b");
+        assert_eq!(e.xattrs[1].name, "security.");
+        assert_eq!(e.xattrs[1].value, b"xy");
+    }
+
+    /// Shared xattr ids resolve through the shared xattr area.
+    #[test]
+    fn xattr_shared_entry() {
+        let mut b = ImgBuilder::new();
+        let blk = b.add_pcluster(&[0u8; BLK], 1, false);
+        b.set_xattr_blkaddr(blk as u32);
+        // shared slot 2: user.abc = "de" (entry spans 9 bytes).
+        let soff = blk as usize * BLK + 8;
+        b.data[soff] = 3;
+        b.data[soff + 1] = 1;
+        b.data[soff + 2..soff + 4].copy_from_slice(&le16(2));
+        b.data[soff + 4..soff + 7].copy_from_slice(b"abc");
+        b.data[soff + 7..soff + 9].copy_from_slice(b"de");
+        // icount = 2 -> isize 16: header + one shared id.
+        let mut body = vec![0u8; 16];
+        body[4] = 1; // h_shared_count
+        body[12..16].copy_from_slice(&le32(2)); // shared id
+        let f = b.add_xattr_file(2, &body);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let img = decode(&img).unwrap();
+        let e = img.entries.iter().find(|e| e.name == "f").unwrap();
+        assert_eq!(e.xattrs.len(), 1);
+        assert_eq!(e.xattrs[0].name, "user.abc");
+        assert_eq!(e.xattrs[0].value, b"de");
+    }
+
+    /// A header-only xattr ibody (i_xattr_icount == 1) is rejected,
+    /// matching kernel init_inode_xattrs.
+    #[test]
+    fn rejects_header_only_xattr_ibody() {
+        let mut b = ImgBuilder::new();
+        let f = b.add_xattr_file(1, &[0u8; 12]);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    /// An inline xattr entry exceeding the ibody is rejected.
+    #[test]
+    fn rejects_truncated_xattr_entry() {
+        let mut b = ImgBuilder::new();
+        let mut body = vec![0u8; 20]; // icount 3 -> isize 20
+        body[4] = 0;
+        // entry claims a 4+10+10 payload (24 > 8 remaining).
+        body[12] = 10;
+        body[13] = 1;
+        body[14..16].copy_from_slice(&le16(10));
+        let f = b.add_xattr_file(3, &body);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
     }
 }

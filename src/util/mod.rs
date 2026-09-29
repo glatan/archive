@@ -77,3 +77,7 @@ pub(crate) mod rc4;
 
 /// Output size limit helpers for decompression bomb protection.
 pub(crate) mod bounded;
+
+/// Base64 (RFC 4648) codec for the POSIX uuencode Base64 algorithm.
+#[cfg(feature = "uuencode")]
+pub(crate) mod base64;

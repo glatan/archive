@@ -165,3 +165,16 @@ fn zx1_rejects_malformed() {
     c.push(0xaa);
     assert!(zx1::decode(&c).is_err());
 }
+
+// ---------------------------------------------------------------
+// Variant coverage: +N prefix streams.
+// ---------------------------------------------------------------
+
+#[test]
+fn zx1_prefix_history() {
+    // literal 'a' + match (distance 6, len 3) reaching into the 5-byte
+    // prefix "HELLO", then EOF.
+    let stream = [0x64, b'a', 0xf4, 0xff, 0xff];
+    assert!(zx1::decode(&stream).is_err());
+    assert_eq!(zx1::decode_with_prefix(&stream, b"HELLO").unwrap(), b"aHEL");
+}

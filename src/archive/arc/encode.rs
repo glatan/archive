@@ -6,8 +6,8 @@ use crate::error::Error;
 
 use super::decode::{MARKER, NAME_LEN};
 
-/// Encoder for method-1 (obsolete unpacked) and method-2 (stored) ARC
-/// archives.
+/// Encoder for method-1 (obsolete unpacked), method-2 (stored) and
+/// method-3 (packed/RLE90) ARC archives.
 pub struct ArcEncoder {
     out: Vec<u8>,
 }
@@ -25,11 +25,12 @@ impl ArcEncoder {
         self.add_file_with_method(name, data, date, time, 2)
     }
 
-    /// Add a file entry with an explicit method byte. Only the stored
-    /// methods are supported: `1` (obsolete unpacked — the record
-    /// carries no date/time/CRC-16/length fields) and `2` (stored).
-    /// Any other method is rejected with [`Error::Unsupported`].
-    /// `date`/`time` are ignored for method 1.
+    /// Add a file entry with an explicit method byte. Supported
+    /// methods: `1` (obsolete unpacked — the record carries no
+    /// date/time/CRC-16/length fields), `2` (stored) and `3`
+    /// (packed/RLE90). Any other method is rejected with
+    /// [`Error::Unsupported`]. `date`/`time` are ignored
+    /// for method 1.
     pub fn add_file_with_method(
         &mut self,
         name: &str,
@@ -46,7 +47,7 @@ impl ArcEncoder {
         {
             return Err(Error::InvalidData("arc: bad filename"));
         }
-        if method == 0 || method > 2 {
+        if method == 0 || method > 3 {
             return Err(Error::Unsupported("arc: unsupported method"));
         }
         self.out.push(MARKER);
@@ -64,11 +65,19 @@ impl ArcEncoder {
         }
         self.out.extend_from_slice(&date.to_le_bytes());
         self.out.extend_from_slice(&time.to_le_bytes());
+        // The CRC-16 covers the uncompressed data.
         self.out
             .extend_from_slice(&crate::util::crc16::crc16(data).to_le_bytes());
+        let packed;
+        let body: &[u8] = if method == 3 {
+            packed = super::rle90::encode(data);
+            &packed
+        } else {
+            data
+        };
         self.out
-            .extend_from_slice(&(data.len() as u32).to_le_bytes());
-        self.out.extend_from_slice(data);
+            .extend_from_slice(&(body.len() as u32).to_le_bytes());
+        self.out.extend_from_slice(body);
         Ok(())
     }
 

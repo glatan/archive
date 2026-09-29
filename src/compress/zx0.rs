@@ -17,9 +17,16 @@
 //! of the offset-MSB elias are inverted, and the low bit of the offset-LSB
 //! byte is reused as the first bit of the following length elias.
 //!
-//! Backwards (`-b`) and inverted (`-i`) variants and the classic v1 format
-//! are outside the current scope.
+//! The classic v1 format (`-c`) is supported via [`decode_classic`]: its
+//! only wire difference is that the offset-MSB Elias gamma data bits are
+//! stored non-inverted. Streams produced with the `+N` prefix option can
+//! be decoded via [`decode_with_prefix`], which lets match offsets reach
+//! into caller-supplied external history.
+//!
+//! Backwards (`-b`) and inverted (`-i`) variants are outside the current
+//! scope.
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::Error;
@@ -94,6 +101,69 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 
 /// Decode a ZX0 v2 stream with an output size limit.
 pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
+    decode_impl(input, &[], max_output, true)
+}
+
+/// Decode a ZX0 v1 (`-c` classic) stream.
+///
+/// The only wire difference from v2 is that the offset-MSB Elias gamma
+/// data bits are stored non-inverted.
+pub fn decode_classic(input: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_classic_bounded(input, usize::MAX)
+}
+
+/// Decode a ZX0 v1 (`-c` classic) stream with an output size limit.
+pub fn decode_classic_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
+    decode_impl(input, &[], max_output, false)
+}
+
+/// Decode a ZX0 v2 stream whose match offsets may reach into `prefix`,
+/// external history logically prepended to the output (the upstream
+/// `+N` prefix option).
+pub fn decode_with_prefix(input: &[u8], prefix: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_impl(input, prefix, usize::MAX, true)
+}
+
+/// Decode a ZX0 v1 (`-c` classic) stream with a `prefix` history as in
+/// [`decode_with_prefix`].
+pub fn decode_classic_with_prefix(input: &[u8], prefix: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_impl(input, prefix, usize::MAX, false)
+}
+
+/// Append `len` bytes copied `offset` back in the virtual history
+/// `prefix ++ out`.
+fn copy_match(
+    prefix: &[u8],
+    out: &mut Vec<u8>,
+    offset: usize,
+    len: usize,
+    max_output: usize,
+    msg: &'static str,
+) -> Result<(), Error> {
+    let avail = prefix.len() + out.len();
+    if offset == 0 || offset > avail {
+        return Err(Error::InvalidData(msg));
+    }
+    if out.len() + len > max_output {
+        return Err(Error::OutputLimitExceeded { limit: max_output });
+    }
+    for vpos in (avail - offset)..(avail - offset + len) {
+        let b = if vpos < prefix.len() {
+            prefix[vpos]
+        } else {
+            out[vpos - prefix.len()]
+        };
+        out.push(b);
+    }
+    Ok(())
+}
+
+fn decode_impl(
+    input: &[u8],
+    prefix: &[u8],
+    max_output: usize,
+    inverted_msb: bool,
+) -> Result<Vec<u8>, Error> {
     if input.is_empty() {
         return Ok(Vec::new());
     }
@@ -119,24 +189,22 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
             // After literals: 0 = copy from last offset, 1 = new offset.
             if r.read_bit()? == 0 {
                 let len = r.elias(false)? as usize;
-                if last_offset > out.len() {
-                    return Err(Error::InvalidData("zx0: offset before start"));
-                }
-                if out.len() + len > max_output {
-                    return Err(Error::OutputLimitExceeded { limit: max_output });
-                }
-                let start = out.len() - last_offset;
-                for i in 0..len {
-                    let b = out[start + i];
-                    out.push(b);
-                }
+                copy_match(
+                    prefix,
+                    &mut out,
+                    last_offset,
+                    len,
+                    max_output,
+                    "zx0: offset before start",
+                )?;
                 literals = r.read_bit()? == 0;
                 continue;
             }
         }
 
-        // COPY_FROM_NEW_OFFSET.
-        let msb = r.elias(true)? as usize; // v2: data bits inverted
+        // COPY_FROM_NEW_OFFSET. v2 stores the offset-MSB elias data bits
+        // inverted; v1 (classic) stores them verbatim.
+        let msb = r.elias(inverted_msb)? as usize;
         if msb == 256 {
             // EOF: the reference decoder requires the input to be fully
             // consumed at this point.
@@ -149,17 +217,14 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
         last_offset = msb * 128 - (lsb_byte as usize >> 1);
         r.backtrack = true;
         let len = r.elias(false)? as usize + 1;
-        if last_offset == 0 || last_offset > out.len() {
-            return Err(Error::InvalidData("zx0: bad match offset"));
-        }
-        if out.len() + len > max_output {
-            return Err(Error::OutputLimitExceeded { limit: max_output });
-        }
-        let start = out.len() - last_offset;
-        for i in 0..len {
-            let b = out[start + i];
-            out.push(b);
-        }
+        copy_match(
+            prefix,
+            &mut out,
+            last_offset,
+            len,
+            max_output,
+            "zx0: bad match offset",
+        )?;
         literals = r.read_bit()? == 0;
     }
 }
@@ -330,6 +395,81 @@ mod tests {
     fn rt(data: &[u8]) {
         let enc = encode(data);
         assert_eq!(decode(&enc).unwrap(), data);
+    }
+
+    /// Build a stream: one literal block `lits`, one new-offset match
+    /// (`dist`, `len`), then EOF. `inverted` selects the v2 (true) vs
+    /// v1 classic (false) offset-MSB elias coding.
+    fn match_stream(lits: &[u8], dist: usize, len: usize, inverted: bool) -> Vec<u8> {
+        let mut w = BitWriter::new();
+        w.write_elias(lits.len(), false);
+        for &b in lits {
+            w.write_byte(b);
+        }
+        w.write_bit(true); // new offset
+        w.write_elias((dist - 1) / 128 + 1, inverted);
+        w.write_byte(((127 - (dist - 1) % 128) << 1) as u8);
+        w.backtrack = true;
+        w.write_elias(len - 1, false);
+        w.write_bit(true); // EOF indicator
+        w.write_elias(256, inverted);
+        w.out
+    }
+
+    #[test]
+    fn decode_classic_v1() {
+        // dist 130 -> offset MSB 2, so the elias carries a data bit and
+        // the v1/v2 encodings differ.
+        let lits: Vec<u8> = (0..140u8).collect();
+        let v1 = match_stream(&lits, 130, 5, false);
+        let v2 = match_stream(&lits, 130, 5, true);
+        assert_ne!(v1, v2);
+
+        let mut expected = lits.clone();
+        let start = expected.len() - 130;
+        for i in 0..5 {
+            let b = expected[start + i];
+            expected.push(b);
+        }
+
+        assert_eq!(decode_classic(&v1).unwrap(), expected);
+        assert_eq!(
+            decode_classic_bounded(&v1, expected.len()).unwrap(),
+            expected
+        );
+        assert!(matches!(
+            decode_classic_bounded(&v1, expected.len() - 1),
+            Err(Error::OutputLimitExceeded { .. })
+        ));
+        assert_eq!(decode(&v2).unwrap(), expected);
+        // Cross-decoding fails: each variant reads a different MSB whose
+        // offset lands outside the produced output.
+        assert!(decode(&v1).is_err());
+        assert!(decode_classic(&v2).is_err());
+    }
+
+    #[test]
+    fn decode_prefix_history() {
+        // literal 'a', then a distance-6 len-3 match reaching into the
+        // 5-byte prefix "HELLO", then EOF.
+        let stream = [0xed, b'a', 0xf4, 0x55, 0x56];
+        // Without the prefix the distance exceeds the produced output.
+        assert!(decode(&stream).is_err());
+        assert_eq!(decode_with_prefix(&stream, b"HELLO").unwrap(), b"aHEL");
+        // Classic variant of the same stream (non-inverted EOF elias).
+        let classic = [0xec, b'a', 0xf4, 0x00, 0x02];
+        assert_eq!(
+            decode_classic_with_prefix(&classic, b"HELLO").unwrap(),
+            b"aHEL"
+        );
+    }
+
+    #[test]
+    fn decode_prefix_match_crosses_boundary() {
+        // distance 3, len 5: the match starts in the 2-byte prefix and
+        // continues into produced output (overlapping copy).
+        let stream = [0xe3, b'a', 0xfa, 0x55, 0x55, 0x80];
+        assert_eq!(decode_with_prefix(&stream, b"AB").unwrap(), b"aABaAB");
     }
 
     #[test]

@@ -9,7 +9,9 @@
 //! `WARC-Block-Digest` (and `WARC-Payload-Digest` when the caller
 //! supplies the payload bytes). On decode, `sha1` digests are
 //! verified: `WARC-Block-Digest` always, and `WARC-Payload-Digest`
-//! when the payload is known to be the whole record block.
+//! when the payload is known to be the whole record block. Per-record
+//! field/type constraints and Clause 7 segmentation structure (segment
+//! ordering, `WARC-Segment-Total-Length`) are validated on decode.
 //! Payload semantics beyond that (HTTP header parsing, record
 //! segmentation reassembly) are intentionally out of scope.
 
