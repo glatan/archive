@@ -503,6 +503,17 @@ against de facto reference behavior:
   - Repository scope: implementations validated against known vectors and
     expected filter semantics for all supported architectures
 
+- BCJ2 filter (7z x86, `src/archive/sevenz/bcj2.rs`)
+  - Reference: 7-Zip / LZMA SDK `Bcj2.c` (Igor Pavlov, public domain).
+    `7zFormat.txt`/`Methods.txt` register the method ID; the four-stream
+    range-coded bitstream layout is defined de facto by that source
+    (BCJ2 is not part of liblzma's `simple/` filter family)
+  - Provenance: ported — algorithmic transliteration of the
+    public-domain reference filter. Compatible with AGPL-3.0 because
+    the LZMA SDK is dedicated to the public domain.
+  - Repository scope: decode and encode for the crate's supported 7z
+    folder layouts; validated by round-trip and known-vector tests
+
 - Delta filter
   - Reference: xz / 7-Zip style byte-wise delta (distance 1..=256);
     liblzma is public domain
@@ -548,9 +559,10 @@ against de facto reference behavior:
 4. Bundled tables and static assets
 -----------------------------------
 
-- Brotli dictionary-related tables (`src/compress/brotli/dictionary.rs`)
+- Brotli dictionary-related tables (`src/compress/brotli/dictionary.rs`
+  and the bundled `src/compress/brotli/dictionary.bin` dictionary data)
   - Scope: static dictionary lookup tables, transforms, and affix data used by
-    the Brotli decoder
+    the Brotli decoder and encoder
   - Provenance: RFC 7932 Appendix A static dictionary data and transform
     semantics, realized using the upstream Brotli (MIT license)
     dictionary structure; table values are specification material, not
@@ -561,6 +573,9 @@ against de facto reference behavior:
 - Cryptographic and checksum primitives (`src/util/`)
   - CRC-16/ARC (`crc16.rs`): clean-room Rust, polynomial 0x8005
     reflected; used by LHA and SEA ARC member CRCs
+  - CRC-16/CCITT (`crc16ccitt.rs`): clean-room Rust, polynomial 0x1021
+    MSB-first, init 0x0000 (XMODEM variant); used by BinHex 4.0 and
+    MacBinary II header/data CRCs
   - CRC-32 (IEEE, `crc32.rs`): clean-room Rust, polynomial from ISO 3309
   - CRC-32C (Castagnoli, `crc32c.rs`): clean-room Rust, polynomial 0x1EDC6F41
   - CRC-64/XZ (`crc64.rs`): clean-room Rust
