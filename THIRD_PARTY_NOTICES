@@ -322,6 +322,12 @@ specifications or standards documents:
   own non-OSI license requiring preservation of copyright notices;
   this notice satisfies the attribution requirement for the
   redistributed fixture binaries.
+  Additional de facto format documents catalogued in
+  `docs/spec/sources/` (reference only, not yet used as implementation
+  sources): jLHA Notes by Michel Ishizuka (level 3 header wire layout,
+  compress-method parameter table, extended-header list) and Joe
+  Jared's lzhformat.html (level 0-2 layouts, multi-disk/spanning
+  extended header 0x39).
 - arj: ARJ technical note (ARJ 2.x archiver file format description);
   header field facts only, no code was copied.
 - arc: SEA ARC file format description

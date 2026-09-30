@@ -132,7 +132,7 @@
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 25 | 0 | 2 | 27 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
 | [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 27 | 0 | 2 | 29 |
-| [lha](lha/README.md) | lha header documentation (apphead / lzh_note) + lhasa/compcol 参照実装 | 21 | 0 | 2 | 23 |
+| [lha](lha/README.md) | lha header documentation + jLHA Notes + lzhformat.html + lhasa/compcol 参照実装 | 21 | 0 | 2 | 23 |
 | [arj](arj/README.md) | ARJ technical note (ARJ 2.x) + UNARJ/newtua_dos 参照実装 | 18 | 0 | 4 | 22 |
 | [arc](arc/README.md) | SEA ARC file format description + hyc/arc `Arcinfo` | 15 | 0 | 2 | 17 |
 | [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 38 | 0 | 5 | 43 |
