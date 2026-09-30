@@ -664,6 +664,12 @@ future implementation/audit planning:
 - lhasa (fragglet, ISC): LHA lh1-lh7, LArc (-lzs-/-lz4-/-lz5-), PMarc
   (-pm0-/-pm1-/-pm2-), -lhx-, and header level 3 decoder; Debian main's
   `lhasa` is usable as a decode oracle.
+- LHA 2.11 source files (Haruyasu Yoshizaki, Vector fh002420
+  `lha211_s.lzh`): the original author's implementation covering
+  lh0-lh5, LArc -lzs-/-lz4-/-lz5-, and header levels 0-2. LHA's own
+  free-software terms (use/copy/redistribution free, commercial use
+  allowed with minor obligations); catalogued as a provenance reference
+  only.
 - libmspack `qtmd.c` (Stuart Caie, LGPL-2.1): Quantum decompressor; the de
   facto CAB Quantum decode reference (used via cabextract fixtures for LZX
   already). No public Quantum encoder is known to exist.

@@ -945,6 +945,17 @@
    ]
   },
   {
+   "id": "lha-211-source",
+   "format": "lha",
+   "title": "LHA ソースファイル群 2.11 (吉崎栄泰 / Vector fh002420)",
+   "version": "LHA 2.11 (1991-03-03)",
+   "note": "オリジナル作者吉崎による一次実装。lh0-lh5 + LArc (-lzs-/-lz4-/-lz5-) の encode/decode 実装 (SLIDEHUF 系は asm) と header level 0-2 処理を収録。ライセンスは LHA 独自フリー表記 (使用・複写・転載・再配布自由、商用利用可・多少の義務あり)。lh6/lh7/pm*/lhx は本作より後の拡張で未収録",
+   "reference_url": [
+    "https://www.vector.co.jp/download/file/dos/util/fh002420.html",
+    "https://ftp.vector.co.jp/00/24/521/lha211_s.lzh"
+   ]
+  },
+  {
    "id": "newtua-dos",
    "format": "arc/arj",
    "title": "newtua_dos — DOS/CP-M archive format decoders (XADMaster ports)",
