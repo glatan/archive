@@ -82,8 +82,22 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
         return Err(Error::InvalidData("lzw: max bits out of range (9-16)"));
     }
 
+    decode_body(&input[3..], max_bits, block_mode)
+}
+
+/// Decode a headerless Unix compress LZW codestream.
+///
+/// This is the variable-width LZW codestream without the 3-byte `.Z`
+/// header, used by ARC methods 8 (Crunched) and 9 (Squashed) and the
+/// Spark `0x7f` method which embed the stream inside their own member
+/// records. `max_bits` is the maximum code width (9-16); `block_mode`
+/// enables the reserved clear code 256 and the group-of-8 resync.
+pub(crate) fn decode_body(data: &[u8], max_bits: u32, block_mode: bool) -> Result<Vec<u8>, Error> {
+    if !(9..=16).contains(&max_bits) {
+        return Err(Error::InvalidData("lzw: max bits out of range (9-16)"));
+    }
+
     let max_code = (1u32 << max_bits) - 1;
-    let data = &input[3..];
 
     // Dictionary: for each code, store (prefix_code, suffix_byte).
     // Codes 0-255 are single-byte entries (prefix = none).

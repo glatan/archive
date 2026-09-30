@@ -543,7 +543,11 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
         }
         Algorithm::Arc => {
             let mut enc = arc::encode::ArcEncoder::new();
-            enc.add_file("fuzz_test", data, 0, 0)
+            // Rotate through the supported member methods so the
+            // packed/squeezed/crunched/squashed codecs also roundtrip.
+            const METHODS: [u8; 6] = [1, 2, 3, 4, 8, 9];
+            let method = METHODS[data.len() % METHODS.len()];
+            enc.add_file_with_method("fuzz_test", data, 0, 0, method)
                 .expect("arc encode should succeed");
             enc.finish()
         }

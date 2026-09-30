@@ -1,514 +1,588 @@
-//! ZIP Imploding (Method 6) decoder.
+//! ZIP Imploding (Method 6) codec.
 //!
-//! Implements the Imploding decompression algorithm as described in APPNOTE §5.3.
-//! Uses Shannon-Fano trees and a sliding dictionary for LZ77-style matches.
+//! Implements the Implode/Explode algorithm described in APPNOTE §5.3,
+//! matching the reference implementation (hwzip, public domain).
 //!
-//! General purpose bit flag controls:
-//! - Bit 1: 8K sliding dictionary (set) or 4K (clear)
-//! - Bit 2: 3 Shannon-Fano trees (set) or 2 trees (clear)
+//! The general purpose bit flag controls the parameters:
+//! - Bit 1 (0x0002): 8 KiB dictionary when set, 4 KiB when clear.
+//! - Bit 2 (0x0004): 3 Shannon-Fano trees when set (literal + length +
+//!   distance), 2 trees when clear (length + distance, literals stored raw).
+//!
+//! The code tables are stored as run-length encoded codeword lengths: one
+//! byte giving the number of length-records minus one, then records with the
+//! code length minus one in the low nibble and the run length minus one in
+//! the high nibble. Codewords on the wire are the bit-complement of the
+//! canonical code, transmitted MSB-first.
+//!
+//! Stream items start with a flag bit: 1 for a literal, 0 for a back
+//! reference. A back reference carries the low distance bits verbatim
+//! (7 bits for an 8 KiB dictionary, 6 for 4 KiB), then the high distance
+//! bits and the length as Shannon-Fano coded symbols. Length symbol 63 is
+//! followed by an extra length byte.
 
 use alloc::vec::Vec;
 
 use crate::error::Error;
 
-/// Implode (decompress) data compressed with ZIP method 6.
-///
-/// `flags` is the general purpose bit flag from the ZIP entry header.
-/// Bits 1-2 control the dictionary size and number of trees.
-///
-/// `expected_size` is the uncompressed size from the ZIP entry header, used
-/// to know when decompression is complete (the bitstream may have padding bits
-/// in the final byte that must not be decoded as additional tokens).
-pub(super) fn implode(input: &[u8], flags: u16, expected_size: usize) -> Result<Vec<u8>, Error> {
-    let large_dict = (flags & 0x0002) != 0; // bit 1: 8K dict
-    let has_literal_tree = (flags & 0x0004) != 0; // bit 2: 3 trees
+/// Number of symbols in the literal tree.
+const LIT_SYMS: usize = 256;
+/// Number of symbols in the length and distance trees.
+const MATCH_SYMS: usize = 64;
+/// Maximum codeword length.
+const MAX_CODE_LEN: u8 = 16;
+/// Maximum extra value carried by length symbol 63.
+const EXTRA_LEN: usize = 255;
+/// Number of buffered tokens used to build the code tables.
+const TREE_WINDOW: usize = 32 * 1024;
 
-    let dict_bits: u8 = if large_dict { 7 } else { 6 }; // extra distance bits: 7 for 8K, 6 for 4K
-    let min_match_length: usize = if has_literal_tree { 3 } else { 2 };
+// ======================================================================
+// Decoder
+// ======================================================================
+
+/// Decompress data compressed with ZIP method 6 (Imploding).
+///
+/// `flags` is the general purpose bit flag from the ZIP entry header;
+/// `expected_size` is the uncompressed size.
+///
+/// # Errors
+///
+/// Returns [`Error::InvalidData`] if the bitstream or the code tables are
+/// malformed, or the stream ends before `expected_size` bytes are produced.
+pub(super) fn implode(input: &[u8], flags: u16, expected_size: usize) -> Result<Vec<u8>, Error> {
+    let large_wnd = (flags & 0x0002) != 0;
+    let lit_tree = (flags & 0x0004) != 0;
+    let dist_bits = if large_wnd { 7u32 } else { 6u32 };
+    let min_len = if lit_tree { 3usize } else { 2usize };
 
     let mut reader = BitReader::new(input);
-
-    // Read Shannon-Fano trees.
-    let literal_tree = if has_literal_tree {
-        Some(read_shannon_fano_tree(&mut reader)?)
+    let lit_code = if lit_tree {
+        Some(read_code_table(&mut reader, LIT_SYMS)?)
     } else {
         None
     };
-    let length_tree = read_shannon_fano_tree(&mut reader)?;
-    let distance_tree = read_shannon_fano_tree(&mut reader)?;
+    let len_code = read_code_table(&mut reader, MATCH_SYMS)?;
+    let dist_code = read_code_table(&mut reader, MATCH_SYMS)?;
 
     let mut output = Vec::with_capacity(expected_size);
-
-    loop {
-        if output.len() >= expected_size || reader.is_exhausted() {
-            break;
+    while output.len() < expected_size {
+        let bit = reader
+            .try_read_bits(1)
+            .ok_or(Error::InvalidData("zip implode: truncated stream"))?;
+        if bit == 1 {
+            let sym = match &lit_code {
+                Some(code) => decode_symbol(&mut reader, code)?,
+                None => reader
+                    .try_read_bits(8)
+                    .ok_or(Error::InvalidData("zip implode: truncated stream"))?
+                    as usize,
+            };
+            output.push(sym as u8);
+            continue;
         }
 
-        // Read one bit to decide literal vs match.
-        let bit = match reader.try_read_bits(1) {
-            Some(v) => v,
-            None => break,
-        };
+        // Back reference: low distance bits, then high-distance and length
+        // symbols.
+        let low = reader
+            .try_read_bits(dist_bits)
+            .ok_or(Error::InvalidData("zip implode: truncated stream"))?;
+        let high = decode_symbol(&mut reader, &dist_code)?;
+        let dist = ((high as u32) << dist_bits) as usize | low as usize;
+        let dist = dist + 1;
 
-        if has_literal_tree && bit == 0 {
-            // Literal byte: decode from literal tree.
-            let byte = match decode_symbol(&mut reader, literal_tree.as_ref().unwrap()) {
-                Ok(v) => v,
-                Err(_) => break,
-            };
-            output.push(byte as u8);
-        } else if !has_literal_tree && bit == 0 {
-            // Literal byte: read 8 bits directly.
-            let byte = match reader.try_read_bits(8) {
-                Some(v) => v,
-                None => break,
-            };
-            output.push(byte as u8);
-        } else {
-            // Length/distance match.
-            // Read low distance bits (dict_bits bits).
-            let low_dist = match reader.try_read_bits(dict_bits) {
-                Some(v) => v as usize,
-                None => break,
-            };
+        let len_sym = decode_symbol(&mut reader, &len_code)?;
+        let mut len = len_sym + min_len;
+        if len_sym == 63 {
+            let extra = reader
+                .try_read_bits(8)
+                .ok_or(Error::InvalidData("zip implode: truncated stream"))?;
+            len += extra as usize;
+        }
 
-            // Read high distance bits from distance tree.
-            let high_dist = match decode_symbol(&mut reader, &distance_tree) {
-                Ok(v) => v as usize,
-                Err(_) => break,
-            };
-
-            let distance = (high_dist << dict_bits) | low_dist;
-            // distance is 0-based offset back from current position.
-            let distance = distance + 1; // convert to 1-based
-
-            // Read length from length tree.
-            let length_code = match decode_symbol(&mut reader, &length_tree) {
-                Ok(v) => v as usize,
-                Err(_) => break,
-            };
-
-            let length = length_code + min_match_length;
-
-            // If length_code == 63, read an additional 8-bit value and add it.
-            let length = if length_code == 63 {
-                let extra = match reader.try_read_bits(8) {
-                    Some(v) => v as usize,
-                    None => break,
-                };
-                length + extra
-            } else {
-                length
-            };
-
-            if distance > output.len() {
-                return Err(Error::InvalidData(
-                    "zip implode: back-reference distance exceeds output",
-                ));
+        if len > expected_size - output.len() {
+            return Err(Error::InvalidData("zip implode: backref overruns output"));
+        }
+        for _ in 0..len {
+            if dist > output.len() {
+                // Back references may point into the "implicit zeros" area
+                // before the start of the output.
+                output.push(0);
+                continue;
             }
-
-            // Copy from sliding window.
-            let start = output.len() - distance;
-            for i in 0..length {
-                let byte = output[start + (i % distance)];
-                output.push(byte);
-            }
+            let b = output[output.len() - dist];
+            output.push(b);
         }
     }
 
     Ok(output)
 }
 
-/// A Shannon-Fano decoding tree node.
-#[derive(Debug, Clone)]
-enum SfNode {
-    Leaf(u16),
-    Internal {
-        left: Box<SfNode>,  // bit 0
-        right: Box<SfNode>, // bit 1
-    },
+/// A decoding table: `entries[len][k]` are (flipped_codeword, symbol) pairs.
+struct CodeTable {
+    /// For each length 1..=16, a sorted list of (flipped code, symbol).
+    entries: [Vec<(u16, u16)>; MAX_CODE_LEN as usize],
 }
 
-/// Read a Shannon-Fano tree from the bitstream.
-///
-/// Format (APPNOTE §5.3):
-/// - 1 byte: number of values minus 1 (so 0 means 1 value, 255 means 256)
-/// - For each value: 1 byte = (value << 4) | (bit_length - 1)
-///   Actually the format per the original PKZIP source is:
-///   - low 4 bits: bit length minus 1
-///   - high 4 bits are NOT the value; values are ordered
-///
-/// The actual format per APPNOTE/PKZIP implementation:
-/// - First byte: number of code length entries - 1
-/// - Each entry: 1 byte where low 4 bits = bit_length-1, high 4 bits = (not used for value)
-///
-/// However, the standard format from the actual PKZIP implementation is:
-/// - Read number of entries - 1
-/// - For each entry: read bit_length (low 4 bits + 1), the values are 0..n_entries-1
-///   arranged by code length using Shannon-Fano assignment.
-fn read_shannon_fano_tree(reader: &mut BitReader<'_>) -> Result<SfNode, Error> {
-    let n_entries = reader.read_bits(8)? as usize + 1;
+/// Read one run-length encoded code table of `num_syms` symbols.
+fn read_code_table(reader: &mut BitReader<'_>, num_syms: usize) -> Result<CodeTable, Error> {
+    let num_records = reader.try_read_bits(8).ok_or(Error::UnexpectedEof)? as usize + 1;
 
-    // Read code lengths for each value.
-    let mut entries: Vec<(u16, u8)> = Vec::with_capacity(n_entries);
-    for i in 0..n_entries {
-        let byte = reader.read_bits(8)? as u8;
-        let code_len = (byte & 0x0F) + 1; // low 4 bits + 1
-        entries.push((i as u16, code_len));
-    }
-
-    // Build Shannon-Fano tree: sort by code length, then assign codes.
-    // Sort by code length (stable sort preserves value order within same length).
-    entries.sort_by_key(|&(_, len)| len);
-
-    if entries.is_empty() {
-        return Err(Error::InvalidData("zip implode: empty Shannon-Fano tree"));
-    }
-
-    // Assign canonical codes (similar to canonical Huffman).
-    let mut code: u32 = 0;
-    let mut prev_len: u8 = entries[0].1;
-
-    let mut code_assignments: Vec<(u16, u8, u32)> = Vec::with_capacity(entries.len());
-
-    for &(value, len) in &entries {
-        if len > prev_len {
-            code <<= len - prev_len;
+    let mut lens = vec![0u8; num_syms];
+    let mut idx = 0usize;
+    let mut len_count = [0i32; MAX_CODE_LEN as usize + 1];
+    for _ in 0..num_records {
+        let byte = reader.try_read_bits(8).ok_or(Error::UnexpectedEof)? as usize;
+        let len = (byte & 0x0f) + 1;
+        let run = (byte >> 4) + 1;
+        len_count[len] += run as i32;
+        if idx + run > num_syms {
+            return Err(Error::InvalidData("zip implode: too many code lengths"));
         }
-        code_assignments.push((value, len, code));
-        code += 1;
-        prev_len = len;
+        for l in lens[idx..idx + run].iter_mut() {
+            *l = len as u8;
+        }
+        idx += run;
+    }
+    if idx < num_syms {
+        return Err(Error::InvalidData("zip implode: too few code lengths"));
     }
 
-    // Build tree from the code assignments.
-    let max_len = entries
-        .last()
-        .ok_or(Error::InvalidData("implode: empty code table"))?
-        .1;
-    build_tree_from_codes(&code_assignments, max_len)
-}
-
-/// Build a binary tree from (value, bit_length, code) triples.
-fn build_tree_from_codes(codes: &[(u16, u8, u32)], max_len: u8) -> Result<SfNode, Error> {
-    // Build tree by inserting each code.
-    // Even single-entry trees must have the proper depth so that
-    // decode_symbol consumes the correct number of bits.
-    let mut root = build_empty_tree(max_len);
-
-    for &(value, len, code) in codes {
-        insert_code(&mut root, value, len, code)?;
+    // The tree must be full (Kraft sum exactly one).
+    let mut avail = 1i32;
+    for &count in len_count.iter().skip(1) {
+        avail = avail * 2 - count;
+        if avail < 0 {
+            return Err(Error::InvalidData("zip implode: over-subscribed code"));
+        }
+    }
+    if avail != 0 {
+        return Err(Error::InvalidData("zip implode: incomplete code"));
     }
 
-    Ok(root)
+    Ok(build_code_table(&lens))
 }
 
-/// Build an empty tree of the given maximum depth.
-fn build_empty_tree(depth: u8) -> SfNode {
-    if depth == 0 {
-        SfNode::Leaf(u16::MAX) // placeholder
+/// Build the decode table for codeword lengths in symbol order.
+fn build_code_table(lens: &[u8]) -> CodeTable {
+    let canonical = canonical_codes(lens);
+    let mut entries: [Vec<(u16, u16)>; MAX_CODE_LEN as usize] = Default::default();
+    for (sym, (&len, &code)) in lens.iter().zip(canonical.iter()).enumerate() {
+        if len == 0 {
+            continue;
+        }
+        let flipped = (!code) & ((1u32 << len) - 1);
+        entries[len as usize - 1].push((flipped as u16, sym as u16));
+    }
+    CodeTable { entries }
+}
+
+/// Decode one symbol, consuming bits MSB-first of the flipped codeword.
+fn decode_symbol(reader: &mut BitReader<'_>, table: &CodeTable) -> Result<usize, Error> {
+    let mut code = 0u16;
+    for len in 1..=MAX_CODE_LEN {
+        let bit = reader
+            .try_read_bits(1)
+            .ok_or(Error::InvalidData("zip implode: truncated stream"))?;
+        code = (code << 1) | bit as u16;
+        for &(c, sym) in &table.entries[len as usize - 1] {
+            if c == code {
+                return Ok(sym as usize);
+            }
+        }
+    }
+    Err(Error::InvalidData("zip implode: invalid codeword"))
+}
+
+/// Assign canonical codes: sorted by (length, symbol), sequential within a
+/// length, left-shifted when the length increases.
+fn canonical_codes(lens: &[u8]) -> Vec<u32> {
+    let mut count = [0u32; MAX_CODE_LEN as usize + 1];
+    for &l in lens {
+        count[l as usize] += 1;
+    }
+    count[0] = 0;
+    let mut next = [0u32; MAX_CODE_LEN as usize + 1];
+    let mut code = 0u32;
+    for l in 1..=MAX_CODE_LEN as usize {
+        code = (code + count[l - 1]) << 1;
+        next[l] = code;
+    }
+    let mut codes = vec![0u32; lens.len()];
+    for (sym, &l) in lens.iter().enumerate() {
+        if l != 0 {
+            codes[sym] = next[l as usize];
+            next[l as usize] += 1;
+        }
+    }
+    codes
+}
+
+// ======================================================================
+// Encoder
+// ======================================================================
+
+/// Compress data with the ZIP Implode algorithm.
+///
+/// `large_wnd` selects the 8 KiB dictionary (otherwise 4 KiB); `lit_tree`
+/// selects the 3-tree mode with Huffman-coded literals (otherwise literals
+/// are stored as raw bytes). These correspond to general purpose flag bits 1
+/// and 2 in the ZIP entry header.
+pub(super) fn implode_encode(input: &[u8], large_wnd: bool, lit_tree: bool) -> Vec<u8> {
+    let max_dist = if large_wnd { 8192 } else { 4096 };
+    let min_len = if lit_tree { 3 } else { 2 };
+    let max_len = min_len + 63 + EXTRA_LEN;
+    let dist_bits = if large_wnd { 7u32 } else { 6u32 };
+
+    let tokens = super::lzmatch::lz_match(input, max_dist, max_len, min_len, true);
+
+    // Frequency tables over the first TREE_WINDOW tokens.
+    let mut lit_freq = [0u32; LIT_SYMS];
+    let mut len_freq = [0u32; MATCH_SYMS];
+    let mut dist_freq = [0u32; MATCH_SYMS];
+    for t in tokens.iter().take(TREE_WINDOW) {
+        if t.dist == 0 {
+            lit_freq[t.litlen as usize] += 1;
+        } else {
+            len_freq[len_sym(t.litlen as usize, lit_tree)] += 1;
+            dist_freq[dist_sym(t.dist as usize, large_wnd)] += 1;
+        }
+    }
+
+    let lit_lens = if lit_tree {
+        Some(code_lengths(&lit_freq))
     } else {
-        SfNode::Internal {
-            left: Box::new(build_empty_tree(depth - 1)),
-            right: Box::new(build_empty_tree(depth - 1)),
-        }
-    }
-}
+        None
+    };
+    let len_lens = code_lengths(&len_freq);
+    let dist_lens = code_lengths(&dist_freq);
+    let lit_codes = lit_lens.as_deref().map(canonical_codes);
+    let len_codes = canonical_codes(&len_lens);
+    let dist_codes = canonical_codes(&dist_lens);
 
-/// Insert a code into the tree.
-fn insert_code(node: &mut SfNode, value: u16, len: u8, code: u32) -> Result<(), Error> {
-    if len == 0 {
-        *node = SfNode::Leaf(value);
-        return Ok(());
+    let mut out = BitWriter::new();
+    if let Some(lens) = &lit_lens {
+        write_code_table(&mut out, lens);
     }
+    write_code_table(&mut out, &len_lens);
+    write_code_table(&mut out, &dist_lens);
 
-    match node {
-        SfNode::Leaf(_) => {
-            // Need to convert to internal node.
-            *node = SfNode::Internal {
-                left: Box::new(SfNode::Leaf(u16::MAX)),
-                right: Box::new(SfNode::Leaf(u16::MAX)),
-            };
-            insert_code(node, value, len, code)
-        }
-        SfNode::Internal { left, right } => {
-            // Shannon-Fano codes are read MSB first from the bitstream.
-            // The bit we check is the (len-1)th bit of the code.
-            let bit = (code >> (len - 1)) & 1;
-            if bit == 0 {
-                insert_code(left, value, len - 1, code)
-            } else {
-                insert_code(right, value, len - 1, code)
-            }
-        }
-    }
-}
-
-/// Decode a symbol from the bitstream using the given Shannon-Fano tree.
-///
-/// Bits are read one at a time: 0 goes left, 1 goes right.
-fn decode_symbol(reader: &mut BitReader<'_>, tree: &SfNode) -> Result<u16, Error> {
-    let mut node = tree;
-    loop {
-        match node {
-            SfNode::Leaf(value) => {
-                if *value == u16::MAX {
-                    return Err(Error::InvalidData(
-                        "zip implode: invalid code in Shannon-Fano tree",
-                    ));
+    for t in &tokens {
+        if t.dist == 0 {
+            out.write_bits(1, 1);
+            match (lit_tree, &lit_lens, &lit_codes) {
+                (true, Some(lens), Some(codes)) => {
+                    write_codeword(&mut out, codes[t.litlen as usize], lens[t.litlen as usize]);
                 }
-                return Ok(*value);
+                _ => out.write_bits(t.litlen as u32, 8),
             }
-            SfNode::Internal { left, right } => {
-                let bit = reader.read_bits(1)?;
-                node = if bit == 0 {
-                    left.as_ref()
-                } else {
-                    right.as_ref()
-                };
-            }
+            continue;
         }
+        // Back reference.
+        let dist = t.dist as usize;
+        let len = t.litlen as usize;
+        out.write_bits(0, 1);
+        out.write_bits(((dist - 1) & ((1 << dist_bits) - 1)) as u32, dist_bits);
+        let dsym = dist_sym(dist, large_wnd);
+        write_codeword(&mut out, dist_codes[dsym], dist_lens[dsym]);
+        let lsym = len_sym(len, lit_tree);
+        write_codeword(&mut out, len_codes[lsym], len_lens[lsym]);
+        if lsym == 63 {
+            out.write_bits((len - 63 - min_len) as u32, 8);
+        }
+    }
+    out.finish()
+}
+
+/// Distance tree symbol for a 1-based distance.
+const fn dist_sym(dist: usize, large_wnd: bool) -> usize {
+    let shift = if large_wnd { 7 } else { 6 };
+    (dist - 1) >> shift
+}
+
+/// Length tree symbol for a match length.
+const fn len_sym(len: usize, lit_tree: bool) -> usize {
+    let adj = len - if lit_tree { 3 } else { 2 };
+    if adj < 63 { adj } else { 63 }
+}
+
+/// Write a flipped canonical codeword, MSB-first.
+fn write_codeword(out: &mut BitWriter, code: u32, len: u8) {
+    let flipped = !code & ((1u32 << len) - 1);
+    for i in (0..len as u32).rev() {
+        out.write_bits((flipped >> i) & 1, 1);
     }
 }
 
-/// Bitstream reader that reads bits LSB-first from a byte slice.
+/// Write a code table as run-length encoded lengths (high nibble = run-1,
+/// low nibble = len-1).
+fn write_code_table(out: &mut BitWriter, lens: &[u8]) {
+    let mut records: Vec<(u8, u8)> = Vec::new(); // (len, run)
+    for &l in lens {
+        debug_assert!((1..=MAX_CODE_LEN).contains(&l));
+        match records.last_mut() {
+            Some(&mut (len, ref mut run)) if len == l && *run < 16 => *run += 1,
+            _ => records.push((l, 1)),
+        }
+    }
+    out.write_bits(records.len() as u32 - 1, 8);
+    for &(len, run) in &records {
+        out.write_bits(((run as u32 - 1) << 4) | (len as u32 - 1), 8);
+    }
+}
+
+/// Compute Kraft-complete codeword lengths (1..=16) for every symbol.
+///
+/// Every symbol receives a non-zero frequency (Implode requires a full
+/// tree), then Huffman code lengths are computed. When the Huffman depth
+/// exceeds 16 the code degrades to a flat, still valid, assignment.
+fn code_lengths(freqs: &[u32]) -> Vec<u8> {
+    let n = freqs.len();
+    let mut f = [0u32; LIT_SYMS];
+    for (i, &x) in freqs.iter().enumerate() {
+        f[i] = x.max(1);
+    }
+
+    // Standard Huffman over the adjusted frequencies.
+    let lengths = huffman_lengths(&f[..n]);
+    if *lengths.iter().max().unwrap_or(&0) <= MAX_CODE_LEN {
+        return lengths;
+    }
+
+    // Fallback: a balanced code is always Kraft-complete.
+    let bits = (usize::BITS - (n - 1).leading_zeros()) as u8;
+    let bits = bits.max(1);
+    vec![bits; n]
+}
+
+/// Huffman code lengths for frequencies (all non-zero).
+fn huffman_lengths(freqs: &[u32]) -> Vec<u8> {
+    let n = freqs.len();
+    let mut lens = vec![0u8; n];
+    if n == 1 {
+        lens[0] = 1;
+        return lens;
+    }
+    // Sort leaves by frequency ascending.
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by_key(|&i| freqs[i]);
+    let total = 2 * n - 1;
+    let mut node_freq = vec![0u64; total];
+    let mut parent = vec![usize::MAX; total];
+    for (i, &sym) in order.iter().enumerate() {
+        node_freq[i] = freqs[sym] as u64;
+    }
+    let mut q1 = 0usize;
+    let mut q2 = 0usize;
+    for k in 0..n - 1 {
+        let internal = n + k;
+        let take = |nodes: &[u64], q1: &mut usize, q2: &mut usize| -> usize {
+            let a = if *q1 < n { Some(*q1) } else { None };
+            let b = if n + *q2 < internal {
+                Some(n + *q2)
+            } else {
+                None
+            };
+            match (a, b) {
+                (Some(x), Some(y)) if nodes[x] <= nodes[y] => {
+                    *q1 += 1;
+                    x
+                }
+                (Some(_), Some(y)) => {
+                    *q2 += 1;
+                    y
+                }
+                (Some(x), None) => {
+                    *q1 += 1;
+                    x
+                }
+                (None, Some(y)) => {
+                    *q2 += 1;
+                    y
+                }
+                (None, None) => unreachable!(),
+            }
+        };
+        let a = take(&node_freq, &mut q1, &mut q2);
+        let b = take(&node_freq, &mut q1, &mut q2);
+        node_freq[internal] = node_freq[a] + node_freq[b];
+        parent[a] = internal;
+        parent[b] = internal;
+    }
+    let mut depth = vec![0u8; total];
+    let root = total - 1;
+    for i in (0..root).rev() {
+        if parent[i] != usize::MAX {
+            depth[i] = depth[parent[i]] + 1;
+        }
+    }
+    for (i, &sym) in order.iter().enumerate() {
+        lens[sym] = depth[i].max(1);
+    }
+    lens
+}
+
+// ======================================================================
+// Bit-level I/O (LSB-first)
+// ======================================================================
+
+/// LSB-first bitstream reader.
 struct BitReader<'a> {
     data: &'a [u8],
-    byte_pos: usize,
-    bit_pos: u8,
+    bit_pos: usize,
 }
 
 impl<'a> BitReader<'a> {
     const fn new(data: &'a [u8]) -> Self {
+        Self { data, bit_pos: 0 }
+    }
+
+    /// Read `count` bits; returns `None` past the end of input.
+    fn try_read_bits(&mut self, count: u32) -> Option<u32> {
+        if count == 0 {
+            return Some(0);
+        }
+        if self.bit_pos + count as usize > self.data.len() * 8 {
+            return None;
+        }
+        let mut result = 0u32;
+        for i in 0..count as usize {
+            let idx = self.bit_pos + i;
+            if (self.data[idx / 8] >> (idx % 8)) & 1 != 0 {
+                result |= 1 << i;
+            }
+        }
+        self.bit_pos += count as usize;
+        Some(result)
+    }
+}
+
+/// LSB-first bitstream writer.
+struct BitWriter {
+    buf: Vec<u8>,
+    bit_pos: usize,
+}
+
+impl BitWriter {
+    fn new() -> Self {
         Self {
-            data,
-            byte_pos: 0,
+            buf: Vec::new(),
             bit_pos: 0,
         }
     }
 
-    const fn is_exhausted(&self) -> bool {
-        self.byte_pos >= self.data.len()
-    }
-
-    fn read_bits(&mut self, count: u8) -> Result<u16, Error> {
-        self.try_read_bits(count).ok_or(Error::UnexpectedEof)
-    }
-
-    fn try_read_bits(&mut self, count: u8) -> Option<u16> {
-        let mut result: u16 = 0;
-        for i in 0..count {
-            if self.byte_pos >= self.data.len() {
-                return None;
+    /// Write the low `count` bits of `value`, LSB-first.
+    fn write_bits(&mut self, value: u32, count: u32) {
+        for i in 0..count as usize {
+            let idx = self.bit_pos + i;
+            if idx / 8 == self.buf.len() {
+                self.buf.push(0);
             }
-            let bit = (self.data[self.byte_pos] >> self.bit_pos) & 1;
-            result |= (bit as u16) << i;
-            self.bit_pos += 1;
-            if self.bit_pos == 8 {
-                self.bit_pos = 0;
-                self.byte_pos += 1;
+            if (value >> i) & 1 != 0 {
+                self.buf[idx / 8] |= 1 << (idx % 8);
             }
         }
-        Some(result)
+        self.bit_pos += count as usize;
+    }
+
+    /// Return the byte buffer, zero-padding the final partial byte.
+    fn finish(self) -> Vec<u8> {
+        self.buf
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    extern crate alloc;
+    use alloc::vec;
 
-    /// Minimal bit writer for constructing test data, LSB-first.
-    struct BitWriter {
-        data: Vec<u8>,
-        current_byte: u8,
-        bit_pos: u8,
+    fn rt(data: &[u8], large_wnd: bool, lit_tree: bool) {
+        let flags = (large_wnd as u16) << 1 | (lit_tree as u16) << 2;
+        let compressed = implode_encode(data, large_wnd, lit_tree);
+        assert_eq!(implode(&compressed, flags, data.len()).unwrap(), data);
     }
 
-    impl BitWriter {
-        fn new() -> Self {
-            Self {
-                data: Vec::new(),
-                current_byte: 0,
-                bit_pos: 0,
+    #[test]
+    fn roundtrip_all_modes() {
+        let data = b"implode test data with some repetition repetition repetition";
+        for &lw in &[false, true] {
+            for &lt in &[false, true] {
+                rt(data, lw, lt);
             }
         }
+    }
 
-        fn write_bits(&mut self, value: u16, count: u8) {
-            for i in 0..count {
-                let bit = ((value >> i) & 1) as u8;
-                self.current_byte |= bit << self.bit_pos;
-                self.bit_pos += 1;
-                if self.bit_pos == 8 {
-                    self.data.push(self.current_byte);
-                    self.current_byte = 0;
-                    self.bit_pos = 0;
-                }
+    #[test]
+    fn roundtrip_repetitive() {
+        let mut data = Vec::new();
+        for i in 0..3000 {
+            data.extend_from_slice(b"hello world ");
+            data.push(i as u8);
+        }
+        for &lw in &[false, true] {
+            for &lt in &[false, true] {
+                let flags = (lw as u16) << 1 | (lt as u16) << 2;
+                let compressed = implode_encode(&data, lw, lt);
+                assert!(compressed.len() < data.len() / 3);
+                assert_eq!(implode(&compressed, flags, data.len()).unwrap(), data);
             }
         }
-
-        fn finish(mut self) -> Vec<u8> {
-            if self.bit_pos > 0 {
-                self.data.push(self.current_byte);
-            }
-            self.data
-        }
     }
 
     #[test]
-    fn test_implode_roundtrip() {
-        // Verify that implode can decode a stream containing both literals
-        // and a back-reference, confirming the decompressed data matches
-        // the expected original.
-        //
-        // Encode "ABCABC" as: literals 'A','B','C' + match(dist=3, len=3).
-        // flags = 0x0000 (4K dict, 2 trees).
-        // dict_bits = 6, min_match_length = 2.
-
-        let flags: u16 = 0x0000;
-
-        let mut bits = BitWriter::new();
-
-        // Length tree: 2 entries. Value 0 (len=0+2=2), value 1 (len=1+2=3).
-        bits.write_bits(1, 8); // n_entries - 1 = 1
-        bits.write_bits(0, 8); // entry 0: code_len=1
-        bits.write_bits(0, 8); // entry 1: code_len=1
-
-        // Distance tree: 1 entry.
-        bits.write_bits(0, 8); // n_entries - 1 = 0
-        bits.write_bits(0, 8); // entry: code_len=1
-
-        // Literal 'A' (0x41)
-        bits.write_bits(0, 1); // literal flag
-        bits.write_bits(0x41, 8);
-
-        // Literal 'B' (0x42)
-        bits.write_bits(0, 1);
-        bits.write_bits(0x42, 8);
-
-        // Literal 'C' (0x43)
-        bits.write_bits(0, 1);
-        bits.write_bits(0x43, 8);
-
-        // Match: bit=1 (match flag), distance=3 (back 3 bytes to 'A'), length=3.
-        bits.write_bits(1, 1);
-        // Low distance bits (6 bits): distance-1=2, low 6 bits = 2.
-        bits.write_bits(2, 6);
-        // High distance from distance tree: value 0, code = 0 (1 bit).
-        bits.write_bits(0, 1);
-        // Length from length tree: want length_code=1 (length = 1 + 2 = 3).
-        bits.write_bits(1, 1); // code 1 => value 1 => length = 3
-
-        let compressed = bits.finish();
-        let result = implode(&compressed, flags, 6).unwrap();
-        assert_eq!(result, b"ABCABC");
+    fn roundtrip_random() {
+        let mut state = 99u32;
+        let data: Vec<u8> = (0..60_000)
+            .map(|_| {
+                state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+                (state >> 16) as u8
+            })
+            .collect();
+        rt(&data, true, true);
+        rt(&data, false, false);
     }
 
     #[test]
-    fn test_implode_simple() {
-        // Build a minimal Imploding-compressed stream.
-        // Use: no literal tree (2 trees), 4K dictionary (bit 1 clear, bit 2 clear).
-        // flags = 0x0000.
-        // dict_bits = 6, min_match_length = 2.
-        //
-        // We will encode 3 literal bytes: 'H', 'i', '!'
-        // Each literal: bit 0 (literal marker) + 8-bit value.
-
-        let flags: u16 = 0x0000; // 4K dict, 2 trees
-
-        let mut bits = BitWriter::new();
-
-        // Write length tree (must have at least 1 entry).
-        // We encode 1 entry (n_entries - 1 = 0), value 0, code length 1.
-        bits.write_bits(0, 8); // n_entries - 1 = 0
-        bits.write_bits(0, 8); // entry: code_len-1=0, high bits=0 => code_len=1
-
-        // Write distance tree (1 entry).
-        bits.write_bits(0, 8); // n_entries - 1 = 0
-        bits.write_bits(0, 8); // entry: code_len=1
-
-        // Encode literals: bit=0 means literal, then 8-bit value.
-        for &byte in b"Hi!" {
-            bits.write_bits(0, 1); // literal flag
-            bits.write_bits(byte as u16, 8); // byte value
-        }
-
-        let compressed = bits.finish();
-        let result = implode(&compressed, flags, 3).unwrap();
-        assert_eq!(result, b"Hi!");
+    fn roundtrip_empty() {
+        rt(b"", true, true);
+        rt(b"", false, false);
     }
 
     #[test]
-    fn test_implode_with_literal_tree() {
-        // Use 3 trees (bit 2 set), 4K dictionary (bit 1 clear).
-        // flags = 0x0004.
-        // dict_bits = 6, min_match_length = 3.
-        //
-        // We will use a trivial literal tree with 1 entry (value 0, code len 1).
-        // But that means we can only decode value 0 as the literal.
-        // Let's instead encode a single literal NUL byte.
-
-        let flags: u16 = 0x0004; // 4K dict, 3 trees
-
-        let mut bits = BitWriter::new();
-
-        // Write literal tree: 1 entry (value 0, code_len=1).
-        bits.write_bits(0, 8); // n_entries - 1 = 0
-        bits.write_bits(0, 8); // code_len=1
-
-        // Write length tree: 1 entry.
-        bits.write_bits(0, 8);
-        bits.write_bits(0, 8);
-
-        // Write distance tree: 1 entry.
-        bits.write_bits(0, 8);
-        bits.write_bits(0, 8);
-
-        // Encode literal: bit=0 means literal (from literal tree).
-        // Literal tree has only value 0 with code 0 (length 1).
-        bits.write_bits(0, 1); // literal flag
-        bits.write_bits(0, 1); // code 0 from literal tree => value 0
-
-        let compressed = bits.finish();
-        let result = implode(&compressed, flags, 1).unwrap();
-        assert_eq!(result, vec![0u8]);
+    fn roundtrip_long_match() {
+        // Force extra-length-byte backrefs (len > 63 + min_len).
+        let data: Vec<u8> = b"Q".repeat(500);
+        rt(&data, true, true);
+        rt(&data, false, false);
     }
 
     #[test]
-    fn test_implode_back_reference() {
-        // Test a back-reference. Encode "AAAA" as literal 'A' + match(dist=1, len=3).
-        // flags = 0x0000 (4K dict, 2 trees).
-        // dict_bits = 6, min_match_length = 2.
+    fn implode_bad_table_overrun() {
+        // First table byte says 200 records: exhausts 64 symbols quickly.
+        let mut buf = vec![200u8];
+        // Each record: len 1, run 16 -> 200*16 = 3200 > 64 symbols.
+        buf.extend(core::iter::repeat_n(0xF0, 10));
+        let flags = 0x0006u16;
+        assert!(implode(&buf, flags, 100).is_err());
+    }
 
-        let flags: u16 = 0x0000;
+    #[test]
+    fn implode_incomplete_code() {
+        // A code that does not form a complete tree must be rejected.
+        // lit tree: one record len=1 run=1 -> only 1 of 256 symbols covered.
+        let mut buf = vec![0u8]; // lit: 1 record, len 1 run 1
+        buf.push(0x00);
+        buf.push(0u8); // len tree: 1 record len 1 run 1
+        buf.push(0x00);
+        buf.push(0u8); // dist tree: 1 record len 1 run 1
+        buf.push(0x00);
+        let flags = 0x0006u16;
+        assert!(implode(&buf, flags, 100).is_err());
+    }
 
-        let mut bits = BitWriter::new();
-
-        // Length tree: 2 entries. Value 0 (len=2), value 1 (len=3).
-        // Both get code_len=1.
-        bits.write_bits(1, 8); // n_entries - 1 = 1
-        bits.write_bits(0, 8); // entry 0: code_len=1
-        bits.write_bits(0, 8); // entry 1: code_len=1
-
-        // Distance tree: 1 entry.
-        bits.write_bits(0, 8); // n_entries - 1 = 0
-        bits.write_bits(0, 8); // entry: code_len=1
-
-        // Literal 'A' (0x41).
-        bits.write_bits(0, 1); // literal flag
-        bits.write_bits(0x41, 8);
-
-        // Match: bit=1 (match flag).
-        bits.write_bits(1, 1);
-        // Low distance bits (6 bits for 4K dict): distance-1 = 0, so low 6 bits = 0.
-        bits.write_bits(0, 6);
-        // High distance from distance tree: value 0, code = 0 (1 bit).
-        bits.write_bits(0, 1);
-        // Length from length tree: we want length_code=1 (which gives length=1+2=3).
-        // Tree: value 0 has code 0 (len 1), value 1 has code 1 (len 1).
-        bits.write_bits(1, 1); // code 1 => value 1 => length = 1 + 2 = 3
-
-        let compressed = bits.finish();
-        let result = implode(&compressed, flags, 4).unwrap();
-        // 'A' + match(dist=1, len=3) = "AAAA"
-        assert_eq!(result, b"AAAA");
+    #[test]
+    fn implode_truncated() {
+        let data = b"truncate me truncate me truncate me";
+        let compressed = implode_encode(data, true, true);
+        assert!(implode(&compressed[..2], 0x0006, data.len()).is_err());
     }
 }

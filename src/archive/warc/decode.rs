@@ -26,8 +26,11 @@
 //! summed block lengths when the whole series is observed) accepts no
 //! further segments. A series first observed through a
 //! `continuation` record is tracked leniently because earlier
-//! segments may live in an earlier WARC file. Segment reassembly is
-//! not performed.
+//! segments may live in an earlier WARC file. Segment reassembly
+//! is available via `join()`: a series whose origin
+//! segment is present is merged into a single entry; orphan
+//! `continuation` records pass through. `concurrent_groups()`
+//! resolves `WARC-Concurrent-To` capture groups.
 
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
@@ -52,6 +55,26 @@ pub struct WarcEntry {
     pub content_type: Option<String>,
     /// `WARC-Target-URI`, if present.
     pub target_uri: Option<String>,
+    /// Clause 7 segmentation metadata when the record carries
+    /// a `WARC-Segment-Number` (origin or `continuation` segment).
+    pub segment: Option<SegmentInfo>,
+    /// Every `WARC-Concurrent-To` value in occurrence
+    /// order (the field may repeat; values are capture-group ids).
+    pub concurrent_to: Vec<String>,
+}
+
+/// Clause 7 segmentation metadata of a segmented WARC record.
+#[derive(Debug, Clone)]
+pub struct SegmentInfo {
+    /// Series identifier: the `WARC-Record-ID` of the first
+    /// segment (repeated as `WARC-Segment-Origin-ID` on
+    /// continuations).
+    pub origin_id: String,
+    /// `WARC-Segment-Number` ("1" on the origin record).
+    pub number: u64,
+    /// `WARC-Segment-Total-Length` when declared on this
+    /// segment; declaring it closes the series.
+    pub total_length: Option<u64>,
 }
 
 impl crate::traits::ArchiveEntry for WarcEntry {
@@ -66,12 +89,15 @@ impl crate::traits::ArchiveEntry for WarcEntry {
 
 const VERSIONS: &[&[u8]] = &[b"WARC/1.0", b"WARC/1.1"];
 
-fn parse_header_block(block: &[u8]) -> Result<BTreeMap<String, String>, Error> {
+fn parse_header_block(block: &[u8]) -> Result<(BTreeMap<String, String>, Vec<String>), Error> {
     // Header lines are UTF-8 text ending in CRLF; LWS folding joins a
     // continuation line (starting with SP/HT) onto the previous value.
     let text =
         core::str::from_utf8(block).map_err(|_| Error::InvalidData("warc: header is not UTF-8"))?;
     let mut fields: BTreeMap<String, String> = BTreeMap::new();
+    // WARC-Concurrent-To may repeat; every occurrence is retained
+    // (the BTreeMap keeps only the last).
+    let mut concurrent_to = Vec::new();
     let mut last_name: Option<String> = None;
     for raw in text.split("\r\n") {
         let line = raw.trim_end_matches('\n');
@@ -95,10 +121,15 @@ fn parse_header_block(block: &[u8]) -> Result<BTreeMap<String, String>, Error> {
         if name.is_empty() || !name.bytes().all(|b| b.is_ascii_graphic() && b != b':') {
             return Err(Error::InvalidData("warc: bad field name"));
         }
-        fields.insert(name.to_string(), value.trim().to_string());
-        last_name = Some(name.to_string());
+        let name = name.to_string();
+        let value = value.trim().to_string();
+        if name.eq_ignore_ascii_case("WARC-Concurrent-To") {
+            concurrent_to.push(value.clone());
+        }
+        fields.insert(name.clone(), value);
+        last_name = Some(name);
     }
-    Ok(fields)
+    Ok((fields, concurrent_to))
 }
 
 /// RFC 4648 Base32 decode (uppercase or lowercase, `=` padding
@@ -531,7 +562,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<WarcEntry>, Error> {
             .position(|w| w == b"\r\n\r\n")
             .map(|i| pos + i)
             .ok_or(Error::InvalidData("warc: unterminated header"))?;
-        let fields = parse_header_block(&input[pos..hdr_end])?;
+        let (fields, concurrent_to) = parse_header_block(&input[pos..hdr_end])?;
         let mut cur = hdr_end + 4;
 
         // Mandatory fields per spec.
@@ -575,6 +606,18 @@ pub fn decode(input: &[u8]) -> Result<Vec<WarcEntry>, Error> {
         )?;
         verify_digests(&fields, &record_type, content_type.as_deref(), &block)?;
 
+        let segment = parse_digits(&fields, "WARC-Segment-Number")?.map(|number| SegmentInfo {
+            origin_id: if number == 1 {
+                record_id.clone()
+            } else {
+                fields
+                    .get("WARC-Segment-Origin-ID")
+                    .cloned()
+                    .unwrap_or_default()
+            },
+            number,
+            total_length: parse_digits(&fields, "WARC-Segment-Total-Length").unwrap_or(None),
+        });
         entries.push(WarcEntry {
             name,
             data: block,
@@ -583,9 +626,114 @@ pub fn decode(input: &[u8]) -> Result<Vec<WarcEntry>, Error> {
             date,
             content_type,
             target_uri,
+            segment,
+            concurrent_to,
         });
     }
     Ok(entries)
+}
+
+/// Join Clause-7 segmented record series into single logical records.
+///
+/// A series is an origin record (`WARC-Segment-Number: 1`) followed
+/// by its `continuation` records. When the origin is present, all
+/// segments are merged into a single entry carrying the origin's
+/// metadata and the concatenated block data in segment order; the
+/// merged entry's `segment` is `None`. A declared
+/// `WARC-Segment-Total-Length` must match the concatenated length.
+/// Series first observed through a `continuation` record (earlier
+/// segments live in another WARC file) and all unsegmented records
+/// pass through unchanged. Entry order is preserved.
+pub fn join(entries: &[WarcEntry]) -> Result<Vec<WarcEntry>, Error> {
+    // position in  for each open series, keyed by origin id
+    let mut open: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut out: Vec<WarcEntry> = Vec::with_capacity(entries.len());
+    for e in entries {
+        let Some(seg) = &e.segment else {
+            out.push(e.clone());
+            continue;
+        };
+        if seg.number == 1 {
+            if seg.origin_id != e.record_id {
+                return Err(Error::InvalidData("warc: segment origin id != record id"));
+            }
+            if open.insert(&e.record_id, out.len()).is_some() {
+                return Err(Error::InvalidData("warc: duplicate segment origin"));
+            }
+            out.push(e.clone());
+            continue;
+        }
+        let Some(&i) = open.get(seg.origin_id.as_str()) else {
+            // Orphan continuation: earlier segments are in another
+            // WARC file — cannot fabricate an origin, pass through.
+            out.push(e.clone());
+            continue;
+        };
+        let joined = &mut out[i];
+        let joined_seg = joined
+            .segment
+            .as_ref()
+            .ok_or(Error::InvalidData("warc: join target is not a series"))?;
+        let expected = joined_seg.number + 1;
+        if seg.number != expected {
+            return Err(Error::InvalidData(
+                "warc: non-sequential WARC-Segment-Number in join",
+            ));
+        }
+        joined.data.extend_from_slice(&e.data);
+        joined.segment = Some(SegmentInfo {
+            origin_id: seg.origin_id.clone(),
+            number: seg.number,
+            total_length: seg.total_length,
+        });
+        if let Some(total) = seg.total_length {
+            if total != joined.data.len() as u64 {
+                return Err(Error::InvalidData(
+                    "warc: joined length != WARC-Segment-Total-Length",
+                ));
+            }
+            joined.segment = None;
+            open.remove(seg.origin_id.as_str());
+        }
+    }
+    Ok(out)
+}
+
+/// Group entries linked by `WARC-Concurrent-To` (a capture group:
+/// records recorded simultaneously, e.g. a `response` with its
+/// `request` and `metadata`). Returns index
+/// groups (into `entries`) of size 2 or more, ordered by first
+/// index; a link exists when a record's `WARC-Concurrent-To` names
+/// another record's `WARC-Record-ID`.
+pub fn concurrent_groups(entries: &[WarcEntry]) -> Vec<Vec<usize>> {
+    let n = entries.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn root(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    let mut id_to_idx: BTreeMap<&str, usize> = BTreeMap::new();
+    for (i, e) in entries.iter().enumerate() {
+        id_to_idx.entry(e.record_id.as_str()).or_insert(i);
+    }
+    for (i, e) in entries.iter().enumerate() {
+        for id in &e.concurrent_to {
+            if let Some(&j) = id_to_idx.get(id.as_str()) {
+                let (a, b) = (root(&mut parent, i), root(&mut parent, j));
+                if a != b {
+                    parent[b] = a;
+                }
+            }
+        }
+    }
+    let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for i in 0..n {
+        groups.entry(root(&mut parent, i)).or_default().push(i);
+    }
+    groups.into_values().filter(|g| g.len() > 1).collect()
 }
 
 #[cfg(test)]
@@ -654,6 +802,174 @@ mod tests {
         data.extend_from_slice(b"Content-Length: 1\r\n\r\nx\r\n\r\n");
         let entries = decode(&data).unwrap();
         assert_eq!(entries.len(), 1);
+    }
+
+    fn record_with_fields(
+        rtype: &str,
+        id: &str,
+        uri: Option<&str>,
+        extra: &[&str],
+        block: &[u8],
+    ) -> Vec<u8> {
+        let mut r = Vec::new();
+        r.extend_from_slice(b"WARC/1.1");
+        r.extend_from_slice(&[13, 10]);
+        r.extend_from_slice(b"WARC-Type: ");
+        r.extend_from_slice(rtype.as_bytes());
+        r.extend_from_slice(&[13, 10]);
+        r.extend_from_slice(b"WARC-Record-ID: <");
+        r.extend_from_slice(id.as_bytes());
+        r.extend_from_slice(b">");
+        r.extend_from_slice(&[13, 10]);
+        r.extend_from_slice(b"WARC-Date: 2024-01-01T00:00:00Z");
+        r.extend_from_slice(&[13, 10]);
+        if let Some(u) = uri {
+            r.extend_from_slice(b"WARC-Target-URI: ");
+            r.extend_from_slice(u.as_bytes());
+            r.extend_from_slice(&[13, 10]);
+        }
+        for f in extra {
+            r.extend_from_slice(f.as_bytes());
+            r.extend_from_slice(&[13, 10]);
+        }
+        r.extend_from_slice(b"Content-Length: ");
+        r.extend_from_slice(block.len().to_string().as_bytes());
+        r.extend_from_slice(&[13, 10]);
+        r.extend_from_slice(&[13, 10]);
+        r.extend_from_slice(block);
+        r.extend_from_slice(&[13, 10]);
+        r.extend_from_slice(&[13, 10]);
+        r
+    }
+
+    #[test]
+    fn join_merges_segmented_series() {
+        let mut data = record_with_fields(
+            "resource",
+            "urn:origin",
+            Some("http://e/"),
+            &["WARC-Segment-Number: 1"],
+            b"AAA",
+        );
+        data.extend_from_slice(&record_with_fields(
+            "continuation",
+            "urn:s2",
+            Some("http://e/"),
+            &[
+                "WARC-Segment-Origin-ID: <urn:origin>",
+                "WARC-Segment-Number: 2",
+            ],
+            b"BBB",
+        ));
+        data.extend_from_slice(&record_with_fields(
+            "continuation",
+            "urn:s3",
+            Some("http://e/"),
+            &[
+                "WARC-Segment-Origin-ID: <urn:origin>",
+                "WARC-Segment-Number: 3",
+                "WARC-Segment-Total-Length: 9",
+            ],
+            b"CCC",
+        ));
+        let entries = decode(&data).unwrap();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].segment.as_ref().unwrap().number, 1);
+        let joined = join(&entries).unwrap();
+        assert_eq!(joined.len(), 1);
+        assert_eq!(joined[0].record_type, "resource");
+        assert_eq!(joined[0].record_id, "<urn:origin>");
+        assert_eq!(joined[0].data, b"AAABBBCCC");
+        assert!(joined[0].segment.is_none());
+    }
+
+    #[test]
+    fn join_passes_orphan_continuations() {
+        let data = record_with_fields(
+            "continuation",
+            "urn:s9",
+            Some("http://e/"),
+            &[
+                "WARC-Segment-Origin-ID: <urn:elsewhere>",
+                "WARC-Segment-Number: 5",
+            ],
+            b"mid",
+        );
+        let entries = decode(&data).unwrap();
+        let joined = join(&entries).unwrap();
+        assert_eq!(joined.len(), 1);
+        assert_eq!(joined[0].data, b"mid");
+        assert_eq!(joined[0].segment.as_ref().unwrap().number, 5);
+    }
+
+    #[test]
+    fn join_unsegmented_is_identity() {
+        let data = record("resource", Some("http://e/"), b"body");
+        let entries = decode(&data).unwrap();
+        let joined = join(&entries).unwrap();
+        assert_eq!(joined.len(), 1);
+        assert_eq!(joined[0].data, b"body");
+    }
+
+    #[test]
+    fn join_rejects_bad_total_length() {
+        let mut entries = decode(&record_with_fields(
+            "resource",
+            "urn:o",
+            Some("http://e/"),
+            &["WARC-Segment-Number: 1"],
+            b"AA",
+        ))
+        .unwrap();
+        entries.push(WarcEntry {
+            name: "x".into(),
+            data: b"BB".to_vec(),
+            record_type: "continuation".into(),
+            record_id: "<urn:s>".into(),
+            date: None,
+            content_type: None,
+            target_uri: None,
+            segment: Some(SegmentInfo {
+                origin_id: "<urn:o>".into(),
+                number: 2,
+                total_length: Some(99),
+            }),
+            concurrent_to: Vec::new(),
+        });
+        assert!(join(&entries).is_err());
+    }
+
+    #[test]
+    fn concurrent_groups_links_capture_members() {
+        let mut data = record_with_fields(
+            "response",
+            "urn:resp",
+            Some("http://e/"),
+            &[
+                "WARC-Concurrent-To: <urn:req>",
+                "WARC-Concurrent-To: <urn:meta>",
+            ],
+            b"r",
+        );
+        data.extend_from_slice(&record_with_fields(
+            "request",
+            "urn:req",
+            Some("http://e/"),
+            &["WARC-Concurrent-To: <urn:resp>"],
+            b"q",
+        ));
+        data.extend_from_slice(&record_with_fields(
+            "metadata",
+            "urn:meta",
+            Some("http://e/"),
+            &["WARC-Concurrent-To: <urn:resp>"],
+            b"m",
+        ));
+        data.extend_from_slice(&record("resource", Some("http://other/"), b"o"));
+        let entries = decode(&data).unwrap();
+        assert_eq!(entries[0].concurrent_to, vec!["<urn:req>", "<urn:meta>"]);
+        let groups = concurrent_groups(&entries);
+        assert_eq!(groups, vec![vec![0, 1, 2]]);
     }
 
     #[test]

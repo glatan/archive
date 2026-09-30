@@ -3,7 +3,8 @@
 //! Parses the binary header, inflates and parses the XML table of
 //! contents, verifies the TOC checksum stored at the start of the
 //! heap, and extracts file data from the heap (stored or
-//! `application/x-gzip` zlib-compressed), verifying per-file
+//! compressed via `application/x-gzip`, `application/x-bzip2`,
+//! `application/x-xz`, or `application/x-lzma`), verifying per-file
 //! `extracted-checksum` values when present, and
 //! `archived-checksum` digests over the stored bytes.
 
@@ -216,6 +217,13 @@ fn walk_file(
         data = match encoding {
             "none" | "application/octet-stream" => stored.to_vec(),
             "application/x-gzip" => crate::compress::zlib::decode::decode(stored)
+                .map_err(|_| invalid("xar: corrupt file data"))?,
+            "application/x-bzip2" => crate::compress::bzip2::decode::decode(stored)
+                .map_err(|_| invalid("xar: corrupt file data"))?,
+            "application/x-xz" => crate::compress::xz::decode::decode(stored)
+                .map_err(|_| invalid("xar: corrupt file data"))?,
+            // libxar writes LZMA_Alone streams (5 props + u64le size).
+            "application/x-lzma" => crate::compress::lzma_alone::decode::decode(stored)
                 .map_err(|_| invalid("xar: corrupt file data"))?,
             _ => {
                 return Err(Error::Unsupported("xar: unsupported data encoding"));

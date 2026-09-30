@@ -12,8 +12,11 @@
 //! when the payload is known to be the whole record block. Per-record
 //! field/type constraints and Clause 7 segmentation structure (segment
 //! ordering, `WARC-Segment-Total-Length`) are validated on decode.
-//! Payload semantics beyond that (HTTP header parsing, record
-//! segmentation reassembly) are intentionally out of scope.
+//! Clause 7 segmented series can be reassembled with
+//! [`decode::join`], and `WARC-Concurrent-To` capture
+//! groups resolved with [`decode::concurrent_groups`]. Payload
+//! semantics beyond that (HTTP message parsing inside blocks)
+//! are intentionally out of scope.
 
 use alloc::vec::Vec;
 

@@ -4,7 +4,7 @@
 |------|------|
 | 基準仕様 | xar プロジェクト wiki の `xarformat` 文書 (mackyle/xar、ローカルスナップショット: `docs/spec/sources/xarformat.wiki`) |
 | 形式概要 | 3 領域構成: (1) `xar!` magic + header size + version + TOC 長 (圧縮/非圧縮) + checksum アルゴリズムの固定ヘッダ (network byte order)。(2) zlib 圧縮された XML Table of Contents。(3) heap: TOC チェックサム (heap offset 0) + 各ファイルの data run。heap offset は TOC の `<offset>` 値で参照される |
-| 実装範囲 | read + write (write は sha1 チェックサム + gzip エンコード固定)。`<ea>` 拡張属性・署名・bzip2/lzma/xz エンコードは intentional scope 外 |
+| 実装範囲 | read + write (write は sha1 チェックサム + gzip エンコード固定)。`<ea>` 拡張属性・署名・bzip2/lzma/xz エンコードの data も decode 対応 |
 
 ## ヘッダ
 
@@ -39,7 +39,7 @@
 | 17 | data が heap 範囲外を指す場合は reject | 同上 + crate 防御 | ✅ | 境界チェック実装 (`decode.rs` "data out of heap bounds") |
 | 18 | `<encoding style="application/x-gzip"/>` は zlib ストリーム | 同上 + libxar 実測 (78 da) | ✅ | `decode_real` |
 | 19 | encoding `none` / `application/octet-stream` は格納データ | 同上 | ✅ | `decode_stored_no_checksum` |
-| 20 | その他の encoding (bzip2/lzma/xz 等) は reject | crate intentional scope | ✅ | `reject_bzip2_encoding` |
+| 20 | `application/x-bzip2`/`application/x-xz`/`application/x-lzma` (LZMA_Alone) はそれぞれ crate codec で伸長、その他未知 encoding は reject | 同上 | ✅ | `decode_bzip2_encoding`, `decode_xz_and_lzma_encodings`, `reject_corrupt_encoded_data` |
 | 21 | `<size>` があれば伸張後サイズと一致必須 | 同上 | ✅ | 実装 + `decode_real` 経由 |
 | 22 | `<extracted-checksum style="sha1|md5">` は伸張後データの digest。不一致は reject。未知 style は検証しない | 同上 | ✅ | `bad_extracted_checksum`, `decode_md5_checksums` |
 | 23 | `<archived-checksum>` は格納バイト列の digest。伸張前に検証、不一致は reject。未知 style は検証しない | 同上 | ✅ | `archived_checksum_catches_tampered_heap`, `archived_checksum_verified_on_valid_archive` |
@@ -69,7 +69,6 @@
 |---|------|------|
 | 33 | `<ea>` 拡張属性データの抽出 | — | ❌ intentional scope | macOS 固有 (ResourceFork/quarantine 等)。heap 内データの存在は許容するがエントリ化しない |
 | 34 | `<signature>` / xar 署名検証 | — | ❌ intentional scope | OpenSSL/CMS 署名で crate スコープ外 |
-| 35 | bzip2/lzma/xz エンコードの data | — | ❌ intentional scope | libxar が対応するが crate は gzip(zlib)/stored のみに限定。bzip2/lzma/xz codec 自体は crate 内に実装済みのため技術的制約ではなく設計判断 |
 | 36 | cksum_alg=3 の "sha1"/"md5" 以外の digest 名 | — | ❌ intentional scope | OpenSSL digest 名依存 (sha256 等)。sha1/md5 は受理 |
 | 37 | hardlink/character/block special の実データ展開 | — | ❌ intentional scope | TOC メタデータは保持するが特殊ファイル生成は対象外 |
 | 38 | heap 内エントリのストリーミング順序要件 (ea を data より先に置き per-file でグループ化する推奨) | — | ❌ intentional scope | 本実装は heap 全体をランダムアクセスで読むため順序制約は不要 |

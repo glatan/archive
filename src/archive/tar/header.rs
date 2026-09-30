@@ -194,7 +194,9 @@ impl TarHeader {
         // tar implementations write non-standard versions (e.g., spaces or other
         // values), so we accept any version for compatibility.
         let is_ustar = &block[257..263] == b"ustar\0" || &block[257..263] == b"ustar ";
-        let prefix = if is_ustar {
+        // The old-GNU 'S' layout replaces the prefix field with
+        // atime/ctime/etc.; do not read it as a name prefix.
+        let prefix = if is_ustar && file_type != FileType::GnuSparse {
             parse_str(&block[345..500])
         } else {
             alloc::string::String::new()
@@ -232,8 +234,13 @@ impl TarHeader {
         let mut gnu_sparse_extended = false;
         let mut gnu_sparse_data_size = 0u64;
         let mut final_size = size;
+        let mut atime = 0;
+        let mut ctime = 0;
 
         if file_type == FileType::GnuSparse {
+            // atime/ctime sit where UStar keeps the prefix field.
+            atime = i64::try_from(parse_octal_u64(&block[345..357])?).unwrap_or(0);
+            ctime = i64::try_from(parse_octal_u64(&block[357..369])?).unwrap_or(0);
             // Parse 4 sparse entries from header bytes 386-481
             // Each entry: 12 bytes offset (octal) + 12 bytes numbytes (octal)
             sparse_map = parse_gnu_sparse_entries(&block[386..482]);
@@ -255,9 +262,9 @@ impl TarHeader {
             size: final_size,
             mtime,
             mtime_nsec: 0,
-            atime: 0,
+            atime,
             atime_nsec: 0,
-            ctime: 0,
+            ctime,
             ctime_nsec: 0,
             file_type,
             link_name,
@@ -331,13 +338,15 @@ fn parse_octal(field: &[u8]) -> Result<u32, Error> {
 ///
 /// Each entry is 12 bytes of octal offset followed by 12 bytes of octal numbytes.
 /// Entries with both offset and numbytes equal to zero are skipped.
-fn parse_gnu_sparse_entries(data: &[u8]) -> Vec<(u64, u64)> {
+pub(crate) fn parse_gnu_sparse_entries(data: &[u8]) -> Vec<(u64, u64)> {
     let mut entries = Vec::new();
     let mut i = 0;
     while i + 24 <= data.len() {
         let offset = parse_octal_u64(&data[i..i + 12]).unwrap_or(0);
         let numbytes = parse_octal_u64(&data[i + 12..i + 24]).unwrap_or(0);
-        if offset == 0 && numbytes == 0 {
+        // Padding and the end-of-map terminator GNU writes as
+        // (realsize, 0) carry no data bytes; skip both.
+        if numbytes == 0 {
             i += 24;
             continue;
         }

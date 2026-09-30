@@ -19,11 +19,14 @@
 //! reassembled transparently. Files carrying a zisofs `ZF` system
 //! use entry are transparently decompressed (`pz` algorithm:
 //! per-block zlib streams with the block pointer table; 32/64/128KiB
-//! block sizes).
+//! block sizes). El Torito boot records (VD type 0) are
+//! recognised: the boot catalog validation entry and all
+//! initial/section entries are parsed, and the referenced boot
+//! image is extracted into `ElToritoEntry::image` (`IsoImage::el_torito`).
 //!
 //! Extended attribute record content, non-`pz` `ZF` compression
-//! algorithms, El Torito boot records, and writing ISO images are
-//! intentionally out of scope.
+//! algorithms, and writing ISO images are intentionally out of
+//! scope.
 
 use crate::error::Error;
 

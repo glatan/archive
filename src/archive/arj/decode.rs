@@ -1,21 +1,27 @@
-//! ARJ archive read and store-method write support.
+//! ARJ archive reading: stored, LZH-static (methods 1-3), and
+//! "fastest" (method 4) members, garbled (password) entries, and
+//! multi-volume archives via [`decode_parts`].
 //!
-//! Reference: ARJ technical note ("arj tekninen" / ARJ file format
-//! description published with ARJ 2.x). Supported scope:
-//!
-//! - reading: ARJ 2.x basic headers, method 0 (`stored`) and
-//!   file-type 3 (directory) / 4 (volume label) entries. Compressed
-//!   methods 1-4 and entries flagged as garbled (password-protected,
-//!   flag bit 0x01) are rejected with [`Error::Unsupported`];
-//! - writing: method-0 binary file entries only.
+//! Reference: ARJ technical note (ARJ 2.x file format description).
 //!
 //! Layout: each header starts with the two-byte signature `0x60 0xEA`
 //! followed by a `u16le` header size (0 = end of archive). The basic
-//! header is a fixed 30-byte block, then a NUL-terminated filename,
-//! a NUL-terminated comment, and a `u32le` CRC-32 of the header bytes
-//! starting at `first_hdr_size`. File data follows the header CRC (and
-//! any extended header block, which is skipped). The main (first)
-//! header describes the archive itself and carries no data.
+//! header is a 28-30 byte fixed block, then a NUL-terminated
+//! filename, a NUL-terminated comment, and a `u32le` CRC-32 of the
+//! header bytes starting at `first_hdr_size`. File data follows the
+//! header CRC (and any extended header block, which is skipped). The
+//! main (first) header describes the archive itself and carries no
+//! data.
+//!
+//! Fixed-field order inside the basic header (all little-endian):
+//! first_hdr_size(1), version(1), min_version(1), host_os(1),
+//! arj_flags(1), method(1), file_type(1), reserved/garble-modifier
+//! (1), dos_time(4), packed_size(4), original_size(4), crc32(4),
+//! filespec_pos(2), access_mode(2), host_data(2).
+//!
+//! Flag bits: 0x01 garbled (password XOR on the packed stream),
+//! 0x04 continued into the next volume (split file), 0x08 extended
+//! file-start-position field present inside `first_hdr_size`.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -23,6 +29,7 @@ use alloc::vec::Vec;
 use crate::error::Error;
 
 pub(crate) const SIG: [u8; 2] = [0x60, 0xEA];
+/// Minimum basic-header size (old ARJ writers stop at byte 27).
 pub(crate) const BASIC_HDR_SIZE: usize = 30;
 
 /// One decoded ARJ entry. The archive-level main header is not
@@ -31,7 +38,7 @@ pub(crate) const BASIC_HDR_SIZE: usize = 30;
 pub struct ArjEntry {
     /// File or directory name.
     pub name: String,
-    /// Compression method byte (always 0 for accepted entries).
+    /// Compression method byte (0 stored, 1-3 LZH-static, 4 fastest).
     pub method: u8,
     /// ARJ file type: 0 = binary, 1 = text, 3 = directory, 4 = label.
     pub file_type: u8,
@@ -72,15 +79,27 @@ fn read_cstr(b: &[u8]) -> Result<(&str, usize), Error> {
     }
 }
 
-/// Parse one ARJ header block starting at `pos` (which must point at
-/// the 0x60 0xEA signature). Returns `(header_end, fixed_fields,
-/// name, comment)` where `header_end` is the offset just past the
-/// header CRC (and optional extended header), and `fixed_fields` is
-/// the 30-byte basic header.
-fn parse_header(
-    input: &[u8],
-    pos: usize,
-) -> Result<(usize, [u8; BASIC_HDR_SIZE], String, String), Error> {
+/// One parsed member header plus the extent of its packed data
+/// within the volume.
+struct Frag {
+    name: String,
+    flags: u8,
+    method: u8,
+    file_type: u8,
+    /// Garble password modifier byte.
+    pmod: u8,
+    mtime: u32,
+    crc: u32,
+    orig: usize,
+    /// Packed-data extent inside the volume buffer.
+    data_off: usize,
+    data_len: usize,
+}
+
+/// Parse one ARJ header block starting at . Returns
+///  where  is the offset just
+/// past the header CRC and the (possibly empty) extended header.
+fn parse_header(input: &[u8], pos: usize) -> Result<(usize, [u8; BASIC_HDR_SIZE], String), Error> {
     if pos + 4 > input.len() || input[pos..pos + 2] != SIG {
         return Err(Error::InvalidData("arj: bad signature"));
     }
@@ -89,24 +108,23 @@ fn parse_header(
         return Err(Error::InvalidData("arj: empty header"));
     }
     // hsize counts bytes from first_hdr_size through the comment NUL.
-    if pos + 4 + hsize > input.len() || hsize < BASIC_HDR_SIZE {
+    if pos + 4 + hsize > input.len() || hsize < 28 {
         return Err(Error::InvalidData("arj: truncated header"));
     }
     let body = &input[pos + 4..pos + 4 + hsize];
     let first = body[0] as usize;
-    if first > hsize || first < BASIC_HDR_SIZE {
+    // The fixed block is  bytes (28 minimum; 30 with host
+    // data; 34+ with the extended file-position field).
+    if first > hsize || first < 28 {
         return Err(Error::InvalidData("arj: bad first header size"));
     }
     let mut fixed = [0u8; BASIC_HDR_SIZE];
-    // body[0] is first_hdr_size, field 1 of the fixed header; fields
-    // are counted from byte 0 of the header body.
     fixed[..first.min(BASIC_HDR_SIZE)].copy_from_slice(&body[..first.min(BASIC_HDR_SIZE)]);
     let (name, nlen) = read_cstr(&body[first..])?;
-    let (comment, clen) = read_cstr(&body[first + nlen..])?;
+    let (_comment, clen) = read_cstr(&body[first + nlen..])?;
     if first + nlen + clen > hsize {
         return Err(Error::InvalidData("arj: strings exceed header"));
     }
-    // The 4-byte header CRC is stored after the hsize bytes.
     let crc_off = pos + 4 + hsize;
     if crc_off + 4 > input.len() {
         return Err(Error::InvalidData("arj: truncated header crc"));
@@ -117,7 +135,7 @@ fn parse_header(
         return Err(Error::InvalidData("arj: header CRC-32 mismatch"));
     }
     // The u16 extended-header size always follows the header CRC;
-    // 0 means no extended header, otherwise  bytes plus a u32 CRC.
+    // 0 means none, otherwise that many bytes plus a u32 CRC.
     let mut end = crc_off + 4;
     if end + 2 > input.len() {
         return Err(Error::InvalidData("arj: truncated ext size"));
@@ -131,15 +149,13 @@ fn parse_header(
     } else {
         end += 2;
     }
-    Ok((end, fixed, name.into(), comment.into()))
+    Ok((end, fixed, name.into()))
 }
 
-/// Decode an ARJ archive into entries.
-pub fn decode(input: &[u8]) -> Result<Vec<ArjEntry>, Error> {
-    if input.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut entries = Vec::new();
+/// Parse all member headers of one volume, returning them in order.
+/// The first (main) header is skipped.
+fn parse_volume(input: &[u8]) -> Result<Vec<Frag>, Error> {
+    let mut frags = Vec::new();
     let mut pos = 0usize;
     let mut first = true;
     loop {
@@ -151,58 +167,161 @@ pub fn decode(input: &[u8]) -> Result<Vec<ArjEntry>, Error> {
         }
         let hsize = u16le(&input[pos + 2..]) as usize;
         if hsize == 0 {
-            return Ok(entries); // end of archive
+            return Ok(frags); // end of archive
         }
-        let (end, fixed, name, _comment) = parse_header(input, pos)?;
-        // fixed[0] = first_hdr_size, [1] version, [2] min ver,
-        // [3] host os, [4] arj flags, [5] method, [6] file type,
-        // [7] reserved, [8..12] dos time, [12..16] crc32,
-        // [16..20] compressed size, [20..24] original size,
-        // [24..28] original filename offset, [28..30] host data.
-        let flags = fixed[4];
-        let method = fixed[5];
-        let file_type = fixed[6];
-        let mtime = u32le(&fixed[8..]);
-        let crc = u32le(&fixed[12..]);
-        let packed = u32le(&fixed[16..]) as usize;
-        let orig = u32le(&fixed[20..]) as usize;
+        let (end, fixed, name) = parse_header(input, pos)?;
         if first {
-            // Main header: file_type != 0 binary data; no payload follows.
+            // Main header: file_type 2, no payload.
             first = false;
             pos = end;
             continue;
         }
-        if flags & 0x01 != 0 {
-            return Err(Error::Unsupported("arj: unsupported method")); // garbled/encrypted
-        }
-        if method != 0 {
-            return Err(Error::Unsupported("arj: unsupported method"));
-        }
-        let is_dir = file_type == 3;
-        let take = if is_dir || file_type == 4 { 0 } else { packed };
-        if end + take > input.len() {
+        let packed = u32le(&fixed[12..]) as usize;
+        if end + packed > input.len() {
             return Err(Error::InvalidData("arj: truncated entry data"));
         }
-        let data = input[end..end + take].to_vec();
-        if !is_dir && file_type != 4 {
-            if data.len() != orig {
+        frags.push(Frag {
+            name,
+            flags: fixed[4],
+            method: fixed[5],
+            file_type: fixed[6],
+            pmod: fixed[7],
+            mtime: u32le(&fixed[8..]),
+            crc: u32le(&fixed[20..]),
+            orig: u32le(&fixed[16..]) as usize,
+            data_off: end,
+            data_len: packed,
+        });
+        pos = end + packed;
+    }
+}
+
+/// De-garble a packed stream: byte `i` is XORed with
+/// `password[i % len].wrapping_add(modifier)`.
+fn ungarble(data: &mut [u8], password: &[u8], pmod: u8) {
+    for (i, b) in data.iter_mut().enumerate() {
+        *b ^= password[i % password.len()].wrapping_add(pmod);
+    }
+}
+
+/// Decode one complete (assembled) member's packed data.
+fn decode_member(f: &Frag, packed: &[u8], password: Option<&[u8]>) -> Result<Vec<u8>, Error> {
+    let mut buf;
+    let packed = if f.flags & 0x01 != 0 {
+        let pw = password
+            .filter(|p| !p.is_empty())
+            .ok_or(Error::Unsupported("arj: garbled entry needs a password"))?;
+        buf = packed.to_vec();
+        ungarble(&mut buf, pw, f.pmod);
+        &buf[..]
+    } else {
+        packed
+    };
+    let data = match f.method {
+        0 => {
+            if packed.len() != f.orig {
                 return Err(Error::InvalidData("arj: size mismatch"));
             }
-            if crate::util::crc32::crc32(&data) != crc {
-                return Err(Error::InvalidData("arj: data CRC-32 mismatch"));
-            }
+            packed.to_vec()
         }
-        entries.push(ArjEntry {
-            name,
-            method,
-            file_type,
-            is_dir,
-            mtime,
-            crc32: crc,
-            data,
-        });
-        pos = end + take;
+        1..=3 => crate::compress::lzh::st1::decode(15, 5, packed, f.orig)?,
+        4 => super::method4::decode(packed, f.orig)?,
+        _ => return Err(Error::Unsupported("arj: unsupported method")),
+    };
+    if data.len() != f.orig {
+        return Err(Error::InvalidData("arj: size mismatch"));
     }
+    if crate::util::crc32::crc32(&data) != f.crc {
+        return Err(Error::InvalidData("arj: data CRC-32 mismatch"));
+    }
+    Ok(data)
+}
+
+/// Decode one or more ARJ volumes, reassembling files whose flag
+/// 0x04 marks them as continued into the next volume.
+fn decode_parts_impl(parts: &[&[u8]], password: Option<&[u8]>) -> Result<Vec<ArjEntry>, Error> {
+    let mut entries = Vec::new();
+    // Packed-data fragments of the entry currently being assembled.
+    // Non-split members finalize on their single fragment.
+    let mut pending: Vec<(Frag, &[u8])> = Vec::new();
+
+    for part in parts {
+        for f in parse_volume(part)? {
+            let slice = &part[f.data_off..f.data_off + f.data_len];
+            if let Some(first) = pending.first()
+                && first.0.name != f.name
+            {
+                return Err(Error::InvalidData("arj: multi-volume name mismatch"));
+            }
+            let split_continues = f.flags & 0x04 != 0;
+            pending.push((f, slice));
+            if split_continues {
+                continue;
+            }
+            let head = &pending[0].0;
+            let mut blob = Vec::new();
+            for (_, d) in &pending {
+                blob.extend_from_slice(d);
+            }
+            let is_meta = head.file_type == 3 || head.file_type == 4;
+            let data = if is_meta {
+                Vec::new()
+            } else {
+                decode_member(head, &blob, password)?
+            };
+            entries.push(ArjEntry {
+                name: head.name.clone(),
+                method: head.method,
+                file_type: head.file_type,
+                is_dir: head.file_type == 3,
+                mtime: head.mtime,
+                crc32: head.crc,
+                data,
+            });
+            pending.clear();
+        }
+    }
+    if !pending.is_empty() {
+        return Err(Error::InvalidData("arj: multi-volume archive truncated"));
+    }
+    Ok(entries)
+}
+
+/// Decode an ARJ archive into entries.
+pub fn decode(input: &[u8]) -> Result<Vec<ArjEntry>, Error> {
+    if input.is_empty() {
+        return Ok(Vec::new());
+    }
+    decode_parts_impl(&[input], None)
+}
+
+/// Decode an ARJ archive into entries using a password for garbled
+/// entries.
+pub fn decode_with_password(input: &[u8], password: &str) -> Result<Vec<ArjEntry>, Error> {
+    decode_with_password_bytes(input, password.as_bytes())
+}
+
+/// Decode an ARJ archive into entries using a password for garbled
+/// entries.
+pub fn decode_with_password_bytes(input: &[u8], password: &[u8]) -> Result<Vec<ArjEntry>, Error> {
+    if input.is_empty() {
+        return Ok(Vec::new());
+    }
+    decode_parts_impl(&[input], Some(password))
+}
+
+/// Decode a multi-volume ARJ archive from its volume buffers, in
+/// order.
+pub fn decode_parts(parts: &[&[u8]]) -> Result<Vec<ArjEntry>, Error> {
+    decode_parts_impl(parts, None)
+}
+
+/// [`decode_parts`] with a password for garbled entries.
+pub fn decode_parts_with_password_bytes(
+    parts: &[&[u8]],
+    password: &[u8],
+) -> Result<Vec<ArjEntry>, Error> {
+    decode_parts_impl(parts, Some(password))
 }
 
 #[cfg(test)]
@@ -234,19 +353,17 @@ mod tests {
         assert_eq!(e[0].file_type, 3);
     }
 
-    /// Offset of the second (first file) header in .
+    /// Offset of the second (first file) header in `a`.
     fn second_header_off(a: &[u8]) -> usize {
-        // main header: SIG(2) + hsize(2) + body(hsize) + crc(4) + ext u16(2)
         let h1 = u16le(&a[2..]) as usize;
         4 + h1 + 4 + 2
     }
 
     #[test]
-    fn rejects_compressed() {
+    fn rejects_unsupported_method() {
         let mut a = crate::archive::arj::encode::encode(&[("f", b"x")]).unwrap();
         let second = second_header_off(&a);
-        a[second + 4 + 5] = 1; // method=1
-        // fix header crc
+        a[second + 4 + 5] = 9; // method 9: never existed
         let bsize = u16le(&a[second + 2..]) as usize;
         let crc = crate::util::crc32::crc32(&a[second + 4..second + 4 + bsize]);
         a[second + 4 + bsize..second + 8 + bsize].copy_from_slice(&crc.to_le_bytes());
@@ -258,7 +375,18 @@ mod tests {
         let mut a = crate::archive::arj::encode::encode(&[("f", b"x")]).unwrap();
         let second = second_header_off(&a);
         let bsize = u16le(&a[second + 2..]) as usize;
-        a[second + 4 + bsize] ^= 0xff; // corrupt stored header CRC
+        a[second + 4 + bsize] ^= 0xff;
         assert!(decode(&a).is_err());
+    }
+
+    #[test]
+    fn rejects_garbled_without_password() {
+        let mut a = crate::archive::arj::encode::encode(&[("f", b"x")]).unwrap();
+        let second = second_header_off(&a);
+        a[second + 4 + 4] |= 0x01; // garbled flag
+        let bsize = u16le(&a[second + 2..]) as usize;
+        let crc = crate::util::crc32::crc32(&a[second + 4..second + 4 + bsize]);
+        a[second + 4 + bsize..second + 8 + bsize].copy_from_slice(&crc.to_le_bytes());
+        assert!(matches!(decode(&a), Err(Error::Unsupported(_))));
     }
 }

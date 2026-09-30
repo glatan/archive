@@ -41,7 +41,7 @@ fn test_lha_rejects_truncated() {
 
 #[test]
 fn test_lha_rejects_compressed_method() {
-    // Rewrite the method marker to -lh5- and fix the header checksum;
+    // Corrupt the method marker to an unsupported `-l50-` and fix the header checksum;
     // decode must refuse with Unsupported.
     let mut a = lha_fixture("f.txt", b"payload");
     a[4] = b'5';
@@ -278,5 +278,164 @@ fn test_lha_level2_bsdtar_interop() {
     if output.status.success() {
         let extracted = std::fs::read(out_dir.join("lvl2b.txt")).unwrap();
         assert_eq!(extracted, data.as_slice());
+    }
+}
+
+// ============================================================
+// LHA compressed-method fixtures (-lh1-..-lh7-, LArc, PMarc) and
+// header level 3. Fixture provenance: lhasa test corpus
+// (tests/fixtures/lha), plus synthesized -lh2-/-lh3- archives
+// cross-checked byte-for-byte against the reference  tool.
+// ============================================================
+
+fn lha_fixture_entry(name: &str) -> archive::archive::lha::decode::LhaEntry {
+    let data = std::fs::read(format!("tests/fixtures/lha/{name}")).unwrap();
+    let entries = archive::archive::lha::decode::decode(&data).unwrap();
+    assert_eq!(entries.len(), 1, "{name}: expected single entry");
+    entries.into_iter().next().unwrap()
+}
+
+/// Every vendored fixture must decode; the header CRC-16 inside each
+/// archive validates the decompressed bytes.
+#[test]
+fn test_lha_compressed_method_fixtures() {
+    for (name, expect_bytes) in [
+        ("lh1.lzh", 18092),
+        ("lh1_lharc.lzh", 18092),
+        ("lh2.lzh", 378),
+        ("lh3.lzh", 268),
+        ("lh4.lzh", 18092),
+        ("lh5.lzh", 18092),
+        ("lh5_255e.lzh", 18092),
+        ("lh6.lzh", 18092),
+        ("lh7.lzh", 18092),
+        ("h2_lh6.lzh", 18092),
+        ("h2_lh7.lzh", 18092),
+        ("lzs.lzh", 18092),
+        ("lz4.lzh", 6829),
+        ("lz4.lzs", 6829),
+        ("lz5.lzh", 18092),
+        ("lz5.lzs", 18092),
+        ("long.lzs", 1241658),
+        ("pm0.lzh", 6912),
+        ("pm0.pma", 6912),
+        ("pm1.lzh", 25284),
+        ("pm1.pma", 25284),
+        ("pm1_long.pma", 1241659),
+        ("pm2.lzh", 18176),
+        ("pm2.pma", 18176),
+        ("long.pma", 1241659),
+    ] {
+        let e = lha_fixture_entry(name);
+        assert_eq!(e.data.len(), expect_bytes, "{name}: decoded size mismatch");
+    }
+}
+
+#[test]
+fn test_lha_level3_fixtures() {
+    // LHA for OS/2 produced real level-3 headers (u32 sizes).
+    let e = lha_fixture_entry("h3_lh0.lzh");
+    assert_eq!(e.level, 3);
+    assert_eq!(e.data.len(), 6829);
+    let e = lha_fixture_entry("h3_lh5.lzh");
+    assert_eq!(e.level, 3);
+    assert_eq!(e.data.len(), 18092);
+    // Long filename carried by the u32 extended-header chain.
+    let e = lha_fixture_entry("h3_lfn.lzh");
+    assert_eq!(e.level, 3);
+    assert_eq!(e.data.len(), 14);
+    assert_eq!(e.name, "Long Filename.txt");
+}
+
+#[test]
+fn test_lha_pmarc_multi_entry_fixture() {
+    let data = std::fs::read("tests/fixtures/lha/mtcd.pma").unwrap();
+    let entries = archive::archive::lha::decode::decode(&data).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].data.len(), 1403);
+    assert_eq!(entries[1].data.len(), 256);
+}
+
+#[test]
+fn test_lha_level3_dir() {
+    let entries = {
+        let data = std::fs::read("tests/fixtures/lha/h3_subdir.lzh").unwrap();
+        archive::archive::lha::decode::decode(&data).unwrap()
+    };
+    assert!(entries.iter().all(|e| e.level == 3));
+    assert!(entries.iter().any(|e| e.is_dir));
+}
+
+/// Oracle extraction: `lhasa`, `unar`, and the classic `lha` binary
+/// must produce the same bytes for every fixture they support.
+#[test]
+fn test_lha_fixture_oracle_extract() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let oracles: &[&str] = &["lhasa", "unar", "lha"];
+    let tools: Vec<&str> = oracles
+        .iter()
+        .copied()
+        .filter(|t| {
+            Command::new(t)
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success() || !o.stdout.is_empty())
+                .unwrap_or(false)
+        })
+        .collect();
+    if tools.is_empty() {
+        return; // no oracle installed
+    }
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_lha_oracle_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    for e in std::fs::read_dir("tests/fixtures/lha").unwrap() {
+        let p = e.unwrap().path();
+        let name = p.file_name().unwrap().to_str().unwrap().to_string();
+        if name.starts_with("level") {
+            continue; // store-method coverage lives elsewhere
+        }
+        let data = std::fs::read(&p).unwrap();
+        let ours = archive::archive::lha::decode::decode(&data)
+            .unwrap()
+            .into_iter()
+            .filter(|e| !e.is_dir)
+            .map(|e| e.data)
+            .collect::<Vec<_>>();
+        for tool in &tools {
+            let out_dir = dir.join(format!("{}_{}", tool, name));
+            std::fs::create_dir_all(&out_dir).unwrap();
+            let output = Command::new(tool)
+                .arg("xf")
+                .arg(&p)
+                .current_dir(&out_dir)
+                .output();
+            let Ok(output) = output else { continue };
+            if !output.status.success() {
+                continue; // oracle lacks support for this member
+            }
+            let mut oracle_data: Vec<u8> = Vec::new();
+            for de in std::fs::read_dir(&out_dir).unwrap() {
+                let de = de.unwrap();
+                if de.file_type().unwrap().is_file() {
+                    oracle_data = std::fs::read(de.path()).unwrap();
+                    break;
+                }
+            }
+            if oracle_data.is_empty() {
+                continue;
+            }
+            assert_eq!(
+                Some(&oracle_data),
+                ours.first(),
+                "{name}: {tool} output differs"
+            );
+        }
     }
 }

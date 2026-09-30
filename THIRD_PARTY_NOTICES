@@ -255,25 +255,32 @@ specifications or standards documents:
   FLAG_RESERVE_PRESENT reserved areas — all from the same [MS-CAB]
   document.
   MSZIP payloads reuse the existing RFC 1951 DEFLATE decoder
-  (`compress::deflate`); no new codec was ported.
+  (`compress::deflate`); no new codec was ported for MSZIP itself.
   LZX folder decompression is implemented in `compress::lzx` (shared
   core with LZX DELTA) from Microsoft's "LZX Compressed Data Format"
   documentation, with the errata semantics documented in
   cabextract/libmspack `lzx.c` (LGPL 2.1, Stuart Caie) consulted for
   behavioral confirmation only; no code was copied.
-  Test fixtures `tests/fixtures/mscab/lzx_mixed.cab` and
-  `lzx_large.cab` are the LZX folders of cabextract's test files
-  (libmspack repository cabextract/test/cabs/, LGPL 2.1); they are
-  checked in unmodified as known-answer decode inputs and are not
-  linked.
+  Quantum folder decompression (`src/archive/mscab/quantum.rs`) is a
+  port/adaptation of libmspack `qtmd.c` (LGPL-2.1, Stuart Caie), with
+  compcol's MIT-licensed port consulted as an intermediate reference.
+  Incorporation path: LGPL-2.1 section 3 permits relicensing under
+  GPL-2.0-or-later -> GPL-3.0, combined with this AGPL-3.0 work under
+  AGPL-3.0 section 13.
+  Test fixtures `tests/fixtures/mscab/lzx_mixed.cab`,
+  `lzx_large.cab`, and `quantum_flush.cab` are the LZX/Quantum folders
+  of cabextract's test files (libmspack repository
+  cabextract/test/cabs/, LGPL 2.1); they are checked in unmodified as
+  known-answer decode inputs and are not linked.
   Patent note: [MS-CAB] is published under the general Microsoft Open
   Specifications IPR notice. It is NOT listed on the Open Specification
   Promise (OSP) covered-specification list ([MS-DEVCENTLP], revised
   2023-02-24), and [MS-CAB] does not appear in the MIP Patent Map
   (checked 2026-01), so the MIP patent pledge status cannot be
   confirmed per-specification. No enforcement history is known; the
-  implemented subset (container + MSZIP via RFC 1951 deflate) uses
-  techniques dating to 1995-1997.
+  implemented subset (container + MSZIP via RFC 1951 deflate, plus
+  LZX/Quantum techniques dating to 1995-1997) uses decades-old
+  techniques.
 - xca: [MS-XCA] Xpress Compression Algorithm documentation
   (Microsoft Open Specifications,
   https://learn.microsoft.com/openspecs/windows_protocols/ms-xca/).
@@ -312,27 +319,46 @@ specifications or standards documents:
 - lha: lha header documentation (apphead / lzh_note) as distributed
   with GNU lha and documented at
   https://github.com/jca02266/lha/blob/master/apphead.txt.jp;
-  header field facts only, no code or document text was copied.
-  The implementation was additionally cross-checked against LHa for
-  UNIX 1.14i (jca02266/lha) behavior: its source was read only to
-  confirm wire-format facts - no code was copied. Test fixtures in
-  `tests/fixtures/lha/` are binary archives produced by that tool
-  (`lha a -o1`/`-o2`); they are program output, not source material,
-  and are kept solely as known-answer vectors. LHa for UNIX uses its
+  header field facts only, no document text was copied.
+  Decoder provenance: `lzh_dyn.rs` (lh2/-lhd- dynamic Huffman) is a
+  transliteration of LHa for UNIX `dhuf.c` (LHa free-use license:
+  copyright retention + modification marking; this notice records the
+  attribution and the port status). `lzhuf.rs` ports Okumura's
+  public-domain `lzhuf.c`. `pmarc.rs` ports lhasa's
+  `HistoryLinkedList`/`tree_decode.c` (ISC; lhasa by Simon Howard -
+  copyright/permission notice required in all copies, satisfied here).
+  `larc.rs`, `lzh_st0.rs`, `compress::lzh::{bits,huf,st1}` are
+  behavior-matched/adapted against lhasa and LHa sources. jLHA Notes
+  (Michel Ishizuka) is used as the level-3 header wire layout source.
+  Test fixtures in `tests/fixtures/lha/`: most are the lhasa test
+  corpus archives (program outputs of LHA 1.14i, LHA OS/2 2.08, LHarc
+  1.13, LArc 3.33, PMarc, lhmelt, lha_amiga distributed under ISC with
+  lhasa) vendored unmodified as known-answer decode inputs; the lh2/
+  lh3/level-* fixtures are locally synthesized. LHa for UNIX uses its
   own non-OSI license requiring preservation of copyright notices;
-  this notice satisfies the attribution requirement for the
-  redistributed fixture binaries.
-  Additional de facto format documents catalogued in
-  `docs/spec/sources/` (reference only, not yet used as implementation
-  sources): jLHA Notes by Michel Ishizuka (level 3 header wire layout,
-  compress-method parameter table, extended-header list) and Joe
-  Jared's lzhformat.html (level 0-2 layouts, multi-disk/spanning
-  extended header 0x39).
+  this notice satisfies the attribution requirement.
+  Joe Jared's lzhformat.html (level 0-2 layouts, multi-disk/spanning
+  extended header 0x39) is additionally catalogued in
+  `docs/spec/sources/` as a reference document.
 - arj: ARJ technical note (ARJ 2.x archiver file format description);
-  header field facts only, no code was copied.
+  header field facts from the document. `arj/method4.rs` is a
+  transliteration of the newtua_dos port of XADMaster's
+  XADARJFastestHandle (LGPL-3.0-or-later); methods 1-3 reuse the
+  shared `compress::lzh::st1` decoder. Garbled-entry semantics follow
+  XADMaster's ARJPasswordModifier + XOR handle behavior. UNARJ sources
+  were not consulted or copied.
 - arc: SEA ARC file format description
-  (wotsit.org "arc" format entry); member structure facts only,
-  no code was copied.
+  (wotsit.org "arc" format entry); member structure facts from the
+  document. Compression methods 5-7/0xa/0xb
+  (`src/archive/arc/{crunch,crush,distill}.rs`) are Rust
+  transliterations of the newtua_dos ports of XADMaster's handlers
+  (LGPL-3.0-or-later -> incorporated under LGPL-3.0 section 2 /
+  GPL-3.0, combined under AGPL-3.0 section 13). `squeeze.rs` is
+  adapted from compcol's `arc_squeeze` documentation/strings (MIT);
+  `rle90.rs` is spec-informed. ARC 5.21 for Unix (hyc/arc, GPL-2-ish)
+  and nomarch (GPL-2.0) were consulted for behavior confirmation only
+  - no GPL code copied. `tests/fixtures/arc/fix8.arc`/`fix9.arc` are
+  Debian arc 5.21q program outputs used as decode fixtures.
   Note: the lha/arj/arc sources above are community-maintained format
   documents rather than official vendor specifications, and are treated
   as de facto format definitions.
@@ -422,7 +448,9 @@ specifications or standards documents:
 - packbits: Apple Technical Note TN1023 "Understanding PackBits" and
   TIFF Revision 6.0 Section 9 "PackBits Compression". Spec-informed
   implementation; no code was copied.
-- zip: PKWARE APPNOTE.TXT 6.3.10
+- zip: PKWARE APPNOTE.TXT 6.3.10. The container layer, encryption,
+  and methods 0/8/10/12/14/93/95/98 are spec-informed; methods 1-6
+  are ported from the public-domain hwzip reference (see section 2)
 - 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00)
 - LZMA codec: LZMA algorithm specification (`lzma-specification.txt`)
   from the LZMA SDK documentation
@@ -447,7 +475,44 @@ against de facto reference behavior:
     code 285) is defined by the de facto description embodied in
     Info-ZIP `unzip`/`inflate.c` ("Info-ZIP APPNOTE additions")
   - Repository scope: Rust reimplementation of the Deflate64 bit
-    structure; decode only, no upstream code copied
+    structure; decode and encode, no upstream code copied. The encoder
+    (`src/compress/deflate64/encode.rs`) reuses the crate's own DEFLATE
+    encoder restricted to the DEFLATE-compatible subset (match lengths
+    <= 257, 32 KiB window), which emits valid Deflate64 streams without
+    exercising the extended distance/length codes
+
+- ZIP legacy methods 1-6 (Shrinking, Reducing, Imploding)
+  (`src/archive/zip/{unshrink,expand,implode,lzmatch}.rs`)
+  - Reference: hwzip 2.4 by Hans Wennborg
+    (https://www.hanshq.net/zip.html; code dedicated to the public
+    domain under the Unlicense), vendored read-only at
+    `.local/refs/hwzip/` (not part of the repository). The companion
+    article "Shrink, Reduce, and Implode" is (c) Hans Wennborg with no
+    explicit grant - consulted as documentation only. Info-ZIP
+    `unshrink.c`/`unreduce.c`/`explode.c` were also consulted as decode
+    references.
+  - Provenance: ported - `unshrink.rs` (shrink.c), `expand.rs`
+    (reduce.c), and `implode.rs` (implode.c) are algorithmic
+    transliterations of the public-domain reference (constants, table
+    layouts, the free-code queue / partial-clear semantics, and the
+    follower-set cost model are carried over). `implode.rs`'s Huffman
+    code-length computation and decode-table mechanics are independent
+    Rust code (hwzip's huffman.c min-heap algorithm was not carried
+    over). `lzmatch.rs` adapts lz77.c's hash-chain design (same Knuth
+    multiplier and 2^15 table size) but implements a simpler greedy
+    parse rather than hwzip's lazy matching. Compatible with AGPL-3.0
+    because hwzip is dedicated to the public domain.
+  - Repository scope: decode and encode for ZIP methods 1-6
+    (`ZipCompression::{Shrunk, Reduce, Implode}`); the method dispatch
+    in decode.rs/encode.rs is crate-original wiring.
+  - Test fixtures: `tests/fixtures/zip/hw_{shrink,reduce,implode}.zip`
+    were generated by running hwzip 2.4 over the crate-provided
+    `payload.bin`; they are checked in unmodified as known-answer
+    decode inputs and are not linked. The crate's encoder output was
+    additionally verified to expand correctly under hwunshrink/
+    hwexpand/hwexplode (local oracle, not distributed). `unar`
+    (XADMaster) and Info-ZIP `unzip` serve as additional local decode
+    oracles for Shrink/Implode/Deflate64.
 
 - FastLZ
   - Reference: `fastlz.c` reference implementation by Ariya Hidayat
@@ -641,60 +706,72 @@ against de facto reference behavior:
     or clean-room Rust derivations validated by tests
 
 
-4a. Catalogued reference implementations (not yet used in this code base)
+4a. Catalogued reference implementations
 -------------------------------------------------------------------------
 
 The following third-party sources were identified during the specification
-re-investigation as de facto references or interoperability oracles for
-intentional-scope features. They are catalogued in
-`docs/spec/sources/manifest.json` (`no_url_available`). No code from these
-projects has been copied into this repository; licenses are recorded for
-future implementation/audit planning. As with the GPL-covered references in
-section 1 (e.g. rdesktop), GPL/LGPL sources here are intended only as local
-oracle/behavior references — no code incorporation:
+re-investigation as de facto references or interoperability oracles. They
+are catalogued in `docs/spec/sources/manifest.json` (`no_url_available`).
+Each entry records its current usage: entries marked "port source" have
+code transliterated into this repository (with the licensing path noted);
+entries marked "reference/oracle only" have no incorporated code. As with
+the GPL-covered references in section 1 (e.g. rdesktop), GPL sources here
+are used only as local oracle/behavior references — no GPL code
+incorporation:
 
 - compcol (KarpelesLab, MIT): ARC squeeze/crunch/squash methods 4/8/9,
   LHA lh1/lh2/lh4-lh7, CAB Quantum, ZIP shrink/reduce/implode decoders.
-  Already used as a local LZS encode/decode oracle (see Stac LZS above).
-- newtua_dos (new-the-unarchiver, LGPL-3.0-or-later): ARC methods 5-7/0xa/0xb
-  and ARJ methods 1-4 (faithful port of The Unarchiver's XADMaster parsers).
+  Used as a local LZS encode/decode oracle (see Stac LZS above), as the
+  adaptation source for `arc/squeeze.rs`, and as an intermediate
+  reference for `mscab/quantum.rs` — MIT-licensed material is
+  compatible with this work; attribution recorded here.
+- newtua_dos (new-the-unarchiver, LGPL-3.0-or-later): port source —
+  `src/archive/arc/{crunch,crush,distill}.rs` (ARC methods 5-7/0xa/0xb)
+  and `src/archive/arj/method4.rs` are transliterations of its faithful
+  ports of The Unarchiver's XADMaster parsers. Incorporated under
+  LGPL-3.0 section 2 -> GPL-3.0, combined under AGPL-3.0 section 13.
 - ARC 5.21 for Unix (hyc/arc, SEA 1985-87 copyright, "under the terms of
   the General Public License" with version unstated — Debian copyright
   records GPL-2, some files GPL-2+; packaged as Debian `arc` 5.21q):
-  squeeze/crunch/squash encoder+decoder. Its bundled `Arcinfo` document
-  describes the ARC 5.xx directory format. Debian main's
-  `arc`/`nomarch`/`unar` are usable as interop oracles.
-- lhasa (fragglet, ISC): LHA lh1-lh7, LArc (-lzs-/-lz4-/-lz5-), PMarc
-  (-pm0-/-pm1-/-pm2-), -lhx-, and header level 3 decoder; Debian main's
-  `lhasa` is usable as a decode oracle.
+  reference/oracle only. squeeze/crunch/squash encoder+decoder. Its
+  bundled `Arcinfo` document describes the ARC 5.xx directory format.
+  Debian `arc` 5.21q produced the `tests/fixtures/arc/fix*.arc`
+  fixtures (program output); `arc`/`nomarch`/`unar` are used as interop
+  oracles. No GPL code copied.
+- lhasa (fragglet, ISC): port source + fixtures — `lha/pmarc.rs` ports
+  its `HistoryLinkedList`/`tree_decode.c`; `lha/larc.rs`,
+  `lha/lzh_st0.rs`, and `compress::lzh/*` are behavior-matched against
+  it. Most of `tests/fixtures/lha/` is the lhasa test corpus vendored
+  unmodified (ISC-licensed program outputs; ISC notice satisfied here).
+  Debian main's `lhasa` is usable as a decode oracle.
 - LHA 2.11 source files (Haruyasu Yoshizaki, Vector fh002420
-  `lha211_s.lzh`): the original author's implementation covering
-  lh0-lh5, LArc -lzs-/-lz4-/-lz5-, and header levels 0-2. LHA's own
-  free-software terms: use/copy/redistribution free, commercial use free
-  with minor obligations; README.DOC states that incorporating parts of
-  the source into other programs is not restricted, while redistribution
-  requires bundling README.DOC (with translation for overseas).
-  Catalogued as a provenance reference; README.DOC obligation applies if
-  any portion is ever reused.
-- libmspack `qtmd.c` (Stuart Caie, LGPL-2.1): Quantum decompressor; the de
-  facto CAB Quantum decode reference (used via cabextract fixtures for LZX
-  already). No public Quantum encoder is known to exist.
+  `lha211_s.lzh`) and LHa for UNIX 1.14i (jca02266/lha): port source —
+  `lha/lzh_dyn.rs` transliterates `dhuf.c`; `lzh_st0.rs`/
+  `compress::lzh` are behavior-matched against `shuf.c`/`maketbl.c`.
+  LHA's own free-software terms: use/copy/redistribution free,
+  commercial use free with minor obligations; README.DOC states that
+  incorporating parts of the source into other programs is not
+  restricted, while redistribution requires bundling README.DOC (with
+  translation for overseas). Attribution and modification status are
+  recorded here and in the module docs.
+- libmspack `qtmd.c` (Stuart Caie, LGPL-2.1): port source — the de
+  facto CAB Quantum decode reference; `mscab/quantum.rs` is a
+  port/adaptation (LGPL-2.1 section 3 -> GPL-2.0-or-later -> GPL-3.0,
+  combined under AGPL-3.0 section 13). No public Quantum encoder is
+  known to exist.
 - UNARJ 2.41 (Robert K Jung, restricted freeware — NOT freely usable):
-  official ARJ decoder for methods 1-4; TECHNOTE.DOC in the same
-  distribution sketches the methods. Source use is free only in products
-  that are not "ARJ archivers" (ones doing both compress and extract);
-  modified versions must mark changes; redistribution must be unmodified
-  complete package, free of charge only. This crate already reads and
-  writes ARJ, so UNARJ code must not be incorporated — reference/oracle
-  use only. Debian `arj` is non-free; `unar`/`7z` are preferred decode
-  oracles.
-- hwzip (Hans Wennborg, code under the Unlicense / public domain):
-  documented encoder+decoder for ZIP methods 1-6 ("Shrink, Reduce, and
-  Implode" article; article text itself is © Hans Wennborg with no
-  explicit grant, reference use only). Info-ZIP `unshrink.c`/
-  `unreduce.c`/`explode.c` are the decode references already consulted.
+  reference/oracle only. Official ARJ decoder for methods 1-4;
+  TECHNOTE.DOC in the same distribution sketches the methods. Source
+  use is free only in products that are not "ARJ archivers" (ones doing
+  both compress and extract); modified versions must mark changes;
+  redistribution must be unmodified complete package, free of charge
+  only. This crate reads and writes ARJ, so UNARJ code must not be
+  incorporated — consulted only via TECHNOTE.DOC and binary oracle
+  behavior; `decode.c` was not used. Debian `arj` is non-free;
+  `unar`/`7z` are the decode oracles actually used.
 - MS-CFB write references: `cfb` crate (MIT), Apache POI POIFS
-  (Apache-2.0), libgsf (LGPL-2.1).
+  (Apache-2.0), libgsf (LGPL-2.1). Reference only — CFB write remains
+  intentional scope.
 - OSTA UDF 2.60 / ECMA TR/112-2: primary specification for any future UDF
   bridge work (UDF is a distinct filesystem, not an ISO 9660 extension).
   ECMA TR/112-2 carries a copyright notice permitting copying and

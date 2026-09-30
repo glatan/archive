@@ -97,6 +97,8 @@ pub(crate) fn encode(input: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use super::*;
 
     fn roundtrip(data: &[u8]) {

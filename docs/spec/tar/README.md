@@ -12,7 +12,7 @@
 | v7 (POSIX.1-1988 基本ヘッダ) | [POSIX.1-1988](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/pax.html) | ✅ | ✅ | magic フィールドなしの形式として受理 (`is_ustar=false` 時に prefix/uname/gname/dev フィールドを解釈しない) |
 | ustar (`ustar\0` / `ustar `) | [POSIX.1-1988](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/pax.html) / [POSIX.1-2001](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/pax.html) | ✅ | — | encode は GNU/PAX モードで代替 |
 | GNU 拡張 (longname 'L'/'K'、binary size エンコーディング) | [GNU tar 1.x](https://www.gnu.org/software/tar/manual/html_node/Formats.html) | ✅ | ✅ | デフォルト encode モード |
-| GNU sparse (旧式 'S' ヘッダ + sparse マップ) | [GNU tar 1.x](https://www.gnu.org/software/tar/manual/html_node/Sparse-Formats.html) | ✅ | ❌ | intentional scope: sparse 生成は非対応 |
+| GNU sparse (旧式 'S' ヘッダ + sparse マップ) | [GNU tar 1.x](https://www.gnu.org/software/tar/manual/html_node/Sparse-Formats.html) | ✅ | ✅ | GNU モードで旧式 'S' 生成可 (PAX モードは GNU.sparse.*) |
 | PAX (`x`/`g` 拡張ヘッダ、`GNU.sparse.*` keys) | [POSIX.1-2001](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/pax.html) | ✅ | ✅ | encode は PAX モード選択で生成 |
 
 要件表の「仕様参照」列は `<バリアントID>: <節/見出し>` 形式で、上表のバリアントに対応づける (全バリアント共通の要件は `共通:` プレフィックス)。
@@ -67,7 +67,7 @@
 | 43 | PAX エンコーダー: レコード長自己参照計算 | POSIX.1-2001 pax extended header | ✅ | `test_format_pax_record`, `test_format_pax_record_digit_boundary` (ユニットテスト) |
 | 44 | PAX エンコーダー: ナノ秒タイムスタンプ (mtime/atime/ctime) | POSIX.1-2001 pax extended header | ✅ | `test_pax_mtime_nanoseconds`, `test_pax_atime_ctime`, `test_format_pax_time` (ユニットテスト) |
 | 45 | PAX エンコーダー: 負 timestamp (整数/小数) | POSIX.1-2001 pax extended header | ✅ | `test_pax_negative_mtime_roundtrip`, `test_pax_negative_fractional_mtime_roundtrip`, `test_format_pax_time` |
-| 46 | PAX エンコーダー: GNU sparse v0.1 書き出し | GNU tar PAX sparse extensions | ✅ | `test_pax_sparse_roundtrip`, `test_pax_sparse_requires_pax_mode`, `test_pax_sparse_rejects_invalid_layout` |
+| 46 | エンコーダー: GNU sparse 書き出し — PAX モードは GNU.sparse.* v0.1、GNU モードは旧式 'S' ヘッダ + ext sparse blocks (各 segment は 512B 境界開始 + (realsize,0) terminator) | GNU tar Sparse-Formats (sparse.c 実測準拠) | ✅ | `test_pax_sparse_roundtrip`, `test_pax_sparse_rejects_invalid_layout`, `test_gnu_sparse_rejects_oversize`, `test_tar_gnu_sparse_roundtrip`, `test_tar_gnu_sparse_extended_map`, `test_tar_gnu_sparse_long_name`, `test_tar_gnu_sparse_oracle` (GNU tar 展開) |
 | 47 | PAX エンコーダー: 長いパス/リンク名の拡張ヘッダー生成 | POSIX.1-2001 pax extended header | ✅ | `test_pax_long_name`, `test_pax_long_link`, `test_pax_long_name_and_link` (ユニットテスト) |
 | 48 | PAX エンコーダー: 複合属性 (長パス+タイムスタンプ) | POSIX.1-2001 pax extended header | ✅ | `test_pax_combined_long_name_and_timestamps` (ユニットテスト) |
 | 49 | PAX エンコーダー: TarFormat::Gnu/Pax 切り替え | POSIX.1-2001 pax extended header | ✅ | `test_pax_format_accessor` (ユニットテスト) |
@@ -86,7 +86,6 @@
 | 57 | Numeric field overflow: binary encoding fallback (GNU) | GNU tar extensions | ✅ | item 18 |
 | 58 | GNU 'S' typeflag (sparse in-header, old style) | GNU tar extensions | ✅ | `FileType::GnuSparse`, `parse_gnu_sparse_entries()`, `test_gnu_sparse_in_header_decode` |
 | 59 | GNU binary mtime encoding (base-256、octal 範囲超の timestamp 用) | GNU tar extensions | ✅ | binary size encoding と同じ base-256 方式 |
-| 60 | GNU sparse 旧式 'S' ヘッダ + in-header sparse マップ (offset 386-482) の emit | GNU tar Sparse-Formats | ❌ intentional scope | sparse 生成は PAX モードの `GNU.sparse.*` (item 46) のみ。in-header マップの書き出し経路は持たない (decode は item 58 で対応) |
 
 ---
 
@@ -95,5 +94,5 @@
 | 状態 | 件数 |
 |------|------|
 | ✅ 実装+テスト済み | 59 |
-| ❌ 未対応 (intentional scope) | 1 |
-| **合計** | **60** |
+| ❌ 未対応 (intentional scope) | 0 |
+| **合計** | **59** |

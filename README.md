@@ -53,7 +53,7 @@
 | アーカイブ | git pack (pack/idx v1-v3) | ✅ | ✅ |
 | アーカイブ | xar | ✅ | ✅ |
 | アーカイブ | lha/lzh (store のみ) | ✅ | ✅ |
-| アーカイブ | arj (store のみ) | ✅ | ✅ |
+| アーカイブ | arj (method 0-4 decode、store write) | ✅ | ✅ |
 | アーカイブ | arc (store のみ) | ✅ | ✅ |
 | アーカイブ | zip | ✅ | ✅ |
 | アーカイブ | 7z | ✅ | ✅ |

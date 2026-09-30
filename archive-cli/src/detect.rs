@@ -322,14 +322,14 @@ pub fn detect_format(input: &[u8]) -> Option<Format> {
     if input.starts_with(&[0x60, 0xEA]) {
         return Some(Format::Arj);
     }
-    if input.len() >= 2 && input[0] == 0x1A && (1..=8).contains(&input[1]) {
+    if input.len() >= 2 && input[0] == 0x1A && (1..=0x0b).contains(&input[1]) {
         return Some(Format::Arc);
     }
     if input.len() >= 21
         && input[2] == b'-'
-        && input[3] == b'l'
+        && (input[3] == b'l' || input[3] == b'p')
         && input[6] == b'-'
-        && input[20] <= 2
+        && input[20] <= 3
     {
         return Some(Format::Lha);
     }
@@ -423,7 +423,7 @@ pub fn scope_notes(format: Format) -> Vec<String> {
             "squashfs support is read-only; LZMA1-compressed images are unsupported".to_owned(),
         ],
         Format::Mscab => vec![
-            "mscab write covers single-cabinet NONE/MSZIP; Quantum/LZX folders and multi-cabinet sets are unsupported".to_owned(),
+            "mscab write covers single-cabinet NONE/MSZIP; Quantum/LZX write and multi-cabinet write are unsupported".to_owned(),
         ],
         Format::Zim => vec![
             "zim write produces v5 single-cluster archives; entry names include the ZIM namespace prefix".to_owned(),
@@ -438,13 +438,13 @@ pub fn scope_notes(format: Format) -> Vec<String> {
             "git-pack entries are named by hex object ID; pack writing stores all files as blobs without deltas".to_owned(),
         ],
         Format::Xar => vec![
-            "xar file data supports stored and gzip (zlib) encodings; extended attributes and signatures are ignored".to_owned(),
+            "xar file data supports stored, gzip (zlib), bzip2, xz and lzma encodings; extended attributes and signatures are ignored".to_owned(),
         ],
         Format::Lha => vec![
-            "lha support covers stored (-lh0-/-lhd-) entries only; LZH-compressed methods are rejected".to_owned(),
+            "lha write support covers stored (-lh0-/-lhd-) entries only; compressed write is out of scope".to_owned(),
         ],
         Format::Arj => vec![
-            "arj support covers method-0 (stored) entries only; compressed/encrypted entries are rejected".to_owned(),
+            "arj write support covers method-0 (stored) entries only; compressed write and garbled read without a password are rejected".to_owned(),
         ],
         Format::Arc => vec![
             "arc support covers stored methods (1/2) only; packed/squeezed/crunched members are rejected".to_owned(),
@@ -649,13 +649,17 @@ mod tests {
 
     #[test]
     fn detect_lha() {
-        // "-l?-" signature at offset 2 and level byte <= 2 at offset 20.
+        // "-l?-" or "-pm?-" signature at offset 2, level <= 3 at 20.
         let mut d = *b"xx-lh0-.............\x00.";
         assert_eq!(detect_format(&d), Some(Format::Lha));
-        d[20] = 3; // level 3 is out of range
+        d[20] = 3;
+        assert_eq!(detect_format(&d), Some(Format::Lha));
+        d[20] = 4; // level 4 is out of range
         assert_eq!(detect_format(&d), None);
+        // PMarc members use a "-pmX-" method marker.
+        let mut d = *b"xx-pm2-.............\x00.";
+        assert_eq!(detect_format(&d), Some(Format::Lha));
     }
-
     #[test]
     fn detect_arj() {
         assert_eq!(detect_format(&[0x60, 0xEA, 0x00]), Some(Format::Arj));
@@ -665,6 +669,8 @@ mod tests {
     fn detect_arc() {
         assert_eq!(detect_format(&[0x1A, 0x01]), Some(Format::Arc));
         assert_eq!(detect_format(&[0x1A, 0x08]), Some(Format::Arc));
-        assert_eq!(detect_format(&[0x1A, 0x09]), None);
+        assert_eq!(detect_format(&[0x1A, 0x09]), Some(Format::Arc));
+        assert_eq!(detect_format(&[0x1A, 0x0b]), Some(Format::Arc));
+        assert_eq!(detect_format(&[0x1A, 0x0c]), None);
     }
 }

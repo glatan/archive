@@ -60,6 +60,11 @@ pub mod lzip;
 #[cfg(feature = "lzma-alone")]
 pub mod lzma_alone;
 
+/// LZH compression family shared by the LHA and ARJ formats
+/// (MSB bit stream + static-Huffman "st1" block decoder).
+#[cfg(any(feature = "lha", feature = "arj"))]
+pub(crate) mod lzh;
+
 /// LZW compression and decompression (Unix compress `.Z` format).
 ///
 /// Variable-width codes (9-16 bits) with optional clear code for
