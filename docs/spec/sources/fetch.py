@@ -30,7 +30,11 @@ def main():
 
         print(f"  fetch {filename} <- {url}")
         try:
-            urllib.request.urlretrieve(url, path)
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "Mozilla/5.0 (spec-source-fetch)"}
+            )
+            with urllib.request.urlopen(req) as r, open(path, "wb") as out:
+                out.write(r.read())
             fetched += 1
         except Exception as e:
             print(f"  ERROR: {e}", file=sys.stderr)

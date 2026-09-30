@@ -86,9 +86,9 @@
    "id": "xz-file-format",
    "format": "xz",
    "title": "The .xz File Format",
-   "version": "1.1.0 (2022-12-11)",
-   "url": "https://tukaani.org/xz/xz-file-format.txt",
-   "filename": "xz-file-format-1.1.0.txt"
+   "version": "1.2.1 (2024-04-08)",
+   "url": "https://tukaani.org/xz/xz-file-format-1.2.1.txt",
+   "filename": "xz-file-format-1.2.1.txt"
   },
   {
    "id": "lz4-frame-format",
@@ -758,6 +758,30 @@
    "version": "erofs-utils master (fetched 2026-09)",
    "url": "https://raw.githubusercontent.com/erofs/erofs-utils/master/include/erofs_fs.h",
    "filename": "erofs_utils_fs.h"
+  },
+  {
+   "id": "el-torito-spec",
+   "format": "iso9660",
+   "title": "El Torito Bootable CD-ROM Format Specification",
+   "version": "1.0 (January 1995, Phoenix/IBM)",
+   "url": "https://mirrors.meulie.net/bitsavers.org/projects/cdrom/El_Torito_CD-ROM_Spec.pdf",
+   "filename": "eltorito_spec_1.0.pdf"
+  },
+  {
+   "id": "zisofs-format",
+   "format": "iso9660",
+   "title": "Description of the zisofs Format (RRIP 'ZF' entry)",
+   "version": "libisofs doc (2009-04-11)",
+   "url": "https://dev.lovelyhq.com/libburnia/libisofs/raw/branch/master/doc/zisofs_format.txt",
+   "filename": "zisofs_format.txt"
+  },
+  {
+   "id": "apple-iso9660-fl36",
+   "format": "iso9660",
+   "title": "Apple Technical Note FL36: Apple Extensions to ISO 9660",
+   "version": "FL36 (July 1989, revised February 1994)",
+   "url": "https://preterhuman.net/macstuff/technotes/fl/fl_36.html",
+   "filename": "apple_iso9660_fl36.html"
   }
  ],
  "no_url_available": [
@@ -874,6 +898,116 @@
    "reference_url": [
     "https://developer.apple.com/library/mac/technotes/tn1023/_index.html",
     "https://preterhuman.net/"
+   ]
+  },
+  {
+   "id": "compcol",
+   "format": "arc/lha/mscab/zip/lzs",
+   "title": "compcol — pure-Rust compression codec collection",
+   "version": "0.6.11 (2026-09-04)",
+   "note": "MIT。参照実装として ARC squeeze/crunch/squash (method 4/8/9)、LHA lh1/lh2/lh4-lh7、CAB Quantum、zip shrink/reduce/implode の decoder を収録。LZS oracle として利用実績あり",
+   "reference_url": [
+    "https://github.com/KarpelesLab/compcol",
+    "https://docs.rs/compcol"
+   ]
+  },
+  {
+   "id": "newtua-dos",
+   "format": "arc/arj",
+   "title": "newtua_dos — DOS/CP-M archive format decoders (XADMaster ports)",
+   "version": "0.1.4 (2026-08-03)",
+   "note": "LGPL-3.0-or-later。ARC method 5-7/0xa/0xb (crunch/crush/distill) と ARJ method 1-4 の参照実装 (The Unarchiver XADMaster の faithful port)",
+   "reference_url": [
+    "https://github.com/new-the-unarchiver/newtua-formats",
+    "https://docs.rs/newtua-dos"
+   ]
+  },
+  {
+   "id": "hyc-arc",
+   "format": "arc",
+   "title": "ARC 5.21 for Unix (Howard Chu port of SEA ARC)",
+   "version": "5.21 patch level 6 / Debian arc 5.21q",
+   "note": "GPL (SEA 1985-87、版番号未記入)。squeeze/crunch/squash の encode+decode 参照実装。同梱 Arcinfo が ARC 5.xx directory format を記述。Debian main の `arc`/`nomarch`/`unar` が interop oracle として利用可能",
+   "reference_url": [
+    "https://github.com/hyc/arc",
+    "https://github.com/ani6al/arc",
+    "https://sources.debian.org/src/arc/"
+   ]
+  },
+  {
+   "id": "lhasa",
+   "format": "lha",
+   "title": "lhasa — free LHA/LZH decompression library",
+   "version": "master (fragglet/lhasa)",
+   "note": "ISC。lh1-lh7 + LArc (-lzs-/-lz4-/-lz5-) + PMarc (-pm0-/-pm1-/-pm2-) + -lhx- + header level 0-3 の de facto 参照実装。Debian main の `lhasa` が decode oracle として利用可能。源流は Okumura lzhuf.c (public domain)",
+   "reference_url": [
+    "https://github.com/fragglet/lhasa",
+    "https://lhasa.soulsphere.org/"
+   ]
+  },
+  {
+   "id": "libmspack-quantum",
+   "format": "mscab",
+   "title": "libmspack qtmd.c — Quantum decompressor (Matthew Russotto)",
+   "version": "libmspack master",
+   "note": "LGPL-2.1。CAB Quantum の de facto decode 参照。cabextract 経由の fixture で利用実績あり。Quantum encoder の公開実装は存在しない",
+   "reference_url": [
+    "https://github.com/kyz/libmspack",
+    "https://www.cabextract.org.uk/libmspack/"
+   ]
+  },
+  {
+   "id": "hwzip-legacy-zip",
+   "format": "zip",
+   "title": "hwzip + 'Shrink, Reduce, and Implode: The Legacy Zip Compression Methods' (Hans Wennborg)",
+   "version": "hwzip-2.4",
+   "note": "ZIP method 1-6 (Shrink/Reduce/Implode) の encode/decode 双方を解説する記事 + 参照実装。decode 側は Info-ZIP unshrink.c/unreduce.c/explode.c も既存参照",
+   "reference_url": [
+    "https://www.hanshq.net/zip2.html",
+    "https://github.com/madler/unzip"
+   ]
+  },
+  {
+   "id": "unarj-source",
+   "format": "arj",
+   "title": "UNARJ (unarj.c / decode.c, Robert K Jung)",
+   "version": "UNARJ 2.41",
+   "note": "ARJ 公式 decoder ソース (freeware)。method 1-4 decode・garbled flag・multi-volume 処理の参照。TECHNOTE.DOC に method 概略記述あり。Debian `arj` は non-free のため oracle は unar/7z を推奨",
+   "reference_url": [
+    "http://fileformats.archiveteam.org/wiki/ARJ"
+   ]
+  },
+  {
+   "id": "osta-udf-260",
+   "format": "iso9660",
+   "title": "OSTA Universal Disk Format Specification",
+   "version": "Revision 2.60 (2005-03-01) / ECMA TR/112-2 (2023-12)",
+   "note": "UDF bridge 実装時の一次仕様 (自由複製許諾付き)。UDF は ISO 9660 拡張ではなく別 FS フォーマット扱い",
+   "reference_url": [
+    "https://www.osta.org/specs/",
+    "https://ecma-international.org/wp-content/uploads/ECMA_TR-112-2_1st_edition_december_2023.pdf"
+   ]
+  },
+  {
+   "id": "mscfb-write-refs",
+   "format": "mscfb",
+   "title": "MS-CFB write reference implementations",
+   "version": "—",
+   "note": "write 側参照: cfb crate (MIT/Apache-2.0, Rust read/write)、Apache POI POIFS (Apache-2.0)、libgsf (LGPL)。[MS-CFB] spec 内に write 要件は完結",
+   "reference_url": [
+    "https://github.com/mdsteele/rust-cfb",
+    "https://gitlab.gnome.org/GNOME/libgsf"
+   ]
+  },
+  {
+   "id": "pea-crypto-specs",
+   "format": "pea",
+   "title": "PEA crypto primitives 参照仕様",
+   "version": "—",
+   "note": "pea#18 の crypto ストリームは各アルゴリズム仕様が公開済み: EAX (Bellare-Rogaway-Wagner 論文)、Twofish/Serpent spec、Whirlpool (ISO/IEC 10118-3)、HMAC RFC 2104。block cipher + AEAD 実装が前提となるため crypto 領域として intentional scope 維持",
+   "reference_url": [
+    "https://web.cs.ucdavis.edu/~rogaway/papers/eax.pdf",
+    "https://www.schneier.com/academic/twofish/"
    ]
   }
  ]

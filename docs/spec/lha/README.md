@@ -12,9 +12,9 @@
 |---|---|---|---|---|
 | header level 0 | lha header documentation | ✅ | ✅ | |
 | header level 1 / 2 | lha header documentation + LHa for UNIX header.c 実測 | ✅ | ✅ | ext header (0x01 filename / 0x02 dir、raw 0xff 区切り) |
-| header level 3 | lha header documentation | ❌ | ❌ | level byte 3 は reject |
+| header level 3 | header.doc 未記載。lhasa (ISC) が level 3 の de facto 参照実装 | ❌ | ❌ | level byte 3 は reject |
 | method `-lh0-` (stored) / `-lhd-` (dir) | lha header documentation | ✅ | `-lh0-` のみ ✅ | |
-| LZH 圧縮メソッド (`-lh1-`〜`-lh7-`, `-lzs-`/`-lz4-`/`-lz5-`, `-pm0-`/`-pm2-`) | lha header documentation | ❌ | ❌ | intentional scope: 圧縮内部の書面仕様なし |
+| LZH 圧縮メソッド (`-lh1-`〜`-lh7-`, `-lzs-`/`-lz4-`/`-lz5-`, `-pm0-`/`-pm2-`) | 書面仕様なし。lhasa (ISC) / compcol (MIT) が de facto decode 参照 | ❌ | ❌ | intentional scope: lh1/lh2/lh4-lh7 + LArc (lzs/lz4/lz5) + PMarc (pm0-pm2) + lhx を全網羅する参照実装あり |
 
 ### ヘッダ構造
 
@@ -65,9 +65,9 @@
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 19 | LZH 系圧縮メソッドの decode は非対応 | ❌ | `-lh1-`〜`-lh7-`、`-lzs-`、`-lz4-`、`-pm0-`/`-pm2-` 等。`Error::Unsupported` を返す |
+| 19 | LZH 系圧縮メソッドの decode は非対応 | ❌ | `-lh1-`〜`-lh7-`、`-lzs-`、`-lz4-`、`-pm0-`/`-pm2-` 等。`Error::Unsupported` を返す。de facto 参照実装は manifest `no_url_available` の `lhasa`/`compcol` (源流は Okumura lzhuf.c public domain)。decode oracle は Debian main の `lhasa`/`unar` |
 | 20 | write の mtime は level 0/1 で DOS time、level 2 で UNIX time をそのまま格納。UNIX ext 0x50/0x51/0x54 は発行しない | ✅ | `level1_roundtrip`, `level2_roundtrip`, `level2_long_path`, `level_rejects_bad_level` |
-| 21 | マルチボリューム/リンク属性/OS 別属性の解釈は非対応 | ❌ | header level 3 も非対応 (level byte 3 は reject) |
+| 21 | マルチボリューム/リンク属性/OS 別属性の解釈は非対応 | ❌ | header level 3 も非対応 (level byte 3 は reject)。level 3 は header.doc 未記載だが lhasa が de facto 参照実装 |
 
 ### 実装メモ
 

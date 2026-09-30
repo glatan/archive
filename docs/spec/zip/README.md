@@ -11,8 +11,8 @@
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
 | method 0 (Store) / 8 (Deflate) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) §4.4.5, §5.8 | ✅ | ✅ | |
-| method 1 (Shrunk) / 2-5 (Reduced) / 6 (Implode) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) §5.1-§5.6 | ✅ | ❌ | decode のみ |
-| method 9 (Deflate64) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) §5.6 + Info-ZIP de facto | ✅ | ❌ | decode のみ |
+| method 1 (Shrunk) / 2-5 (Reduced) / 6 (Implode) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) §5.1-§5.6 + Info-ZIP `unshrink.c`/`unreduce.c`/`explode.c` + hwzip 解説 (manifest `no_url_available` `hwzip-legacy-zip`) | ✅ | ❌ | decode のみ (encode は hwzip が参照実装として存在するが intentional scope) |
+| method 9 (Deflate64) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) §5.6 + Info-ZIP/hwzip de facto | ✅ | ❌ | decode のみ |
 | method 12 (BZIP2) / 14 (LZMA) / 93 (Zstd) / 95 (XZ) / 98 (PPMd) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) §5.7-§5.10 | ✅ | ✅ | 各 feature で encode 対応 |
 | method 10 (DCL Implode) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) + blast.c 参照実装 | ✅ | ❌ | decode のみ |
 | method 16 (CMPSC Entropy拡張) / 96 (JPEG) / 97 (WavPack) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ❌ | ❌ | intentional exclusion |

@@ -635,6 +635,48 @@ against de facto reference behavior:
     or clean-room Rust derivations validated by tests
 
 
+4a. Catalogued reference implementations (not yet used in this code base)
+-------------------------------------------------------------------------
+
+The following third-party sources were identified during the specification
+re-investigation as de facto references or interoperability oracles for
+intentional-scope features. They are catalogued in
+`docs/spec/sources/manifest.json` (`no_url_available`). No code from these
+projects has been copied into this repository; licenses are recorded for
+future implementation/audit planning:
+
+- compcol (KarpelesLab, MIT): ARC squeeze/crunch/squash methods 4/8/9,
+  LHA lh1/lh2/lh4-lh7, CAB Quantum, ZIP shrink/reduce/implode decoders.
+  Already used as a local LZS encode/decode oracle (see Stac LZS above).
+- newtua_dos (new-the-unarchiver, LGPL-3.0-or-later): ARC methods 5-7/0xa/0xb
+  and ARJ methods 1-4 (faithful port of The Unarchiver's XADMaster parsers).
+- ARC 5.21 for Unix (hyc/arc, SEA 1985-87 copyright, GPL wording with
+  version unstated; packaged as Debian `arc` 5.21q): squeeze/crunch/squash
+  encoder+decoder. Its bundled `Arcinfo` document describes the ARC 5.xx
+  directory format. Debian main's `arc`/`nomarch`/`unar` are usable as
+  interop oracles.
+- lhasa (fragglet, ISC): LHA lh1-lh7, LArc (-lzs-/-lz4-/-lz5-), PMarc
+  (-pm0-/-pm1-/-pm2-), -lhx-, and header level 3 decoder; Debian main's
+  `lhasa` is usable as a decode oracle.
+- libmspack `qtmd.c` (Stuart Caie, LGPL-2.1): Quantum decompressor; the de
+  facto CAB Quantum decode reference (used via cabextract fixtures for LZX
+  already). No public Quantum encoder is known to exist.
+- UNARJ 2.41 (Robert K Jung, freeware): official ARJ decoder for methods
+  1-4; TECHNOTE.DOC in the same distribution sketches the methods. Debian
+  `arj` is non-free; `unar`/`7z` are preferred decode oracles.
+- hwzip (Hans Wennborg): documented encoder+decoder for ZIP methods 1-6
+  ("Shrink, Reduce, and Implode" article); Info-ZIP `unshrink.c`/
+  `unreduce.c`/`explode.c` are the decode references already consulted.
+- MS-CFB write references: `cfb` crate (MIT/Apache-2.0), Apache POI POIFS
+  (Apache-2.0), libgsf (LGPL).
+- OSTA UDF 2.60 / ECMA TR/112-2: primary specification for any future UDF
+  bridge work (UDF is a distinct filesystem, not an ISO 9660 extension).
+- PEA crypto primitives: EAX (Bellare-Rogaway-Wagner paper), Twofish/Serpent
+  specs, Whirlpool (ISO/IEC 10118-3), HMAC (RFC 2104) — published specs
+  exist, but the feature remains intentional scope because it requires
+  block-cipher + AEAD implementations.
+
+
 5. Current non-goals and exclusions
 -----------------------------------
 

@@ -42,7 +42,7 @@
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 18 | 認証付き暗号ストリーム (EAX/TF/SP/HMAC + カスケード、コード 48-51, 65-76) | ❌ intentional scope | crypto subheader + パスワード鍵導出が必要。archive 展開の領域外 |
+| 18 | 認証付き暗号ストリーム (EAX/TF/SP/HMAC + カスケード、コード 48-51, 65-76) | ❌ intentional scope | crypto subheader + パスワード鍵導出が必要。archive 展開の領域外。各プリミティブの一次仕様は公開済み (manifest `no_url_available` `pea-crypto-specs`) が crypto 実装前提のため scope 維持 |
 | 19 | マルチボリューム分割結合 | ❌ intentional scope | 単一ファイル内ではボリュームタグのみ処理。`.pea` 分割出力の結合は split/join 側機能 |
 | 20 | PEA write / EOS 後のマルチストリーム生成 | ❌ intentional scope | PeaZip が参照プロデューサー |
 | 21 | 属性・タイムスタンプのファイルシステム適用 | ❌ intentional scope | SETATTR/RESETATTR は OS 依存。raw 値として公開 |

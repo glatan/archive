@@ -44,7 +44,7 @@
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 19 | compound file write | ❌ intentional scope | red-black 木の構築・FAT 確保・トランザクションは別仕事。read が本フォーマットの主用途 |
+| 19 | compound file write | ❌ intentional scope | red-black 木の構築・FAT 確保・トランザクションは別仕事。read が本フォーマットの主用途。write 参照実装は manifest `no_url_available` の `mscfb-write-refs` (cfb crate / Apache POI / libgsf) |
 | 20 | Range Lock sector (offset 0x7FFFFFFF) / トランザクション signature | ❌ intentional scope | 並行アクセス制御はコンテナ展開に不要。signature は読み飛ばし |
 | 22 | 大文字 mapping / red-black 挿入順序 | ⚠️ 列挙は DFS で網羅、名前順序保証なし | 検索用ソート規則は write 時にのみ意味を持つ |
 | 23 | version 3 で上位 32bit が非ゼロな stream size の寛容読み | ❌ intentional scope | spec は「parser は上位を無視すべき」と推奨。本実装は規格上限超過を厳格拒否 |
