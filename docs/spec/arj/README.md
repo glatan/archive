@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | ARJ technical note `TECHNOTE.TXT` (ARJ/UNARJ 配布物同梱、ARJ 2.x file format description)。所在: [Just Solve Wiki: ARJ](http://fileformats.archiveteam.org/wiki/ARJ) (安定した単一ファイル URL なし) |
+| 基準仕様 | ARJ technical note `TECHNOTE.TXT` (ARJ/UNARJ 配布物同梱、ARJ 2.x file format description)。所在: [Just Solve Wiki: ARJ](http://fileformats.archiveteam.org/wiki/ARJ) (安定した単一ファイル URL なし)。参照実装: UNARJ 2.41 (公式 decoder、制限付き freeware — ソースは ARJ archiver 以外の製品でのみ自由利用可。本 crate への取り込み不可、参照・oracle 用途のみ)、7-Zip `NArj`、newtua_dos (LGPL-3.0、XADMaster port、method 1-4) — manifest `no_url_available` の `unarj-source`/`newtua-dos` |
 | 形式概要 | `0x60 0xEA` + `u16le header size` の header ブロック列 (0 = end)。基本 header は 30B 固定 + NUL 終端 filename/comment + u32 header CRC + u16 ext size。main header の後に file header 列と data が続く |
 | 実装範囲 | **method 0 (stored) + file type 3 (directory) / 4 (label)** のみ read。write は method-0 のみ。method 1-4 圧縮・garbled (password) エントリは intentional scope 外 |
 
@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | method 0 (stored) | ARJ technical note | ✅ | ✅ | header/data CRC-32 検証 |
 | file_type 3 (dir) / 4 (label) | ARJ technical note | ✅ | — | メタデータエントリ |
-| method 1-4 | ARJ technical note | ❌ | ❌ | intentional scope: method 1-3 は仕様不在、4 は二次文書のみ |
+| method 1-4 | TECHNOTE に概略記述 + UNARJ/7-Zip/newtua_dos が de facto 参照 | ❌ | ❌ | intentional scope: 仕様・実装とも存在するが未実装 |
 | garbled (password) / multi-volume | ARJ technical note | ❌ | ❌ | intentional scope |
 
 ### ヘッダ構造
@@ -62,7 +62,7 @@
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 19 | method 1-4 圧縮データの decode は非対応 | ❌ | `Error::Unsupported` を返す |
+| 19 | method 1-4 圧縮データの decode は非対応 | ❌ | `Error::Unsupported` を返す。decode 参照実装は manifest `no_url_available` (`newtua-dos` が安全側、`unarj-source` は制限付き freeware のため参照のみ)。oracle は Debian main の `unar` または `7z` (Debian `arj` は non-free) |
 | 20 | garbled (password protected) アーカイブは非対応 | ❌ | flag bit0 で `Error::Unsupported` |
 | 21 | multi-volume (flag bit2) / security envelope / chapter 機能は非対応 | ❌ | volume 分割は扱わない |
 | 22 | write は method-0 のみ | ❌ | 圧縮エンコーダは非対応 |

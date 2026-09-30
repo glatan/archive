@@ -14,7 +14,7 @@
 |---|---|---|---|---|
 | compression NONE | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) | ✅ | ✅ | 単一 folder write |
 | compression MSZIP | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) + [RFC 1951](https://www.rfc-editor.org/rfc/rfc1951.txt) | ✅ | — | `compress::deflate` 再利用 |
-| compression Quantum | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) | ❌ | — | intentional scope (書面仕様不在、逆解析実装のみ) |
+| compression Quantum | MS-CAB (名称のみ) + de facto 参照: libmspack `qtmd.c` (LGPL-2.1)、compcol (MIT)、unquantum 解説 | ❌ | — | intentional scope。decode は参照実装が複数存在し実装可能。encode は公開 encoder が一切存在せず恒久的対象外候補 |
 | compression LZX | MS "LZX Format" doc + cabextract `lzx.c` errata | ✅ | — | `compress::lzx` (lzxd とコア共有)。window bits 15-21、cabextract fixture で検証 |
 | multi-cabinet set | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) | ✅ | ❌ | `decode_parts(&[&[u8]])` が set メンバーを順に連結 (iCabinet/setID 検証、folder fragment 連結・CFDATA 分割再構成)。write は単一キャビネットのみ |
 
@@ -71,7 +71,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 23 | tcompTYPE_QUANTUM (2) | MS-CAB §3.1 | ❌ | Quantum codec の厳密仕様が MS-CAB 内に完結しない (cf. 対象外フォーマット一覧) |
+| 23 | tcompTYPE_QUANTUM (2) | MS-CAB §3.1 | ❌ | Quantum codec の厳密仕様は MS-CAB 内に完結しないが、de facto decode 参照が存在 (manifest `no_url_available` の `libmspack-quantum`/`compcol`、Matthew Russotto 逆解析、unquantum 解説)。公開 encoder は存在しないため encode は恒久的対象外候補 |
 
 | 25 | multi-cabinet set (.set / disk spanning) | MS-CAB §2.1, §2.3 | ✅ | `decode_parts` が iCabinet 順の member 列を受理 (index/setID 不一致は reject)。iFolder 0xFFFD/0xFFFE/0xFFFF と cbUncomp==0 CFDATA 分割を解決 (continued entry の dedup は name+cbFile 一致で判定、CFHEADER の PREV/NEXT flag 自体は内容を解決に使わないため未検証)。`decode_parts_split_file`, `decode_parts_cfdata_block_split`, `decode_parts_set_id_mismatch`, `decode_parts_index_mismatch`, `decode_parts_missing_earlier_member`, `decode_parts_rejects_empty` |
 | 26 | 属性 / 日時のファイルシステム復元 | MS-CAB §2.3 | ❌ | 展開時の metadata 適用は対象外 (アーカイブ抽出の範囲)。encode 側も date/time/attribs は 0 出力 |

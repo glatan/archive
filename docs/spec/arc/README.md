@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | ARC file format description (System Enhancement Associates / wotsit "arc" entry、[fileformat.info mirror](https://www.fileformat.info/format/arc/corion.htm)、ローカルスナップショット: `docs/spec/sources/arc_format_corion.htm`) |
+| 基準仕様 | ARC file format description (System Enhancement Associates / wotsit "arc" entry、[fileformat.info mirror](https://www.fileformat.info/format/arc/corion.htm)、ローカルスナップショット: `docs/spec/sources/arc_format_corion.htm`)。併せて [hyc/arc](https://github.com/hyc/arc) 同梱の `Arcinfo` が ARC 5.xx directory format を記述する第二ソース |
 | 形式概要 | 各 member は `0x1A` + method byte で開始、method 0 で終端。name は 13B NUL 埋めの flat 名 (directory 概念なし) |
 | 実装範囲 | **method 1 (unpacked) / 2 (stored) / 3 (packed=RLE90)** の read。write は method-1/2。method 4 (squeezed)・5-8 (crunched/crushed/distilled) 以降は intentional scope 外 |
 
@@ -13,7 +13,7 @@
 | method 1 (obsolete unpacked) | ARC spec | ✅ | ✅ | CRC-16 フィールドなし |
 | method 2 (stored) | ARC spec | ✅ | ✅ | CRC-16 検証 |
 | method 3 (packed = RLE90) | de facto (virtualdub/compcol/XADMaster 一致) | ✅ | ✅ | `0x90` run marker、`0x90 0x00` escape。ヘッダは method 2 と同じ 29B、CRC-16 は非圧縮データ |
-| method 4-9 (squeezed/crunched/crushed/distilled/squashed) | ARC spec | ❌ | ❌ | intentional scope: 圧縮内部仕様の書面文書なし |
+| method 4-9 (squeezed/crunched/crushed/distilled/squashed) | 書面仕様なし。de facto 参照実装あり (manifest `no_url_available` 参照) | ❌ | ❌ | intentional scope: method 4/8/9 は compcol (MIT)、method 5-7/0xa/0xb は newtua_dos (LGPL-3.0、XADMaster port)、hyc/arc (GPL) が decode 参照。encode 参照は hyc/arc の squeeze/crunch/squash |
 
 ### ヘッダ構造
 
@@ -54,5 +54,5 @@
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 15 | method 4-8+ (squeezed/crunched/crushed/distilled/squashed) の decode は非対応 | ❌ | `Error::Unsupported` を返す。method 3 (packed=RLE90) は対応済み |
-| 17 | 外部ツールとの相互運用検証なし | ❌ | コンテナに ARC 対応ツール (unar 等) がないため、自己往復 + 手組みベクタのみ |
+| 15 | method 4-8+ (squeezed/crunched/crushed/distilled/squashed) の decode は非対応 | ❌ | `Error::Unsupported` を返す。method 3 (packed=RLE90) は対応済み。de facto 参照実装: compcol (MIT: 4/8/9)、newtua_dos (LGPL-3.0: 5-7/0xa/0xb)、hyc/arc (GPL: 4/8/9 encode+decode) |
+| 17 | 外部ツールとの相互運用検証なし | ❌ | 自己往復 + 手組みベクタのみ。interop oracle 候補: Debian main の `arc` 5.21q (hyc/arc 由来、squeeze/crunch/squash の encode 可能)・`nomarch`・`unar` |

@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 形式概要 | ISO 9660 (= ECMA-119) CD-ROM ファイルシステムイメージ。System Area + Volume Descriptor 列 + Path Table + ディレクトリレコード木。Rock Ridge (IEEE P1282) と Joliet 補足ボリュームを decode |
-| 基準仕様 | ECMA-119 4th ed. (`sources/ecma119.pdf`)、Linux kernel `Documentation/filesystems/isofs.rst` + `include/uapi/linux/iso_fs.h`、SUSP 1.10 (`sources/susp.shar`)、RRIP 1.12 (`sources/rrip112.pdf`)、Joliet spec (`sources/jolspec.html`) — いずれも `docs/spec/sources/` にスナップショット |
+| 基準仕様 | ECMA-119 4th ed. (`sources/ecma119.pdf`)、Linux kernel `Documentation/filesystems/isofs.rst` + `include/uapi/linux/iso_fs.h`、SUSP 1.10 (`sources/susp.shar`)、RRIP 1.12 (`sources/rrip112.pdf`)、Joliet spec (`sources/jolspec.html`)、El Torito 1.0 (`sources/eltorito_spec_1.0.pdf`)、zisofs format (`sources/zisofs_format.txt`)、Apple TN FL36 (`sources/apple_iso9660_fl36.html`) — いずれも `docs/spec/sources/` にスナップショット |
 | 実装 | `archive::archive::iso9660::decode` (read のみ)。`iso9660` feature 配下 |
 
 ## Volume Descriptor 層
@@ -49,7 +49,7 @@
 | 27 | `TF`: timestamp ビット列、7B 形式の modify time (bit1) を mtime として採用。17B 長形式は読み飛ばし | RRIP §4.1.6 | ✅ | decode 時処理 |
 | 28 | RRIP 名は Joliet/ISO 名に優先、PX 非存在時は dir=0o040555 / file=0o100444 の合成 mode | 優先順位設計 | ✅ | `test_iso9660_rockridge_image` / `test_iso9660_plain_image` |
 | 29 | PX mode の S_IFMT で kind を決定: 0o120000→Symlink、0o100000→File、その他→`Other(sfmt)` | RRIP + POSIX | ✅ | `rr_symlink_with_px` |
-| 35 | zisofs `ZF` 圧縮エントリ (transparent decompression): `ZF` System Use entry (signature `pz`、log2 block size、非圧縮サイズ) + データ領域のポインタテーブル + 各ブロックの zlib ストリームを透過展開 | zisofs format (kernel `fs/isofs/rock.c`/`compress.c`、zisofs-tools `mkzftree`) | ✅ | `zisofs_inflate` (block_shift 15-17 のみ受理、csize==0 は全ゼロブロック、ポインタ逆転/範囲外/truncate は reject)。`zisofs_roundtrip`, `zisofs_small_file`, `zisofs_rejects_bad_header`, `zisofs_rejects_bad_pointers`, `zisofs_rejects_bad_params` |
+| 35 | zisofs `ZF` 圧縮エントリ (transparent decompression): `ZF` System Use entry (signature `pz`、log2 block size、非圧縮サイズ) + データ領域のポインタテーブル + 各ブロックの zlib ストリームを透過展開 | zisofs format 書面仕様 (`sources/zisofs_format.txt`、libisofs) + kernel `fs/isofs/rock.c`/`compress.c`、zisofs-tools `mkzftree` | ✅ | `zisofs_inflate` (block_shift 15-17 のみ受理、csize==0 は全ゼロブロック、ポインタ逆転/範囲外/truncate は reject)。`zisofs_roundtrip`, `zisofs_small_file`, `zisofs_rejects_bad_header`, `zisofs_rejects_bad_pointers`, `zisofs_rejects_bad_params` |
 
 ## Joliet 層
 
@@ -69,11 +69,11 @@
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
 
-| 36 | El Torito boot catalog / Boot Record の解釈 | ❌ intentional scope | VD type 0 は読み飛ばし |
+| 36 | El Torito boot catalog / Boot Record の解釈 | ❌ intentional scope | VD type 0 は読み飛ばし。El Torito 1.0 spec (Phoenix/IBM 1995) を `sources/eltorito_spec_1.0.pdf` にスナップショット済み — 情報源は確保、read 実装は未着手 |
 | 37 | extended attribute record の内容解釈 | ❌ intentional scope | extent 開始ブロックへの加算のみ (読み飛ばし) |
-| 38 | multi-session / UDF bridge / HFS ハイブリッドの別ツリー | ❌ intentional scope | primary + Joliet SVD のみ |
-| 39b | RRIP `PN`/`CL`/`RE`/`NM`/`PX`/`SL`/`TF`/`CE`/`SP`/`ST`/`ER` 以外の残エントリ (hardlink dev/inode 等) | ❌ intentional scope | 読み飛ばし (decode に必須でない) |
-| 40 | ISO 9660 write | ❌ intentional scope | mkisofs/xorriso の領域 |
+| 38 | multi-session / UDF bridge / HFS ハイブリッドの別ツリー | ❌ intentional scope | primary + Joliet SVD のみ。UDF 実装時の一次仕様は OSTA UDF 2.60 / ECMA TR/112-2 (manifest `no_url_available` `osta-udf-260`) — ISO 9660 拡張ではなく別 FS 扱い |
+| 39b | RRIP `PN`/`CL`/`RE`/`NM`/`PX`/`SL`/`TF`/`CE`/`SP`/`ST`/`ER` 以外の残エントリ (hardlink dev/inode、Apple `AA`/`BA` 等) | ❌ intentional scope | 読み飛ばし (decode に必須でない)。zisofs `ZF` は #35 で対応済み。Apple 拡張の資料は TN FL36 (`sources/apple_iso9660_fl36.html`) |
+| 40 | ISO 9660 write | ❌ intentional scope | mkisofs/xorriso の領域 (write 実装時は producer oracle として利用可) |
 
 ## Fixture / interop
 

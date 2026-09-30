@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | lha header documentation (apphead / lzh_note、GNU lha 系資料)。実参照: [LHa for UNIX `header.doc.md`](https://github.com/jca02266/lha/blob/master/header.doc.md) ([jca02266/lha](https://github.com/jca02266/lha)) + [Just Solve Wiki: LHarc](http://justsolve.archiveteam.org/wiki/LHarc)。ローカルスナップショット: `docs/spec/sources/lha_header.doc.md` |
+| 基準仕様 | lha header documentation (apphead / lzh_note、GNU lha 系資料)。実参照: [LHa for UNIX `header.doc.md`](https://github.com/jca02266/lha/blob/master/header.doc.md) ([jca02266/lha](https://github.com/jca02266/lha)) + jLHA Notes (Michel Ishizuka、[Wayback index](https://web.archive.org/web/20080724142842/http://homepage1.nifty.com/dangan/en/Content/Program/Java/jLHA/Notes/Notes.html)) + Joe Jared `lzhformat.html` + [Just Solve Wiki: LHarc](http://justsolve.archiveteam.org/wiki/LHarc)。ローカルスナップショット: `docs/spec/sources/lha_header.doc.md`, `jlha_notes_*.html`, `lzhformat.html`。一次実装: [LHA 2.11 ソース (Vector fh002420)](https://www.vector.co.jp/download/file/dos/util/fh002420.html) |
 | 形式概要 | `[u8/u16 header size][checksum?][method 5B][packed u32][orig u32][time u32][attr u8][level u8](level 別フィールド)[ext headers][data]` のエントリ列。終端は header size = 0 |
 | 実装範囲 | level 0/1/2 の **`-lh0-` (stored) / `-lhd-` (directory)** のみ read/write (write は `LhaEncoder::with_level` で level 0/1/2 を選択)。LZH 系圧縮メソッド (`-lh1-` 〜 `-lh7-`、`-lzs-`、`-lz4-`、`-pm0-` 等) は intentional scope 外 |
 
@@ -12,9 +12,9 @@
 |---|---|---|---|---|
 | header level 0 | lha header documentation | ✅ | ✅ | |
 | header level 1 / 2 | lha header documentation + LHa for UNIX header.c 実測 | ✅ | ✅ | ext header (0x01 filename / 0x02 dir、raw 0xff 区切り) |
-| header level 3 | lha header documentation | ❌ | ❌ | level byte 3 は reject |
+| header level 3 | jLHA Notes Level3Header (`sources/jlha_notes_level3_header.html`、word-size u16 + 32bit サイズのワイヤー記述あり) + lhasa (ISC) が de facto 参照実装 | ❌ | ❌ | level byte 3 は reject |
 | method `-lh0-` (stored) / `-lhd-` (dir) | lha header documentation | ✅ | `-lh0-` のみ ✅ | |
-| LZH 圧縮メソッド (`-lh1-`〜`-lh7-`, `-lzs-`/`-lz4-`/`-lz5-`, `-pm0-`/`-pm2-`) | lha header documentation | ❌ | ❌ | intentional scope: 圧縮内部の書面仕様なし |
+| LZH 圧縮メソッド (`-lh1-`〜`-lh7-`, `-lzs-`/`-lz4-`/`-lz5-`, `-pm0-`/`-pm2-`) | jLHA Notes CompressMethod (`sources/jlha_notes_compress_method.html`、辞書サイズ/threshold/max-match/静的・動的 Huffman のパラメータ表 — bit レベル仕様は未記述) + 一次実装 LHA 2.11 ソース (lh0-lh5/lzs/lz4/lz5) + lhasa (ISC) / compcol (MIT) が de facto decode 参照 | ❌ | ❌ | intentional scope: lh6/lh7 は LHA 2.55 以降の追加、pm* は PMarc 独自、lhx は UNLHA32 独自 |
 
 ### ヘッダ構造
 
@@ -65,9 +65,43 @@
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 19 | LZH 系圧縮メソッドの decode は非対応 | ❌ | `-lh1-`〜`-lh7-`、`-lzs-`、`-lz4-`、`-pm0-`/`-pm2-` 等。`Error::Unsupported` を返す |
+| 19 | LZH 系圧縮メソッドの decode は非対応 | ❌ | `-lh1-`〜`-lh7-`、`-lzs-`、`-lz4-`、`-pm0-`/`-pm2-` 等。`Error::Unsupported` を返す。de facto 参照実装は manifest `no_url_available` の `lhasa`/`compcol` (源流は Okumura lzhuf.c public domain)。decode oracle は Debian main の `lhasa`/`unar` |
 | 20 | write の mtime は level 0/1 で DOS time、level 2 で UNIX time をそのまま格納。UNIX ext 0x50/0x51/0x54 は発行しない | ✅ | `level1_roundtrip`, `level2_roundtrip`, `level2_long_path`, `level_rejects_bad_level` |
-| 21 | マルチボリューム/リンク属性/OS 別属性の解釈は非対応 | ❌ | header level 3 も非対応 (level byte 3 は reject) |
+| 21 | マルチボリューム/リンク属性/OS 別属性の解釈は非対応 | ❌ | header level 3 も非対応 (level byte 3 は reject)。level 3 の書面記述は jLHA Notes (`sources/jlha_notes_level3_header.html`)、de facto 実装は lhasa。multi-disk/spanning (ext header 0x39・SPAN mode) は `sources/lzhformat.html` が記述 |
+
+### vendor 別拡張・拡張ヘッダの整理
+
+LHA 系の「独自拡張」は出自が分散している。出典別に整理する (詳細: jLHA Notes 各ページ、`sources/jlha_notes_ext_header_list.html`)。
+
+**header level**
+
+| level | 出自 | 備考 |
+|---|---|---|
+| level 0 | オリジナル LHA (≤2.13、Yoshizaki) | DOS 時刻・基本ヘッダのみ |
+| level 1 | LHA 2.x (拡張ヘッダチェーン導入) | `header.doc` 記載 |
+| level 2 | LHA for UNIX 系 (UNIX 時刻・u16 総サイズ) | `header.doc` 記載 |
+| level 3 | LHA 2.67 / LHA for OS/2 / UNLHA32.DLL が試行的に使用 (LHA 3.0 構想は中断) | `header.doc` 未記載、jLHA Notes Level3Header が唯一の書面記述。32bit サイズ制限が残る設計問題あり |
+
+**method の出自**
+
+| 系列 | method | 備考 |
+|---|---|---|
+| LArc (三木和彦) | `-lzs-` `-lz4-` `-lz5-` | `-lz4-` は stored |
+| LHA 本家 (吉崎) | `-lh0-`〜`-lh7-` | lh3 は試作 (静的 Huffman 版 lh2)。2.11 ソースは lh0-5 + lzs/lz4/lz5 を収録、lh6/7 は後の版で追加 |
+| PMarc | `-pm0-` `-pm1-` `-pm2-` | 別ツール独自、`-pm0-` は stored |
+| UNLHA32 (Micco) | `-lhx-` | UNLHA32.DLL 独自 |
+
+**拡張ヘッダ identifier のカテゴリ** (LHA for OS/2 同梱 `header.tex` 由来の分類 + jLHA の細分化)
+
+| range | カテゴリ | 主な identifier |
+|---|---|---|
+| 0x00-0x3F | common | 0x00 header CRC、0x01 filename、0x02 dirname、0x39 multi-disk、0x3F comment |
+| 0x40-0x4F | MS-DOS | 0x40 DOS attr、0x41 Windows FILETIME、0x42 4GiB 超 file size、0x48-0x4F 認証用 reserved |
+| 0x50-0x5F | UNIX | 0x50 permission、0x51 uid/gid、0x52 group name、0x53 user name、0x54 time_t |
+| 0x60-0x7F | その他 OS 依存 | 0x7D capsule (旧 0xFC、Mac 用)、0x7E OS/2 EA (旧 0xFD)、0x7F level-3 新属性 (1) |
+| 0x80-0xFF | reserved | 0xC4-0xC8 圧縮 comment、0xFF level-3 新属性 (2) |
+
+一次資料の所在: header.tex (LHA for OS/2 2.08、平松聡)、LHAHED15.ZIP (立花恵理子)、header.txt (UNLHA32.DLL、Micco)、jLHA Notes・lzhformat.html (ともにスナップショット済み)。
 
 ### 実装メモ
 

@@ -69,7 +69,7 @@
 |---|------|------|
 | 33 | `<ea>` 拡張属性データの抽出 | — | ❌ intentional scope | macOS 固有 (ResourceFork/quarantine 等)。heap 内データの存在は許容するがエントリ化しない |
 | 34 | `<signature>` / xar 署名検証 | — | ❌ intentional scope | OpenSSL/CMS 署名で crate スコープ外 |
-| 35 | bzip2/lzma/xz エンコードの data | — | ❌ intentional scope | libxar が対応するが crate は gzip(zlib)/stored のみに限定 (追加 feature なしで完結するため) |
+| 35 | bzip2/lzma/xz エンコードの data | — | ❌ intentional scope | libxar が対応するが crate は gzip(zlib)/stored のみに限定。bzip2/lzma/xz codec 自体は crate 内に実装済みのため技術的制約ではなく設計判断 |
 | 36 | cksum_alg=3 の "sha1"/"md5" 以外の digest 名 | — | ❌ intentional scope | OpenSSL digest 名依存 (sha256 等)。sha1/md5 は受理 |
 | 37 | hardlink/character/block special の実データ展開 | — | ❌ intentional scope | TOC メタデータは保持するが特殊ファイル生成は対象外 |
 | 38 | heap 内エントリのストリーミング順序要件 (ea を data より先に置き per-file でグループ化する推奨) | — | ❌ intentional scope | 本実装は heap 全体をランダムアクセスで読むため順序制約は不要 |
