@@ -181,3 +181,22 @@ fn test_iso9660_rejects_corrupt() {
     }
     assert!(iso9660::decode::decode(&img).is_err());
 }
+
+const ELTORITO: &[u8] = include_bytes!("../fixtures/iso9660/bsdtar-eltorito.iso");
+
+// bsdtar El Torito image: -o boot=boot.img -o boot-catalog=bootcat.bin
+// over a tree containing boot.img ("BOOTPAYLOAD" + pad) and hello.txt.
+#[test]
+fn test_iso9660_eltorito_image() {
+    let img = iso9660::decode::decode(ELTORITO).unwrap();
+    assert_eq!(img.el_torito.len(), 1);
+    let et = &img.el_torito[0];
+    assert_eq!(et.platform, 0); // x86
+    assert_eq!(et.entries.len(), 1);
+    let e = &et.entries[0];
+    assert!(e.bootable);
+    assert_eq!(e.media_type, 0); // no-emulation
+    assert_eq!(e.sector_count, 4); // 4 * 512 = 2048 bytes
+    assert_eq!(e.image.len(), 2048);
+    assert!(e.image.starts_with(b"BOOTPAYLOAD"));
+}

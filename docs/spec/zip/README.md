@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [APPNOTE.TXT 6.3.10](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) (PKWARE, 2024、ローカルスナップショット: `docs/spec/sources/APPNOTE_6.3.10.txt`) |
-| current scope | split/spanned (multi-disk) を含む読み取り、compression method 0 (Store) / 1 (Shrunk, decode) / 2-5 (Reduced, decode) / 6 (Implode, decode) / 8 (Deflate) / 9 (Deflate64, decode) / 10 (DCL Implode, decode) / 12 (BZIP2) / 14 (LZMA) / 93 (Zstd) / 95 (XZ) / 98 (PPMd)、Traditional PKZIP encryption、WinZip AES-128/192/256、Strong Encryption 復号 (§7、DES/3DES/RC2/RC4/AES) と Central Directory Encryption (§7.5) の decode、extra field 0x000a/0x000d/0x5455/0x6375/0x7075、Archive Extra Data Record / Digital Signature / ZIP64 extensible data sector スキップ |
+| current scope | split/spanned (multi-disk) を含む読み取り、compression method 0 (Store) / 1 (Shrunk) / 2-5 (Reduced) / 6 (Implode) / 8 (Deflate) / 9 (Deflate64) / 10 (DCL Implode, decode) / 12 (BZIP2) / 14 (LZMA) / 93 (Zstd) / 95 (XZ) / 98 (PPMd)、Traditional PKZIP encryption、WinZip AES-128/192/256、Strong Encryption 復号 (§7、DES/3DES/RC2/RC4/AES) と Central Directory Encryption (§7.5) の decode、extra field 0x000a/0x000d/0x5455/0x6375/0x7075、Archive Extra Data Record / Digital Signature / ZIP64 extensible data sector スキップ |
 | intentional exclusion | Certificate-based encryption (§7.2.4)、Method 7 (Tokenizing、仕様未公開)、IBM z/OS CMPSC Entropy Encoding 拡張 (Method 16、特許状況未確認の新規要素)、JPEG (Method 96、WinZip 独自の JPEG 再圧縮で非公式文書のみ)、WavPack (Method 97、可逆圧縮コアの bit-level 仕様なし) |
 
 ## 対応バリアント・仕様版
@@ -11,8 +11,8 @@
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
 | method 0 (Store) / 8 (Deflate) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) §4.4.5, §5.8 | ✅ | ✅ | |
-| method 1 (Shrunk) / 2-5 (Reduced) / 6 (Implode) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) §5.1-§5.6 + Info-ZIP `unshrink.c`/`unreduce.c`/`explode.c` + hwzip 解説 (manifest `no_url_available` `hwzip-legacy-zip`) | ✅ | ❌ | decode のみ (encode は hwzip が参照実装として存在するが intentional scope) |
-| method 9 (Deflate64) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) §5.6 + Info-ZIP/hwzip de facto | ✅ | ❌ | decode のみ |
+| method 1 (Shrunk) / 2-5 (Reduced) / 6 (Implode) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) §5.1-§5.6 + Info-ZIP `unshrink.c`/`unreduce.c`/`explode.c` + hwzip 解説 (manifest `no_url_available` `hwzip-legacy-zip`) | ✅ | ✅ | decode + encode (hwzip 参照実装を移植) |
+| method 9 (Deflate64) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) §5.6 + Info-ZIP/hwzip de facto | ✅ | ✅ | decode + encode |
 | method 12 (BZIP2) / 14 (LZMA) / 93 (Zstd) / 95 (XZ) / 98 (PPMd) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) §5.7-§5.10 | ✅ | ✅ | 各 feature で encode 対応 |
 | method 10 (DCL Implode) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) + blast.c 参照実装 | ✅ | ❌ | decode のみ |
 | method 16 (CMPSC Entropy拡張) / 96 (JPEG) / 97 (WavPack) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ❌ | ❌ | intentional exclusion |

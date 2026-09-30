@@ -224,7 +224,9 @@ impl TarEncoder {
         );
     }
 
-    /// Add a sparse regular file using GNU PAX sparse v0.1 metadata.
+    /// Add a sparse regular file. In PAX mode this emits GNU PAX
+    /// sparse v0.1 metadata; in GNU mode it writes the old-style 'S'
+    /// header with an inline/extended sparse map.
     ///
     /// `data` must contain the concatenated non-hole segments described by
     /// `sparse_map`, and `real_size` is the logical file size after holes are
@@ -467,9 +469,6 @@ impl TarEncoder {
         sparse_map: &[(u64, u64)],
         real_size: u64,
     ) -> Result<(), Error> {
-        if self.format != TarFormat::Pax {
-            return Err(Error::Unsupported("tar: sparse files require PAX format"));
-        }
         if opts.file_type != FileType::Regular {
             return Err(Error::Unsupported(
                 "tar: sparse encoding only supports regular files",
@@ -477,21 +476,137 @@ impl TarEncoder {
         }
         validate_sparse_layout(data, sparse_map, real_size)?;
 
-        let mut pax_data = build_pax_data(opts, data.len(), false);
-        pax_data.extend_from_slice(&build_sparse_pax_data(&opts.name, sparse_map, real_size));
-        let pax_name = pax_header_name(&opts.name);
-        self.add_file_with_options(
-            &pax_data,
-            &TarEntryOptions {
-                name: pax_name,
-                file_type: FileType::PaxHeader,
-                ..Default::default()
-            },
-        );
+        match self.format {
+            TarFormat::Pax => {
+                let mut pax_data = build_pax_data(opts, data.len(), false);
+                pax_data
+                    .extend_from_slice(&build_sparse_pax_data(&opts.name, sparse_map, real_size));
+                let pax_name = pax_header_name(&opts.name);
+                self.add_file_with_options(
+                    &pax_data,
+                    &TarEntryOptions {
+                        name: pax_name,
+                        file_type: FileType::PaxHeader,
+                        ..Default::default()
+                    },
+                );
 
-        let mut sparse_opts = opts.clone();
-        sparse_opts.name = sparse_placeholder_name(&opts.name);
-        self.add_file_with_options(data, &sparse_opts);
+                let mut sparse_opts = opts.clone();
+                sparse_opts.name = sparse_placeholder_name(&opts.name);
+                self.add_file_with_options(data, &sparse_opts);
+            }
+            TarFormat::Gnu => {
+                self.write_gnu_sparse_entry(data, opts, sparse_map, real_size)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Write an old-style GNU sparse ('S' typeflag) entry: up to four
+    /// inline sparse map slots in the header, 512-byte extension
+    /// blocks (21 slots each) for longer maps, then the packed data.
+    fn write_gnu_sparse_entry(
+        &mut self,
+        data: &[u8],
+        opts: &TarEntryOptions,
+        sparse_map: &[(u64, u64)],
+        real_size: u64,
+    ) -> Result<(), Error> {
+        // Octal-only 12-byte fields cap every stored value at ~8 GiB.
+        const MAX_OCTAL_SIZE: u64 = 0x1_FFFF_FFFF;
+        if real_size > MAX_OCTAL_SIZE
+            || data.len() as u64 > MAX_OCTAL_SIZE
+            || sparse_map
+                .iter()
+                .any(|&(o, l)| o > MAX_OCTAL_SIZE || l > MAX_OCTAL_SIZE)
+        {
+            return Err(Error::Unsupported(
+                "tar: GNU sparse format is limited to 8GiB values",
+            ));
+        }
+        // Long names need a GNU LongName extension header; the old
+        // sparse layout has no room for the UStar prefix field.
+        let header_name = truncate_to(&opts.name, 100);
+        if opts.name.len() > 100 {
+            let mut name_bytes = Vec::from(opts.name.as_bytes());
+            name_bytes.push(0);
+            self.add_file_with_options(
+                &name_bytes,
+                &TarEntryOptions {
+                    name: String::from("././@LongLink"),
+                    file_type: FileType::GnuLongName,
+                    ..Default::default()
+                },
+            );
+        }
+
+        let mut header = [0u8; BLOCK_SIZE];
+        write_string(&mut header[0..100], &header_name);
+        write_octal(&mut header[100..108], opts.mode as u64, 7);
+        write_octal(&mut header[108..116], opts.uid as u64, 7);
+        write_octal(&mut header[116..124], opts.gid as u64, 7);
+        // On-tape data size (the logical size lives in realsize).
+        write_octal(&mut header[124..136], data.len() as u64, 11);
+        write_octal(&mut header[136..148], opts.mtime.max(0) as u64, 11);
+        header[148..156].copy_from_slice(b"        ");
+        header[156] = b'S';
+        // GNU magic "ustar  " + NUL (8 bytes, already zeroed at 264).
+        header[257..264].copy_from_slice(b"ustar  ");
+        write_string(&mut header[265..297], &truncate_to(&opts.uname, 32));
+        write_string(&mut header[297..329], &truncate_to(&opts.gname, 32));
+        write_octal(&mut header[329..337], opts.devmajor as u64, 7);
+        write_octal(&mut header[337..345], opts.devminor as u64, 7);
+        write_octal(&mut header[345..357], opts.atime.max(0) as u64, 11);
+        write_octal(&mut header[357..369], opts.ctime.max(0) as u64, 11);
+        // 369..385: multivol offset + longnames stay zero.
+        // GNU writes an end-of-map terminator (realsize, 0) after
+        // the data extents.
+        let mut slots = Vec::from(sparse_map);
+        slots.push((real_size, 0));
+        let mut rest = &slots[..];
+        for slot in header[386..482].chunks_mut(24) {
+            if let Some((&(offset, numbytes), tail)) = rest.split_first() {
+                write_octal(&mut slot[..12], offset, 11);
+                write_octal(&mut slot[12..], numbytes, 11);
+                rest = tail;
+            }
+        }
+        if !rest.is_empty() {
+            header[482] = 1; // isextended
+        }
+        write_octal(&mut header[483..495], real_size, 11);
+        let checksum: u32 = header.iter().map(|&b| b as u32).sum();
+        write_octal(&mut header[148..155], checksum as u64, 6);
+        header[155] = b' ';
+        self.data.extend_from_slice(&header);
+
+        // Extended sparse blocks: 21 entries each, flag byte at 504.
+        while !rest.is_empty() {
+            let mut block = [0u8; BLOCK_SIZE];
+            for slot in block[..504].chunks_mut(24) {
+                if let Some((&(offset, numbytes), tail)) = rest.split_first() {
+                    write_octal(&mut slot[..12], offset, 11);
+                    write_octal(&mut slot[12..], numbytes, 11);
+                    rest = tail;
+                }
+            }
+            block[504] = u8::from(!rest.is_empty());
+            self.data.extend_from_slice(&block);
+        }
+
+        // Each segment starts on a fresh 512-byte boundary on tape
+        // (GNU tar's old-sparse layout); the input is packed.
+        let mut off = 0usize;
+        for &(_, len) in sparse_map {
+            let len = len as usize;
+            self.data.extend_from_slice(&data[off..off + len]);
+            off += len;
+            let remainder = len % BLOCK_SIZE;
+            if remainder != 0 {
+                self.data
+                    .resize(self.data.len() + BLOCK_SIZE - remainder, 0);
+            }
+        }
         Ok(())
     }
 
@@ -1578,10 +1693,11 @@ mod tests {
     }
 
     #[test]
-    fn test_pax_sparse_requires_pax_mode() {
+    fn test_gnu_sparse_rejects_oversize() {
+        // The octal-only 'S' fields cannot hold values above ~8GiB.
         let mut enc = TarEncoder::new();
         let err = enc
-            .add_sparse_file("sparse.bin", b"HELLO", &[(0, 5)], 4096)
+            .add_sparse_file("sparse.bin", b"H", &[(0, 1)], 0x2_0000_0000)
             .unwrap_err();
         assert!(matches!(err, Error::Unsupported(_)));
     }

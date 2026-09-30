@@ -5,7 +5,8 @@
 //! - ZIP64 EOCD / locator parsing and emission
 //! - Central Directory traversal and writing
 //! - Local File Header validation and writing
-//! - Store and Deflate extraction/encoding
+//! - Store/Deflate extraction/encoding, legacy methods (Shrunk, Reduced
+//!   factors 1-4, Imploded) and Deflate64 decode and encode
 //! - Traditional PKZIP and WinZip AES-128/192/256 encrypted entry read/write
 //! - Strong Encryption (AES/DES/3DES/RC2/RC4) decryption
 //! - Central Directory Encryption decryption (Archive Decryption Header, APPNOTE §4.3.10/§7.5)
@@ -89,6 +90,7 @@ mod crypto;
 mod dcl_implode;
 mod expand;
 mod implode;
+mod lzmatch;
 mod unshrink;
 
 /// Codec struct for trait-based ZIP decode operations.

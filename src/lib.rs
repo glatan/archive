@@ -82,7 +82,7 @@
 //! | `deb` (default) | Debian binary package (`.deb`) read/write support |
 //! | `rpm` (default) | RPM package (`.rpm`) read/write support |
 //! | `squashfs` (default) | SquashFS image read/write support |
-//! | `mscab` (default) | Microsoft Cabinet (`.cab`) read/write support (MSZIP/LZX/stored) |
+//! | `mscab` (default) | Microsoft Cabinet (`.cab`) read/write support (stored/MSZIP write; Quantum/LZX read) |
 //! | `mscfb` (default) | Microsoft Compound File Binary (OLE2) read support |
 //! | `cramfs` (default) | Linux cramfs read-only filesystem image |
 //! | `romfs` (default) | Linux romfs read-only filesystem image |
@@ -95,9 +95,9 @@
 //! | `warc` (default) | WARC (`.warc`) record read/write support |
 //! | `git-pack` (default) | Git pack (`pack-*.pack`/`pack-*.idx`) read/write support |
 //! | `xar` (default) | XAR (`.xar`) archive read/write support |
-//! | `lha` (default) | LHA/LZH archive support (store methods; header levels 0-2) |
-//! | `arj` (default) | ARJ archive support (method 0 only) |
-//! | `arc` (default) | SEA ARC archive support (method 1/2/3 read; method 1/2 write) |
+//! | `lha` (default) | LHA/LZH archive support (header levels 0-3; lh0-lh7/LArc/PMarc decode, lh0 write) |
+//! | `arj` (default) | ARJ archive support (stored + methods 1-4 decode incl. garbled/multi-volume, stored write) |
+//! | `arc` (default) | SEA ARC archive support (method 1-9/0xa/0xb read; method 1/2/3/4/8/9 write) |
 //! | `zip` | ZIP archive format |
 //! | `sevenz` | 7z archive format |
 //!
@@ -502,7 +502,9 @@ pub(crate) mod util;
     feature = "lzs",
     feature = "lzxd",
     feature = "cmpsc",
-    feature = "packbits"
+    feature = "packbits",
+    feature = "lha",
+    feature = "arj"
 ))]
 pub mod compress;
 

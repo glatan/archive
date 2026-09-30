@@ -1,32 +1,33 @@
-//! SEA ARC (`.arc`) archive read and store-method write support.
+//! SEA ARC (`.arc`) archive read and write support.
 //!
 //! Reference: the ARC file format description published by System
 //! Enhancement Associates (arc specification / wotsit "arc" entry).
 //! Supported scope:
 //!
 //! - reading: method 1 (obsolete unpacked, no CRC), method 2
-//!   (stored) and method 3 (packed/RLE90). Methods 4 (squeezed),
-//!   5-8 (crunched / non-ASCII crunched / crushed / distilled) and
-//!   any higher method are rejected with [`Error::Unsupported`];
-//! - writing: method 1 (obsolete unpacked), method 2 (stored) and
-//!   method 3 (packed/RLE90) entries.
+//!   (stored), method 3 (packed/RLE90), method 4 (squeezed), methods
+//!   5-7 (crunched hash-LZW variants), method 8 (crunched), method 9
+//!   (squashed), method 0x0a (crushed) and method 0x0b (distilled).
+//!   Method 0x0c and higher are rejected with [`Error::Unsupported`];
+//! - writing: methods 1, 2, 3, 4, 8 and 9 entries.
 //!
 //! Layout: each member starts with `0x1A` and a method byte; method 0
 //! marks end of archive. Method-1 records are
 //! `[name 13B][size u32le][data]`; methods >= 2 use
-//! `[name 13B][size u32le][date u16le][time u16le][crc16 u16le]
-//! [length u32le][data]` where `size` is the uncompressed size and
-//! `length` is the stored data size (equal for method 2; the RLE90
-//! packed size for method 3). The CRC-16 covers the uncompressed
-//! data. ARC has no directory entries and names are flat,
-//! NUL-padded, at most 12 characters plus a terminator byte.
+//! `[name 13B][length u32le][date u16le][time u16le][crc16 u16le]
+//! [size u32le][data]` where `length` is the stored (compressed) data
+//! size and `size` is the original uncompressed size (equal for method
+//! 2; for method 3 `length` is the RLE90 packed size). The CRC-16
+//! covers the uncompressed data. ARC has no directory entries and
+//! names are flat, NUL-padded, at most 12 characters plus a terminator
+//! byte.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::error::Error;
 
-use super::rle90;
+use super::{crunch, crush, distill, rle90, squeeze};
 
 pub(crate) const MARKER: u8 = 0x1A;
 pub(crate) const NAME_LEN: usize = 13;
@@ -36,7 +37,7 @@ pub(crate) const NAME_LEN: usize = 13;
 pub struct ArcEntry {
     /// File name (no directory component; ARC is flat).
     pub name: String,
-    /// Member method byte as read (1, 2 or 3).
+    /// Member method byte as read.
     pub method: u8,
     /// DOS date field (0 when absent/unset).
     pub date: u16,
@@ -94,7 +95,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<ArcEntry>, Error> {
         if method == 0 {
             return Ok(entries);
         }
-        if method > 3 {
+        if !matches!(method, 1..=0x0b) {
             return Err(Error::Unsupported("arc: unsupported method"));
         }
         if pos + NAME_LEN + 4 > input.len() {
@@ -102,11 +103,13 @@ pub fn decode(input: &[u8]) -> Result<Vec<ArcEntry>, Error> {
         }
         let name = parse_name(&input[pos..pos + NAME_LEN])?;
         pos += NAME_LEN;
-        let size = u32le(&input[pos..]) as usize;
+        // Bytes 16-19 hold the stored (compressed) data size.
+        let length = u32le(&input[pos..]) as usize;
         pos += 4;
-        let (date, time, crc16, length) = if method == 1 {
-            // Obsolete unpacked member: no date/time/CRC/length fields.
-            (0, 0, None, size)
+        let (date, time, crc16, size) = if method == 1 {
+            // Obsolete unpacked member: no date/time/CRC/orig-size
+            // fields; the stored size doubles as the original size.
+            (0, 0, None, length)
         } else {
             if pos + 10 > input.len() {
                 return Err(Error::InvalidData("arc: truncated header"));
@@ -114,25 +117,97 @@ pub fn decode(input: &[u8]) -> Result<Vec<ArcEntry>, Error> {
             let date = u16le(&input[pos..]);
             let time = u16le(&input[pos + 2..]);
             let crc = u16le(&input[pos + 4..]);
-            let length = u32le(&input[pos + 6..]) as usize;
+            // Bytes 26-29 hold the original (uncompressed) length.
+            let size = u32le(&input[pos + 6..]) as usize;
             pos += 10;
-            (date, time, Some(crc), length)
+            (date, time, Some(crc), size)
         };
         if pos + length > input.len() {
             return Err(Error::InvalidData("arc: truncated member data"));
         }
         let packed = &input[pos..pos + length];
         pos += length;
-        let data = if method == 3 {
-            // Packed member: RLE90-expand; output must match the
-            // declared uncompressed size.
-            rle90::decode(packed, size)?
-        } else {
-            // For stored members length must equal uncompressed size.
-            if packed.len() != size {
-                return Err(Error::InvalidData("arc: size mismatch"));
+        let data = match method {
+            3 => {
+                // Packed member: RLE90-expand; output must match the
+                // declared uncompressed size.
+                rle90::decode(packed, size)?
             }
-            packed.to_vec()
+            4 => {
+                // Squeezed member: static Huffman over an RLE90 stream.
+                squeeze::decode(packed, size)?
+            }
+            5 => {
+                // Crunched (obsolete): quadratic-hash 12-bit LZW, no
+                // RLE stage.
+                let out = crunch::decode(packed, crunch::CrunchHash::Quadratic, size)?;
+                if out.len() != size {
+                    return Err(Error::InvalidData("arc: size mismatch"));
+                }
+                out
+            }
+            6 => {
+                // Crunched: quadratic-hash 12-bit LZW over an RLE90
+                // stream. The intermediate RLE stream is bounded at
+                // 2x the original size (worst case: all 0x90 literals).
+                let s = crunch::decode(
+                    packed,
+                    crunch::CrunchHash::Quadratic,
+                    size.saturating_mul(2),
+                )?;
+                rle90::decode(&s, size)?
+            }
+            7 => {
+                // Crunched (fast hash): multiplicative-hash 12-bit LZW
+                // over an RLE90 stream.
+                let s = crunch::decode(
+                    packed,
+                    crunch::CrunchHash::Multiplicative,
+                    size.saturating_mul(2),
+                )?;
+                rle90::decode(&s, size)?
+            }
+            8 => {
+                // Crunched member: one maxbits byte, then a
+                // compress-style dynamic LZW stream, then RLE90.
+                let (&maxb, body) = packed
+                    .split_first()
+                    .ok_or(Error::InvalidData("arc: truncated crunched member"))?;
+                let lzw = crate::compress::lzw::decode::decode_body(body, u32::from(maxb), true)?;
+                rle90::decode(&lzw, size)?
+            }
+            9 => {
+                // Squashed member: compress-style dynamic LZW (13-bit
+                // ceiling), no RLE stage.
+                let out = crate::compress::lzw::decode::decode_body(packed, 13, true)?;
+                if out.len() != size {
+                    return Err(Error::InvalidData("arc: size mismatch"));
+                }
+                out
+            }
+            0x0a => {
+                // Crushed member: adaptive LZW with usage-based
+                // replacement, over an RLE90 stream.
+                let s = crush::decode(packed, size.saturating_mul(2))?;
+                rle90::decode(&s, size)?
+            }
+            0x0b => {
+                // Distilled member: LZSS + header Huffman; the stream
+                // is authoritative on length.
+                let out = distill::decode(packed)?;
+                if out.len() != size {
+                    return Err(Error::InvalidData("arc: size mismatch"));
+                }
+                out
+            }
+            _ => {
+                // Stored members (methods 1/2): length equals the
+                // uncompressed size.
+                if packed.len() != size {
+                    return Err(Error::InvalidData("arc: size mismatch"));
+                }
+                packed.to_vec()
+            }
         };
         if let Some(c) = crc16
             && crate::util::crc16::crc16(&data) != c
@@ -227,24 +302,18 @@ mod tests {
     #[test]
     fn rejects_unsupported_encode_method() {
         let mut e = crate::archive::arc::encode::ArcEncoder::new();
-        assert!(matches!(
-            e.add_file_with_method("F", b"", 0, 0, 4),
-            Err(Error::Unsupported(_))
-        ));
-        assert!(matches!(
-            e.add_file_with_method("F", b"", 0, 0, 9),
-            Err(Error::Unsupported(_))
-        ));
-        assert!(matches!(
-            e.add_file_with_method("F", b"", 0, 0, 0),
-            Err(Error::Unsupported(_))
-        ));
+        for m in [5u8, 6, 7, 0x0a, 0x0b, 0] {
+            assert!(matches!(
+                e.add_file_with_method("F", b"", 0, 0, m),
+                Err(Error::Unsupported(_))
+            ));
+        }
     }
 
     #[test]
     fn rejects_compressed_method() {
-        // Methods 4 and above remain out of scope.
-        for m in [4u8, 9, 0xFF] {
+        // Methods 0x0c and above remain out of scope.
+        for m in [0x0cu8, 0x0d, 0x7e, 0xFF] {
             let mut a = Vec::new();
             a.extend_from_slice(&[MARKER, m]);
             a.extend_from_slice(&[0u8; NAME_LEN + 4]);
@@ -259,11 +328,11 @@ mod tests {
         let mut field = [0u8; NAME_LEN];
         field[..name.len()].copy_from_slice(name.as_bytes());
         a.extend_from_slice(&field);
-        a.extend_from_slice(&orig_size.to_le_bytes());
+        a.extend_from_slice(&(packed.len() as u32).to_le_bytes());
         a.extend_from_slice(&0x1234u16.to_le_bytes());
         a.extend_from_slice(&0x5678u16.to_le_bytes());
         a.extend_from_slice(&crc.to_le_bytes());
-        a.extend_from_slice(&(packed.len() as u32).to_le_bytes());
+        a.extend_from_slice(&orig_size.to_le_bytes());
         a.extend_from_slice(packed);
         a.extend_from_slice(&[MARKER, 0]);
         a

@@ -1,23 +1,31 @@
-//! SEA ARC (`.arc`) archive read and store-method write support.
+//! SEA ARC (`.arc`) archive read and write support.
 //!
 //! Reference: the ARC file format description published by System
 //! Enhancement Associates (arc specification / wotsit "arc" entry).
+//! Compression method internals follow the de-facto reference
+//! implementations (nomarch, XADMaster, compcol; used for behaviour
+//! observation only).
 //! Supported scope:
 //!
 //! - reading: method 1 (obsolete unpacked, no CRC), method 2
-//!   (stored) and method 3 (packed/RLE90). Methods 4 (squeezed),
-//!   5-8 (crunched / non-ASCII crunched / crushed / distilled) and
-//!   any higher method are rejected with [`Error::Unsupported`];
-//! - writing: method 1 (obsolete unpacked), method 2 (stored) and
-//!   method 3 (packed/RLE90) entries.
+//!   (stored), method 3 (packed/RLE90), method 4 (squeezed = RLE90 +
+//!   static Huffman), method 5 (crunched, obsolete — quadratic-hash
+//!   LZW), method 6 (crunched = quadratic-hash LZW + RLE90), method 7
+//!   (crunched = multiplicative-hash LZW + RLE90), method 8 (crunched
+//!   = dynamic LZW + RLE90), method 9 (squashed = dynamic LZW), method
+//!   0x0a (crushed = adaptive LZW + RLE90) and method 0x0b (distilled =
+//!   LZSS + header Huffman). Method 0x0c and higher are rejected with
+//!   [`Error::Unsupported`];
+//! - writing: methods 1, 2, 3, 4, 8 and 9 entries.
 //!
 //! Layout: each member starts with `0x1A` and a method byte; method 0
 //! marks end of archive. Method-1 records are
 //! `[name 13B][size u32le][data]`; methods >= 2 use
-//! `[name 13B][size u32le][date u16le][time u16le][crc16 u16le]
-//! [length u32le][data]` where `size` is the uncompressed size and
-//! `length` is the stored data size (equal for method 2; the RLE90
-//! packed size for method 3). The CRC-16 covers the uncompressed
+//! `[name 13B][length u32le][date u16le][time u16le][crc16 u16le]
+//! [size u32le][data]` where `length` is the stored (compressed) data
+//! size and `size` is the original uncompressed size (equal for method
+//! 2; for method 3 `length` is the RLE90 packed size). The CRC-16
+//! covers the uncompressed
 //! data. ARC has no directory entries and names are flat,
 //! NUL-padded, at most 12 characters plus a terminator byte.
 
@@ -27,11 +35,24 @@ use crate::error::Error;
 
 /// ARC archive decoding.
 pub mod decode;
-/// ARC store/RLE90-method encoding.
+/// ARC member encoding.
 pub mod encode;
 
-/// RLE90 packing used by method-3 (packed) members.
+/// Methods 5/6/7 (crunched) codec: fixed 12-bit hash-table LZW.
+mod bits;
+mod crunch;
+/// Method-0x0a (crushed) codec: adaptive LZW with usage-based
+/// replacement.
+mod crush;
+/// Method-0x0b (distilled) codec: LZSS with a header-supplied Huffman
+/// code.
+mod distill;
+/// RLE90 packing used by method-3 (packed) members and as a stage of
+/// methods 4 (squeezed), 6/7 (crunched), 8 (crunched) and 0x0a
+/// (crushed).
 mod rle90;
+/// Method-4 (squeezed) codec: static Huffman over an RLE90 stream.
+mod squeeze;
 
 /// Codec struct for trait-based ARC decode operations.
 pub struct ArcCodec;

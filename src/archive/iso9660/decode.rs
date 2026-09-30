@@ -11,6 +11,7 @@ const SECTOR: usize = 2048;
 const VD_START: usize = 16 * SECTOR;
 const VD_ID: &[u8; 5] = b"CD001";
 
+const VD_TYPE_BOOT: u8 = 0;
 const VD_TYPE_PRIMARY: u8 = 1;
 const VD_TYPE_SUPPLEMENTARY: u8 = 2;
 const VD_TYPE_TERMINATOR: u8 = 255;
@@ -90,6 +91,43 @@ pub struct PathTableEntry {
     pub parent: u16,
 }
 
+/// One boot catalog entry (El Torito 1.0 §2.5): the initial/default
+/// entry and every section entry describe a bootable image.
+#[derive(Debug, Clone)]
+pub struct ElToritoEntry {
+    /// Boot indicator byte is 0x88 (image marked bootable).
+    pub bootable: bool,
+    /// Boot media type: 0 = no emulation, 1 = 1.2M floppy,
+    /// 2 = 1.44M floppy, 3 = 2.88M floppy, 4 = hard disk.
+    pub media_type: u8,
+    /// Load segment (0 means the default 0x07C0).
+    pub load_segment: u16,
+    /// System type byte (partition type for hard-disk emulation).
+    pub system_type: u8,
+    /// Virtual sectors to load, in 512-byte units.
+    pub sector_count: u16,
+    /// LBA of the boot image on the volume.
+    pub load_lba: u32,
+    /// Boot image contents (sector_count*512 bytes at load_lba).
+    pub image: Vec<u8>,
+}
+
+/// El Torito 1.0 boot catalog decoded from a boot record volume
+/// descriptor (type 0, system id "EL TORITO SPECIFICATION").
+#[derive(Debug, Clone)]
+pub struct ElTorito {
+    /// LBA of the boot catalog sector.
+    pub catalog_lba: u32,
+    /// Platform id from the validation entry (0 = x86, 1 = PowerPC,
+    /// 2 = Macintosh; 0xEF is used by UEFI-era images).
+    pub platform: u8,
+    /// Developer/vendor id string from the validation entry,
+    /// trailing NUL/space padding removed.
+    pub id_string: String,
+    /// Catalog boot entries: index 0 is the initial/default entry.
+    pub entries: Vec<ElToritoEntry>,
+}
+
 /// Decoded ISO 9660 image.
 #[derive(Debug)]
 pub struct IsoImage {
@@ -107,6 +145,10 @@ pub struct IsoImage {
     /// (ECMA-119 §9.4), in table order. Empty when the descriptor
     /// does not reference a usable table.
     pub path_table: Vec<PathTableEntry>,
+    /// El Torito boot catalogs found on boot record volume
+    /// descriptors (El Torito 1.0 §2), in descriptor order. Empty for
+    /// non-bootable images.
+    pub el_torito: Vec<ElTorito>,
 }
 
 fn u16le(b: &[u8], o: usize) -> u16 {
@@ -509,7 +551,7 @@ fn parse_vd(sec: &[u8], joliet: bool) -> Result<VolDesc, Error> {
         decode_ucs2(&sec[40..72])
     } else {
         let mut vid = String::from_utf8_lossy(&sec[40..72]).into_owned();
-        while vid.ends_with(' ') || vid.ends_with(' ') {
+        while vid.ends_with(' ') || vid.ends_with('\x00') {
             vid.pop();
         }
         vid
@@ -1004,6 +1046,84 @@ impl Walker<'_, '_> {
     }
 }
 
+/// Parse one boot record volume descriptor. Returns None for
+/// non-El-Torito boot records (other system identifiers).
+fn parse_el_torito(input: &[u8], sec: &[u8]) -> Result<Option<ElTorito>, Error> {
+    // Boot system identifier (BP 8-39) must be the El Torito magic.
+    if !sec[7..39].starts_with(b"EL TORITO SPECIFICATION") {
+        return Ok(None);
+    }
+    let catalog_lba = u32le(sec, 71);
+    let cat_start = catalog_lba as usize * SECTOR;
+    let cat = input
+        .get(cat_start..cat_start + SECTOR)
+        .ok_or(Error::InvalidData("iso9660 el torito catalog out of range"))?;
+
+    // Validation entry (§2.4): header 1, key bytes 0x55/0xAA, and
+    // the 16 words summing to zero.
+    let v = &cat[..32];
+    if v[0] != 1 || v[30] != 0x55 || v[31] != 0xAA {
+        return Err(Error::InvalidData("iso9660 bad el torito validation entry"));
+    }
+    let sum: u32 = (0..32).step_by(2).map(|i| u32::from(u16le(v, i))).sum();
+    if sum & 0xFFFF != 0 {
+        return Err(Error::InvalidData("iso9660 el torito checksum mismatch"));
+    }
+    let platform = v[1];
+    let raw_id = &v[4..28];
+    let id_string = String::from_utf8_lossy(raw_id)
+        .trim_end_matches([' ', '\x00'])
+        .to_string();
+
+    // Catalog boot entries start at offset 32: the initial/default
+    // entry (indicator 0x88 or 0x00) followed by optional section
+    // headers (0x90/0x91) and their entries.
+    let mut entries = Vec::new();
+    for e in cat[32..].as_chunks::<32>().0.iter() {
+        // All-zero records are padding after the last catalog entry.
+        if e.iter().all(|&b| b == 0) {
+            break;
+        }
+        let ind = e[0];
+        match ind {
+            0x88 | 0x00 => {
+                let load_lba = u32le(e, 8);
+                let sector_count = u16le(e, 6);
+                let img_start = load_lba as usize * SECTOR;
+                let img_len = sector_count as usize * 512;
+                let image = input
+                    .get(img_start..img_start + img_len)
+                    .ok_or(Error::InvalidData("iso9660 el torito image out of range"))?
+                    .to_vec();
+                entries.push(ElToritoEntry {
+                    bootable: ind == 0x88,
+                    media_type: e[1],
+                    load_segment: u16le(e, 2),
+                    system_type: e[4],
+                    sector_count,
+                    load_lba,
+                    image,
+                });
+            }
+            // Section headers (0x90 = more sections, 0x91 = last)
+            // only mark boundaries between entry groups; skip them.
+            0x90 | 0x91 => {}
+            _ => break,
+        }
+    }
+    if entries.is_empty() {
+        return Err(Error::InvalidData(
+            "iso9660 el torito catalog has no entries",
+        ));
+    }
+    Ok(Some(ElTorito {
+        catalog_lba,
+        platform,
+        id_string,
+        entries,
+    }))
+}
+
 /// Decode an ISO 9660 image (PVD tree with Rock Ridge, falling back
 /// to a Joliet supplementary tree, then plain ISO9660 names).
 pub fn decode(input: &[u8]) -> Result<IsoImage, Error> {
@@ -1012,6 +1132,7 @@ pub fn decode(input: &[u8]) -> Result<IsoImage, Error> {
     }
     let mut pvd: Option<VolDesc> = None;
     let mut joliet_svd: Option<VolDesc> = None;
+    let mut el_torito = Vec::new();
     let mut off = VD_START;
     loop {
         let sec = input.get(off..off + SECTOR).ok_or(Error::InvalidData(
@@ -1038,8 +1159,13 @@ pub fn decode(input: &[u8]) -> Result<IsoImage, Error> {
                     joliet_svd = Some(parse_vd(sec, true)?);
                 }
             }
+            VD_TYPE_BOOT => {
+                if let Some(et) = parse_el_torito(input, sec)? {
+                    el_torito.push(et);
+                }
+            }
             VD_TYPE_TERMINATOR => break,
-            _ => {} // boot record / partition descriptor
+            _ => {} // partition descriptor
         }
         off += SECTOR;
     }
@@ -1111,6 +1237,7 @@ pub fn decode(input: &[u8]) -> Result<IsoImage, Error> {
         has_joliet: joliet_svd.is_some(),
         entries,
         path_table,
+        el_torito,
     })
 }
 
@@ -1252,10 +1379,67 @@ mod tests {
             self.data[s + 156..s + 156 + 34].copy_from_slice(&rec[..34]);
         }
 
-        /// Install PVD (and terminator) with `root` record pointing
+        /// Write a boot record volume descriptor (El Torito 1.0 §2.2)
+        /// pointing at catalog_lba.
+        fn write_boot_vd(&mut self, sector: usize, catalog_lba: u32) {
+            let s = sector * SECTOR;
+            self.data[s] = 0;
+            self.data[s + 1..s + 6].copy_from_slice(b"CD001");
+            self.data[s + 6] = 1;
+            self.data[s + 7..s + 30].copy_from_slice(b"EL TORITO SPECIFICATION");
+            self.data[s + 71..s + 75].copy_from_slice(&catalog_lba.to_le_bytes());
+        }
+
+        /// Build a 32-byte validation entry with a valid checksum.
+        fn validation_entry(platform: u8, id: &[u8]) -> [u8; 32] {
+            let mut v = [0u8; 32];
+            v[0] = 1;
+            v[1] = platform;
+            v[4..4 + id.len()].copy_from_slice(id);
+            v[30] = 0x55;
+            v[31] = 0xAA;
+            // Checksum covers all 16 words (including the key bytes
+            // as the 0xAA55 word); the checksum slot is still zero.
+            let sum: u32 = (0..32)
+                .step_by(2)
+                .map(|i| u32::from(u16::from_le_bytes([v[i], v[i + 1]])))
+                .sum();
+            let fix = (0u16).wrapping_sub(sum as u16);
+            v[28..30].copy_from_slice(&fix.to_le_bytes());
+            v
+        }
+
+        /// Build a 32-byte boot catalog entry.
+        fn boot_entry(indicator: u8, media: u8, seg: u16, count: u16, lba: u32) -> [u8; 32] {
+            let mut e = [0u8; 32];
+            e[0] = indicator;
+            e[1] = media;
+            e[2..4].copy_from_slice(&seg.to_le_bytes());
+            e[6..8].copy_from_slice(&count.to_le_bytes());
+            e[8..12].copy_from_slice(&lba.to_le_bytes());
+            e
+        }
+
+        /// Install PVD (and terminator) with root record pointing
         /// at sector of root dir.
         fn finish(self, root_extent: u32, root_size: u32) -> Vec<u8> {
             self.finish_ext(root_extent, root_size, None, None)
+        }
+
+        /// PVD at 16, boot record at 17, terminator at 18.
+        /// Caller must have set next_sector >= 19 before allocating
+        /// directory/catalog/image data.
+        fn finish_boot(mut self, root_extent: u32, root_size: u32, catalog_lba: u32) -> Vec<u8> {
+            self.write_vd(16, 1, root_extent, root_size, None);
+            self.write_boot_vd(17, catalog_lba);
+            if self.data.len() < 19 * SECTOR {
+                self.data.resize(19 * SECTOR, 0);
+            }
+            let t = 18 * SECTOR;
+            self.data[t] = 255;
+            self.data[t + 1..t + 6].copy_from_slice(b"CD001");
+            self.data[t + 6] = 1;
+            self.data
         }
 
         /// `finish` variant: optionally install a Joliet SVD pointing
@@ -1996,5 +2180,96 @@ mod tests {
         let root = b.alloc(&rootd);
         let img = b.finish(root, SECTOR as u32);
         assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    fn el_torito_iso() -> Vec<u8> {
+        let mut b = IsoBuilder::new();
+        b.next_sector = 19; // VD region: 16 PVD, 17 boot, 18 term
+        // Boot image: 4 virtual sectors (2048 bytes of 0xAB).
+        let img_lba = b.alloc_span(&vec![0xABu8; 2048]);
+        // Boot catalog sector: validation + default entry.
+        let mut cat = vec![0u8; SECTOR];
+        cat[..32].copy_from_slice(&IsoBuilder::validation_entry(0, b"DEVIN TEST"));
+        cat[32..64].copy_from_slice(&IsoBuilder::boot_entry(0x88, 0, 0, 4, img_lba));
+        let cat_lba = b.alloc(&cat);
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        b.finish_boot(root, SECTOR as u32, cat_lba)
+    }
+
+    #[test]
+    fn decodes_el_torito() {
+        let img = decode(&el_torito_iso()).unwrap();
+        assert_eq!(img.el_torito.len(), 1);
+        let et = &img.el_torito[0];
+        assert_eq!(et.platform, 0);
+        assert_eq!(et.id_string, "DEVIN TEST");
+        assert_eq!(et.entries.len(), 1);
+        let e = &et.entries[0];
+        assert!(e.bootable);
+        assert_eq!(e.media_type, 0);
+        assert_eq!(e.sector_count, 4);
+        assert_eq!(e.image.len(), 2048);
+        assert!(e.image.iter().all(|&b| b == 0xAB));
+    }
+
+    #[test]
+    fn el_torito_section_entries() {
+        let mut b = IsoBuilder::new();
+        b.next_sector = 19;
+        let img_lba = b.alloc_span(&vec![0x55u8; 512]);
+        let mut cat = vec![0u8; SECTOR];
+        cat[..32].copy_from_slice(&IsoBuilder::validation_entry(0xEF, b"UEFI"));
+        cat[32..64].copy_from_slice(&IsoBuilder::boot_entry(0x88, 0, 0, 1, img_lba));
+        cat[64] = 0x91; // last section header
+        cat[96..128].copy_from_slice(&IsoBuilder::boot_entry(0x88, 0, 0, 1, img_lba));
+        let cat_lba = b.alloc(&cat);
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = decode(&b.finish_boot(root, SECTOR as u32, cat_lba)).unwrap();
+        let et = &img.el_torito[0];
+        assert_eq!(et.platform, 0xEF);
+        assert_eq!(et.entries.len(), 2);
+        assert_eq!(et.entries[1].image.len(), 512);
+        assert!(et.entries[1].image.iter().all(|&b| b == 0x55));
+    }
+
+    #[test]
+    fn rejects_bad_el_torito_validation() {
+        let mut img = el_torito_iso();
+        // Break the catalog key bytes (catalog LBA is 20).
+        img[20 * SECTOR + 31] = 0x00;
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn rejects_bad_el_torito_checksum() {
+        let mut img = el_torito_iso();
+        // Flip an id byte so the checksum word no longer balances.
+        img[20 * SECTOR + 10] += 1;
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn rejects_out_of_range_el_torito_catalog() {
+        let mut img = el_torito_iso();
+        // Point the catalog LBA past the end of the image.
+        img[17 * SECTOR + 71..17 * SECTOR + 75].copy_from_slice(&999u32.to_le_bytes());
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn skips_non_eltorito_boot_record() {
+        let mut img = el_torito_iso();
+        // Overwrite the system id so it is not an El Torito record.
+        img[17 * SECTOR + 7..17 * SECTOR + 20].copy_from_slice(b"OTHER BOOT   ");
+        let out = decode(&img).unwrap();
+        assert!(out.el_torito.is_empty());
     }
 }

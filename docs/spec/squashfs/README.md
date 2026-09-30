@@ -3,8 +3,8 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [SquashFS binary format documentation](https://dr-emann.github.io/squashfs/squashfs.html) (SquashFS 4.0、コミュニティ逆解析文書 = de facto 仕様、ローカルスナップショット: `docs/spec/sources/squashfs_4.0.html`) |
-| 形式概要 | 96B superblock + metadata block 列 (inode/dir table) + lookup table (fragment/ID を実読み、export/xattr は境界計算のみ) + data block |
-| 実装範囲 | read + write (write は SquashFS 4.0 / regular file + symlink + directory tree、任意で fragment table・複数 UID/GID。xattr・export table なし) |
+| 形式概要 | 96B superblock + metadata block 列 (inode/dir table) + lookup table (fragment/ID/xattr を実読み、export は境界計算のみ) + data block |
+| 実装範囲 | read + write (write は SquashFS 4.0 / regular file + symlink + device/IPC + directory tree、任意で fragment table・複数 UID/GID・export table・xattr table・directory index (ext dir inode)・sparse block 自動検出) |
 
 参照: <https://dr-emann.github.io/squashfs/squashfs.html>
 
@@ -52,11 +52,17 @@ mksquashfs 生成イメージの decode、`unsquashfs` による本 writer 出�
 | 17 | inode table: basic dir inode + basic file inode (blocks_start/file_size が u32 を超える場合は extended file inode 9)。inode は metadata block をまたがない (8KiB 境界で pad) | §5 | ✅ | `inodes_do_not_straddle_metablock` |
 | 18 | inode table は非圧縮格納 (dir inode patch 後も on-disk offset が不変であることを保証するため)。dir table は compressor で圧縮 | §2.2 | ✅ | `compressors_roundtrip` |
 | 19 | dir table: header (count-1 / start_block=inode chunk disk pos / base inode) + entry (offset / s16 diff / type / name_size-1 / name)。子 inode を連番化して diff を i16 に収める | §6 | ✅ | `nested_dirs_roundtrip` |
-| 20 | fragment table: `with_fragments()` で file tail を共有 fragment block に格納し 16B entry 表 + location list を emit (未使用時は tail を block 格納・TABLE_ABSENT)。xattr / export table なし | §7/§8/§10 | ✅ | `fragments_roundtrip`, `fragments_disabled_by_default`, `single_file_roundtrip` |
+| 20 | fragment table: `with_fragments()` で file tail を共有 fragment block に格納し 16B entry 表 + location list を emit (未使用時は tail を block 格納・TABLE_ABSENT)。export table は `with_export_table()`、xattr は `*_xattrs` API で emit 可 | §7/§8/§10 | ✅ | `fragments_roundtrip`, `fragments_disabled_by_default`, `single_file_roundtrip` |
 | 20a | basic symlink inode (type 3) の emit: nlink + target bytes、dir listing type 3 | §5.4 | ✅ | `symlink_roundtrip`, `test_squashfs_encoder_symlink_fragments_ids` (`add_symlink`/`add_symlink_owned`) |
 | 21 | ID table: 複数 UID/GID (`add_file_owned`/`add_symlink_owned` で初出順に dedup 追加、inode は uid_idx/gid_idx で参照)。uid=gid=0 のみなら 1 entry | §9 | ✅ | `multiple_ids_roundtrip`, `symlink_roundtrip` |
 | 22 | パス正規化: `/` 区切りの中間 dir を自動生成。空要素 `.` `..` 重複名を `InvalidData` で拒否 | crate-local | ✅ | `rejects_bad_paths_and_compressor` |
 | 23 | 全 compressor (gzip/xz/lz4/zstd/lzo) で encode→decode roundtrip + `unsquashfs` 実展開 | system interop | ✅ | `compressors_roundtrip`, `test_squashfs_encoder_unsquashfs_extract` |
+| 23a | write: device/IPC inode emit — `add_block_device`/`add_char_device` (rdev = new_encode_dev)、`add_fifo`/`add_socket` (basic inode 4-7、dir listing type 一致) | §5.5/§5.6 | ✅ | `device_and_ipc_inodes_roundtrip`, `test_squashfs_encoder_extended_unsquashfs` (unsquashfs が device node 実体化) |
+| 23b | write: sparse block — all-zero data block は block_sizes 0 で格納 (data なし) | §4 | ✅ | `sparse_blocks_roundtrip` |
+| 23c | write: export table — `with_export_table()` で inode_number-1 → u64 inode ref の lookup table emit | §8 | ✅ | `export_table_roundtrip` (superblock offset + decode) |
+| 23d | write: xattr table — `add_file_xattrs`/`add_symlink_xattrs` で kv metadata run + 16B lookup entries + {kv_start,count,locations} header emit、inode は ext type (xattr idx)。prefix は user./trusted./security. のみ、値は inline のみ | §10 | ✅ | `xattrs_roundtrip`, `rejects_bad_xattr_name` |
+| 23e | write: directory index — `with_dir_index()` で非空 dir を ext dir inode + §6.1 index (header 毎の {index,start,name}) として emit。run plan は fixpoint で収束 | §6.1/§5.2 | ✅ | `dir_index_roundtrip` |
+| 23f | write: dir header は inode diff が i16 超過・256 entries 到達でも新 header で split | §6 | ✅ | run 分割ロジック (fixpoint) |
 
 ### inode / ディレクトリ
 
@@ -92,7 +98,5 @@ mksquashfs 生成イメージの decode、`unsquashfs` による本 writer 出�
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 37 | write: xattr / export table の emit、device・IPC inode、sparse block、非 directory children 向け inode split | §7-§10 | ❌ | encoder は file+symlink+dir subset (intentional) |
 | 38 | LZMA1 (compressor id 2) payload の伸張 | §2.4 | ❌ | upstream deprecated。`Unsupported` を返す (intentional) |
 | 40 | filesystem セマンティクス (デバイス node 作成、パーミッション適用) | crate-local | ❌ | 抽出は name/content 列挙まで (intentional) |
-| 41b | directory index emit | §6.1 | ❌ | write 側は emit しない (intentional) |

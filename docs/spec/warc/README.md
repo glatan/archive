@@ -63,6 +63,8 @@
 |---|------|----------|-----------|----------------|
 | 28 | record type 別フィールド使用制約: `WARC-Concurrent-To`/`WARC-IP-Address` (warcinfo・conversion・continuation で禁止)、`WARC-Refers-To` 系 (revisit のみ)、`WARC-Warcinfo-ID` (warcinfo で禁止)、`WARC-Target-URI` (warcinfo 禁止・response 等で必須)、`WARC-Filename` (warcinfo only)、segment フィールド (continuation only) | WARC 1.1 §5 named fields | ✅ | `rejects_field_forbidden_on_record_type`, `accepts_field_on_allowed_record_type`, `rejects_missing_target_uri` |
 | 29 | segmentation 検証 (Clause 7): continuation は `WARC-Segment-Origin-ID`+`WARC-Segment-Number` (>=2) 必須、非 continuation の Segment-Number は 1 のみ、ファイル内系列で number 連番・Total-Length で系列クローズ・累積長照合。cross-file 系列の途中観測は寛容 | WARC 1.1 Clause 7 | ✅ | `accepts_segmented_series`, `rejects_continuation_missing_segment_fields`, `rejects_bad_segment_number`, `rejects_total_length_mismatch`, `rejects_segment_after_total_length`, `accepts_late_joined_segment_series` |
+| 30 | segment ('continuation') 結合: `decode::join()` で origin + continuation 系列を単一論理 record に連結 (orphan continuation は pass-through、Total-Length 照合) | WARC 1.1 Clause 7 | ✅ | `join_merges_segmented_series`, `join_passes_orphan_continuations`, `join_unsegmented_is_identity`, `join_rejects_bad_total_length` |
+| 31 | `WARC-Concurrent-To` グルーピング: `decode::concurrent_groups()` で capture group を index 集合として解決 | WARC 1.1 §5 named fields | ✅ | `concurrent_groups_links_capture_members` |
 
 ### CLI / fuzz 連携
 
@@ -77,5 +79,4 @@
 
 | # | 項目 | 理由 |
 |---|------|------|
-| 25 | ❌ record 間の `WARC-Concurrent-To` / segment (`continuation`) 結合 | 各 record を独立エントリとして公開。結合は利用側の判断 |
-| 26 | ❌ record 内部の HTTP メッセージ解析 (response/request block の中身) | block は opaque octet 列として扱う (encode 側も payload 特定は caller 責務)。`WARC-Payload-Digest` が特定不能な record では digest 検証も skip (行 27 参照) |
+| 25 | ❌ record 内部の HTTP メッセージ解析 (response/request block の中身) | block は opaque octet 列として扱う (encode 側も payload 特定は caller 責務)。`WARC-Payload-Digest` が特定不能な record では digest 検証も skip (行 27 参照) |

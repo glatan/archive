@@ -87,7 +87,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<TarEntry>, Error> {
         }
         zero_block_count = 0;
 
-        let header = TarHeader::parse(block)?;
+        let mut header = TarHeader::parse(block)?;
         pos += BLOCK_SIZE;
 
         // For GNU sparse files, skip extended sparse header blocks and
@@ -106,6 +106,9 @@ pub fn decode(input: &[u8]) -> Result<Vec<TarEntry>, Error> {
                         .try_into()
                         .map_err(|_| Error::UnexpectedEof)?;
                     pos += BLOCK_SIZE;
+                    header
+                        .sparse_map
+                        .extend(super::header::parse_gnu_sparse_entries(&ext_block[..504]));
                     // isextended flag at byte 504
                     if ext_block[504] == 0 {
                         break;
@@ -117,20 +120,32 @@ pub fn decode(input: &[u8]) -> Result<Vec<TarEntry>, Error> {
             header.size as usize
         };
 
-        // Read file data
-        let data_size = tape_data_size;
-        let padded_size = round_up_to_block(data_size);
-
-        let data = if data_size > 0 {
-            if pos + data_size > input.len() {
-                return Err(Error::UnexpectedEof);
+        // Read file data. For GNU sparse files each map segment is
+        // stored in its own 512-byte block (zero padded), per GNU
+        // tar's old-sparse layout; a file with no map falls back to
+        // the contiguous 'size' interpretation.
+        let data = if header.file_type == FileType::GnuSparse && !header.sparse_map.is_empty() {
+            let mut buf = Vec::with_capacity(tape_data_size);
+            for &(_, len) in &header.sparse_map {
+                let len = len as usize;
+                let seg = input.get(pos..pos + len).ok_or(Error::UnexpectedEof)?;
+                buf.extend_from_slice(seg);
+                pos += round_up_to_block(len);
             }
-            input[pos..pos + data_size].to_vec()
+            buf
         } else {
-            Vec::new()
+            let data_size = tape_data_size;
+            let data = if data_size > 0 {
+                input
+                    .get(pos..pos + data_size)
+                    .ok_or(Error::UnexpectedEof)?
+                    .to_vec()
+            } else {
+                Vec::new()
+            };
+            pos += round_up_to_block(data_size);
+            data
         };
-
-        pos += padded_size;
 
         match header.file_type {
             FileType::GnuLongName => {

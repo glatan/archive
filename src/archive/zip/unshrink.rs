@@ -1,11 +1,12 @@
-//! ZIP Method 1 (UnShrinking) decompression.
+//! ZIP Method 1 (Shrinking / UnShrinking) codec.
 //!
 //! Implements the LZW variant described in APPNOTE §5.1.
 //! Code width starts at 9 bits and can grow up to 13 bits.
 //! Code 256 is a special control code: followed by 1 it increases code width,
 //! followed by 2 it performs a partial clear (frees leaf dictionary entries).
+//! Freed codes are re-used in increasing order via a code queue, matching the
+//! reference implementation (hwzip, public domain).
 
-use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::Error;
@@ -16,13 +17,74 @@ const MAX_BITS: u32 = 13;
 const INIT_BITS: u32 = 9;
 /// Special control code.
 const CONTROL_CODE: u16 = 256;
-/// First available dictionary slot (codes 0-255 are literals, 256 is control).
+/// Control sub-code: increase the code width by one bit.
+const INC_CODE_SIZE: u16 = 1;
+/// Control sub-code: partial clear of the dictionary.
+const PARTIAL_CLEAR: u16 = 2;
+/// First dictionary code (codes 0-255 are literals, 256 is control).
 const FIRST_CODE: u16 = 257;
-/// Maximum number of dictionary entries (2^13 = 8192).
+/// Maximum code value.
+const MAX_CODE: u16 = (1 << MAX_BITS) - 1;
+/// Number of dictionary slots (2^13 = 8192).
 const DICT_SIZE: usize = 1 << MAX_BITS;
+/// Marker for an invalid dictionary entry / empty code queue.
+const INVALID_CODE: u16 = u16::MAX;
 
-/// Marker for "no prefix" (entry is a single-byte literal).
-const NO_PREFIX: u16 = u16::MAX;
+// ======================================================================
+// Decoder
+// ======================================================================
+
+/// Dictionary entry for the decoder.
+///
+/// The decoder tracks the position of each code's expansion inside `output`,
+/// which makes partial-clearing and the KwKwK cases exact without walking
+/// prefix chains.
+#[derive(Clone, Copy)]
+struct DecEntry {
+    /// Parent code, or [`INVALID_CODE`] when the entry is free.
+    prefix: u16,
+    /// Extension byte of this code's string.
+    ext: u8,
+    /// Expansion length, or [`UNKNOWN_LEN`] while indeterminate.
+    len: u16,
+    /// Position of this code's expansion in the output buffer.
+    pos: usize,
+}
+
+/// Marker for an entry whose expansion length is not yet known.
+const UNKNOWN_LEN: u16 = u16::MAX;
+
+/// Queue of free dictionary codes in allocation order.
+struct CodeQueue {
+    codes: Vec<u16>,
+    head: usize,
+}
+
+impl CodeQueue {
+    /// All dictionary codes are initially free, in increasing order.
+    fn new() -> Self {
+        let mut codes = Vec::with_capacity(DICT_SIZE - FIRST_CODE as usize + 1);
+        for c in FIRST_CODE..=MAX_CODE {
+            codes.push(c);
+        }
+        codes.push(INVALID_CODE); // end-of-queue marker
+        Self { codes, head: 0 }
+    }
+
+    /// The next free code without removing it.
+    fn peek(&self) -> u16 {
+        self.codes[self.head]
+    }
+
+    /// Remove and return the next free code (INVALID_CODE when empty).
+    fn pop(&mut self) -> u16 {
+        let c = self.peek();
+        if c != INVALID_CODE {
+            self.head += 1;
+        }
+        c
+    }
+}
 
 /// Decompress data compressed with ZIP Method 1 (Shrinking).
 ///
@@ -33,179 +95,419 @@ const NO_PREFIX: u16 = u16::MAX;
 /// Returns [`Error::InvalidData`] if the bitstream is malformed or a code
 /// references an invalid dictionary entry.
 pub(super) fn unshrink(input: &[u8]) -> Result<Vec<u8>, Error> {
-    let mut prefix = vec![NO_PREFIX; DICT_SIZE];
-    let mut suffix = vec![0u8; DICT_SIZE];
-    // Track which codes are in use (not freed by partial clear).
-    let mut in_use = vec![false; DICT_SIZE];
-
-    // Initialise single-byte entries (codes 0-255).
-    for i in 0u16..256 {
-        prefix[i as usize] = NO_PREFIX;
-        suffix[i as usize] = i as u8;
-        in_use[i as usize] = true;
+    let mut table = vec![
+        DecEntry {
+            prefix: INVALID_CODE,
+            ext: 0,
+            len: 1,
+            pos: 0,
+        };
+        DICT_SIZE
+    ];
+    // Literals are always valid with length 1.
+    for i in 0u16..=255 {
+        table[i as usize].prefix = i;
+        table[i as usize].ext = i as u8;
     }
-    // Code 256 is the control code (always "in use" conceptually).
-    in_use[CONTROL_CODE as usize] = true;
+    table[CONTROL_CODE as usize].prefix = CONTROL_CODE;
 
-    let mut next_code: u16 = FIRST_CODE;
-    let mut code_bits: u32 = INIT_BITS;
-    let mut bit_pos: usize = 0;
-
+    let mut queue = CodeQueue::new();
+    let mut bits = BitReader::new(input);
+    let mut code_size = INIT_BITS;
     let mut output = Vec::new();
-    let mut decode_stack = Vec::with_capacity(DICT_SIZE);
 
-    // Read the first code — must be a literal (< 256).
-    let prev_code = match read_code(input, &mut bit_pos, code_bits) {
-        Some(c) if c < 256 => c as u16,
-        Some(_) => return Err(Error::InvalidData("unshrink: first code must be a literal")),
+    // The first code must be a literal byte.
+    let prev_code = match read_code(&mut bits, &mut code_size, &mut table, &mut queue)? {
+        Some(c) => c,
         None => return Ok(output),
     };
-    output.push(prev_code as u8);
+    if prev_code == INVALID_CODE || prev_code > 255 {
+        return Err(Error::InvalidData("unshrink: first code must be a literal"));
+    }
+    let mut first_byte = prev_code as u8;
+    output.push(first_byte);
+    table[prev_code as usize].pos = 0;
     let mut prev_code = prev_code;
 
-    while let Some(raw) = read_code(input, &mut bit_pos, code_bits) {
-        let code = raw as u16;
+    while let Some(code) = read_code(&mut bits, &mut code_size, &mut table, &mut queue)? {
+        if code == INVALID_CODE {
+            return Err(Error::InvalidData("unshrink: invalid code"));
+        }
 
-        // Handle special control code (256).
-        if code == CONTROL_CODE {
-            let sub = match read_code(input, &mut bit_pos, code_bits) {
-                Some(s) => s as u16,
-                None => break, // end of stream after control code
-            };
-            match sub {
-                1 => {
-                    // Increase code width (up to MAX_BITS).
-                    if code_bits < MAX_BITS {
-                        code_bits += 1;
-                    }
-                }
-                2 => {
-                    // Partial clear: free leaf entries.
-                    partial_clear(&prefix, &mut in_use, next_code);
-                }
-                _ => {
-                    return Err(Error::InvalidData(
-                        "unshrink: invalid sub-code after control code 256",
-                    ));
-                }
+        // KwKwK case: the code being read is the slot that is about to be
+        // assigned for prev_code extended with first_byte.
+        if code == queue.peek() {
+            if table[prev_code as usize].prefix == INVALID_CODE {
+                return Err(Error::InvalidData("unshrink: KwKwK with invalid prefix"));
             }
-            continue;
+            let prev = table[prev_code as usize];
+            table[code as usize] = DecEntry {
+                prefix: prev_code,
+                ext: first_byte,
+                len: prev.len + 1,
+                pos: prev.pos,
+            };
         }
 
-        // Decode the string for this code.
-        let first_byte;
-        let expected_slot = find_free_slot(next_code, &in_use);
-        if code < DICT_SIZE as u16 && in_use[code as usize] {
-            first_byte = decode_chain(&prefix, &suffix, &in_use, code, &mut decode_stack)?;
-        } else if expected_slot == Some(code) {
-            // KwKwK case: code references the slot about to be added.
-            first_byte = decode_chain(&prefix, &suffix, &in_use, prev_code, &mut decode_stack)?;
-            decode_stack.insert(0, first_byte);
-        } else {
-            return Err(Error::InvalidData("unshrink: code out of range"));
-        }
-
-        // Output the decoded string (stack is in reverse order).
-        for &b in decode_stack.iter().rev() {
-            output.push(b);
-        }
+        let out_start = output.len();
+        output_code(
+            code,
+            &mut output,
+            &mut table,
+            &queue,
+            prev_code,
+            &mut first_byte,
+        )?;
 
         // Add a new dictionary entry: prev_code + first_byte.
-        // Find the next available slot.
-        let slot = find_free_slot(next_code, &in_use);
-        if let Some(s) = slot {
-            prefix[s as usize] = prev_code;
-            suffix[s as usize] = first_byte;
-            in_use[s as usize] = true;
-            if s >= next_code {
-                next_code = s + 1;
+        let new_code = queue.pop();
+        if new_code != INVALID_CODE {
+            let prev = table[prev_code as usize];
+            let mut len = prev.len + 1;
+            if prev.prefix == INVALID_CODE {
+                // prev_code was invalidated by a partial clear; the new
+                // entry's expansion is indeterminate until its prefix is
+                // assigned again.
+                len = UNKNOWN_LEN;
             }
+            table[new_code as usize] = DecEntry {
+                prefix: prev_code,
+                ext: first_byte,
+                len,
+                pos: prev.pos,
+            };
         }
 
+        table[code as usize].pos = out_start;
         prev_code = code;
     }
 
     Ok(output)
 }
 
-/// Find the next free dictionary slot starting from `start`.
-fn find_free_slot(start: u16, in_use: &[bool]) -> Option<u16> {
-    (start..(DICT_SIZE as u16)).find(|&i| !in_use[i as usize])
+/// Read one code, transparently handling control codes. Returns `Ok(None)` at
+/// the end of the stream and `Ok(Some(INVALID_CODE))` for invalid control
+/// codes.
+fn read_code(
+    bits: &mut BitReader<'_>,
+    code_size: &mut u32,
+    table: &mut [DecEntry],
+    queue: &mut CodeQueue,
+) -> Result<Option<u16>, Error> {
+    loop {
+        let code = match bits.try_read_bits(*code_size) {
+            Some(c) => c as u16,
+            None => return Ok(None),
+        };
+        if code != CONTROL_CODE {
+            return Ok(Some(code));
+        }
+        let sub = match bits.try_read_bits(*code_size) {
+            Some(c) => c as u16,
+            None => return Ok(None),
+        };
+        match sub {
+            INC_CODE_SIZE if *code_size < MAX_BITS => *code_size += 1,
+            PARTIAL_CLEAR => dec_partial_clear(table, queue),
+            _ => return Ok(Some(INVALID_CODE)),
+        }
+    }
 }
 
-/// Partial clear: mark leaf entries as free.
-///
-/// A leaf entry is one that is not referenced as a prefix by any other
-/// in-use entry. We mark all such entries (from FIRST_CODE onward) as free.
-fn partial_clear(prefix: &[u16], in_use: &mut [bool], next_code: u16) {
-    // First, determine which codes are referenced as a prefix by some other in-use code.
-    let mut is_parent = vec![false; DICT_SIZE];
-    let limit = core::cmp::min(next_code as usize, DICT_SIZE);
-    for i in FIRST_CODE as usize..limit {
-        if in_use[i] && prefix[i] != NO_PREFIX {
-            let p = prefix[i] as usize;
-            if p < DICT_SIZE {
-                is_parent[p] = true;
+/// Partial clear (decoder side): invalidate non-leaf-free entries and refill
+/// the queue with the freed codes in increasing order.
+fn dec_partial_clear(table: &mut [DecEntry], queue: &mut CodeQueue) {
+    let mut is_prefix = [false; DICT_SIZE];
+    for e in table.iter().skip(FIRST_CODE as usize) {
+        if e.prefix != INVALID_CODE {
+            is_prefix[e.prefix as usize] = true;
+        }
+    }
+    let mut codes = Vec::with_capacity(DICT_SIZE - FIRST_CODE as usize + 1);
+    for i in FIRST_CODE..=MAX_CODE {
+        if !is_prefix[i as usize] {
+            table[i as usize].prefix = INVALID_CODE;
+            codes.push(i);
+        }
+    }
+    codes.push(INVALID_CODE);
+    queue.codes = codes;
+    queue.head = 0;
+}
+
+/// Emit the expansion of `code` into `output` and update `first_byte`.
+fn output_code(
+    code: u16,
+    output: &mut Vec<u8>,
+    table: &mut [DecEntry],
+    queue: &CodeQueue,
+    prev_code: u16,
+    first_byte: &mut u8,
+) -> Result<(), Error> {
+    let dst_pos = output.len();
+    if code < 256 {
+        output.push(code as u8);
+        *first_byte = code as u8;
+        return Ok(());
+    }
+    let idx = code as usize;
+    if table[idx].prefix == INVALID_CODE || table[idx].prefix == code {
+        return Err(Error::InvalidData("unshrink: invalid dictionary entry"));
+    }
+
+    if table[idx].len != UNKNOWN_LEN {
+        // Copy the previously emitted expansion (1-byte overlap allowed).
+        let len = table[idx].len as usize;
+        let src = table[idx].pos;
+        for i in 0..len {
+            let b = output[src + i];
+            output.push(b);
+        }
+        *first_byte = output[dst_pos];
+        return Ok(());
+    }
+
+    // Length unknown: the entry was created while its prefix was invalid.
+    let prefix = table[idx].prefix;
+    if prefix == queue.peek() {
+        // The prefix is the slot about to be assigned (nested KwKwK).
+        // It expands to prev_code's string extended with the first byte of
+        // the previous output, which is still in `first_byte`.
+        if table[prev_code as usize].prefix == INVALID_CODE {
+            return Err(Error::InvalidData("unshrink: prefix invalidated"));
+        }
+        let prev = table[prev_code as usize];
+        table[prefix as usize] = DecEntry {
+            prefix: prev_code,
+            ext: *first_byte,
+            len: prev.len + 1,
+            pos: prev.pos,
+        };
+        // The copy below reads one byte past prev's expansion, which lands
+        // on dst_pos; by then it holds the first byte of prev's expansion,
+        // i.e. *first_byte — exactly the extension byte of this entry.
+    }
+    if table[prefix as usize].prefix == INVALID_CODE || table[prefix as usize].len == UNKNOWN_LEN {
+        return Err(Error::InvalidData("unshrink: indeterminate prefix"));
+    }
+    let plen = table[prefix as usize].len as usize;
+    let src = table[prefix as usize].pos;
+    for i in 0..plen {
+        let b = output[src + i];
+        output.push(b);
+    }
+    output.push(table[idx].ext);
+    *first_byte = output[dst_pos];
+    table[idx].len = (plen + 1) as u16;
+    table[idx].pos = dst_pos;
+    Ok(())
+}
+
+// ======================================================================
+// Encoder
+// ======================================================================
+
+/// Hash table size for the encoder's string table (load factor 0.5).
+const HASHTAB_SIZE: usize = 1 << (MAX_BITS + 1);
+/// Knuth's multiplicative hash constant.
+const HASH_MUL: u32 = 2_654_435_761;
+
+/// Hash table entry mapping (prefix_code, ext_byte) to a dictionary code.
+#[derive(Clone, Copy)]
+struct HashEnt {
+    prefix: u16,
+    ext: u8,
+    code: u16,
+}
+
+/// Compress data with ZIP Method 1 (Shrinking).
+pub(super) fn shrink(input: &[u8]) -> Vec<u8> {
+    let mut table = vec![
+        HashEnt {
+            prefix: INVALID_CODE,
+            ext: 0,
+            code: 0,
+        };
+        HASHTAB_SIZE
+    ];
+    let mut queue = CodeQueue::new();
+    let mut out = BitWriter::new();
+    let mut code_size = INIT_BITS;
+
+    if input.is_empty() {
+        return Vec::new();
+    }
+
+    let mut curr = input[0] as u16;
+    for &ext_byte in &input[1..] {
+        let next = htab_find(&table, curr, ext_byte);
+        if next != INVALID_CODE {
+            curr = next;
+            continue;
+        }
+
+        write_code(&mut out, curr, &mut code_size);
+
+        let mut new_code = queue.pop();
+        if new_code == INVALID_CODE {
+            // Free leaf codes and notify the decoder.
+            enc_partial_clear(&mut table, &mut queue);
+            out.write_bits(CONTROL_CODE as u32, code_size);
+            out.write_bits(PARTIAL_CLEAR as u32, code_size);
+            new_code = queue.pop();
+        }
+        if new_code != INVALID_CODE {
+            htab_insert(&mut table, curr, ext_byte, new_code);
+        }
+
+        curr = ext_byte as u16;
+    }
+    write_code(&mut out, curr, &mut code_size);
+    out.finish()
+}
+
+/// Write a code, emitting INC_CODE_SIZE control codes as needed.
+fn write_code(out: &mut BitWriter, code: u16, code_size: &mut u32) {
+    while code as u32 > (1u32 << *code_size) - 1 {
+        out.write_bits(CONTROL_CODE as u32, *code_size);
+        out.write_bits(INC_CODE_SIZE as u32, *code_size);
+        *code_size += 1;
+    }
+    out.write_bits(code as u32, *code_size);
+}
+
+/// Partial clear (encoder side): drop entries whose code is not used as a
+/// prefix and refill the free-code queue in increasing order.
+fn enc_partial_clear(table: &mut [HashEnt], queue: &mut CodeQueue) {
+    let mut is_prefix = [false; DICT_SIZE];
+    for e in table.iter() {
+        if e.prefix != INVALID_CODE {
+            is_prefix[e.prefix as usize] = true;
+        }
+    }
+    let mut new_table = vec![
+        HashEnt {
+            prefix: INVALID_CODE,
+            ext: 0,
+            code: 0,
+        };
+        HASHTAB_SIZE
+    ];
+    for e in table.iter() {
+        if e.prefix == INVALID_CODE || !is_prefix[e.code as usize] {
+            continue;
+        }
+        htab_insert(&mut new_table, e.prefix, e.ext, e.code);
+    }
+    table.copy_from_slice(&new_table);
+
+    let mut codes = Vec::with_capacity(DICT_SIZE - FIRST_CODE as usize + 1);
+    for i in FIRST_CODE..=MAX_CODE {
+        if !is_prefix[i as usize] {
+            codes.push(i);
+        }
+    }
+    codes.push(INVALID_CODE);
+    queue.codes = codes;
+    queue.head = 0;
+}
+
+/// Hash of a (prefix_code, ext_byte) key.
+fn htab_hash(code: u16, byte: u8) -> usize {
+    (((((byte as u32) << 16) | code as u32).wrapping_mul(HASH_MUL)) >> (32 - 14)) as usize
+}
+
+/// Look up the code for (prefix, ext); INVALID_CODE when absent.
+fn htab_find(table: &[HashEnt], prefix: u16, ext: u8) -> u16 {
+    let mut i = htab_hash(prefix, ext);
+    loop {
+        let e = table[i];
+        if e.prefix == INVALID_CODE {
+            return INVALID_CODE;
+        }
+        if e.prefix == prefix && e.ext == ext {
+            return e.code;
+        }
+        i = (i + 1) % HASHTAB_SIZE;
+    }
+}
+
+/// Insert (prefix, ext) -> code. The key must not already exist.
+fn htab_insert(table: &mut [HashEnt], prefix: u16, ext: u8, code: u16) {
+    let mut i = htab_hash(prefix, ext);
+    while table[i].prefix != INVALID_CODE {
+        i = (i + 1) % HASHTAB_SIZE;
+    }
+    table[i] = HashEnt { prefix, ext, code };
+}
+
+// ======================================================================
+// Bit-level I/O (LSB-first)
+// ======================================================================
+
+/// LSB-first bitstream reader.
+struct BitReader<'a> {
+    data: &'a [u8],
+    bit_pos: usize,
+}
+
+impl<'a> BitReader<'a> {
+    const fn new(data: &'a [u8]) -> Self {
+        Self { data, bit_pos: 0 }
+    }
+
+    /// Read `count` bits; returns `None` past the end of input.
+    fn try_read_bits(&mut self, count: u32) -> Option<u32> {
+        if count == 0 {
+            return Some(0);
+        }
+        if self.bit_pos + count as usize > self.data.len() * 8 {
+            return None;
+        }
+        let mut result = 0u32;
+        for i in 0..count as usize {
+            let idx = self.bit_pos + i;
+            if (self.data[idx / 8] >> (idx % 8)) & 1 != 0 {
+                result |= 1 << i;
             }
         }
-    }
-    // Free non-parent entries from FIRST_CODE onward.
-    for i in FIRST_CODE as usize..limit {
-        if in_use[i] && !is_parent[i] {
-            in_use[i] = false;
-        }
+        self.bit_pos += count as usize;
+        Some(result)
     }
 }
 
-/// Decode a dictionary chain into `stack` (reversed order).
-/// Returns the first byte of the string.
-fn decode_chain(
-    prefix: &[u16],
-    suffix: &[u8],
-    in_use: &[bool],
-    mut code: u16,
-    stack: &mut Vec<u8>,
-) -> Result<u8, Error> {
-    stack.clear();
-    let limit = DICT_SIZE;
-    let mut count = 0;
-    loop {
-        if count >= limit {
-            return Err(Error::InvalidData("unshrink: dictionary chain too long"));
-        }
-        let idx = code as usize;
-        if idx >= DICT_SIZE || (!in_use[idx] && code >= FIRST_CODE) {
-            return Err(Error::InvalidData("unshrink: invalid dictionary entry"));
-        }
-        stack.push(suffix[idx]);
-        if prefix[idx] == NO_PREFIX {
-            break;
-        }
-        code = prefix[idx];
-        count += 1;
-    }
-    stack
-        .last()
-        .copied()
-        .ok_or(Error::InvalidData("unshrink: empty dictionary chain"))
+/// LSB-first bitstream writer.
+struct BitWriter {
+    buf: Vec<u8>,
+    bit_pos: usize,
 }
 
-/// Read a variable-width code from the bitstream (LSB-first).
-fn read_code(data: &[u8], bit_pos: &mut usize, code_bits: u32) -> Option<u32> {
-    let bits_needed = code_bits as usize;
-    if *bit_pos + bits_needed > data.len() * 8 {
-        return None;
-    }
-    let mut code = 0u32;
-    for i in 0..bits_needed {
-        let byte_idx = (*bit_pos + i) / 8;
-        let bit_idx = (*bit_pos + i) % 8;
-        if (data[byte_idx] >> bit_idx) & 1 != 0 {
-            code |= 1 << i;
+impl BitWriter {
+    fn new() -> Self {
+        Self {
+            buf: Vec::new(),
+            bit_pos: 0,
         }
     }
-    *bit_pos += bits_needed;
-    Some(code)
+
+    /// Write the low `count` bits of `value`, LSB-first.
+    fn write_bits(&mut self, value: u32, count: u32) {
+        for i in 0..count as usize {
+            let idx = self.bit_pos + i;
+            if idx / 8 == self.buf.len() {
+                self.buf.push(0);
+            }
+            if (value >> i) & 1 != 0 {
+                self.buf[idx / 8] |= 1 << (idx % 8);
+            }
+        }
+        self.bit_pos += count as usize;
+    }
+
+    /// Return the byte buffer, zero-padding the final partial byte.
+    fn finish(self) -> Vec<u8> {
+        self.buf
+    }
 }
 
 #[cfg(test)]
@@ -213,298 +515,127 @@ mod tests {
     use super::*;
     extern crate alloc;
 
-    /// Helper: write a variable-width code into a bit buffer (LSB-first).
-    fn write_code(buf: &mut Vec<u8>, bit_pos: &mut usize, code: u32, bits: u32) {
-        let needed_bytes = (*bit_pos + bits as usize).div_ceil(8);
-        while buf.len() < needed_bytes {
-            buf.push(0);
+    #[test]
+    fn roundtrip_literals() {
+        let data = b"Hello, world! This is a shrinking test.";
+        let compressed = shrink(data);
+        assert_eq!(unshrink(&compressed).unwrap(), data);
+    }
+
+    #[test]
+    fn roundtrip_repetitive() {
+        // Highly repetitive data exercises dictionary codes and KwKwK.
+        let mut data = Vec::new();
+        for _ in 0..500 {
+            data.extend_from_slice(b"ABABAB");
         }
-        for i in 0..bits as usize {
-            if (code >> i) & 1 != 0 {
-                let byte_idx = (*bit_pos + i) / 8;
-                let bit_idx = (*bit_pos + i) % 8;
-                if byte_idx >= buf.len() {
-                    buf.push(0);
-                }
-                buf[byte_idx] |= 1 << bit_idx;
-            }
+        let compressed = shrink(&data);
+        assert!(compressed.len() < data.len() / 4);
+        assert_eq!(unshrink(&compressed).unwrap(), data);
+    }
+
+    #[test]
+    fn roundtrip_all_bytes() {
+        let data: Vec<u8> = (0..=255).cycle().take(256 * 40).collect();
+        let compressed = shrink(&data);
+        assert_eq!(unshrink(&compressed).unwrap(), data);
+    }
+
+    #[test]
+    fn roundtrip_empty() {
+        assert_eq!(shrink(b""), Vec::<u8>::new());
+        assert_eq!(unshrink(&[]).unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn roundtrip_single_byte() {
+        let compressed = shrink(b"X");
+        assert_eq!(unshrink(&compressed).unwrap(), b"X");
+    }
+
+    #[test]
+    fn roundtrip_code_width_growth() {
+        // Enough distinct pairs to grow the dictionary past 9..13 bit widths.
+        let mut data = Vec::new();
+        let mut state = 1u32;
+        for _ in 0..200_000 {
+            state = state.wrapping_mul(1103515245).wrapping_add(12345);
+            data.push((state >> 16) as u8);
         }
-        *bit_pos += bits as usize;
-    }
-
-    /// Pad buf to contain at least enough bytes for all written bits.
-    fn flush(buf: &mut Vec<u8>, bit_pos: usize) {
-        let needed = bit_pos.div_ceil(8);
-        while buf.len() < needed {
-            buf.push(0);
+        // Sprinkle repetition so dictionary codes are actually emitted.
+        for b in data.iter_mut().step_by(997) {
+            *b = b'A';
         }
+        let compressed = shrink(&data);
+        assert_eq!(unshrink(&compressed).unwrap(), data);
     }
 
     #[test]
-    fn test_unshrink_literals_only() {
-        // Stream of just literal codes: 'H' 'i' should produce "Hi".
-        let mut buf = Vec::new();
-        let mut bp = 0;
-        write_code(&mut buf, &mut bp, b'H' as u32, 9);
-        write_code(&mut buf, &mut bp, b'i' as u32, 9);
-        flush(&mut buf, bp);
-
-        let result = unshrink(&buf).unwrap();
-        assert_eq!(result, b"Hi");
+    fn roundtrip_partial_clear() {
+        // Force the dictionary to fill (8192 entries) so a partial clear
+        // occurs; pseudo-random input creates many distinct strings.
+        let mut data = Vec::new();
+        let mut state = 7u32;
+        for _ in 0..300_000 {
+            state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+            data.push(((state >> 16) & 0xff) as u8);
+        }
+        let compressed = shrink(&data);
+        assert_eq!(unshrink(&compressed).unwrap(), data);
     }
 
     #[test]
-    fn test_unshrink_simple_with_dict() {
-        // Encode "ABABAB" manually using unshrink-style LZW:
-        //
-        // Initial: codes 0-255 = literals, 256 = control, next_code = 257
-        // Codes at 9 bits.
-        //
-        // Step 1: prev='A'(65), emit 65. Output: A
-        // Step 2: code='B'(66), emit 66. Add dict[257]=(65,'B')="AB". prev=66. Output: AB
-        // Step 3: code='A'(65), emit 65. Add dict[258]=(66,'A')="BA". prev=65. Output: ABA
-        // Step 4: code='B'(66), emit 66. Add dict[259]=(65,'B')="AB" (dup, but still added). prev=66. Output: ABAB
-        // Step 5: code=65, emit 65. Add dict[260]=(66,'A')="BA". prev=65. Output: ABABA
-        // Step 6: code=66, emit 66. Add dict[261]=(65,'B')="AB". Output: ABABAB
-        //
-        // But actually with LZW the encoder would use dictionary codes. Let's just
-        // test with literals to ensure basic operation.
-        let mut buf = Vec::new();
-        let mut bp = 0;
-        write_code(&mut buf, &mut bp, b'A' as u32, 9);
-        write_code(&mut buf, &mut bp, b'B' as u32, 9);
-        write_code(&mut buf, &mut bp, b'A' as u32, 9);
-        write_code(&mut buf, &mut bp, b'B' as u32, 9);
-        write_code(&mut buf, &mut bp, b'A' as u32, 9);
-        write_code(&mut buf, &mut bp, b'B' as u32, 9);
-        flush(&mut buf, bp);
-
-        let result = unshrink(&buf).unwrap();
-        assert_eq!(result, b"ABABAB");
+    fn unshrink_first_code_must_be_literal() {
+        // The first non-control code must be a literal byte (0-255).
+        let mut w = BitWriter::new();
+        w.write_bits(257, 9);
+        let buf = w.finish();
+        assert!(unshrink(&buf).is_err());
+        // Leading control codes are consumed transparently; a stream of
+        // only control codes decodes to empty output.
+        let mut w = BitWriter::new();
+        w.write_bits(CONTROL_CODE as u32, 9);
+        w.write_bits(INC_CODE_SIZE as u32, 9);
+        let buf = w.finish();
+        assert_eq!(unshrink(&buf).unwrap(), Vec::<u8>::new());
     }
 
     #[test]
-    fn test_unshrink_dictionary_reference() {
-        // Encode "ABA" using dictionary code:
-        // Step 1: emit 'A'(65). Output: A
-        // Step 2: emit 'B'(66). dict[257]=(65,'B'). Output: AB
-        // Step 3: emit 257. dict[258]=(66,'A')="BA" (prev=66 + first byte of chain(257)='A').
-        //         chain(257) = suffix[257]='B' -> prefix[257]=65 -> suffix[65]='A'. So "AB".
-        //         Wait, we're decoding code 257 *after* it was added? No.
-        //         After step 2, next_code=258 (we added 257 in step 2).
-        //         Wait: after first code (65), prev=65. Then code=66: we add entry (prev=65, first_byte='B')
-        //         as dict[257]. next_code=258. Then code=257: valid (257 < 258). chain(257)= suffix='B',
-        //         prefix=65 -> suffix='A'. So "AB". Add dict[258]=(66, 'A'). Output = A B A B.
-        //
-        // So codes: [65, 66, 257] produces "ABAB".
-        let mut buf = Vec::new();
-        let mut bp = 0;
-        write_code(&mut buf, &mut bp, 65, 9); // 'A'
-        write_code(&mut buf, &mut bp, 66, 9); // 'B'
-        write_code(&mut buf, &mut bp, 257, 9); // dict entry "AB"
-        flush(&mut buf, bp);
-
-        let result = unshrink(&buf).unwrap();
-        assert_eq!(result, b"ABAB");
+    fn unshrink_invalid_control_subcode() {
+        let mut w = BitWriter::new();
+        w.write_bits(b'A' as u32, 9);
+        w.write_bits(CONTROL_CODE as u32, 9);
+        w.write_bits(7, 9); // invalid sub-code
+        let buf = w.finish();
+        assert!(unshrink(&buf).is_err());
     }
 
     #[test]
-    fn test_unshrink_kwkwk() {
-        // KwKwK case: "AAA"
-        // Step 1: emit 'A'(65). prev=65. Output: A
-        // Step 2: code='A'(65). emit 'A'. dict[257]=(65,'A')="AA". prev=65. Output: AA
-        // Step 3: code=257. chain(257)='A','A'. dict[258]=(65,'A')="AA". Output: AAAA
-        // Step 4: code=258. chain(258)='A','A'. dict[259]=(257,'A'). Output: AAAAAA
-        //
-        // For KwKwK specifically:
-        // codes: [65, 65, 257] produces "AAAA"
-        // where code 257 = "AA" is built from prev=65, first_byte='A'
-        // (but 257 is only added when we process the *second* 65)
-        //
-        // Wait, let's trace more carefully:
-        //   read first code: 65 ('A'). emit 'A'. prev=65.
-        //   read code: 65 ('A'). Known. chain = ['A']. first_byte = 'A'.
-        //     Output 'A'. Now output = "AA".
-        //     Add dict[257] = (prev=65, first_byte='A'). next_code=258. prev=65.
-        //   read code: 257. Known. chain(257) = suffix='A', prefix=65, suffix='A'.
-        //     chain = "AA". first_byte='A'. Output "AA". Now output = "AAAA".
-        //     Add dict[258] = (prev=65, first_byte='A'). next_code=259. prev=257.
-        //
-        // Now for actual KwKwK:
-        //   codes: [65, 65, 258]
-        //   After reading 65,65: dict[257]=(65,'A'), next_code=258, prev=65.
-        //   Read code 258: code == next_code! KwKwK case.
-        //     chain(prev=65) = "A", first='A'. prepend first -> "AA".
-        //     Add dict[258]=(65,'A'). Output "AA". Total: "AAAA".
-        //     Hmm, same result. Let me use a clearer KwKwK example.
-        //
-        // Classic KwKwK: codes [65, 257] where 257 == next_code (not yet added).
-        //   After first code 65, prev=65, next_code=257.
-        //   Read code 257 == next_code. KwKwK!
-        //   chain(prev=65) = "A", first='A'. prepend -> "AA".
-        //   Add dict[257]=(65,'A'). Output "AA". Total: "AAA".
-        let mut buf = Vec::new();
-        let mut bp = 0;
-        write_code(&mut buf, &mut bp, 65, 9); // 'A'
-        write_code(&mut buf, &mut bp, 257, 9); // KwKwK: not yet in dict
-        flush(&mut buf, bp);
-
-        let result = unshrink(&buf).unwrap();
-        assert_eq!(result, b"AAA");
+    fn unshrink_truncated() {
+        let data = b"some reasonably long input for truncation testing";
+        let compressed = shrink(data);
+        // Truncated input must not panic; it just decodes what it can.
+        let _ = unshrink(&compressed[..compressed.len() / 2]);
     }
 
     #[test]
-    fn test_unshrink_code_width_increase() {
-        // Test the control code 256 + sub-code 1 (increase code width).
-        // Build a stream at 9 bits, issue control+1, then codes at 10 bits.
-        let mut buf = Vec::new();
-        let mut bp = 0;
-        // First code: literal 'X' at 9 bits
-        write_code(&mut buf, &mut bp, b'X' as u32, 9);
-        // Control code 256 at 9 bits
-        write_code(&mut buf, &mut bp, 256, 9);
-        // Sub-code 1 (increase width) at 9 bits
-        write_code(&mut buf, &mut bp, 1, 9);
-        // Next code: literal 'Y' at 10 bits (width increased)
-        write_code(&mut buf, &mut bp, b'Y' as u32, 10);
-        flush(&mut buf, bp);
-
-        let result = unshrink(&buf).unwrap();
-        assert_eq!(result, b"XY");
+    fn unshrink_manual_literals() {
+        // Two literal codes 'H' 'i' at 9 bits.
+        let mut w = BitWriter::new();
+        w.write_bits(b'H' as u32, 9);
+        w.write_bits(b'i' as u32, 9);
+        let buf = w.finish();
+        assert_eq!(unshrink(&buf).unwrap(), b"Hi");
     }
 
     #[test]
-    fn test_unshrink_empty_input() {
-        let result = unshrink(&[]).unwrap();
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn test_unshrink_first_code_not_literal() {
-        // First code must be < 256.
-        let mut buf = Vec::new();
-        let mut bp = 0;
-        write_code(&mut buf, &mut bp, 257, 9);
-        flush(&mut buf, bp);
-
-        let result = unshrink(&buf);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_unshrink_code_out_of_range() {
-        // After only one literal, next_code = 257. Code 500 should be invalid.
-        let mut buf = Vec::new();
-        let mut bp = 0;
-        write_code(&mut buf, &mut bp, 65, 9); // 'A'
-        write_code(&mut buf, &mut bp, 500, 9); // out of range (only 257 is next)
-        flush(&mut buf, bp);
-
-        let result = unshrink(&buf);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_unshrink_partial_clear() {
-        // Build a dictionary, then issue partial clear (256 + 2).
-        // After partial clear, leaf entries should be freed, and new entries
-        // should be able to reuse those slots.
-        let mut buf = Vec::new();
-        let mut bp = 0;
-
-        // Emit some literals to build dictionary entries.
-        // 'A' 'B' 'C' 'D' builds entries 257=(A,B), 258=(B,C), 259=(C,D).
-        write_code(&mut buf, &mut bp, b'A' as u32, 9);
-        write_code(&mut buf, &mut bp, b'B' as u32, 9);
-        write_code(&mut buf, &mut bp, b'C' as u32, 9);
-        write_code(&mut buf, &mut bp, b'D' as u32, 9);
-
-        // Issue partial clear: control(256) + sub-code(2).
-        write_code(&mut buf, &mut bp, 256, 9);
-        write_code(&mut buf, &mut bp, 2, 9);
-
-        // After partial clear, leaf entries (those not used as prefix by others)
-        // are freed. Entries: 257=(A prefix->literal), 258=(B prefix->literal),
-        // 259=(C prefix->literal). None of these are parents of each other,
-        // so all three are leaves and should be freed.
-
-        // Continue with more literals. New entries should reuse freed slots.
-        write_code(&mut buf, &mut bp, b'E' as u32, 9);
-        write_code(&mut buf, &mut bp, b'F' as u32, 9);
-        flush(&mut buf, bp);
-
-        let result = unshrink(&buf).unwrap();
-        assert_eq!(result, b"ABCDEF");
-    }
-
-    #[test]
-    fn test_unshrink_invalid_sub_code() {
-        // Control code 256 followed by invalid sub-code 3.
-        let mut buf = Vec::new();
-        let mut bp = 0;
-        write_code(&mut buf, &mut bp, b'A' as u32, 9);
-        write_code(&mut buf, &mut bp, 256, 9);
-        write_code(&mut buf, &mut bp, 3, 9); // invalid
-        flush(&mut buf, bp);
-
-        let result = unshrink(&buf);
-        assert!(matches!(result, Err(Error::InvalidData(msg)) if msg.contains("invalid sub-code")));
-    }
-
-    #[test]
-    fn test_unshrink_roundtrip() {
-        // Verify that unshrink can decode a hand-encoded LZW stream with
-        // mixed literals and dictionary references, confirming that all
-        // decoded bytes match the expected original data.
-        //
-        // Encode "XYZXYZ" using codes:
-        //   Step 1: emit 'X'(88). prev=88. Output: X
-        //   Step 2: code 'Y'(89). emit 'Y'. dict[257]=(88,'Y'). prev=89. Output: XY
-        //   Step 3: code 'Z'(90). emit 'Z'. dict[258]=(89,'Z'). prev=90. Output: XYZ
-        //   Step 4: code 'X'(88). emit 'X'. dict[259]=(90,'X'). prev=88. Output: XYZX
-        //   Step 5: code 258. chain(258): suffix='Z', prefix=89 -> suffix='Y'.
-        //           Stack=['Z','Y']. first_byte='Y'. Output reversed: "YZ".
-        //           dict[260]=(88,'Y'). prev=258. Output: XYZXYZ
-        //
-        // Codes: [88, 89, 90, 88, 258]
-        let mut buf = Vec::new();
-        let mut bp = 0;
-        write_code(&mut buf, &mut bp, 88, 9); // 'X'
-        write_code(&mut buf, &mut bp, 89, 9); // 'Y'
-        write_code(&mut buf, &mut bp, 90, 9); // 'Z'
-        write_code(&mut buf, &mut bp, 88, 9); // 'X'
-        write_code(&mut buf, &mut bp, 258, 9); // "YZ"
-        flush(&mut buf, bp);
-
-        let result = unshrink(&buf).unwrap();
-        assert_eq!(result, b"XYZXYZ");
-    }
-
-    #[test]
-    fn test_unshrink_repeated_pattern() {
-        // Encode "ABCABC" - the second "ABC" could use dictionary codes.
-        // After "ABC": dict[257]=(A,B), dict[258]=(B,C). next_code=259.
-        // For 'A': dict[259]=(C,A). prev=A. For code 257: chain="AB", dict[260]=(A,B).
-        // Total: A B C A AB = ABCAAB. That's not right.
-        //
-        // Let me trace properly for "ABCABC":
-        //   Emit 'A'(65). prev=65. Output: A
-        //   Code 'B'(66). emit 'B'. dict[257]=(65,'B'). prev=66. Output: AB
-        //   Code 'C'(67). emit 'C'. dict[258]=(66,'C'). prev=67. Output: ABC
-        //   Code 'A'(65). emit 'A'. dict[259]=(67,'A'). prev=65. Output: ABCA
-        //   Code 258. chain(258)='C',prefix=66,'B'. So "BC". emit "BC". dict[260]=(65,'B'). Output: ABCABC
-        //
-        // Codes: [65, 66, 67, 65, 258]
-        let mut buf = Vec::new();
-        let mut bp = 0;
-        write_code(&mut buf, &mut bp, 65, 9); // A
-        write_code(&mut buf, &mut bp, 66, 9); // B
-        write_code(&mut buf, &mut bp, 67, 9); // C
-        write_code(&mut buf, &mut bp, 65, 9); // A
-        write_code(&mut buf, &mut bp, 258, 9); // "BC"
-        flush(&mut buf, bp);
-
-        let result = unshrink(&buf).unwrap();
-        assert_eq!(result, b"ABCABC");
+    fn unshrink_manual_dict_and_kwkwk() {
+        // Codes: 'A', 'A', 257 → output "AAAA" (257 = "AA" via KwKwK-ish use).
+        let mut w = BitWriter::new();
+        w.write_bits(b'A' as u32, 9);
+        w.write_bits(b'A' as u32, 9);
+        w.write_bits(257, 9);
+        let buf = w.finish();
+        assert_eq!(unshrink(&buf).unwrap(), b"AAAA");
     }
 }

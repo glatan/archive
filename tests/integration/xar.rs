@@ -10,7 +10,7 @@ use archive::traits::ArchiveEntry;
 //   real.xar   - sha1 TOC checksum, gzip-encoded data, nested dirs
 //   md5.xar    - md5 TOC checksum + md5 file checksums
 //   none.xar   - no checksums, stored (uncompressed) file data
-//   bzip2.xar  - bzip2-encoded data (rejected: unsupported encoding)
+//   bzip2.xar  - bzip2-encoded data
 
 fn fixture(name: &str) -> Vec<u8> {
     std::fs::read(format!(
@@ -65,10 +65,75 @@ fn decode_stored_no_checksum() {
 }
 
 #[test]
-fn reject_bzip2_encoding() {
+fn decode_bzip2_encoding() {
+    // reference xar --compression=bzip2
+    let entries = archive::archive::xar::decode::decode(&fixture("bzip2.xar")).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        find(&entries, "hello.txt").data(),
+        b"hello xar world
+"
+    );
+}
+
+fn make_xar(heap: &[u8], toc_xml: &str) -> Vec<u8> {
+    // cksum_alg=0 header: magic, size, version, toc comp/raw sizes.
+    let toc_comp = archive::compress::zlib::encode::encode(toc_xml.as_bytes());
+    let mut out = Vec::new();
+    out.extend_from_slice(b"xar!");
+    out.extend_from_slice(&28u16.to_be_bytes());
+    out.extend_from_slice(&1u16.to_be_bytes());
+    out.extend_from_slice(&(toc_comp.len() as u64).to_be_bytes());
+    out.extend_from_slice(&(toc_xml.len() as u64).to_be_bytes());
+    out.extend_from_slice(&0u32.to_be_bytes());
+    out.extend_from_slice(&toc_comp);
+    out.extend_from_slice(heap);
+    out
+}
+
+fn xar_with_encoding(style: &str, stored: &[u8], extracted_len: usize) -> Vec<u8> {
+    let toc = format!(
+        concat!(
+            "<?xml version='1.0'?><xar><toc>",
+            "<file id='1'><name>f.bin</name><type>file</type>",
+            "<data><offset>0</offset><size>{}</size><length>{}</length>",
+            "<encoding style='{}'/></data></file></toc></xar>"
+        ),
+        extracted_len,
+        stored.len(),
+        style,
+    );
+    make_xar(stored, &toc)
+}
+
+#[test]
+fn decode_xz_and_lzma_encodings() {
+    use archive::compress;
+    let payload: Vec<u8> = (0..2000u32).map(|i| (i % 251) as u8).collect();
+    for (style, stored) in [
+        ("application/x-xz", compress::xz::encode::encode(&payload)),
+        (
+            "application/x-lzma",
+            compress::lzma_alone::encode::encode(&payload),
+        ),
+        (
+            "application/x-bzip2",
+            compress::bzip2::encode::encode(&payload),
+        ),
+    ] {
+        let x = xar_with_encoding(style, &stored, payload.len());
+        let entries = archive::archive::xar::decode::decode(&x).unwrap();
+        assert_eq!(entries.len(), 1, "{style}");
+        assert_eq!(entries[0].data(), &payload[..], "{style}");
+    }
+}
+
+#[test]
+fn reject_corrupt_encoded_data() {
+    let x = xar_with_encoding("application/x-bzip2", b"not bzip2", 9);
     assert!(matches!(
-        archive::archive::xar::decode::decode(&fixture("bzip2.xar")),
-        Err(Error::Unsupported(_))
+        archive::archive::xar::decode::decode(&x),
+        Err(Error::InvalidData(_))
     ));
 }
 
@@ -175,4 +240,56 @@ fn bad_version_rejected() {
         archive::archive::xar::decode::decode(&f),
         Err(Error::Unsupported(_))
     ));
+}
+
+#[test]
+fn xar_encoded_data_unar_oracle() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let has_unar = Command::new("unar")
+        .arg("--version")
+        .output()
+        .map(|o| !o.stdout.is_empty())
+        .unwrap_or(false);
+    if !has_unar {
+        return;
+    }
+    use archive::compress;
+    let payload: Vec<u8> = (0..3000u32).map(|i| (i % 97) as u8).collect();
+    for (style, stored) in [
+        (
+            "application/x-bzip2",
+            compress::bzip2::encode::encode(&payload),
+        ),
+        ("application/x-xz", compress::xz::encode::encode(&payload)),
+        (
+            "application/x-lzma",
+            compress::lzma_alone::encode::encode(&payload),
+        ),
+    ] {
+        let x = xar_with_encoding(style, &stored, payload.len());
+        let uniq = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("archive_xar_oracle_{uniq}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.xar");
+        std::fs::write(&path, &x).unwrap();
+        let outdir = dir.join("out");
+        let output = Command::new("unar")
+            .args(["-D", "-o", outdir.to_str().unwrap()])
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "unar failed for {style}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let got = std::fs::read(outdir.join("f.bin"))
+            .unwrap_or_else(|_| panic!("unar: missing f.bin for {style}"));
+        assert_eq!(got, payload, "unar output mismatch for {style}");
+    }
 }

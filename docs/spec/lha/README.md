@@ -4,7 +4,7 @@
 |------|------|
 | 基準仕様 | lha header documentation (apphead / lzh_note、GNU lha 系資料)。実参照: [LHa for UNIX `header.doc.md`](https://github.com/jca02266/lha/blob/master/header.doc.md) ([jca02266/lha](https://github.com/jca02266/lha)) + jLHA Notes (Michel Ishizuka、[Wayback index](https://web.archive.org/web/20080724142842/http://homepage1.nifty.com/dangan/en/Content/Program/Java/jLHA/Notes/Notes.html)) + Joe Jared `lzhformat.html` + [Just Solve Wiki: LHarc](http://justsolve.archiveteam.org/wiki/LHarc)。ローカルスナップショット: `docs/spec/sources/lha_header.doc.md`, `jlha_notes_*.html`, `lzhformat.html`。一次実装: [LHA 2.11 ソース (Vector fh002420)](https://www.vector.co.jp/download/file/dos/util/fh002420.html) |
 | 形式概要 | `[u8/u16 header size][checksum?][method 5B][packed u32][orig u32][time u32][attr u8][level u8](level 別フィールド)[ext headers][data]` のエントリ列。終端は header size = 0 |
-| 実装範囲 | level 0/1/2 の **`-lh0-` (stored) / `-lhd-` (directory)** のみ read/write (write は `LhaEncoder::with_level` で level 0/1/2 を選択)。LZH 系圧縮メソッド (`-lh1-` 〜 `-lh7-`、`-lzs-`、`-lz4-`、`-pm0-` 等) は intentional scope 外 |
+| 実装範囲 | level 0-3 read、`-lh0-` (stored) / `-lhd-` (dir) / `-lh1-`-`-lh7-` / LArc `-lzs-`/`-lz4-`/`-lz5-` / PMarc `-pm0-`-`-pm2-` の decode。write は `-lh0-`/`-lhd-` のみ (`LhaEncoder::with_level` で level 0/1/2 を選択) |
 
 ## 対応バリアント・仕様版
 
@@ -12,9 +12,9 @@
 |---|---|---|---|---|
 | header level 0 | lha header documentation | ✅ | ✅ | |
 | header level 1 / 2 | lha header documentation + LHa for UNIX header.c 実測 | ✅ | ✅ | ext header (0x01 filename / 0x02 dir、raw 0xff 区切り) |
-| header level 3 | jLHA Notes Level3Header (`sources/jlha_notes_level3_header.html`、word-size u16 + 32bit サイズのワイヤー記述あり) + lhasa (ISC) が de facto 参照実装 | ❌ | ❌ | level byte 3 は reject |
+| header level 3 | jLHA Notes Level3Header (`sources/jlha_notes_level3_header.html`) + lhasa (ISC) | decode のみ ✅ | ❌ | write は非対応。32 バイト基本ヘッダ + u32 サイズ + u32 ext チェーン |
 | method `-lh0-` (stored) / `-lhd-` (dir) | lha header documentation | ✅ | `-lh0-` のみ ✅ | |
-| LZH 圧縮メソッド (`-lh1-`〜`-lh7-`, `-lzs-`/`-lz4-`/`-lz5-`, `-pm0-`/`-pm2-`) | jLHA Notes CompressMethod (`sources/jlha_notes_compress_method.html`、辞書サイズ/threshold/max-match/静的・動的 Huffman のパラメータ表 — bit レベル仕様は未記述) + 一次実装 LHA 2.11 ソース (lh0-lh5/lzs/lz4/lz5) + lhasa (ISC) / compcol (MIT) が de facto decode 参照 | ❌ | ❌ | intentional scope: lh6/lh7 は LHA 2.55 以降の追加、pm* は PMarc 独自、lhx は UNLHA32 独自 |
+| LZH 圧縮メソッド (`-lh1-`〜`-lh7-`, `-lzs-`/`-lz4-`/`-lz5-`, `-pm0-`-`-pm2-`) | jLHA Notes CompressMethod + 一次実装 LHA 2.11/LHa 1.14i ソース + lhasa (ISC) が de facto decode 参照 | ✅ | ❌ | decode のみ。`-lhx-` (UNLHA32 独自) 等の未対応メソッドは `Error::Unsupported` |
 
 ### ヘッダ構造
 
@@ -33,10 +33,34 @@
 |---|------|----------|-----------|----------------|
 | 7 | `-lh0-`: data は生バイト列、packed size == orig size 必須 | lha note | ✅ | `level0_roundtrip` |
 | 8 | `-lhd-`: directory marker、payload なしで `is_dir` | lha note | ✅ | `dir_entry` |
-| 9 | その他のメソッド (`-lh1-`〜`-lh7-`、`-lzs-`、`-lz4-`、`-pm*` 等) は `Error::Unsupported` | lha note | ✅ | `rejects_unsupported_method`, `test_lha_rejects_compressed_method` |
+| 9 | 未対応メソッド (`-lhx-` 等、実装済み以外の `-l??-`) は `Error::Unsupported` | lha note | ✅ | `rejects_unsupported_method` |
 | 10 | entry CRC-16 (CRC-16/ARC、poly 0x8005 reflected) を検証、不一致は reject | lha note | ✅ | decode 内検証 |
 | 11 | bounds 検査 (truncated header/data → エラー) | crate エラー規約 | ✅ | `test_lha_rejects_truncated` |
 | 12 | filename は UTF-8 必須、NUL 混入は reject。raw `0xff` バイトは `/` に正規化 (ext payload 全般 + level-0/1 基本 name field)、基本 name field の `\` も `/` に変換 | crate エラー規約 | ✅ | `sanitize_name`, `sanitize_basic_name` |
+
+
+### 圧縮メソッド decode
+
+| method | アルゴリズム | 履歴バッファ | 状態 | テスト/fixture |
+|---|---|---|---|---|
+| `-lh0-` | stored (無圧縮) | - | ✅ | `level0_roundtrip` |
+| `-lh1-` | 適応 Huffman + LZ77 (Okumura lzhuf) | 4 KiB | ✅ | `lh1.lzh, lh1_lharc.lzh` |
+| `-lh2-` | 動的 Huffman + LZ77 (LHa dhuf) | 8 KiB | ✅ | `lh2.lzh` |
+| `-lh3-` | 静的 Huffman st0 + LZ77 (LHa shuf) | 8 KiB | ✅ | `lh3.lzh` |
+| `-lh4-` | 静的 Huffman st1 + LZ77 | 16 KiB | ✅ | `lh4.lzh` |
+| `-lh5-` | 静的 Huffman st1 + LZ77 | 16 KiB | ✅ | `lh5.lzh, lh5_255e.lzh, h3_lh5.lzh` |
+| `-lh6-` | 静的 Huffman st1 + LZ77 | 64 KiB | ✅ | `lh6.lzh, h2_lh6.lzh` |
+| `-lh7-` | 静的 Huffman st1 + LZ77 | 128 KiB | ✅ | `lh7.lzh, h2_lh7.lzh` |
+| `-lzs-` | LArc ビット指向 LZSS | 2 KiB | ✅ | `lzs.lzh` |
+| `-lz4-` | LArc stored (無圧縮) | - | ✅ | `lz4.lzh, lz4.lzs` |
+| `-lz5-` | LArc バイト指向 LZSS | 4 KiB | ✅ | `lz5.lzh, lz5.lzs, long.lzs` |
+| `-pm0-` | PMarc stored (無圧縮) | - | ✅ | `pm0.lzh, pm0.pma` |
+| `-pm1-` | PMarc 静的木 + MTF + LZ | 8 KiB | ✅ | `pm1.lzh, pm1.pma, pm1_long.pma, mtcd.pma` |
+| `-pm2-` | PMarc 動的木 + MTF + LZ | 8 KiB | ✅ | `pm2.lzh, pm2.pma, long.pma` |
+| `-lhd-` | directory marker (payload なし) | - | ✅ | `dir_entry` |
+
+fixture は全て `tests/fixtures/lha/` 配下。統合テスト: `test_lha_compressed_method_fixtures`, `test_lha_level3_fixtures`, `test_lha_fixture_oracle_extract`。
+decode 参照は lhasa (ISC) / XADMaster + LHa 1.14i 一次ソース (dhuf.c, shuf.c, lzhuf.c)。
 
 ### encode
 
@@ -58,16 +82,16 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 17 | offset 2 の `-l`-`-` マーカー + offset 20 の level byte (0-2) で自動検出、`list`/`extract`/`test`/`inspect`/`pack` に対応 | CLI 規約 | ✅ | `detect_lha` (サブコマンド配線の spawn 統合テスト基盤は未整備) |
+| 17 | offset 2 の `-l?-` または `-pm?-` マーカー + offset 20 の level byte (0-3) で自動検出、`list`/`extract`/`test`/`inspect`/`pack` に対応 | CLI 規約 | ✅ | `detect_lha` |
 | 18 | fuzz harness `lha` で encode→decode 往復 | fuzz 規約 | ✅ | `Algorithm::Lha` |
 
 ### 既知制約 (intentional scope)
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 19 | LZH 系圧縮メソッドの decode は非対応 | ❌ | `-lh1-`〜`-lh7-`、`-lzs-`、`-lz4-`、`-pm0-`/`-pm2-` 等。`Error::Unsupported` を返す。de facto 参照実装は manifest `no_url_available` の `lhasa`/`compcol` (源流は Okumura lzhuf.c public domain)。decode oracle は Debian main の `lhasa`/`unar` |
+| 19 | 圧縮メソッドの write は非対応 | ❌ | encode は `-lh0-`/`-lhd-` のみ。`-lhx-` 等の未実装メソッドの decode は `Error::Unsupported` |
 | 20 | write の mtime は level 0/1 で DOS time、level 2 で UNIX time をそのまま格納。UNIX ext 0x50/0x51/0x54 は発行しない | ✅ | `level1_roundtrip`, `level2_roundtrip`, `level2_long_path`, `level_rejects_bad_level` |
-| 21 | マルチボリューム/リンク属性/OS 別属性の解釈は非対応 | ❌ | header level 3 も非対応 (level byte 3 は reject)。level 3 の書面記述は jLHA Notes (`sources/jlha_notes_level3_header.html`)、de facto 実装は lhasa。multi-disk/spanning (ext header 0x39・SPAN mode) は `sources/lzhformat.html` が記述 |
+| 21 | マルチボリューム/リンク属性/OS 別属性の解釈は非対応 | ❌ | header level 3 の read は対応済み (write は非対応)。multi-disk/spanning (ext header 0x39・SPAN mode) は `sources/lzhformat.html` が記述 |
 
 ### vendor 別拡張・拡張ヘッダの整理
 
@@ -86,10 +110,10 @@ LHA 系の「独自拡張」は出自が分散している。出典別に整理�
 
 | 系列 | method | 備考 |
 |---|---|---|
-| LArc (三木和彦) | `-lzs-` `-lz4-` `-lz5-` | `-lz4-` は stored |
-| LHA 本家 (吉崎) | `-lh0-`〜`-lh7-` | lh3 は試作 (静的 Huffman 版 lh2)。2.11 ソースは lh0-5 + lzs/lz4/lz5 を収録、lh6/7 は後の版で追加 |
-| PMarc | `-pm0-` `-pm1-` `-pm2-` | 別ツール独自、`-pm0-` は stored |
-| UNLHA32 (Micco) | `-lhx-` | UNLHA32.DLL 独自 |
+| LArc (三木和彦) | `-lzs-` `-lz4-` `-lz5-` | `-lz4-` は stored。全 method decode 対応 |
+| LHA 本家 (吉崎) | `-lh0-`〜`-lh7-` | lh3 は試作 (静的 Huffman 版 lh2)。全 method decode 対応 |
+| PMarc | `-pm0-` `-pm1-` `-pm2-` | 別ツール独自、`-pm0-` は stored。全 method decode 対応 |
+| UNLHA32 (Micco) | `-lhx-` | UNLHA32.DLL 独自。非対応 |
 
 **拡張ヘッダ identifier のカテゴリ** (LHA for OS/2 同梱 `header.tex` 由来の分類 + jLHA の細分化)
 

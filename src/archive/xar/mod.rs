@@ -10,8 +10,8 @@
 //! Decode verifies the header TOC checksum (none/SHA-1/MD5 and
 //! `cksum_alg=3` names "sha1"/"md5"), the uncompressed TOC length, and
 //! each file's `extracted-checksum` when it uses sha1/md5. Extended
-//! attributes (`<ea>`), signatures, and other encoding styles are out
-//! of scope.
+//! attributes (`<ea>`), signatures, and encoding styles beyond
+//! none/gzip/bzip2/xz/lzma are out of scope.
 
 mod xml;
 

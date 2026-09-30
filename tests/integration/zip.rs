@@ -747,3 +747,161 @@ fn test_zip_decode_detects_invalid_local_file_header_signature() {
         ))
     ));
 }
+
+#[cfg(feature = "zip")]
+#[test]
+fn test_zip_legacy_methods_roundtrip() {
+    // Roundtrip the legacy methods (1-6, 9) through ZipEncoder and our decoder.
+    let payload: &[u8] = b"the quick brown fox jumps over the lazy dog.         the quick brown fox jumps over the lazy dog. the quick brown fox.";
+
+    let cases: &[(&str, zip::encode::ZipCompression, u16)] = &[
+        ("shrunk.txt", zip::encode::ZipCompression::Shrunk, 1),
+        ("reduce1.txt", zip::encode::ZipCompression::Reduce(1), 2),
+        ("reduce2.txt", zip::encode::ZipCompression::Reduce(2), 3),
+        ("reduce3.txt", zip::encode::ZipCompression::Reduce(3), 4),
+        ("reduce4.txt", zip::encode::ZipCompression::Reduce(4), 5),
+        ("implode.txt", zip::encode::ZipCompression::Implode, 6),
+        ("deflate64.txt", zip::encode::ZipCompression::Deflate64, 9),
+    ];
+
+    for &(name, compression, method) in cases {
+        let mut encoder = zip::encode::ZipEncoder::new();
+        encoder.add_file_with_options(
+            name,
+            payload,
+            &zip::encode::ZipEntryOptions {
+                compression,
+                ..zip::encode::ZipEntryOptions::default()
+            },
+        );
+        let archive = encoder.finish().unwrap();
+        let entries = zip::decode::decode(&archive).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, name);
+        assert_eq!(entries[0].data, payload, "method {method}");
+        assert_eq!(entries[0].header.compression_method, method);
+    }
+}
+
+#[cfg(feature = "zip")]
+#[test]
+fn test_zip_legacy_methods_unar_compat() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_zip_legacy_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let payload: &[u8] = b"the quick brown fox jumps over the lazy dog.         the quick brown fox jumps over the lazy dog. the quick brown fox.";
+
+    // unar (XADMaster) supports Shrink, Implode and Deflate64 but not Reduce.
+    let unar_cases: &[(&str, zip::encode::ZipCompression)] = &[
+        ("shrunk.txt", zip::encode::ZipCompression::Shrunk),
+        ("implode.txt", zip::encode::ZipCompression::Implode),
+        ("deflate64.txt", zip::encode::ZipCompression::Deflate64),
+    ];
+    // Info-ZIP unzip is compiled COPYRIGHT_CLEAN in most distributions and
+    // therefore does not implement Reduce; use it only for the methods it
+    // supports. Reduce is covered by the hwzip reference fixtures and the
+    // mirror roundtrip test.
+    let unzip_cases: &[(&str, zip::encode::ZipCompression)] = &[
+        ("shrunk2.txt", zip::encode::ZipCompression::Shrunk),
+        ("implode2.txt", zip::encode::ZipCompression::Implode),
+        ("deflate64b.txt", zip::encode::ZipCompression::Deflate64),
+    ];
+
+    for &(name, compression) in unar_cases {
+        let archive_path = dir.join(format!("{name}.zip"));
+        let mut encoder = zip::encode::ZipEncoder::new();
+        encoder.add_file_with_options(
+            name,
+            payload,
+            &zip::encode::ZipEntryOptions {
+                compression,
+                ..zip::encode::ZipEntryOptions::default()
+            },
+        );
+        std::fs::write(&archive_path, encoder.finish().unwrap()).unwrap();
+
+        let out_dir = dir.join(format!("{name}.out"));
+        std::fs::create_dir_all(&out_dir).unwrap();
+        let extracted = Command::new("unar")
+            .args([
+                "-quiet",
+                "-output-directory",
+                out_dir.to_str().unwrap(),
+                archive_path.to_str().unwrap(),
+            ])
+            .output();
+        match extracted {
+            Ok(result) => {
+                assert!(
+                    result.status.success(),
+                    "unar failed on {name}: {}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+                let data = std::fs::read(out_dir.join(name)).unwrap();
+                assert_eq!(data, payload, "unar mismatch on {name}");
+            }
+            Err(_) => {
+                eprintln!("unar not available; skipping unar oracle checks");
+                break;
+            }
+        }
+    }
+
+    for &(name, compression) in unzip_cases {
+        let archive_path = dir.join(format!("{name}.zip"));
+        let mut encoder = zip::encode::ZipEncoder::new();
+        encoder.add_file_with_options(
+            name,
+            payload,
+            &zip::encode::ZipEntryOptions {
+                compression,
+                ..zip::encode::ZipEntryOptions::default()
+            },
+        );
+        std::fs::write(&archive_path, encoder.finish().unwrap()).unwrap();
+
+        let extracted = Command::new("unzip")
+            .args(["-p", archive_path.to_str().unwrap(), name])
+            .output();
+        match extracted {
+            Ok(result) => {
+                assert!(
+                    result.status.success(),
+                    "unzip failed on {name}: {}",
+                    String::from_utf8_lossy(&result.stderr)
+                );
+                assert_eq!(result.stdout, payload, "unzip mismatch on {name}");
+            }
+            Err(_) => {
+                eprintln!("unzip not available; skipping unzip oracle checks");
+                break;
+            }
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[cfg(feature = "zip")]
+#[test]
+fn test_zip_legacy_methods_hwzip_compat() {
+    // Decode archives produced by the hwzip reference implementation
+    // (public domain, https://www.hanshq.net/zip2.html). This is the Reduce
+    // oracle: neither unar nor the commonly installed COPYRIGHT_CLEAN Info-ZIP
+    // unzip implements methods 2-5. Our encoders for Shrink/Reduce/Implode
+    // were also verified to expand correctly under hwzip.
+    let expected = std::fs::read("tests/fixtures/zip/payload.bin").unwrap();
+    for fixture in ["hw_shrink.zip", "hw_reduce.zip", "hw_implode.zip"] {
+        let archive = std::fs::read(format!("tests/fixtures/zip/{fixture}")).unwrap();
+        let entries = zip::decode::decode(&archive).unwrap();
+        assert_eq!(entries.len(), 1, "{fixture}");
+        assert_eq!(entries[0].data, expected, "{fixture}");
+    }
+}

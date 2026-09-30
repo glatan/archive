@@ -19,12 +19,18 @@ const FLAG_RESERVE_PRESENT: u16 = 0x0004;
 
 const COMPRESS_NONE: u16 = 0;
 const COMPRESS_MSZIP: u16 = 1;
+const COMPRESS_QUANTUM: u16 = 2;
 const COMPRESS_LZX: u16 = 3;
 
 /// Cabinet LZX window sizes are log2-encoded in `typeCompress` bits
 /// 8..12 (`(typeCompress >> 8) & 0x1f`, 15..=21 for 32 KiB..2 MiB).
 const LZX_WINDOW_BITS_MIN: u16 = 15;
 const LZX_WINDOW_BITS_MAX: u16 = 21;
+
+/// Cabinet Quantum window sizes share the same `typeCompress` bits
+/// 8..12 field, valid range 10..=21 (1 KiB..2 MiB).
+const QUANTUM_WINDOW_BITS_MIN: u16 = 10;
+const QUANTUM_WINDOW_BITS_MAX: u16 = 21;
 
 /// `iFolder` values reserved for files spanning cabinets (MS-CAB §2.3).
 const IFOLD_CONTINUED_FROM_PREV: usize = 0xfffd;
@@ -117,12 +123,12 @@ pub(crate) fn checksum(data: &[u8], seed: u32) -> u32 {
     sum
 }
 
-/// Accumulated input/expected-output counters for an LZX logical
-/// folder that may span cabinet members (the LZX bitstream is
-/// contiguous across folder fragments, so it can only be decoded once
-/// the last fragment is in).
+/// Accumulated input/expected-output counters for an LZX or Quantum
+/// logical folder that may span cabinet members (those bitstreams are
+/// contiguous across folder fragments, so they can only be decoded
+/// once the last fragment is in).
 #[derive(Default)]
-struct LzxAccum {
+struct StreamAccum {
     /// Concatenated compressed CFDATA payloads.
     data: Vec<u8>,
     /// Sum of `cbUncomp` over the fragments seen so far.
@@ -140,10 +146,10 @@ struct LzxAccum {
 /// `cbUncomp == 0` continues in the first CFDATA of the next
 /// cabinet's folder fragment, which reports the total size.
 ///
-/// For LZX folders, `lzx_acc` accumulates the contiguous bitstream
-/// across the fragment's blocks (and across cabinet members while the
-/// folder continues, i.e. while `pending` is non-empty); decoding
-/// runs once the logical folder is complete.
+/// For LZX and Quantum folders, `stream_acc` accumulates the
+/// contiguous bitstream across the fragment's blocks (and across
+/// cabinet members while the folder continues, i.e. while `pending`
+/// is non-empty); decoding runs once the logical folder is complete.
 fn decompress_folder(
     input: &[u8],
     folder: &Folder,
@@ -151,21 +157,35 @@ fn decompress_folder(
     logical_start: usize,
     stream: &mut Vec<u8>,
     pending: &mut Vec<u8>,
-    lzx_acc: &mut LzxAccum,
+    stream_acc: &mut StreamAccum,
 ) -> Result<(), Error> {
-    let comp_type = folder.type_compress & 0x00ff;
-    if comp_type != COMPRESS_NONE && comp_type != COMPRESS_MSZIP && comp_type != COMPRESS_LZX {
+    // typeCompress bits 0-3 select the codec; bits 8-12 carry the
+    // window size for LZX/Quantum (MS-CAB §3.2 CFFOLDER).
+    let comp_type = folder.type_compress & 0x000f;
+    if !matches!(
+        comp_type,
+        COMPRESS_NONE | COMPRESS_MSZIP | COMPRESS_QUANTUM | COMPRESS_LZX
+    ) {
         return Err(Error::Unsupported(
             "mscab: unsupported folder compression type",
         ));
     }
     let mut lzx_window = 0usize;
+    let mut quantum_window_bits = 0u32;
+    let window_bits = (folder.type_compress >> 8) & 0x1f;
     if comp_type == COMPRESS_LZX {
-        let bits = (folder.type_compress >> 8) & 0x1f;
-        if !(LZX_WINDOW_BITS_MIN..=LZX_WINDOW_BITS_MAX).contains(&bits) {
+        if !(LZX_WINDOW_BITS_MIN..=LZX_WINDOW_BITS_MAX).contains(&window_bits) {
             return Err(Error::InvalidData("mscab: LZX window size out of range"));
         }
-        lzx_window = 1usize << bits;
+        lzx_window = 1usize << window_bits;
+    } else if comp_type == COMPRESS_QUANTUM
+        && !(QUANTUM_WINDOW_BITS_MIN..=QUANTUM_WINDOW_BITS_MAX).contains(&window_bits)
+    {
+        return Err(Error::InvalidData(
+            "mscab: Quantum window size out of range",
+        ));
+    } else if comp_type == COMPRESS_QUANTUM {
+        quantum_window_bits = u32::from(window_bits);
     }
 
     let mut off = folder.coff_cab_start;
@@ -221,12 +241,17 @@ fn decompress_folder(
                 }
                 stream.extend_from_slice(&decoded);
             }
-            COMPRESS_LZX => {
-                // CFDATA records are byte containers only: LZX decoder
-                // state (bit position, Huffman trees, R0-R2, E8) is
-                // contiguous across them, so the payloads accumulate.
-                lzx_acc.data.extend_from_slice(&data);
-                lzx_acc.expected += cb_uncomp;
+            COMPRESS_LZX | COMPRESS_QUANTUM => {
+                // CFDATA records are byte containers only: LZX/Quantum
+                // decoder state is contiguous across them, so the
+                // payloads accumulate. Quantum additionally realigns at
+                // every block boundary, so a synthesised 0xFF sentinel
+                // byte is fed after each block (as cabd.c does).
+                stream_acc.data.extend_from_slice(&data);
+                if comp_type == COMPRESS_QUANTUM {
+                    stream_acc.data.push(0xFF);
+                }
+                stream_acc.expected += cb_uncomp;
             }
             _ => unreachable!(),
         }
@@ -234,9 +259,14 @@ fn decompress_folder(
     }
     if comp_type == COMPRESS_LZX && pending.is_empty() {
         // Logical folder complete: decode the contiguous LZX stream.
-        let decoded = lzx::decode_cabinet(&lzx_acc.data, lzx_window, lzx_acc.expected)?;
+        let decoded = lzx::decode_cabinet(&stream_acc.data, lzx_window, stream_acc.expected)?;
         stream.extend_from_slice(&decoded);
-        *lzx_acc = LzxAccum::default();
+        *stream_acc = StreamAccum::default();
+    } else if comp_type == COMPRESS_QUANTUM && pending.is_empty() {
+        let decoded =
+            super::quantum::decode(&stream_acc.data, quantum_window_bits, stream_acc.expected)?;
+        stream.extend_from_slice(&decoded);
+        *stream_acc = StreamAccum::default();
     }
     Ok(())
 }
@@ -407,7 +437,7 @@ fn extract_cabs(cabs: &[&ParsedCab<'_>]) -> Result<Vec<MscabEntry>, Error> {
     let mut stream = Vec::new();
     let mut folder_base: Vec<Vec<usize>> = Vec::with_capacity(cabs.len());
     let mut pending: Vec<u8> = Vec::new();
-    let mut lzx_acc = LzxAccum::default();
+    let mut stream_acc = StreamAccum::default();
     let mut cur_logical = 0usize;
     let mut prev_type = u16::MAX;
     for (k, cab) in cabs.iter().enumerate() {
@@ -437,7 +467,7 @@ fn extract_cabs(cabs: &[&ParsedCab<'_>]) -> Result<Vec<MscabEntry>, Error> {
                 cur_logical,
                 &mut stream,
                 &mut pending,
-                &mut lzx_acc,
+                &mut stream_acc,
             )?;
         }
         folder_base.push(bases);
@@ -543,8 +573,8 @@ mod tests {
             }
         }
 
-        /// Push an LZX folder; `uncomps` carries each CFDATA block's
-        /// cbUncomp (the LZX payload length says nothing about it).
+        /// Push an LZX/Quantum folder; `uncomps` carries each CFDATA
+        /// block's cbUncomp (compressed payloads say nothing about it).
         fn push_lzx(&mut self, type_compress: u16, blocks: Vec<Vec<u8>>, uncomps: Vec<u16>) {
             self.uncomp_overrides.push((self.folders.len(), uncomps));
             self.folders.push((type_compress, blocks));
@@ -743,12 +773,41 @@ mod tests {
     }
 
     #[test]
-    fn rejects_quantum_folder() {
+    fn decodes_quantum_folder() {
+        // Real Quantum stream (libmspack qtm.txt fixture), window 18.
+        let qtm: &[u8] = &[
+            0xD6, 0x06, 0x69, 0x0B, 0xCB, 0x47, 0xF0, 0x2C, 0x2A, 0x3A, 0x8F, 0x2C, 0xAB, 0xBB,
+            0x3C, 0xB9, 0x33, 0x01, 0x8B, 0xD8, 0x58, 0x4B, 0x7B, 0x01, 0xBA, 0x6F, 0x6D, 0x51,
+            0x6E, 0x3A, 0xC3, 0x67, 0x42, 0x4B, 0xEB, 0x02, 0x36, 0x43, 0xD6, 0x66, 0x56, 0xCA,
+            0x9E, 0x72, 0xCC, 0x30, 0x00, 0x00,
+        ];
+        const EXPECTED: &[u8] = b"If you can read this, the Quantum decompressor is working!\n";
         let mut b = CabBuilder::new();
-        b.folders.push((2, vec![b"x".to_vec()])); // tcompTYPE_QUANTUM
+        // typeCompress = QUANTUM | (window_bits << 8) = 2 | 18<<8.
+        b.push_lzx(0x1202, vec![qtm.to_vec()], vec![EXPECTED.len() as u16]);
+        b.files.push((EXPECTED.len(), 0, 0, "qtm.txt".into()));
+        let entries = decode(&b.build()).unwrap();
+        assert_eq!(entries[0].name(), "qtm.txt");
+        assert_eq!(entries[0].data(), EXPECTED);
+    }
+
+    #[test]
+    fn rejects_unknown_folder_compression() {
+        let mut b = CabBuilder::new();
+        b.folders.push((7, vec![b"x".to_vec()])); // invalid typeCompress
         b.files.push((1, 0, 0, "f".into()));
         let e = decode(&b.build()).unwrap_err();
         assert!(matches!(e, Error::Unsupported(_)));
+    }
+
+    #[test]
+    fn rejects_bad_quantum_window_bits() {
+        let mut b = CabBuilder::new();
+        // window_bits 22 is outside Quantum's 10..=21 range.
+        b.push_lzx(2 | (22 << 8), vec![b"xx".to_vec()], vec![1]);
+        b.files.push((1, 0, 0, "f".into()));
+        let e = decode(&b.build()).unwrap_err();
+        assert!(matches!(e, Error::InvalidData(_)));
     }
 
     #[test]

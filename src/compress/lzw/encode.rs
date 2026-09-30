@@ -73,13 +73,29 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
 /// ```
 pub fn encode_with_options(input: &[u8], max_bits: u8) -> Vec<u8> {
     let max_bits = max_bits.clamp(9, 16);
-    let max_code = (1u32 << max_bits) - 1;
 
     let flags = BLOCK_MODE | max_bits;
     let mut output = Vec::new();
     output.push(MAGIC[0]);
     output.push(MAGIC[1]);
     output.push(flags);
+    output.extend_from_slice(&encode_body(input, max_bits, true));
+    output
+}
+
+/// Emit a headerless Unix compress LZW codestream.
+///
+/// Produces the variable-width code stream without the 3-byte `.Z`
+/// header. Used by ARC methods 8 (Crunched) and 9 (Squashed) and the
+/// Spark `0x7f` method, which wrap the stream in their own member
+/// records. `max_bits` is the maximum code width (9-16); `block_mode`
+/// reserves clear code 256 and emits it with the group-of-8 padding
+/// when the dictionary fills.
+pub(crate) fn encode_body(input: &[u8], max_bits: u8, block_mode: bool) -> Vec<u8> {
+    let max_bits = max_bits.clamp(9, 16);
+    let max_code = (1u32 << max_bits) - 1;
+
+    let mut output = Vec::new();
 
     if input.is_empty() {
         return output;
@@ -96,7 +112,7 @@ pub fn encode_with_options(input: &[u8], max_bits: u8) -> Vec<u8> {
 
     // u32: next_code must reach max_code + 1 (65536 at max_bits=16) without
     // wrapping — a full dictionary is signaled by next_code > max_code.
-    let mut next_code: u32 = FIRST_CODE as u32;
+    let mut next_code: u32 = if block_mode { FIRST_CODE as u32 } else { 256 };
     let mut code_bits: u32 = 9;
     let mut bit_buf: u64 = 0;
     let mut bit_count: u32 = 0;
@@ -210,7 +226,7 @@ pub fn encode_with_options(input: &[u8], max_bits: u8) -> Vec<u8> {
                 if should_bump_encode_code_width(next_code, code_bits, max_bits as u32) {
                     code_bits += 1;
                 }
-            } else {
+            } else if block_mode {
                 // Dictionary full — emit clear code and reset
                 write_code(
                     CLEAR_CODE as u32,
@@ -231,8 +247,7 @@ pub fn encode_with_options(input: &[u8], max_bits: u8) -> Vec<u8> {
                 }
                 // Pad output to code_bits-byte alignment
                 let group_bytes = code_bits as usize;
-                let data_bytes = output.len() - 3; // exclude header
-                let remainder = data_bytes % group_bytes;
+                let remainder = output.len() % group_bytes;
                 if remainder != 0 {
                     let pad = group_bytes - remainder;
                     output.resize(output.len() + pad, 0);
@@ -243,6 +258,8 @@ pub fn encode_with_options(input: &[u8], max_bits: u8) -> Vec<u8> {
                 next_code = FIRST_CODE as u32;
                 code_bits = 9;
             }
+            // Non-block mode: when the dictionary is full, simply stop
+            // inserting (no clear code exists).
 
             w = byte as u16;
         }
@@ -292,7 +309,6 @@ pub fn encode_with_full_options(input: &[u8], max_bits: u8, block_mode: bool) ->
     }
 
     let max_bits = max_bits.clamp(9, 16);
-    let max_code = (1u32 << max_bits) - 1;
 
     // Non-block mode: bit 7 is clear, just max_bits
     let flags = max_bits;
@@ -300,140 +316,7 @@ pub fn encode_with_full_options(input: &[u8], max_bits: u8, block_mode: bool) ->
     output.push(MAGIC[0]);
     output.push(MAGIC[1]);
     output.push(flags);
-
-    if input.is_empty() {
-        return output;
-    }
-
-    // Dictionary: hash table mapping (prefix_code, byte) → code
-    let table_size = 1 << (max_bits + 1);
-    // u32 + u32::MAX sentinel: at max_bits=16 the prefix 65535 is a real code
-    // and must not collide with the empty-slot marker.
-    let mut hash_prefix = vec![u32::MAX; table_size as usize];
-    let mut hash_suffix = vec![0u8; table_size as usize];
-    let mut hash_code = vec![0u16; table_size as usize];
-
-    // No clear code in non-block mode; codes start at 256.
-    // u32: next_code must reach max_code + 1 without wrapping.
-    let mut next_code: u32 = 256;
-    let mut code_bits: u32 = 9;
-    let mut bit_buf: u64 = 0;
-    let mut bit_count: u32 = 0;
-
-    let flush_bits = |bit_buf: &mut u64, bit_count: &mut u32, output: &mut Vec<u8>| {
-        while *bit_count >= 8 {
-            output.push(*bit_buf as u8);
-            *bit_buf >>= 8;
-            *bit_count -= 8;
-        }
-    };
-
-    let write_code = |code: u32,
-                      code_bits: u32,
-                      bit_buf: &mut u64,
-                      bit_count: &mut u32,
-                      output: &mut Vec<u8>| {
-        *bit_buf |= (code as u64) << *bit_count;
-        *bit_count += code_bits;
-        flush_bits(bit_buf, bit_count, output);
-    };
-
-    let hash = |prefix: u16, byte: u8, table_size: usize| -> usize {
-        let h = ((prefix as u32) << 8 | byte as u32).wrapping_mul(2654435761);
-        (h as usize) & (table_size - 1)
-    };
-
-    let lookup = |prefix: u16,
-                  byte: u8,
-                  hash_prefix: &[u32],
-                  hash_suffix: &[u8],
-                  hash_code: &[u16],
-                  table_size: usize|
-     -> Option<u16> {
-        let mut idx = hash(prefix, byte, table_size);
-        loop {
-            if hash_prefix[idx] == u32::MAX {
-                return None;
-            }
-            if hash_prefix[idx] == prefix as u32 && hash_suffix[idx] == byte {
-                return Some(hash_code[idx]);
-            }
-            idx = (idx + 1) & (table_size - 1);
-        }
-    };
-
-    let insert = |prefix: u16,
-                  byte: u8,
-                  code: u16,
-                  hash_prefix: &mut [u32],
-                  hash_suffix: &mut [u8],
-                  hash_code: &mut [u16],
-                  table_size: usize| {
-        let mut idx = hash(prefix, byte, table_size);
-        loop {
-            if hash_prefix[idx] == u32::MAX {
-                hash_prefix[idx] = prefix as u32;
-                hash_suffix[idx] = byte;
-                hash_code[idx] = code;
-                return;
-            }
-            idx = (idx + 1) & (table_size - 1);
-        }
-    };
-
-    let table_sz = table_size as usize;
-
-    let mut w = input[0] as u16;
-
-    for &byte in &input[1..] {
-        if let Some(code) = lookup(w, byte, &hash_prefix, &hash_suffix, &hash_code, table_sz) {
-            w = code;
-        } else {
-            write_code(
-                w as u32,
-                code_bits,
-                &mut bit_buf,
-                &mut bit_count,
-                &mut output,
-            );
-
-            // Add to dictionary only if not full
-            if next_code <= max_code {
-                insert(
-                    w,
-                    byte,
-                    next_code as u16,
-                    &mut hash_prefix,
-                    &mut hash_suffix,
-                    &mut hash_code,
-                    table_sz,
-                );
-                next_code += 1;
-
-                if should_bump_encode_code_width(next_code, code_bits, max_bits as u32) {
-                    code_bits += 1;
-                }
-            }
-            // When dict full, just stop inserting (no clear code)
-
-            w = byte as u16;
-        }
-    }
-
-    // Output the last code
-    write_code(
-        w as u32,
-        code_bits,
-        &mut bit_buf,
-        &mut bit_count,
-        &mut output,
-    );
-
-    // Flush remaining bits
-    if bit_count > 0 {
-        output.push(bit_buf as u8);
-    }
-
+    output.extend_from_slice(&encode_body(input, max_bits, false));
     output
 }
 

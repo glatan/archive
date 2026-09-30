@@ -3,33 +3,37 @@
 //! Reference: lha header documentation ("apphead"/lzh_note) as used by
 //! the original LHA and GNU `lha`. Supported scope:
 //!
-//! - header levels 0, 1, and 2 for reading;
-//! - methods `-lh0-` (stored) and `-lhd-` (directory marker, no data);
-//!   every other method (`-lh1-`, `-lh5-`, `-lh6-`, `-lh7-`, `-lzs-`,
-//!   `-lz4-`, `-pm0-`, `-pm2-`, ...) is rejected with
-//!   [`Error::Unsupported`];
+//! - header levels 0, 1, 2, and 3 for reading;
+//! - methods `-lh0-` (stored), `-lhd-` (directory marker),
+//!   `-lh1-`/`-lh2-`/`-lh3-`, `-lh4-` through `-lh7-`,
+//!   LArc `-lzs-`/`-lz4-`/`-lz5-`, and PMarc
+//!   `-pm0-`/`-pm1-`/`-pm2-` for reading; other methods are rejected with
+//!   [Error::Unsupported];
 //! - writing emits `-lh0-`/`-lhd-` entries at header level 0, 1, or 2
 //!   (`LhaEncoder::with_level`). Level 0 requires the whole filename to
 //!   fit in one byte (at most 255 bytes); levels 1/2 carry the name
 //!   through extended headers.
 //!
 //! Layout (level 0):
-//! `[hdr_size u8][checksum u8][method 5B][packed u32le][orig u32le]
+//! [hdr_size u8][checksum u8][method 5B][packed u32le][orig u32le]
 //!  [dos time u32le][attr u8][level u8][name_len u8][name][crc16 u16le]
-//!  [data]`. `hdr_size` counts bytes from `method` through `crc16` and
-//! `checksum` is the byte sum of that range; name components are
-//! `'\\'`-separated.
+//!  [data]. hdr_size counts bytes from method through crc16 and
+//!  checksum is the byte sum of that range; name components are
+//!  backslash-separated.
 //!
-//! Level 1 keeps the same basic-header shape but appends `crc16 + OS id`
-//! and terminates the basic header with a `u16` next-header size; the
+//! Level 1 keeps the same basic-header shape but appends crc16 + OS id
+//! and terminates the basic header with a u16 next-header size; the
 //! extended-header chain then sits *after* the basic header and the
 //! packed-size field is a "skip size" that also counts those
 //! extended-header bytes. Level 2 replaces the size/checksum prefix
-//! with a single `u16` total header size (counting the size field
+//! with a single u16 total header size (counting the size field
 //! itself), stores a UNIX timestamp, and carries names in extended
-//! headers (`0x01` filename, `0x02` directory, components separated by
-//! raw `0xff`). A `0x00` extended block holds the level-2 header CRC-16.
-//! The archive is terminated by a zero header-size field.
+//! headers (0x01 filename, 0x02 directory, components separated by
+//! raw 0xff). A 0x00 extended block holds the level-2 header CRC-16.
+//! Level 3 uses a 32-byte base header (u16 word size = 4, u32 packed/
+//! original sizes, UNIX time, crc16, OS id, u32 total header length)
+//! and u32-sized extended headers, capped at 1 MiB total. The archive
+//! is terminated by a zero header-size field.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -71,10 +75,6 @@ fn u32le(b: &[u8]) -> u32 {
     u32::from_le_bytes([b[0], b[1], b[2], b[3]])
 }
 
-fn method_of(h: &[u8]) -> &[u8] {
-    &h[0..5]
-}
-
 /// (filename extension, directory extension) pair.
 type ExtNameDir = (Option<Vec<u8>>, Option<Vec<u8>>);
 
@@ -83,23 +83,35 @@ type ExtNameDir = (Option<Vec<u8>>, Option<Vec<u8>>);
 /// first `u16` extension size; each block is `u16 size` (counting the
 /// size field itself) + `u8 type` + payload, and the chain ends with a
 /// `u16` zero terminator (counted in `consumed`).
-fn walk_ext_headers(mut blocks: &[u8]) -> Result<(ExtNameDir, usize), Error> {
+fn walk_ext_headers(blocks: &[u8]) -> Result<(ExtNameDir, usize), Error> {
+    walk_ext_headers_sized(blocks, 2)
+}
+
+/// As [`walk_ext_headers`], but the size field width is `size_bytes`
+/// (2 for levels 1/2, 4 for level 3).
+fn walk_ext_headers_sized(
+    mut blocks: &[u8],
+    size_bytes: usize,
+) -> Result<(ExtNameDir, usize), Error> {
     let mut name = None;
     let mut dir = None;
     let mut consumed = 0usize;
     loop {
-        if blocks.len() < 2 {
+        if blocks.len() < size_bytes {
             return Err(Error::InvalidData("lha: truncated extended header"));
         }
-        let size = u16le(blocks) as usize;
+        let size = match size_bytes {
+            2 => u16le(blocks) as usize,
+            _ => u32le(blocks) as usize,
+        };
         if size == 0 {
-            return Ok(((name, dir), consumed + 2));
+            return Ok(((name, dir), consumed + size_bytes));
         }
-        if size < 3 || size > blocks.len() {
+        if size < size_bytes + 1 || size > blocks.len() {
             return Err(Error::InvalidData("lha: bad extended header"));
         }
-        let ty = blocks[2];
-        let payload = &blocks[3..size];
+        let ty = blocks[size_bytes];
+        let payload = &blocks[size_bytes + 1..size];
         match ty {
             0x01 => name = Some(payload.to_vec()),
             0x02 => dir = Some(payload.to_vec()),
@@ -149,14 +161,11 @@ pub fn decode(input: &[u8]) -> Result<Vec<LhaEntry>, Error> {
         if input[pos] == 0 {
             return Ok(entries);
         }
-        // All supported levels put the level byte at offset 20 and the
-        // "-lX-" method marker at offset 2. Distinguish by level byte:
-        // level 2 uses a u16 size field, levels 0/1 use a u8 size.
-        if pos + 21 > input.len()
-            || input[pos + 2] != b'-'
-            || input[pos + 3] != b'l'
-            || input[pos + 6] != b'-'
-        {
+        // All supported levels put the level byte at offset 20 and a
+        // `-xxX-` method marker at offset 2 (`-lh1-`, `-pm2-`, `-lz5-`
+        // …). Distinguish by level byte: level 2/3 use wider size
+        // fields, levels 0/1 use a u8 size.
+        if pos + 21 > input.len() || input[pos + 2] != b'-' || input[pos + 6] != b'-' {
             return Err(Error::InvalidData("lha: bad header"));
         }
         match input[pos + 20] {
@@ -165,8 +174,34 @@ pub fn decode(input: &[u8]) -> Result<Vec<LhaEntry>, Error> {
                 let size16 = u16le(&input[pos..]) as usize;
                 pos = decode_level2(input, pos, size16, &mut entries)?;
             }
+            3 => pos = decode_level3(input, pos, &mut entries)?,
             _ => return Err(Error::InvalidData("lha: bad header level")),
         }
+    }
+}
+
+/// Decode the member payload for `method`. `raw` is the packed byte
+/// range; `orig` is the header's original size. Stored-like methods
+/// return `raw` unchanged (verifying `raw.len() == orig`).
+fn decode_member_data(method: &[u8; 5], raw: &[u8], orig: usize) -> Result<Vec<u8>, Error> {
+    match method {
+        b"-lhd-" => Ok(Vec::new()),
+        // Stored / null-decoded methods.
+        b"-lh0-" | b"-lz4-" | b"-pm0-" => {
+            if raw.len() != orig {
+                return Err(Error::InvalidData("lha: size mismatch"));
+            }
+            Ok(raw.to_vec())
+        }
+        b"-lh1-" => super::lzhuf::decode(raw, orig),
+        _ if super::lzh_dyn::supported(method) => super::lzh_dyn::decode(raw, orig),
+        _ if super::lzh_st0::supported(method) => super::lzh_st0::decode(raw, orig),
+        b"-lh4-" | b"-lh5-" => crate::compress::lzh::st1::decode(14, 4, raw, orig),
+        b"-lh6-" => crate::compress::lzh::st1::decode(16, 5, raw, orig),
+        b"-lh7-" => crate::compress::lzh::st1::decode(17, 5, raw, orig),
+        _ if super::larc::supported(method) => super::larc::decode(method, raw, orig),
+        _ if super::pmarc::supported(method) => super::pmarc::decode(method, raw, orig),
+        _ => Err(Error::Unsupported("lha: unsupported method")),
     }
 }
 
@@ -183,11 +218,10 @@ fn decode_level01(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Resu
     if checksum != input[pos + 1] {
         return Err(Error::InvalidData("lha: header checksum mismatch"));
     }
-    let method = method_of(hdr);
+    let method: &[u8; 5] = hdr
+        .first_chunk::<5>()
+        .ok_or(Error::InvalidData("lha: bad method"))?;
     let is_dir = method == b"-lhd-";
-    if method != b"-lh0-" && !is_dir {
-        return Err(Error::Unsupported("lha: unsupported method"));
-    }
     let packed = u32le(&hdr[5..]) as usize;
     let orig = u32le(&hdr[9..]) as usize;
     let mtime = u32le(&hdr[13..]);
@@ -255,12 +289,9 @@ fn decode_level01(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Resu
     if data_start + take > input.len() {
         return Err(Error::InvalidData("lha: truncated entry data"));
     }
-    let data = input[data_start..data_start + take].to_vec();
-    if data.len() != orig && !is_dir {
-        // For stored entries packed size must equal original size.
-        return Err(Error::InvalidData("lha: size mismatch"));
-    }
+    let data = decode_member_data(method, &input[data_start..data_start + take], orig)?;
     if let Some(c) = crc16
+        && !is_dir
         && crate::util::crc16::crc16(&data) != c
     {
         return Err(Error::InvalidData("lha: CRC-16 mismatch"));
@@ -287,11 +318,10 @@ fn decode_level2(
         return Err(Error::InvalidData("lha: truncated header"));
     }
     let hdr = &input[pos + 2..pos + size16];
-    let method = method_of(hdr);
+    let method: &[u8; 5] = hdr
+        .first_chunk::<5>()
+        .ok_or(Error::InvalidData("lha: bad method"))?;
     let is_dir = method == b"-lhd-";
-    if method != b"-lh0-" && !is_dir {
-        return Err(Error::Unsupported("lha: unsupported method"));
-    }
     let packed = u32le(&hdr[5..]) as usize;
     let orig = u32le(&hdr[9..]) as usize;
     let mtime = u32le(&hdr[13..]);
@@ -323,10 +353,7 @@ fn decode_level2(
     if data_start + take > input.len() {
         return Err(Error::InvalidData("lha: truncated entry data"));
     }
-    let data = input[data_start..data_start + take].to_vec();
-    if data.len() != orig && !is_dir {
-        return Err(Error::InvalidData("lha: size mismatch"));
-    }
+    let data = decode_member_data(method, &input[data_start..data_start + take], orig)?;
     if !is_dir && crate::util::crc16::crc16(&data) != crc {
         return Err(Error::InvalidData("lha: CRC-16 mismatch"));
     }
@@ -339,6 +366,109 @@ fn decode_level2(
         data,
     });
     Ok(data_start + take)
+}
+
+/// Level-3 base header (32 bytes):
+/// `[word_size u16 = 4][method 5B][packed u32][orig u32]
+///  [unix time u32][reserved u8][level u8 = 3][crc16 u16le]
+///  [os id u8][header_len u32][ext headers…]`. `header_len` counts the
+/// whole header from offset 0 (including the word-size field) and is
+/// capped at 1 MiB like the reference. Extended headers use `u32`
+/// size fields and end on a `u32` zero.
+fn decode_level3(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Result<usize, Error> {
+    const BASE: usize = 32;
+    const MAX: usize = 1024 * 1024;
+    if u16le(&input[pos..]) != 4 {
+        return Err(Error::InvalidData("lha: bad level-3 word size"));
+    }
+    if pos + BASE > input.len() {
+        return Err(Error::InvalidData("lha: truncated header"));
+    }
+    let hsize = u32le(&input[pos + 24..]) as usize;
+    if !(BASE..=MAX).contains(&hsize) || pos + hsize > input.len() {
+        return Err(Error::InvalidData("lha: bad level-3 header size"));
+    }
+    let hdr = &input[pos + 2..pos + hsize];
+    let method: &[u8; 5] = hdr
+        .first_chunk::<5>()
+        .ok_or(Error::InvalidData("lha: bad method"))?;
+    let is_dir = method == b"-lhd-";
+    let packed = u32le(&hdr[5..]) as usize;
+    let orig = u32le(&hdr[9..]) as usize;
+    let mtime = u32le(&hdr[13..]);
+    if hdr[18] != 3 {
+        return Err(Error::InvalidData("lha: bad header level"));
+    }
+    let crc = u16le(&hdr[19..]);
+    // Extended headers at absolute offset 28 (hdr[26..]), u32 sizes.
+    let ((name, dir), _) = walk_ext_headers_sized(&hdr[26..], 4)?;
+    let mut name = match (name, dir) {
+        (Some(n), Some(d)) => {
+            let mut s = sanitize_name(&d)?;
+            if !s.is_empty() && !s.ends_with('/') {
+                s.push('/');
+            }
+            s.push_str(&sanitize_name(&n)?);
+            s
+        }
+        (Some(n), None) => sanitize_name(&n)?,
+        _ => return Err(Error::InvalidData("lha: no filename")),
+    };
+    if is_dir && !name.ends_with('/') {
+        name.push('/');
+    }
+    let data_start = pos + hsize;
+    let take = if is_dir { 0 } else { packed };
+    if data_start + take > input.len() {
+        return Err(Error::InvalidData("lha: truncated entry data"));
+    }
+    let data = decode_member_data(method, &input[data_start..data_start + take], orig)?;
+    if !is_dir && crate::util::crc16::crc16(&data) != crc {
+        return Err(Error::InvalidData("lha: CRC-16 mismatch"));
+    }
+    entries.push(LhaEntry {
+        name,
+        level: 3,
+        is_dir,
+        crc16: Some(crc),
+        mtime,
+        data,
+    });
+    Ok(data_start + take)
+}
+
+/// Wrap  in a level-0 member header for  and append
+/// the archive terminator. Test-only helper shared by the codec
+/// mirror-encoder tests.
+#[cfg(test)]
+pub(crate) fn level0_archive(
+    method: &[u8; 5],
+    name: &str,
+    payload: &[u8],
+    orig: usize,
+    data: &[u8],
+) -> Vec<u8> {
+    let namelen = name.len();
+    let hsize = (5 + 4 + 4 + 4 + 1 + 1 + 1 + namelen + 2) as u8;
+    let mut a = Vec::new();
+    a.push(hsize);
+    a.push(0); // checksum, filled below
+    a.extend_from_slice(method);
+    a.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    a.extend_from_slice(&(orig as u32).to_le_bytes());
+    a.extend_from_slice(&0x1234_5678u32.to_le_bytes()); // dos time
+    a.push(0x20); // attribute
+    a.push(0); // level
+    a.push(namelen as u8);
+    a.extend_from_slice(name.as_bytes());
+    a.extend_from_slice(&crate::util::crc16::crc16(data).to_le_bytes());
+    let cksum = a[2..2 + hsize as usize]
+        .iter()
+        .fold(0u8, |x, &b| x.wrapping_add(b));
+    a[1] = cksum;
+    a.extend_from_slice(payload);
+    a.push(0); // terminator
+    a
 }
 
 #[cfg(test)]
@@ -374,7 +504,7 @@ mod tests {
     #[test]
     fn rejects_unsupported_method() {
         let mut a = crate::archive::lha::encode::encode(&[("f", b"x")]).unwrap();
-        a[4] = b'1'; // -lh1-
+        a[4] = b'1'; // -l10- (unsupported)
         // recompute checksum
         let hs = a[0] as usize;
         a[1] = a[2..2 + hs].iter().fold(0u8, |x, &b| x.wrapping_add(b));

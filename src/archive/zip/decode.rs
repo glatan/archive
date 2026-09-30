@@ -954,10 +954,26 @@ fn extract_entry(
     let data = match record.actual_compression_method {
         0 => effective_compressed,
         1 => super::unshrink::unshrink(&effective_compressed)?,
-        2 => super::expand::expand(&effective_compressed, 1)?,
-        3 => super::expand::expand(&effective_compressed, 2)?,
-        4 => super::expand::expand(&effective_compressed, 3)?,
-        5 => super::expand::expand(&effective_compressed, 4)?,
+        2 => super::expand::expand(
+            &effective_compressed,
+            1,
+            effective_uncompressed_size as usize,
+        )?,
+        3 => super::expand::expand(
+            &effective_compressed,
+            2,
+            effective_uncompressed_size as usize,
+        )?,
+        4 => super::expand::expand(
+            &effective_compressed,
+            3,
+            effective_uncompressed_size as usize,
+        )?,
+        5 => super::expand::expand(
+            &effective_compressed,
+            4,
+            effective_uncompressed_size as usize,
+        )?,
         6 => super::implode::implode(
             &effective_compressed,
             record.flags,

@@ -6,8 +6,9 @@ use crate::error::Error;
 
 use super::decode::{MARKER, NAME_LEN};
 
-/// Encoder for method-1 (obsolete unpacked), method-2 (stored) and
-/// method-3 (packed/RLE90) ARC archives.
+/// Encoder for ARC archives supporting methods 1 (obsolete unpacked),
+/// 2 (stored), 3 (packed/RLE90), 4 (squeezed), 8 (crunched) and 9
+/// (squashed).
 pub struct ArcEncoder {
     out: Vec<u8>,
 }
@@ -27,8 +28,9 @@ impl ArcEncoder {
 
     /// Add a file entry with an explicit method byte. Supported
     /// methods: `1` (obsolete unpacked — the record carries no
-    /// date/time/CRC-16/length fields), `2` (stored) and `3`
-    /// (packed/RLE90). Any other method is rejected with
+    /// date/time/CRC-16/length fields), `2` (stored), `3`
+    /// (packed/RLE90), `4` (squeezed), `8` (crunched) and `9`
+    /// (squashed). Any other method is rejected with
     /// [`Error::Unsupported`]. `date`/`time` are ignored
     /// for method 1.
     pub fn add_file_with_method(
@@ -47,20 +49,37 @@ impl ArcEncoder {
         {
             return Err(Error::InvalidData("arc: bad filename"));
         }
-        if method == 0 || method > 3 {
+        if !matches!(method, 1..=4 | 8 | 9) {
             return Err(Error::Unsupported("arc: unsupported method"));
         }
+        let body = match method {
+            1 | 2 => data.to_vec(),
+            3 => super::rle90::encode(data),
+            4 => super::squeeze::encode(data),
+            8 => {
+                // Crunched: maxbits byte (12) then a dynamic-LZW stream
+                // over the RLE90-packed data.
+                let rle = super::rle90::encode(data);
+                let mut b = Vec::with_capacity(rle.len() + 1);
+                b.push(12u8);
+                b.extend_from_slice(&crate::compress::lzw::encode::encode_body(&rle, 12, true));
+                b
+            }
+            9 => crate::compress::lzw::encode::encode_body(data, 13, true),
+            _ => unreachable!(),
+        };
         self.out.push(MARKER);
         self.out.push(method);
         let mut field = [0u8; NAME_LEN];
         field[..name.len()].copy_from_slice(name.as_bytes());
         self.out.extend_from_slice(&field);
+        // The header carries the stored (compressed) size first.
         self.out
-            .extend_from_slice(&(data.len() as u32).to_le_bytes());
+            .extend_from_slice(&(body.len() as u32).to_le_bytes());
         if method == 1 {
             // Obsolete unpacked member: raw data follows the size
             // directly, with no date/time/CRC-16/length fields.
-            self.out.extend_from_slice(data);
+            self.out.extend_from_slice(&body);
             return Ok(());
         }
         self.out.extend_from_slice(&date.to_le_bytes());
@@ -68,16 +87,10 @@ impl ArcEncoder {
         // The CRC-16 covers the uncompressed data.
         self.out
             .extend_from_slice(&crate::util::crc16::crc16(data).to_le_bytes());
-        let packed;
-        let body: &[u8] = if method == 3 {
-            packed = super::rle90::encode(data);
-            &packed
-        } else {
-            data
-        };
+        // Original (uncompressed) file length closes the header.
         self.out
-            .extend_from_slice(&(body.len() as u32).to_le_bytes());
-        self.out.extend_from_slice(body);
+            .extend_from_slice(&(data.len() as u32).to_le_bytes());
+        self.out.extend_from_slice(&body);
         Ok(())
     }
 

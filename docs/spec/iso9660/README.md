@@ -64,12 +64,12 @@
 | 34 | interleaved file (file unit size / interleave gap ≠ 0) | ECMA-119 §6.4.3, §9.1.7/8 | ✅ | unit ブロックを (unit+gap) 間隔で読み連結。`interleaved_file`, `interleave_gap_without_unit_rejected` |
 | 39 | RRIP `PN`/`CL`/`RE` (PL は informational で読み飛ばし) | RRIP 1.12 §4.1.2, §4.1.5 | ✅ | `dev_t` を `IsoEntry` に公開、CL で relocated dir の実体 walk、RE 複製は列挙スキップ。`rr_pn_device`, `rr_cl_re_relocated_dir`, `rr_cl_rejects_bad_target` |
 
+| 36 | El Torito boot record VD (type 0, sysid EL TORITO SPECIFICATION) + boot catalog 解釈: validation entry (key bytes/checksum/platform/id) + initial/section entries (indicator/media/segment/sectors/load LBA + image 抽出) を `IsoImage.el_torito` で公開 | El Torito 1.0 §2-2.5 (`sources/eltorito_spec_1.0.pdf`) | ✅ | `decodes_el_torito`, `el_torito_section_entries`, `rejects_bad_el_torito_validation`, `rejects_bad_el_torito_checksum`, `rejects_out_of_range_el_torito_catalog`, `skips_non_eltorito_boot_record`, `test_iso9660_eltorito_image` (bsdtar `-o boot=` 実 fixture `bsdtar-eltorito.iso` で payload 照合) |
 ## 意図的な scope 制約
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
 
-| 36 | El Torito boot catalog / Boot Record の解釈 | ❌ intentional scope | VD type 0 は読み飛ばし。El Torito 1.0 spec (Phoenix/IBM 1995) を `sources/eltorito_spec_1.0.pdf` にスナップショット済み — 情報源は確保、read 実装は未着手 |
 | 37 | extended attribute record の内容解釈 | ❌ intentional scope | extent 開始ブロックへの加算のみ (読み飛ばし) |
 | 38 | multi-session / UDF bridge / HFS ハイブリッドの別ツリー | ❌ intentional scope | primary + Joliet SVD のみ。UDF 実装時の一次仕様は OSTA UDF 2.60 / ECMA TR/112-2 (manifest `no_url_available` `osta-udf-260`) — ISO 9660 拡張ではなく別 FS 扱い |
 | 39b | RRIP `PN`/`CL`/`RE`/`NM`/`PX`/`SL`/`TF`/`CE`/`SP`/`ST`/`ER` 以外の残エントリ (hardlink dev/inode、Apple `AA`/`BA` 等) | ❌ intentional scope | 読み飛ばし (decode に必須でない)。zisofs `ZF` は #35 で対応済み。Apple 拡張の資料は TN FL36 (`sources/apple_iso9660_fl36.html`) |
@@ -82,5 +82,6 @@
 | `tests/fixtures/iso9660/bsdtar-plain.iso` | bsdtar (libarchive ISO9660 writer) | plain ISO9660、大文字名 + `;1` |
 | `tests/fixtures/iso9660/bsdtar-rockridge.iso` | bsdtar | SUSP 1.10 + RRIP 1.12、POSIX 名・mode・symlink |
 | `tests/fixtures/iso9660/bsdtar-joliet.iso` | bsdtar | Joliet SVD、UCS-2BE 名 |
+| `tests/fixtures/iso9660/bsdtar-eltorito.iso` | bsdtar -o boot= | El Torito boot record + catalog + boot.img payload |
 
 `bsdtar -tf` / `bsdtar -tvf` による一覧・メタデータ照合済み (実ツール oracle)。

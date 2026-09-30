@@ -419,6 +419,106 @@ fn test_tar_pax_sparse_roundtrip_integration() {
 }
 
 #[test]
+fn test_tar_gnu_sparse_roundtrip() {
+    let mut encoder = tar::encode::TarEncoder::new();
+    encoder
+        .add_sparse_file("sparse.bin", b"HELLOWORLD", &[(0, 5), (2048, 5)], 4096)
+        .unwrap();
+
+    let tar_data = encoder.finish();
+    // typeflag 'S' in the entry header
+    assert_eq!(tar_data[156], b'S');
+    let entries = tar::decode::decode(&tar_data).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0].header.file_type,
+        tar::header::FileType::GnuSparse
+    );
+    assert_eq!(entries[0].header.name, "sparse.bin");
+    assert_eq!(entries[0].header.size, 4096);
+    assert_eq!(entries[0].header.sparse_map, vec![(0, 5), (2048, 5)]);
+    assert_eq!(entries[0].data, b"HELLOWORLD");
+}
+
+#[test]
+fn test_tar_gnu_sparse_extended_map() {
+    // Six extents exceed the four inline header slots and force a
+    // 512-byte extended sparse block.
+    let map: Vec<(u64, u64)> = (0..6).map(|i| (i * 4096, 16)).collect();
+    let data = vec![0xABu8; 96];
+    let mut encoder = tar::encode::TarEncoder::new();
+    encoder
+        .add_sparse_file("big.bin", &data, &map, 6 * 4096)
+        .unwrap();
+
+    let tar_data = encoder.finish();
+    assert_eq!(tar_data[482], 1); // isextended
+    let entries = tar::decode::decode(&tar_data).unwrap();
+    assert_eq!(entries[0].header.sparse_map, map);
+    assert_eq!(entries[0].data, data);
+}
+
+#[test]
+fn test_tar_gnu_sparse_long_name() {
+    // The old 'S' layout has no prefix field; long names must come
+    // through a GNU LongName header.
+    let name = format!("{}/{}", "d".repeat(80), "f".repeat(80));
+    let mut encoder = tar::encode::TarEncoder::new();
+    encoder.add_sparse_file(&name, b"X", &[(0, 1)], 10).unwrap();
+    let entries = tar::decode::decode(&encoder.finish()).unwrap();
+    assert_eq!(entries[0].header.name, name);
+}
+
+#[test]
+fn test_tar_gnu_sparse_oracle() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let has_tar = Command::new("tar")
+        .arg("--version")
+        .output()
+        .map(|o| !o.stdout.is_empty())
+        .unwrap_or(false);
+    if !has_tar {
+        return;
+    }
+    let map: Vec<(u64, u64)> = vec![(0, 5), (2048, 5), (8192, 6), (16384, 5), (20480, 5)];
+    let data: Vec<u8> = (0..26u32).map(|i| b'A' + (i % 26) as u8).collect();
+    let mut encoder = tar::encode::TarEncoder::new();
+    encoder
+        .add_sparse_file("sparse.bin", &data, &map, 24581)
+        .unwrap();
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_gnu_sparse_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("test.tar");
+    std::fs::write(&path, encoder.finish()).unwrap();
+    let output = Command::new("tar")
+        .args(["-xf", path.to_str().unwrap(), "-C"])
+        .arg(&dir)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "tar extract failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let got = std::fs::read(dir.join("sparse.bin")).unwrap();
+    // GNU tar expands the holes; rebuild the expected logical file.
+    let mut want = vec![0u8; 24581];
+    let mut off = 0usize;
+    for (o, l) in &map {
+        want[*o as usize..*o as usize + *l as usize].copy_from_slice(&data[off..off + *l as usize]);
+        off += *l as usize;
+    }
+    assert_eq!(got, want);
+}
+
+#[test]
 fn test_tar_decode_rejects_truncated_archive() {
     let mut encoder = tar::encode::TarEncoder::new();
     encoder.add_file("truncated.txt", b"truncate me");

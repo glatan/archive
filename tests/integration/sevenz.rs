@@ -104,7 +104,7 @@ fn encoded_method_system_extract_compat(method: sevenz::encode::SevenZMethod, pa
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("archive_test_sevenz_enc_{uniq}"));
+    let dir = std::env::temp_dir().join(format!("archive_test_sevenz_enc_{method:?}_{uniq}"));
     std::fs::create_dir_all(&dir).unwrap();
     let archive_path = dir.join("encoded.7z");
 

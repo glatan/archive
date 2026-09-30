@@ -4,7 +4,7 @@
 |------|------|
 | 基準仕様 | [[MS-CAB]](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) Cabinet File Format (Microsoft Open Specifications、2011-03-04 版 PDF。HTML 版: <https://learn.microsoft.com/en-us/previous-versions/bb417343(v=msdn.10)>、ローカルスナップショット: `docs/spec/sources/ms-cab_20110304.pdf`) |
 | 形式概要 | CFHEADER + CFFOLDER 配列 + CFFILE 配列 + CFDATA ブロック列。フォルダ単位で圧縮 |
-| 実装範囲 | read/write (単一 cabinet・単一 folder の NONE/MSZIP) + LZX folder の read + `decode_parts` による multi-cabinet set read。Quantum / LZX write / multi-cabinet write は intentional scope 外 |
+| 実装範囲 | read/write (単一 cabinet・単一 folder の NONE/MSZIP) + LZX/Quantum folder の read + `decode_parts` による multi-cabinet set read。LZX/Quantum write / multi-cabinet write は intentional scope 外 |
 
 参照: <https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf>
 
@@ -13,8 +13,8 @@
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
 | compression NONE | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) | ✅ | ✅ | 単一 folder write |
-| compression MSZIP | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) + [RFC 1951](https://www.rfc-editor.org/rfc/rfc1951.txt) | ✅ | — | `compress::deflate` 再利用 |
-| compression Quantum | MS-CAB (名称のみ) + de facto 参照: libmspack `qtmd.c` (LGPL-2.1)、compcol (MIT)、unquantum 解説 | ❌ | — | intentional scope。decode は参照実装が複数存在し実装可能。encode は公開 encoder が一切存在せず恒久的対象外候補 |
+| compression MSZIP | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) + [RFC 1951](https://www.rfc-editor.org/rfc/rfc1951.txt) | ✅ | ✅ | `compress::deflate` 再利用 (`mszip_roundtrip` 等) |
+| compression Quantum | MS-CAB (名称のみ) + de facto 参照: libmspack `qtmd.c` (LGPL-2.1)、compcol (MIT)、unquantum 解説 | ✅ | — | adaptive arithmetic coder + LZ。encode は公開 encoder が一切存在せず恒久的対象外 |
 | compression LZX | MS "LZX Format" doc + cabextract `lzx.c` errata | ✅ | — | `compress::lzx` (lzxd とコア共有)。window bits 15-21、cabextract fixture で検証 |
 | multi-cabinet set | [MS-CAB](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) | ✅ | ❌ | `decode_parts(&[&[u8]])` が set メンバーを順に連結 (iCabinet/setID 検証、folder fragment 連結・CFDATA 分割再構成)。write は単一キャビネットのみ |
 
@@ -66,12 +66,18 @@
 | 22 | encode: CFDATA csum を実値出力 (cbData/cbUncomp seed + payload) | MS-CAB §2.2 | ✅ | decoder csum 検証パス (`checksum`) が encode 出力で成立 |
 | 22a | encode: `FLAG_RESERVE_PRESENT` + cbCFHeader/cbCFFolder/cbCFData の reserved 領域をゼロフィル出力 (csum は CFDATA reserve を含む) | MS-CAB §2.1, §2.2 | ✅ | `reserve_roundtrip_stored`, `reserve_roundtrip_mszip`, `reserve_wire_layout` (`MscabEncoder::reserve`; cbCFHeader 上限 60,000 は `finish` で検証 `reserve_rejects_oversize_header`) |
 | 24 | tcompTYPE_LZX (3): CFFOLDER typeCompress 上位 window bits (15-21) で window 決定、CFDATA 列を連続 bitstream として LZX 展開 (folder 内 window 継続・multi-cabinet fragment 連結対応) | MS-CAB §3.1 + MS "LZX Format" doc (+cabextract `lzx.c` errata) | ✅ | `compress::lzx::decode_cabinet` (lzxd コア共有)。`cab_*`, `parses_lzx_cabinet`, `lzx_stream_spans_cfdata_blocks`, `lzx_window_size_bits`, `test_mscab_lzx_fixture`, `test_mscab_lzx_large_fixture` |
+| 23 | tcompTYPE_QUANTUM (2): typeCompress 上位 window bits (10-21) で window 決定、CFDATA 列を連続 bitstream + 各 block 後の synthesize 0xFF sentinel として Quantum 展開 | MS-CAB §3.1 + de facto 参照 (manifest `no_url_available` の `libmspack-quantum`/`compcol`、Matthew Russotto 逆解析) | ✅ | `archive::mscab::quantum`。`decodes_real_text_stream`, `decodes_single_frame`, `decodes_multi_frame`, `decodes_quantum_folder`, `test_mscab_quantum_fixture` (実 cab: 16 blocks/524159B zeros), `test_mscab_quantum_synthesized_cab`, `test_mscab_quantum_cabextract_interop`。公開 encoder は存在しないため encode は恒久的対象外 |
+
+### その他要件
+
+| # | 要件 | 仕様参照 | 状態 | 備考 |
+|---|------|----------|-----------|------|
+
+| 25 | multi-cabinet set (.set / disk spanning) read | MS-CAB §2.1, §2.3 | ✅ | `decode_parts` が iCabinet 順の member 列を受理 (index/setID 不一致は reject)。iFolder 0xFFFD/0xFFFE/0xFFFF と cbUncomp==0 CFDATA 分割を解決 (continued entry の dedup は name+cbFile 一致で判定、CFHEADER の PREV/NEXT flag 自体は内容を解決に使わないため未検証)。`decode_parts_split_file`, `decode_parts_cfdata_block_split`, `decode_parts_set_id_mismatch`, `decode_parts_index_mismatch`, `decode_parts_missing_earlier_member`, `decode_parts_rejects_empty` |
 
 ### Intentional scope (実装対象外)
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 23 | tcompTYPE_QUANTUM (2) | MS-CAB §3.1 | ❌ | Quantum codec の厳密仕様は MS-CAB 内に完結しないが、de facto decode 参照が存在 (manifest `no_url_available` の `libmspack-quantum`/`compcol`、Matthew Russotto 逆解析、unquantum 解説)。公開 encoder は存在しないため encode は恒久的対象外候補 |
 
-| 25 | multi-cabinet set (.set / disk spanning) | MS-CAB §2.1, §2.3 | ✅ | `decode_parts` が iCabinet 順の member 列を受理 (index/setID 不一致は reject)。iFolder 0xFFFD/0xFFFE/0xFFFF と cbUncomp==0 CFDATA 分割を解決 (continued entry の dedup は name+cbFile 一致で判定、CFHEADER の PREV/NEXT flag 自体は内容を解決に使わないため未検証)。`decode_parts_split_file`, `decode_parts_cfdata_block_split`, `decode_parts_set_id_mismatch`, `decode_parts_index_mismatch`, `decode_parts_missing_earlier_member`, `decode_parts_rejects_empty` |
 | 26 | 属性 / 日時のファイルシステム復元 | MS-CAB §2.3 | ❌ | 展開時の metadata 適用は対象外 (アーカイブ抽出の範囲)。encode 側も date/time/attribs は 0 出力 |

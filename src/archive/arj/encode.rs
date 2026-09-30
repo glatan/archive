@@ -46,8 +46,9 @@ impl ArjEncoder {
         fixed[1] = 10; // archiver version (ARJ 2.x)
         fixed[2] = 1; // min version to extract
         fixed[3] = 2; // host OS: unix
-        fixed[4] = 0x10; // flags: backup-type (per spec, plain archives use 0x10)
-        // fixed[5] file_type for main header = 0; time fields 0.
+        fixed[4] = 0x10; // flags: path separator translated
+        fixed[5] = 2; // security version
+        fixed[6] = 2; // file type: main header
         self.write_header(&fixed, "", "");
     }
 
@@ -68,9 +69,9 @@ impl ArjEncoder {
         fixed[5] = 0; // method 0: stored
         fixed[6] = 0; // file type: binary
         fixed[8..12].copy_from_slice(&mtime.to_le_bytes());
-        fixed[12..16].copy_from_slice(&crate::util::crc32::crc32(data).to_le_bytes());
-        fixed[16..20].copy_from_slice(&(data.len() as u32).to_le_bytes());
-        fixed[20..24].copy_from_slice(&(data.len() as u32).to_le_bytes());
+        fixed[12..16].copy_from_slice(&(data.len() as u32).to_le_bytes()); // packed
+        fixed[16..20].copy_from_slice(&(data.len() as u32).to_le_bytes()); // original
+        fixed[20..24].copy_from_slice(&crate::util::crc32::crc32(data).to_le_bytes());
         self.write_header(&fixed, name, "");
         self.out.extend_from_slice(data);
         Ok(())

@@ -299,3 +299,97 @@ fn test_squashfs_encoder_symlink_fragments_ids() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn test_squashfs_encoder_extended_unsquashfs() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    // Exercise every new writer feature in one image: sparse blocks,
+    // device/IPC inodes, xattrs, directory index, export table.
+    let mut enc = squashfs::encode::SquashfsEncoder::new()
+        .with_block_size(8192)
+        .with_dir_index()
+        .with_export_table()
+        .with_mtime(1_700_000_000);
+    let mut sparse = vec![0u8; 8192 * 2];
+    sparse.extend_from_slice(b"data-tail");
+    enc.add_file("sparse.bin", &sparse);
+    enc.add_file_xattrs("tagged.txt", b"tagged content", &[("user.note", b"hi")]);
+    enc.add_symlink("link", "/sparse.bin");
+    enc.add_char_device("null", 1, 3);
+    enc.add_fifo("pipe");
+    for i in 0..30 {
+        enc.add_file(&format!("many/f{i:02}"), b"m");
+    }
+    let image = enc.finish().unwrap();
+
+    // internal roundtrip first
+    let decoded = squashfs::decode::decode(&image).unwrap();
+    let get = |n: &str| decoded.entries.iter().find(|e| e.name == n).unwrap();
+    assert_eq!(get("sparse.bin").data, sparse);
+    assert_eq!(get("tagged.txt").xattrs.len(), 1);
+    assert!(!get("many").dir_index.is_empty());
+
+    // oracle: real unsquashfs must accept the image
+    let has_unsquashfs = Command::new("unsquashfs")
+        .arg("-version")
+        .output()
+        .map(|o| !o.stdout.is_empty())
+        .unwrap_or(false);
+    if !has_unsquashfs {
+        return;
+    }
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_sqfs_ext_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let image_path = dir.join("ext.sqfs");
+    std::fs::write(&image_path, &image).unwrap();
+    let dest = dir.join("out");
+    // Extract only regular paths: containerized unsquashfs may lack
+    // CAP_MKNOD for the device nodes.
+    let output = Command::new("unsquashfs")
+        .arg("-d")
+        .arg(&dest)
+        .arg("-no-progress")
+        .arg("-no-xattrs")
+        .arg(&image_path)
+        .arg("sparse.bin")
+        .arg("tagged.txt")
+        .arg("many/f29")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "unsquashfs failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(std::fs::read(dest.join("sparse.bin")).unwrap(), sparse);
+    assert_eq!(
+        std::fs::read(dest.join("tagged.txt")).unwrap(),
+        b"tagged content"
+    );
+    assert_eq!(std::fs::read(dest.join("many/f29")).unwrap(), b"m");
+    // Special nodes must appear in the listing with device types.
+    let list = Command::new("unsquashfs")
+        .arg("-lls")
+        .arg(&image_path)
+        .output()
+        .unwrap();
+    assert!(list.status.success());
+    let list = String::from_utf8_lossy(&list.stdout).into_owned();
+    assert!(
+        list.lines()
+            .any(|l| l.starts_with('c') && l.contains("null")),
+        "char device missing from -lls output: {list}"
+    );
+    assert!(
+        list.lines()
+            .any(|l| l.starts_with('p') && l.contains("pipe")),
+        "fifo missing from -lls output: {list}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

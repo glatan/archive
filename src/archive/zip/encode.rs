@@ -50,6 +50,16 @@ pub enum ZipCompression {
     Xz,
     /// Compress the entry with PPMd.
     Ppmd,
+    /// Compress the entry with the legacy Shrinking method (method 1).
+    Shrunk,
+    /// Compress the entry with the legacy Reducing method, with the given
+    /// compression factor 1-4 (methods 2-5).
+    Reduce(u8),
+    /// Compress the entry with the legacy Imploding method (method 6),
+    /// using an 8 KiB dictionary and three Shannon-Fano trees.
+    Implode,
+    /// Compress the entry with Deflate64 (method 9).
+    Deflate64,
 }
 
 /// Metadata for an encoded ZIP entry.
@@ -697,6 +707,10 @@ const fn entry_flags(options: &ZipEntryOptions) -> u16 {
     if options.use_data_descriptor {
         flags |= DATA_DESCRIPTOR_FLAG;
     }
+    if let ZipCompression::Implode = options.compression {
+        // Bit 1: 8 KiB dictionary, bit 2: three Shannon-Fano trees.
+        flags |= 0x0006;
+    }
     flags
 }
 
@@ -773,6 +787,15 @@ fn compress_data(data: &[u8], compression: ZipCompression) -> Result<(u16, Vec<u
                 ))
             }
         }
+        ZipCompression::Shrunk => Ok((1, super::unshrink::shrink(data))),
+        ZipCompression::Reduce(factor) => {
+            if !(1..=4).contains(&factor) {
+                return Err(Error::InvalidData("zip: reduce factor must be 1-4"));
+            }
+            Ok((factor as u16 + 1, super::expand::reduce(data, factor)))
+        }
+        ZipCompression::Implode => Ok((6, super::implode::implode_encode(data, true, true))),
+        ZipCompression::Deflate64 => Ok((9, crate::compress::deflate64::encode::encode(data))),
         ZipCompression::Ppmd => {
             #[cfg(feature = "sevenz")]
             {
@@ -808,6 +831,10 @@ const fn compression_method_id(compression: ZipCompression) -> u16 {
         ZipCompression::Zstd => 93,
         ZipCompression::Xz => 95,
         ZipCompression::Ppmd => 98,
+        ZipCompression::Shrunk => 1,
+        ZipCompression::Reduce(factor) => factor as u16 + 1,
+        ZipCompression::Implode => 6,
+        ZipCompression::Deflate64 => 9,
     }
 }
 
@@ -823,6 +850,7 @@ fn compute_version_needed(compression: ZipCompression, zip64: bool, aes: bool) -
     match compression {
         ZipCompression::Bzip2 => version = version.max(ZIP_VERSION_BZIP2),
         ZipCompression::Lzma | ZipCompression::Ppmd => version = version.max(63),
+        ZipCompression::Deflate64 => version = version.max(21),
         _ => {}
     }
     version
