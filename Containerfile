@@ -58,9 +58,13 @@ ENTRYPOINT ["bash"]
 # ── test target ──────────────────────────────────────────────
 FROM base AS test
 COPY . .
+# cargo clean -p forces the crate itself to rebuild: the cache mount's
+# mtime-based fingerprints can otherwise reuse stale binaries when source
+# files arrive with older mtimes (e.g. 9p/drvfs mounts).
 RUN --mount=type=cache,id=cargo-registry,target=/root/.cargo/registry \
     --mount=type=cache,id=cargo-git,target=/root/.cargo/git \
     --mount=type=cache,id=test-target,target=/workspace/target \
+    cargo clean -p archive && \
     cargo test --all-features --no-run && \
     cp -a target/debug /workspace/_target_debug
 RUN mkdir -p target && mv _target_debug target/debug
@@ -72,6 +76,7 @@ COPY . .
 RUN --mount=type=cache,id=cargo-registry,target=/root/.cargo/registry \
     --mount=type=cache,id=cargo-git,target=/root/.cargo/git \
     --mount=type=cache,id=fuzz-target,target=/workspace/target \
+    cargo clean -p archive -p archive-fuzz && \
     cargo build --release -p archive-fuzz && \
     cp target/release/archive-fuzz /usr/local/bin/
 ENTRYPOINT ["/usr/local/bin/archive-fuzz"]
