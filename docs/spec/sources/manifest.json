@@ -949,7 +949,7 @@
    "format": "lha",
    "title": "LHA ソースファイル群 2.11 (吉崎栄泰 / Vector fh002420)",
    "version": "LHA 2.11 (1991-03-03)",
-   "note": "オリジナル作者吉崎による一次実装。lh0-lh5 + LArc (-lzs-/-lz4-/-lz5-) の encode/decode 実装 (SLIDEHUF 系は asm) と header level 0-2 処理を収録。ライセンスは LHA 独自フリー表記 (使用・複写・転載・再配布自由、商用利用可・多少の義務あり)。lh6/lh7/pm*/lhx は本作より後の拡張で未収録",
+   "note": "オリジナル作者吉崎による一次実装。lh0-lh5 + LArc (-lzs-/-lz4-/-lz5-) の encode/decode 実装 (SLIDEHUF 系は asm) と header level 0-2 処理を収録。ライセンスは LHA 独自フリー表記 (使用・複写・転載・再配布自由、商用無料で許諾条件わずか、「ソースの一部を他プログラムに組み込むことも制限しない」、再配布は README.DOC 同梱義務)。lh6/lh7/pm*/lhx は本作より後の拡張で未収録",
    "reference_url": [
     "https://www.vector.co.jp/download/file/dos/util/fh002420.html",
     "https://ftp.vector.co.jp/00/24/521/lha211_s.lzh"
@@ -971,7 +971,7 @@
    "format": "arc",
    "title": "ARC 5.21 for Unix (Howard Chu port of SEA ARC)",
    "version": "5.21 patch level 6 / Debian arc 5.21q",
-   "note": "GPL (SEA 1985-87、版番号未記入)。squeeze/crunch/squash の encode+decode 参照実装。同梱 Arcinfo が ARC 5.xx directory format を記述。Debian main の `arc`/`nomarch`/`unar` が interop oracle として利用可能",
+   "note": "原典文言は「GPL の条項で」(SEA 1985-87、版番号未記入)。Debian copyright では GPL-2 (一部 GPL-2+) と整理。squeeze/crunch/squash の encode+decode 参照実装。同梱 Arcinfo が ARC 5.xx directory format を記述。Debian main の `arc`/`nomarch`/`unar` が interop oracle として利用可能",
    "reference_url": [
     "https://github.com/hyc/arc",
     "https://github.com/ani6al/arc",
@@ -1005,7 +1005,7 @@
    "format": "zip",
    "title": "hwzip + 'Shrink, Reduce, and Implode: The Legacy Zip Compression Methods' (Hans Wennborg)",
    "version": "hwzip-2.4",
-   "note": "ZIP method 1-6 (Shrink/Reduce/Implode) の encode/decode 双方を解説する記事 + 参照実装。decode 側は Info-ZIP unshrink.c/unreduce.c/explode.c も既存参照",
+   "note": "hwzip コードは Unlicense (public domain)。記事本文は © Hans Wennborg (別途許諾文なし、参照利用のみ)。ZIP method 1-6 (Shrink/Reduce/Implode) の encode/decode 双方を解説する記事 + 参照実装。decode 側は Info-ZIP unshrink.c/unreduce.c/explode.c も既存参照",
    "reference_url": [
     "https://www.hanshq.net/zip2.html",
     "https://github.com/madler/unzip"
@@ -1016,7 +1016,7 @@
    "format": "arj",
    "title": "UNARJ (unarj.c / decode.c, Robert K Jung)",
    "version": "UNARJ 2.41",
-   "note": "ARJ 公式 decoder ソース (freeware)。method 1-4 decode・garbled flag・multi-volume 処理の参照。TECHNOTE.DOC に method 概略記述あり。Debian `arj` は non-free のため oracle は unar/7z を推奨",
+   "note": "ARJ 公式 decoder ソース (制限付き freeware: ソース利用は「ARJ archiver＝圧縮+解凍の双方を行う製品」でない範囲のみ自由、改変版は改変表示必須、再配布は無改変完全パッケージ・無償のみ)。本 crate は ARJ read+write を持つため同条件に触れ得る — 参照・oracle 用途のみでコード取り込み不可。method 1-4 decode・garbled flag・multi-volume 処理の参照。TECHNOTE.DOC に method 概略記述あり。Debian `arj` は non-free のため oracle は unar/7z を推奨",
    "reference_url": [
     "http://fileformats.archiveteam.org/wiki/ARJ"
    ]
@@ -1037,7 +1037,7 @@
    "format": "mscfb",
    "title": "MS-CFB write reference implementations",
    "version": "—",
-   "note": "write 側参照: cfb crate (MIT/Apache-2.0, Rust read/write)、Apache POI POIFS (Apache-2.0)、libgsf (LGPL)。[MS-CFB] spec 内に write 要件は完結",
+   "note": "write 側参照: cfb crate (MIT, Rust read/write)、Apache POI POIFS (Apache-2.0)、libgsf (LGPL-2.1)。[MS-CFB] spec 内に write 要件は完結",
    "reference_url": [
     "https://github.com/mdsteele/rust-cfb",
     "https://gitlab.gnome.org/GNOME/libgsf"
@@ -1048,7 +1048,7 @@
    "format": "pea",
    "title": "PEA crypto primitives 参照仕様",
    "version": "—",
-   "note": "pea#18 の crypto ストリームは各アルゴリズム仕様が公開済み: EAX (Bellare-Rogaway-Wagner 論文)、Twofish/Serpent spec、Whirlpool (ISO/IEC 10118-3)、HMAC RFC 2104。block cipher + AEAD 実装が前提となるため crypto 領域として intentional scope 維持",
+   "note": "pea#18 の crypto ストリームは各アルゴリズム仕様が公開済み: EAX (Bellare-Rogaway-Wagner 論文、OCB の patent-free 代替として設計)、Twofish (作者が特許申請なし・完全フリーと明言)、Serpent (作者が public domain 宣言 — 最適化実装コードのみ GPL のためコード参照時注意)、Whirlpool (作者による非特許・自由利用宣言、ISO/IEC 10118-3)、HMAC RFC 2104。いずれも patent-free 宣言あり。block cipher + AEAD 実装が前提となるため crypto 領域として intentional scope 維持",
    "reference_url": [
     "https://web.cs.ucdavis.edu/~rogaway/papers/eax.pdf",
     "https://www.schneier.com/academic/twofish/"
