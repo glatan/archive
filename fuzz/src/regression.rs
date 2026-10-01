@@ -74,12 +74,21 @@ fn prepare_export(artifact: &Path, out_dir: &Path) -> Result<PreparedExport, Str
     } else {
         loaded.report.signature.clone()
     };
-    let base = format!(
+    let mut base = format!(
         "{}_{}_{}",
         sanitize(algo.name()),
         sanitize(pattern.label()),
         sanitize(&signature.chars().take(24).collect::<String>())
     );
+    // The signature is `algo|pattern|error`, so its first 24 chars can be
+    // entirely consumed by the algo/pattern prefix; distinct failures then
+    // collide on `base` and a second import silently overwrites the first
+    // fixture. Disambiguate with the input data hash.
+    if !loaded.report.data_blake3.is_empty() {
+        let tag_len = loaded.report.data_blake3.len().min(8);
+        base.push('_');
+        base.push_str(&loaded.report.data_blake3[..tag_len]);
+    }
 
     let fixture_path = out_dir.join(format!("{base}.bin"));
     fs::write(&fixture_path, &loaded.data).map_err(|e| format!("write fixture failed: {e}"))?;
@@ -794,6 +803,32 @@ mod tests {
         let rendered = template_for(Algorithm::Gzip, TestPattern::Self_, "fixture.bin");
         assert!(rendered.contains("archive::compress::gzip::encode::encode"));
         assert!(rendered.contains("assert_eq!(decoded, input)"));
+    }
+
+    #[test]
+    fn export_base_disambiguates_same_prefix_failures() {
+        let dir = tempfile::tempdir().unwrap();
+        let export_dir = dir.path().join("out");
+        let mut bases = Vec::new();
+        for (stem, blake3) in [("fail_a", "aaaaaaaa"), ("fail_b", "bbbbbbbb")] {
+            let json = format!(
+                r#"{{"algorithm":"gzip","pattern":"self","seed":1,"iteration":1,"data_size":1,"data_sha3_512":"","data_blake3":"{}","error":"boom","timestamp":"2026-01-01T00:00:00Z","signature":"gzip|self|boom"}}"#,
+                blake3,
+            );
+            std::fs::write(dir.path().join(format!("{stem}.json")), json).unwrap();
+            std::fs::write(dir.path().join(format!("{stem}.bin")), b"x").unwrap();
+            let exported =
+                super::prepare_export(&dir.path().join(format!("{stem}.json")), &export_dir)
+                    .unwrap();
+            bases.push(exported.base);
+        }
+        assert_eq!(bases.len(), 2);
+        assert_ne!(
+            bases[0], bases[1],
+            "same-prefix signatures must not collide"
+        );
+        assert!(bases[0].ends_with("_aaaaaaaa"));
+        assert!(bases[1].ends_with("_bbbbbbbb"));
     }
 
     #[test]
