@@ -863,3 +863,19 @@ fn test_arj_encoder_rejects_unsupported_method() {
         assert!(ArjEncoder::with_method(m).is_err());
     }
 }
+
+#[test]
+fn test_arj_encoder_filename_length_boundary() {
+    use archive::archive::arj::encode::ArjEncoder;
+    // The u16 header-size field must cover the fixed fields plus the
+    // NUL-terminated name and comment: 30 + name_len + 2 <= u16::MAX.
+    let ok_name = "a".repeat(u16::MAX as usize - 32);
+    let too_long = "a".repeat(u16::MAX as usize - 31);
+    let mut enc = ArjEncoder::new();
+    enc.add_file(&ok_name, b"x", 0).unwrap();
+    enc.add_dir(&ok_name, 0).unwrap();
+    assert!(enc.add_file(&too_long, b"x", 0).is_err());
+    assert!(enc.add_dir(&too_long, 0).is_err());
+    let entries = arj_decode::decode(&enc.finish()).unwrap();
+    assert_eq!(entries.len(), 2);
+}

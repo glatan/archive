@@ -7,6 +7,7 @@
 //! Freed codes are re-used in increasing order via a code queue, matching the
 //! reference implementation (hwzip, public domain).
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::Error;

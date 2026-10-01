@@ -126,7 +126,11 @@ impl ArjEncoder {
     /// Add a file entry. mtime is written verbatim as the
     /// DOS-format timestamp (0 = unset).
     pub fn add_file(&mut self, name: &str, data: &[u8], mtime: u32) -> Result<(), Error> {
-        if name.is_empty() || name.contains('\0') || name.len() > u16::MAX as usize - BASIC_HDR_SIZE
+        // The u16 header-size field covers the fixed fields plus the
+        // NUL-terminated name and comment strings.
+        if name.is_empty()
+            || name.contains('\0')
+            || name.len() > u16::MAX as usize - BASIC_HDR_SIZE - 2
         {
             return Err(Error::InvalidData("arj: bad filename"));
         }
@@ -166,7 +170,10 @@ impl ArjEncoder {
 
     /// Add a directory entry (file type 3, method 0, no payload).
     pub fn add_dir(&mut self, name: &str, mtime: u32) -> Result<(), Error> {
-        if name.is_empty() || name.contains('\0') {
+        if name.is_empty()
+            || name.contains('\0')
+            || name.len() > u16::MAX as usize - BASIC_HDR_SIZE - 2
+        {
             return Err(Error::InvalidData("arj: bad filename"));
         }
         self.entries.push(PendingEntry {

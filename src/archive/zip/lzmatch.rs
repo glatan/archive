@@ -4,6 +4,7 @@
 //! (`dist`, `len`). Matches never self-overlap (`len <= dist`), mirroring the
 //! reference implementation (hwzip, public domain).
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 /// Knuth's multiplicative hash constant.

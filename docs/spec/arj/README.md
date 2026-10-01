@@ -15,7 +15,7 @@
 | method 1-3 (LZH st1 系) | TECHNOTE 概略 + newtua_dos/UNARJ de facto 参照 | ✅ | ✅ | 15-bit window の静的 Huffman (LHA st1 共有実装)。encode は `with_method(1-3)` → `compress::lzh::st1_enc` |
 | method 4 (fastest LZSS) | TECHNOTE 概略 + newtua_dos de facto 参照 | ✅ | ✅ | 0x8000B window LZSS。encode は `with_method(4)` → `method4::encode` |
 | garbled (password) | ARJ technical note | ✅ | ❌ | password API 必須。write は非対応 (#20) |
-| multi-volume | ARJ technical note | ✅ | ✅ | `decode_parts` で parts 供給、encode は `finish_parts` で分割 emit |
+| multi-volume | ARJ technical note | ✅ | ✅ | `decode_parts` で parts 供給、encode は `finish_parts` で分割 emit (自己 roundtrip 検証のみ。外部ツールによる multi-volume interop は未検証) |
 
 ### ヘッダ構造
 
