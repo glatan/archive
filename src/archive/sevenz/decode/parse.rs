@@ -104,26 +104,21 @@ impl<'a> Cursor<'a> {
         Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 
+    /// Read a 7z UINT64. The number of leading 1-bits in the first byte counts
+    /// the extension bytes; the remaining low bits of the first byte hold the
+    /// most-significant part of the value, and the extension bytes store the
+    /// rest in little-endian order (least-significant byte first).
     pub(super) fn read_uint64(&mut self) -> Result<u64, Error> {
         let first = self.read_byte()?;
         let mut mask = 0x80u8;
-        for extra in 0..8 {
+        let mut value = 0u64;
+        for extra in 0..8u32 {
             if first & mask == 0 {
-                if extra == 0 {
-                    return Ok(first as u64);
-                }
-                let mut value = (first & (mask - 1)) as u64;
-                for _ in 0..extra {
-                    value = (value << 8) | self.read_byte()? as u64;
-                }
+                value |= u64::from(first & (mask - 1)) << (8 * extra);
                 return Ok(value);
             }
+            value |= u64::from(self.read_byte()?) << (8 * extra);
             mask >>= 1;
-        }
-
-        let mut value = 0u64;
-        for _ in 0..8 {
-            value = (value << 8) | self.read_byte()? as u64;
         }
         Ok(value)
     }

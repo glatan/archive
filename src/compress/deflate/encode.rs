@@ -510,47 +510,77 @@ fn pick_smallest(
     }
 }
 
-/// Limit code lengths to max_bits using the Kraft inequality.
+/// Limit code lengths to `max_bits`, keeping the code complete.
+///
+/// `symbols` are (symbol index, bit length) pairs for the used symbols; the
+/// caller has already clamped lengths to `max_bits`. Since they come from a
+/// Huffman tree the code was complete before clamping, so clamping can only
+/// leave it over-subscribed, never under-subscribed.
+///
+/// The repair loop uses the bit-length-count scheme of zlib's `gen_bitlen`
+/// (trees.c): each step moves one leaf at the longest sub-max length one
+/// level deeper (splitting into two slots at `bits + 1`) and absorbs one
+/// over-long leaf at `max_bits` into the freed sibling slot, which frees
+/// exactly one unit of 2^-max_bits of Kraft space. The
+/// loop therefore stops at a Kraft sum of exactly 2^max_bits — a complete
+/// code. Emitting an *incomplete* code (sum < 2^max_bits) would produce
+/// streams that strict inflaters reject (zlib's `inflate_table` reports
+/// e.g. "invalid distances set" for a multi-symbol distance tree).
 fn kraft_limit(symbols: &mut [(usize, u8)], max_bits: u8) {
     if symbols.is_empty() {
         return;
     }
 
-    // Sort by length descending
+    // Sort by length descending, then symbol index for determinism.
     symbols.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
 
-    loop {
-        let kraft_sum: u64 = symbols
-            .iter()
-            .map(|&(_, len)| {
-                if len == 0 {
-                    0
-                } else {
-                    1u64 << (max_bits - len)
-                }
-            })
-            .sum();
-        let target = 1u64 << max_bits;
-
-        if kraft_sum <= target {
-            break;
-        }
-
-        // Over budget: increase the shortest code length
-        let mut found = false;
-        for item in symbols.iter_mut().rev() {
-            if item.1 < max_bits {
-                item.1 += 1;
-                found = true;
-                break;
-            }
-        }
-        if !found {
-            break;
-        }
-
-        symbols.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let mut bl_count = vec![0u32; max_bits as usize + 1];
+    for &(_, len) in symbols.iter() {
+        debug_assert!(len > 0 && len <= max_bits);
+        bl_count[len as usize] += 1;
     }
+
+    // Kraft sum in units of 2^-max_bits: a leaf of length L costs
+    // 2^(max_bits - L); a complete code costs exactly 2^max_bits.
+    let capacity = 1u64 << max_bits;
+    let mut kraft: u64 = (1..=max_bits as usize)
+        .map(|bits| u64::from(bl_count[bits]) << (max_bits as usize - bits))
+        .sum();
+
+    while kraft > capacity {
+        // Find the longest length below max_bits that still has a leaf.
+        // An over-subscribed Huffman-derived code always has a leaf above
+        // max_bits and a leaf at max_bits to absorb the repair.
+        let mut bits = max_bits as usize - 1;
+        while bits > 0 && bl_count[bits] == 0 {
+            bits -= 1;
+        }
+        if bits == 0 || bl_count[max_bits as usize] == 0 {
+            break;
+        }
+        // One leaf moves down one level (its cost halves), one over-long
+        // leaf takes the freed slot as its sibling, and one more over-long
+        // leaf is absorbed: -1 + 2*(1/2) - 1 unit = exactly -1 unit.
+        bl_count[bits] -= 1;
+        bl_count[bits + 1] += 2;
+        bl_count[max_bits as usize] -= 1;
+        kraft -= 1;
+    }
+    debug_assert_eq!(
+        kraft, capacity,
+        "kraft_limit failed to repair over-subscription"
+    );
+
+    // Redistribute the repaired counts over the symbols, longest lengths to
+    // the deepest (least frequent) leaves first.
+    let mut idx = 0usize;
+    for bits in (1..=max_bits as usize).rev() {
+        for _ in 0..bl_count[bits] {
+            symbols[idx].1 = bits as u8;
+            idx += 1;
+        }
+    }
+    debug_assert_eq!(idx, symbols.len());
 }
 
 /// Build canonical Huffman codes from code lengths.
@@ -1383,5 +1413,221 @@ mod tests {
         let encoded = encode(&[], Level::Default);
         let decoded = decode::decode(&encoded).unwrap();
         assert!(decoded.is_empty());
+    }
+
+    // Regression coverage for a fuzz-found bug: when code lengths are
+    // clamped to `max_bits`, the over-subscription repair in `kraft_limit`
+    // must produce a *complete* code (Kraft sum = 1). The old incremental
+    // repair could overshoot and emit an incomplete code, which zlib's
+    // inflate_table rejects (e.g. "invalid distances set"), while our own
+    // decoder tolerates it, so self-roundtrips never caught it.
+
+    /// Byte length of a planted repeat: long enough to hold several
+    /// distinct trigrams, short enough to stay a single match token.
+    const PLANTED_LEN: usize = 12;
+
+    /// Input builder that tracks every emitted 3-byte sequence so filler
+    /// bytes can be chosen to never repeat an earlier trigram. With no
+    /// repeated trigrams the LZ77 stage emits only literals, and each
+    /// planted repeat yields exactly one match token at a known distance.
+    struct DistTreeInput {
+        data: Vec<u8>,
+        /// All trigrams present in `data`.
+        grams: alloc::collections::BTreeSet<[u8; 3]>,
+        /// Trigrams already repeated once by a planted match; a third
+        /// occurrence would emit an unplanned match.
+        spent: alloc::collections::BTreeSet<[u8; 3]>,
+        /// Rotating filler-byte candidate.
+        candidate: u32,
+    }
+
+    impl DistTreeInput {
+        fn new() -> Self {
+            let mut input = Self {
+                data: Vec::new(),
+                grams: alloc::collections::BTreeSet::new(),
+                spent: alloc::collections::BTreeSet::new(),
+                candidate: 0,
+            };
+            // Two seed bytes so trigram lookups always have two bytes of
+            // context.
+            input.data.extend_from_slice(&[0xA5, 0x3C]);
+            input
+        }
+
+        /// Append a literal byte whose trailing trigram has never been used.
+        fn push_fresh(&mut self) {
+            let n = self.data.len();
+            for k in 0..=255u32 {
+                let byte = (self.candidate.wrapping_add(k) & 0xFF) as u8;
+                let gram = [self.data[n - 2], self.data[n - 1], byte];
+                if !self.grams.contains(&gram) {
+                    self.grams.insert(gram);
+                    self.data.push(byte);
+                    self.candidate = self.candidate.wrapping_add(1);
+                    return;
+                }
+            }
+            panic!("no fresh byte available");
+        }
+
+        /// Emit one match token whose distance lands in `code`'s range.
+        ///
+        /// Layout: a fresh 12-byte source (literals), filler literals until
+        /// the source is a valid distance back, then a copy of the source.
+        /// The trigram bookkeeping guarantees the copy is the only match in
+        /// the stream and that it spans exactly PLANTED_LEN bytes.
+        fn plant_match(&mut self, code: usize) {
+            let lo = (DISTANCE_BASE[code] as usize).max(PLANTED_LEN);
+            let hi = DISTANCE_BASE[code] as usize + (1usize << DISTANCE_EXTRA[code]) - 1;
+            loop {
+                let src = self.data.len();
+                for _ in 0..PLANTED_LEN {
+                    self.push_fresh();
+                }
+                loop {
+                    let d = self.data.len() - src;
+                    if d > hi {
+                        break; // unlucky junction context: emit a fresh source
+                    }
+                    if d >= lo {
+                        let n = self.data.len();
+                        let (x, y) = (self.data[n - 2], self.data[n - 1]);
+                        let (c0, c1) = (self.data[src], self.data[src + 1]);
+                        // The copy may only start if the two junction
+                        // trigrams it forms are fresh.
+                        if !self.grams.contains(&[x, y, c0]) && !self.grams.contains(&[y, c0, c1]) {
+                            self.copy_source(src);
+                            return;
+                        }
+                    }
+                    self.push_fresh();
+                }
+            }
+        }
+
+        /// Append a copy of `data[src..src + PLANTED_LEN]`, producing a match
+        /// at distance `self.data.len() - src`.
+        fn copy_source(&mut self, src: usize) {
+            // The trigrams inside the slice are repeated here for the second
+            // and last time, so the source must be entirely first-use bytes.
+            for i in src..src + PLANTED_LEN - 2 {
+                let gram = [self.data[i], self.data[i + 1], self.data[i + 2]];
+                assert!(
+                    self.grams.contains(&gram) && !self.spent.contains(&gram),
+                    "match source must contain only first-use trigrams"
+                );
+                self.spent.insert(gram);
+            }
+            let n = self.data.len();
+            let (x, y) = (self.data[n - 2], self.data[n - 1]);
+            let bytes: Vec<u8> = self.data[src..src + PLANTED_LEN].to_vec();
+            self.data.extend_from_slice(&bytes);
+            // Register the two junction trigrams the copy forms at its edge.
+            self.grams.insert([x, y, bytes[0]]);
+            self.grams.insert([y, bytes[0], bytes[1]]);
+        }
+    }
+
+    /// Kraft sum of `lengths` in units of 2^-max_bits; a complete code
+    /// returns exactly `1 << max_bits`.
+    fn kraft_sum(lengths: &[u8], max_bits: u8) -> u64 {
+        lengths
+            .iter()
+            .map(|&l| if l == 0 { 0 } else { 1u64 << (max_bits - l) })
+            .sum()
+    }
+
+    #[test]
+    fn test_deflate_complete_dist_tree() {
+        // Fuzz-found bug: an over-subscribed distance tree could be repaired
+        // into an *incomplete* code, producing deflate streams that zlib's
+        // inflate_table rejects. Drive the LZ77 stage into a Fibonacci-like
+        // distance histogram over 17 distance codes: the deepest possible
+        // Huffman tree for 17 symbols has depth 16 > 15, so clamping to 15
+        // bits leaves the code over-subscribed and exercises the repair.
+        let mut input = DistTreeInput::new();
+        let mut planned = vec![0u32; 30];
+        let (mut a, mut b) = (1u32, 1u32);
+        for code in (6..=22).rev() {
+            planned[code] = a;
+            for _ in 0..a {
+                input.plant_match(code);
+            }
+            let next = a + b;
+            a = b;
+            b = next;
+        }
+        let input = input.data;
+
+        // Collect the distance-code frequencies exactly as
+        // encode_dynamic_with does; the planted input must reproduce them
+        // with zero stray matches.
+        let matches = lz77_compress_max(&input, Level::Default, MAX_MATCH_LEN);
+        let mut dist_freq = vec![0u32; 30];
+        for token in &matches {
+            if let LZ77Token::Match { distance, .. } = *token {
+                let (code, _, _) = encode_distance(distance);
+                dist_freq[code as usize] += 1;
+            }
+        }
+        assert_eq!(dist_freq, planned);
+
+        // Confirm the unclamped tree really exceeds 15 bits, i.e. the repair
+        // path in kraft_limit was exercised.
+        let active: Vec<(usize, u32)> = dist_freq
+            .iter()
+            .enumerate()
+            .filter(|&(_, f)| *f > 0)
+            .map(|(i, f)| (i, *f))
+            .collect();
+        let raw = huffman_tree_lengths(&active);
+        assert!(
+            raw.iter().any(|&(_, l)| l > 15),
+            "test input must produce Huffman depths above the 15-bit limit"
+        );
+
+        // The emitted distance tree must be a complete code (Kraft = 2^15);
+        // an incomplete one is rejected by zlib's inflate_table.
+        let dist_lengths = build_code_lengths(&dist_freq, 15);
+        assert!(dist_lengths.iter().all(|&l| l <= 15));
+        assert_eq!(kraft_sum(&dist_lengths, 15), 1 << 15);
+
+        // The same tree is emitted through encode(): a dynamic Huffman block
+        // must roundtrip through our decoder.
+        let encoded = encode(&input, Level::Default);
+        assert_eq!(
+            (encoded[0] >> 1) & 0b11,
+            0b10,
+            "expected dynamic Huffman block (BTYPE=10)"
+        );
+        let decoded = decode::decode(&encoded).unwrap();
+        assert_eq!(decoded, input);
+    }
+
+    #[test]
+    fn test_build_code_lengths_over_subscribed_complete() {
+        // Direct unit-level regression: a deep Huffman tree (Fibonacci
+        // frequencies) clamped to max_bits must still come out complete.
+        for (num_symbols, max_bits) in [(17usize, 15u8), (19, 15), (9, 7), (10, 7)] {
+            let mut freq = vec![0u32; num_symbols];
+            let (mut a, mut b) = (1u32, 1u32);
+            for f in freq.iter_mut() {
+                *f = a;
+                let c = a + b;
+                a = b;
+                b = c;
+            }
+            let lengths = build_code_lengths(&freq, max_bits);
+            assert!(
+                lengths.iter().all(|&l| l > 0 && l <= max_bits),
+                "num_symbols={num_symbols} max_bits={max_bits}: {lengths:?}"
+            );
+            assert_eq!(
+                kraft_sum(&lengths, max_bits),
+                1 << max_bits,
+                "num_symbols={num_symbols} max_bits={max_bits}: {lengths:?}"
+            );
+        }
     }
 }

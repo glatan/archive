@@ -38,7 +38,7 @@
 
 | # | 仕様要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|---------|---------|------|----------------|
-| 7 | First byte mask pattern: 0x80 未設定→7 bit 直値、以降 extra byte 数に応じ最大 8B 読み取り | 7zFormat.txt: UINT64 | ✅ | `test_uint64_roundtrip` |
+| 7 | First byte mask pattern: 0x80 未設定→7 bit 直値、以降 extra byte 数に応じ最大 8B 読み取り。extra bytes は little-endian (LSB 先頭) | 7zFormat.txt: UINT64 | ✅ | `test_uint64_roundtrip`, `test_uint64_le_extension_bytes`, `test_encode_uint64_le_extension_bytes` |
 
 ---
 

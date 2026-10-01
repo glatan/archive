@@ -115,8 +115,8 @@ fn update_generated_mod(path: &Path, module_name: &str) -> Result<(), String> {
 fn template_for(algo: Algorithm, pattern: TestPattern, fixture_literal: &str) -> String {
     let fn_name = format!(
         "test_fuzz_regression_{}_{}",
-        sanitize(algo.name()),
-        sanitize(pattern.label())
+        sanitize_for_module(algo.name()),
+        sanitize_for_module(pattern.label())
     );
     let mut attrs = String::new();
     if let Some(feature) = feature_gate_for(algo) {
@@ -768,14 +768,27 @@ fn sanitize(input: &str) -> String {
 }
 
 fn sanitize_for_module(input: &str) -> String {
-    sanitize(input).replace('-', "_")
+    let name = sanitize(input).replace('-', "_");
+    if name.chars().next().is_some_and(|ch| ch.is_ascii_digit()) {
+        format!("_{name}")
+    } else {
+        name
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{template_for, update_generated_mod};
+    use super::{sanitize_for_module, template_for, update_generated_mod};
     use crate::algorithms::Algorithm;
     use crate::report::TestPattern;
+
+    #[test]
+    fn module_sanitize_handles_hyphens_and_leading_digits() {
+        assert_eq!(sanitize_for_module("xpress-huff"), "xpress_huff");
+        assert_eq!(sanitize_for_module("7z"), "_7z");
+        assert_eq!(sanitize_for_module("7z-copy"), "_7z_copy");
+    }
+
     #[test]
     fn self_template_mentions_codec_calls() {
         let rendered = template_for(Algorithm::Gzip, TestPattern::Self_, "fixture.bin");

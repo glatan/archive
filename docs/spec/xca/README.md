@@ -40,7 +40,7 @@ API/CLI での利用には形式の明示が必要 (`--format xpress` / `xpress-
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
 | 14 | ブロック先頭に 256 バイトの符号長テーブル (512 シンボル × 4bit nibble) | [MS-XCA] §2.1.4.1 | ✅ | `xpress_huffman_spec_example_*` (統合) |
-| 15 | canonical Huffman コード、最大符号長 15bit、Kraft 和検証 (incomplete / over-subscribed 拒否) | [MS-XCA] §2.1.4.1 | ✅ | `code_lengths_kraft`、`rejects_bad_table` |
+| 15 | canonical Huffman コード、最大符号長 15bit、Kraft 和検証 (incomplete / over-subscribed 拒否)。エンコーダ側も修復後に complete code を保証 | [MS-XCA] §2.1.4.1 | ✅ | `code_lengths_kraft`、`rejects_bad_table`、`test_xpress_huff_oversubscribed` |
 | 16 | シンボル <256 はリテラル、256 は EOF、>256 はマッチ | [MS-XCA] §2.1.4.3 | ✅ | `xpress_huffman_spec_example_*` (統合) |
 | 17 | EOF 判定: シンボル 256 かつ入力全消費かつ (既知の場合) 出力完備。それ以外の 256 は len 3/dist 1 マッチとして処理 | [MS-XCA] §2.1.4.3 | ✅ | `multi_block`、`roundtrip_various` (反復データで 256 マッチを通過) |
 | 18 | ブロックは非圧縮 64 KiB 単位、マルチブロック対応 | [MS-XCA] §2.1.4.2 | ✅ | `multi_block` |

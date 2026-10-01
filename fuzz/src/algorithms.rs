@@ -1174,7 +1174,13 @@ fn zim_fixture(data: &[u8]) -> Vec<u8> {
 
 /// Build a minimal stored (uncompressed) `.cab` archive containing a
 /// single `fuzz_test` file.
+///
+/// MS-CAB stores `cbData`/`cbUncomp` as u16, so file data is split
+/// into CFDATA blocks of at most 32KiB (the conventional stored-block
+/// size) rather than a single block that would overflow the fields.
 fn mscab_fixture(data: &[u8]) -> Vec<u8> {
+    const BLOCK: usize = 32 * 1024;
+
     let mut files_buf = Vec::new();
     files_buf.extend_from_slice(&(data.len() as u32).to_le_bytes()); // cbFile
     files_buf.extend_from_slice(&0u32.to_le_bytes()); // uoffFolderStart
@@ -1185,10 +1191,11 @@ fn mscab_fixture(data: &[u8]) -> Vec<u8> {
     files_buf.extend_from_slice(b"fuzz_test");
     files_buf.push(0);
 
+    let n_blocks = data.len().div_ceil(BLOCK);
     let folders_off = 36usize;
     let files_off = folders_off + 8;
     let data_off = files_off + files_buf.len();
-    let cb_cabinet = (data_off + 8 + data.len()) as u32;
+    let cb_cabinet = (data_off + n_blocks * 8 + data.len()) as u32;
 
     let mut out = Vec::with_capacity(cb_cabinet as usize);
     out.extend_from_slice(b"MSCF");
@@ -1204,13 +1211,15 @@ fn mscab_fixture(data: &[u8]) -> Vec<u8> {
     out.extend_from_slice(&0u16.to_le_bytes()); // setID
     out.extend_from_slice(&0u16.to_le_bytes()); // iCabinet
     out.extend_from_slice(&(data_off as u32).to_le_bytes()); // coffCabStart
-    out.extend_from_slice(&1u16.to_le_bytes()); // cCFDATA
+    out.extend_from_slice(&(n_blocks as u16).to_le_bytes()); // cCFDATA
     out.extend_from_slice(&0u16.to_le_bytes()); // tcompTYPE_NONE
     out.extend_from_slice(&files_buf);
-    out.extend_from_slice(&0u32.to_le_bytes()); // csum
-    out.extend_from_slice(&(data.len() as u16).to_le_bytes()); // cbData
-    out.extend_from_slice(&(data.len() as u16).to_le_bytes()); // cbUncomp
-    out.extend_from_slice(data);
+    for chunk in data.chunks(BLOCK) {
+        out.extend_from_slice(&0u32.to_le_bytes()); // csum
+        out.extend_from_slice(&(chunk.len() as u16).to_le_bytes()); // cbData
+        out.extend_from_slice(&(chunk.len() as u16).to_le_bytes()); // cbUncomp
+        out.extend_from_slice(chunk);
+    }
     out
 }
 
@@ -1304,6 +1313,16 @@ fn squashfs_fixture(data: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::{Algorithm, decode_with, encode_with, run_special_case, special_case_labels};
+
+    #[test]
+    fn mscab_fixture_splits_cfdata_blocks() {
+        for len in [0usize, 32768, 32769, 70_000] {
+            let data: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
+            let encoded = encode_with(Algorithm::Mscab, &data);
+            let decoded = decode_with(Algorithm::Mscab, &encoded).unwrap();
+            assert_eq!(decoded, data, "len={len}");
+        }
+    }
 
     #[test]
     fn roundtrips_new_archive_targets() {

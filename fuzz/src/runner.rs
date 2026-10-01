@@ -564,6 +564,11 @@ const fn min_encoded_floor(algo: Algorithm) -> usize {
         // GNU tar always writes at least 20 blocks (the default blocking factor)
         // of 512 bytes each = 10240 bytes, regardless of archive content.
         Algorithm::TarGnu | Algorithm::TarPax | Algorithm::TarUstar => 10240,
+        // cmpsc always emits a fixed 4KiB alphabet dictionary plus a 6-byte
+        // header even for empty input, and deb wraps payloads in an ar
+        // archive holding two tar members; both exceed 4KiB of structural
+        // overhead on tiny inputs.
+        Algorithm::Cmpsc | Algorithm::Deb => 8192,
         _ => 4096,
     }
 }
