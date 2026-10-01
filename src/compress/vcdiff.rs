@@ -22,9 +22,11 @@
 //! - `VCD_APPHEADER` (`0x04`, an xdelta3 extension carrying application
 //!   metadata) is accepted and skipped for interoperability.
 //!
-//! Encoding always produces uncompressed-section, default-table streams: a
-//! single window per call, `VCD_SOURCE` when a source is supplied, single
-//! (non-paired) instructions only.
+//! Encoding always produces uncompressed-section, default-table streams
+//! with single (non-paired) instructions only. [`encode`] and
+//! [`encode_with_source`] emit one window per call (`VCD_SOURCE` when a
+//! source is supplied); [`encode_with_windows`] splits the target into
+//! multiple windows, using `VCD_TARGET` segments for all but the first.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -545,25 +547,25 @@ impl<'a> Encoder<'a> {
     }
 }
 
-/// Encode `target` as a VCDIFF delta against `source`.
-///
-/// Produces a single-window stream using the default code table with no
-/// secondary compression.
-pub fn encode_with_source(source: &[u8], target: &[u8]) -> Vec<u8> {
-    let src_len = source.len();
+/// Encode one window's delta-encoding body (RFC 3284 Section 4.3): match
+/// `window_target` against the `seg ++ produced-target` virtual address
+/// space and return `target length | Delta_Indicator | section lengths |
+/// data | instructions | addresses`.
+fn encode_window_body(seg: &[u8], window_target: &[u8]) -> Vec<u8> {
+    let src_len = seg.len();
     let mut head = vec![-1i32; 1 << 16];
     let hash = |b: &[u8]| -> usize {
         let v = u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
         (v.wrapping_mul(0x9E37_79B1) >> 16) as usize
     };
-    // Index the whole source up front (source addresses always precede the
-    // target window).
+    // Index the whole source segment up front (source addresses always
+    // precede the target window).
     for p in 0..src_len.saturating_sub(MIN_MATCH - 1) {
-        head[hash(&source[p..])] = p as i32;
+        head[hash(&seg[p..])] = p as i32;
     }
 
     let mut e = Encoder {
-        source,
+        source: seg,
         data: Vec::new(),
         inst: Vec::new(),
         addr: Vec::new(),
@@ -573,15 +575,15 @@ pub fn encode_with_source(source: &[u8], target: &[u8]) -> Vec<u8> {
 
     let mut lit_start = 0usize;
     let mut t = 0usize;
-    while t < target.len() {
+    while t < window_target.len() {
         // Detect a run of a repeated byte first.
         let mut run = 1usize;
-        while t + run < target.len() && target[t + run] == target[t] {
+        while t + run < window_target.len() && window_target[t + run] == window_target[t] {
             run += 1;
         }
         if run >= MIN_MATCH {
-            e.push_add(&target[lit_start..t]);
-            e.push_run(target[t], run);
+            e.push_add(&window_target[lit_start..t]);
+            e.push_run(window_target[t], run);
             t += run;
             lit_start = t;
             continue;
@@ -592,16 +594,24 @@ pub fn encode_with_source(source: &[u8], target: &[u8]) -> Vec<u8> {
         // positions strictly before src_len + t are legal.
         let abs = src_len + t;
         let mut best: Option<(usize, usize)> = None;
-        if t + MIN_MATCH <= target.len() {
-            let cand = head[hash(&target[t..])];
-            head[hash(&target[t..])] = abs as i32;
+        if t + MIN_MATCH <= window_target.len() {
+            let cand = head[hash(&window_target[t..])];
+            head[hash(&window_target[t..])] = abs as i32;
             if cand >= 0 {
                 let c = cand as usize;
                 debug_assert!(c < abs);
                 let mut len = 0usize;
-                while t + len < target.len() && byte_at(source, target, c + len) == target[t + len]
+                while t + len < window_target.len()
+                    && byte_at(seg, window_target, c + len) == window_target[t + len]
                 {
                     len += 1;
+                }
+                // RFC 3284 Section 3: a COPY must be entirely contained in
+                // either the source segment or the target window, so a
+                // match starting in the source may not cross the S/T
+                // boundary.
+                if c < src_len {
+                    len = len.min(src_len - c);
                 }
                 if len >= MIN_MATCH {
                     best = Some((c, len));
@@ -610,12 +620,12 @@ pub fn encode_with_source(source: &[u8], target: &[u8]) -> Vec<u8> {
         }
 
         if let Some((c, len)) = best {
-            e.push_add(&target[lit_start..t]);
+            e.push_add(&window_target[lit_start..t]);
             e.push_copy(c, len);
             // Index produced positions inside the match for later matches.
             for p in t..t + len {
-                if p + MIN_MATCH <= target.len() {
-                    head[hash(&target[p..])] = (src_len + p) as i32;
+                if p + MIN_MATCH <= window_target.len() {
+                    head[hash(&window_target[p..])] = (src_len + p) as i32;
                 }
             }
             t += len;
@@ -624,11 +634,11 @@ pub fn encode_with_source(source: &[u8], target: &[u8]) -> Vec<u8> {
             t += 1;
         }
     }
-    e.push_add(&target[lit_start..]);
+    e.push_add(&window_target[lit_start..]);
 
-    // Assemble the window.
+    // Assemble the window's delta encoding.
     let mut enc = Vec::new();
-    write_varint(&mut enc, target.len());
+    write_varint(&mut enc, window_target.len());
     enc.push(0); // Delta_Indicator: uncompressed sections
     write_varint(&mut enc, e.data.len());
     write_varint(&mut enc, e.inst.len());
@@ -636,21 +646,76 @@ pub fn encode_with_source(source: &[u8], target: &[u8]) -> Vec<u8> {
     enc.extend_from_slice(&e.data);
     enc.extend_from_slice(&e.inst);
     enc.extend_from_slice(&e.addr);
+    enc
+}
 
-    let mut out = Vec::with_capacity(enc.len() + 16);
+/// Append one window to `out`: Win_Indicator, the optional source segment
+/// (size, position), and the delta-encoding body.
+fn push_window(out: &mut Vec<u8>, win_ind: u8, seg: Option<(usize, usize)>, enc: &[u8]) {
+    out.push(win_ind);
+    if let Some((size, pos)) = seg {
+        write_varint(out, size);
+        write_varint(out, pos);
+    }
+    write_varint(out, enc.len());
+    out.extend_from_slice(enc);
+}
+
+/// Encode `target` as a VCDIFF delta against `source`, emitting at most
+/// `window_len` target bytes per window.
+///
+/// The first window uses `VCD_SOURCE` against `source` (or no source
+/// segment when `source` is empty). Each subsequent window uses
+/// `VCD_TARGET` (RFC 3284 Section 4.2) with its source segment set to the
+/// previously emitted window's target bytes, so matches may copy from the
+/// immediately preceding target region as well as from within the window
+/// itself. A `window_len` of 0 (or one covering the whole target)
+/// produces a single-window stream identical to [`encode_with_source`].
+pub fn encode_with_windows(source: &[u8], target: &[u8], window_len: usize) -> Vec<u8> {
+    let wl = if window_len == 0 {
+        usize::MAX
+    } else {
+        window_len
+    };
+    let mut out = Vec::new();
     out.extend_from_slice(&MAGIC);
     out.push(0); // Header4: version 0
     out.push(0); // Hdr_Indicator: no optional fields
-    if src_len > 0 {
-        out.push(VCD_SOURCE);
-        write_varint(&mut out, src_len);
-        write_varint(&mut out, 0); // source segment position
-    } else {
-        out.push(0);
+
+    let mut pos = 0usize;
+    let mut prev_start = 0usize;
+    loop {
+        let end = pos.saturating_add(wl).min(target.len());
+        if pos == 0 {
+            let enc = encode_window_body(source, &target[..end]);
+            if source.is_empty() {
+                push_window(&mut out, 0, None, &enc);
+            } else {
+                push_window(&mut out, VCD_SOURCE, Some((source.len(), 0)), &enc);
+            }
+        } else {
+            // The source segment is the previously emitted window's
+            // target bytes: it always lies within already-produced
+            // output, as the decoder requires for VCD_TARGET.
+            let seg = &target[prev_start..pos];
+            let enc = encode_window_body(seg, &target[pos..end]);
+            push_window(&mut out, VCD_TARGET, Some((seg.len(), prev_start)), &enc);
+        }
+        prev_start = pos;
+        pos = end;
+        if pos >= target.len() {
+            break;
+        }
     }
-    write_varint(&mut out, enc.len());
-    out.extend_from_slice(&enc);
     out
+}
+
+/// Encode `target` as a VCDIFF delta against `source`.
+///
+/// Produces a single-window stream using the default code table with no
+/// secondary compression.
+pub fn encode_with_source(source: &[u8], target: &[u8]) -> Vec<u8> {
+    encode_with_windows(source, target, usize::MAX)
 }
 
 /// Encode `target` as a standalone VCDIFF stream (empty source).
@@ -945,5 +1010,95 @@ mod tests {
         write_varint(&mut d, enc.len());
         d.extend_from_slice(enc);
         assert!(matches!(decode(&d), Err(Error::InvalidData(_))));
+    }
+
+    /// Collect the Win_Indicator byte of every window in a stream.
+    fn window_indicators(d: &[u8]) -> Vec<u8> {
+        let mut inds = Vec::new();
+        let mut pos = 5; // skip magic + Header4 + Hdr_Indicator
+        while pos < d.len() {
+            let win = d[pos];
+            pos += 1;
+            inds.push(win);
+            if win & (VCD_SOURCE | VCD_TARGET) != 0 {
+                let _ = read_varint(d, &mut pos).unwrap();
+                let _ = read_varint(d, &mut pos).unwrap();
+            }
+            let delta_len = read_varint(d, &mut pos).unwrap();
+            pos += delta_len;
+        }
+        inds
+    }
+
+    #[test]
+    fn multi_window_encode_roundtrip() {
+        // Target longer than one window with content repeated across
+        // window boundaries; VCD_TARGET windows COPY from prior target.
+        let mut tgt = Vec::new();
+        for i in 0..8usize {
+            tgt.extend_from_slice(b"chunk ");
+            tgt.push(b'0' + i as u8);
+            tgt.extend_from_slice(b": the quick brown fox jumps. ");
+        }
+        let d = encode_with_windows(b"", &tgt, 64);
+        assert_eq!(decode(&d).unwrap(), tgt);
+        let inds = window_indicators(&d);
+        assert!(inds.len() > 1);
+        assert_eq!(inds[0], 0); // no source supplied
+        assert!(inds[1..].iter().all(|&w| w == VCD_TARGET));
+        // Repetition is encoded as COPYs, not literals.
+        assert!(d.len() < tgt.len() / 2);
+    }
+
+    #[test]
+    fn multi_window_encode_with_source_roundtrip() {
+        let src = b"the quick brown fox jumps over the lazy dog";
+        let mut tgt = Vec::new();
+        tgt.extend_from_slice(b"the quick brown fox leaps. ");
+        for i in 0..6usize {
+            tgt.extend_from_slice(b"again ");
+            tgt.push(b'0' + i as u8);
+            tgt.extend_from_slice(b" the quick brown fox jumps. ");
+        }
+        let d = encode_with_windows(src, &tgt, 48);
+        assert_eq!(decode_with_source(src, &d).unwrap(), tgt);
+        let inds = window_indicators(&d);
+        assert_eq!(inds[0], VCD_SOURCE);
+        assert!(inds[1..].iter().all(|&w| w == VCD_TARGET));
+    }
+
+    #[test]
+    fn multi_window_encode_self_repeating() {
+        // Long runs and periodic copies inside VCD_TARGET windows.
+        let mut tgt = vec![b'x'; 100];
+        tgt.extend_from_slice(b"abcdefgh");
+        tgt.extend_from_slice(b"abcdefgh");
+        let d = encode_with_windows(b"", &tgt, 16);
+        assert_eq!(decode(&d).unwrap(), tgt);
+        assert!(window_indicators(&d).contains(&VCD_TARGET));
+    }
+
+    #[test]
+    fn multi_window_encode_zero_window_len() {
+        // window_len 0 is clamped to "do not split": a single window.
+        let d = encode_with_windows(b"", b"hello", 0);
+        assert_eq!(decode(&d).unwrap(), b"hello");
+        assert_eq!(window_indicators(&d).len(), 1);
+        // Same for a window covering the whole target.
+        let d = encode_with_windows(b"src", b"hello", usize::MAX);
+        assert_eq!(decode_with_source(b"src", &d).unwrap(), b"hello");
+        assert_eq!(window_indicators(&d), &[VCD_SOURCE]);
+    }
+
+    #[test]
+    fn multi_window_encode_edge_cases() {
+        // Empty target still emits one (empty) window.
+        let d = encode_with_windows(b"", b"", 8);
+        assert_eq!(decode(&d).unwrap(), b"");
+        assert_eq!(window_indicators(&d).len(), 1);
+        // One byte per window.
+        let d = encode_with_windows(b"", b"ab", 1);
+        assert_eq!(decode(&d).unwrap(), b"ab");
+        assert_eq!(window_indicators(&d).len(), 2);
     }
 }

@@ -4,6 +4,10 @@
 //! cluster pointer list, extracts entry content from stored,
 //! xz-compressed, or zstd-compressed clusters, and verifies the
 //! trailing 16-byte MD5 archive checksum when present.
+//!
+//! Legacy zlib (id 2) and bzip2 (id 3) clusters are decoded when the
+//! `zlib` / `bzip2` features are enabled, respectively; otherwise they
+//! return [`Error::Unsupported`].
 
 use alloc::format;
 use alloc::string::String;
@@ -15,6 +19,8 @@ use crate::util::md5::md5;
 const MAGIC: u32 = 0x044D_495A; // 72173914
 
 const CLUSTER_NONE: u8 = 1;
+const CLUSTER_ZLIB: u8 = 2;
+const CLUSTER_BZIP2: u8 = 3;
 const CLUSTER_XZ: u8 = 4;
 const CLUSTER_ZSTD: u8 = 5;
 
@@ -187,6 +193,24 @@ fn extract_blob(
         .ok_or(Error::InvalidData("zim: truncated cluster"))?;
     let cluster_data: Vec<u8> = match comp {
         CLUSTER_NONE => raw.to_vec(),
+        #[cfg(feature = "zlib")]
+        CLUSTER_ZLIB => crate::compress::zlib::decode::decode(raw)
+            .map_err(|_| Error::InvalidData("zim: zlib cluster decode failed"))?,
+        #[cfg(not(feature = "zlib"))]
+        CLUSTER_ZLIB => {
+            return Err(Error::Unsupported(
+                "zim: zlib cluster (enable zlib feature)",
+            ));
+        }
+        #[cfg(feature = "bzip2")]
+        CLUSTER_BZIP2 => crate::compress::bzip2::decode::decode(raw)
+            .map_err(|_| Error::InvalidData("zim: bzip2 cluster decode failed"))?,
+        #[cfg(not(feature = "bzip2"))]
+        CLUSTER_BZIP2 => {
+            return Err(Error::Unsupported(
+                "zim: bzip2 cluster (enable bzip2 feature)",
+            ));
+        }
         CLUSTER_XZ => crate::compress::xz::decode::decode(raw)
             .map_err(|_| Error::InvalidData("zim: xz cluster decode failed"))?,
         CLUSTER_ZSTD => crate::compress::zstd::decode::decode(raw)
@@ -706,6 +730,8 @@ mod tests {
         assert!(matches!(decode(&b.build()), Err(Error::Unsupported(_))));
     }
 
+    /// Legacy bzip2 id stays Unsupported without the bzip2 feature.
+    #[cfg(not(feature = "bzip2"))]
     #[test]
     fn rejects_bzip_cluster() {
         let mut b = ZimBuilder::new();
@@ -719,6 +745,24 @@ mod tests {
         assert!(matches!(decode(&b.build()), Err(Error::Unsupported(_))));
     }
 
+    /// With the bzip2 feature, id 3 decodes; corrupt data is InvalidData.
+    #[cfg(feature = "bzip2")]
+    #[test]
+    fn rejects_bzip_cluster() {
+        let mut b = ZimBuilder::new();
+        b.entries.push(DirentSpec::Content {
+            cluster: 0,
+            blob: 0,
+            ns: b'C',
+            path: "x",
+        });
+        b.clusters
+            .push((CLUSTER_BZIP2, vec![0xde, 0xad, 0xbe, 0xef]));
+        assert!(matches!(decode(&b.build()), Err(Error::InvalidData(_))));
+    }
+
+    /// Legacy zlib id stays Unsupported without the zlib feature.
+    #[cfg(not(feature = "zlib"))]
     #[test]
     fn rejects_zlib_cluster() {
         let mut b = ZimBuilder::new();
@@ -730,6 +774,71 @@ mod tests {
         });
         b.clusters.push((2, stored_cluster(&[b"d"]))); // legacy zlib id
         assert!(matches!(decode(&b.build()), Err(Error::Unsupported(_))));
+    }
+
+    /// With the zlib feature, id 2 decodes; corrupt data is InvalidData.
+    #[cfg(feature = "zlib")]
+    #[test]
+    fn rejects_zlib_cluster() {
+        let mut b = ZimBuilder::new();
+        b.entries.push(DirentSpec::Content {
+            cluster: 0,
+            blob: 0,
+            ns: b'C',
+            path: "x",
+        });
+        b.clusters
+            .push((CLUSTER_ZLIB, vec![0xde, 0xad, 0xbe, 0xef]));
+        assert!(matches!(decode(&b.build()), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn rejects_unknown_cluster_compression() {
+        let mut b = ZimBuilder::new();
+        b.entries.push(DirentSpec::Content {
+            cluster: 0,
+            blob: 0,
+            ns: b'C',
+            path: "x",
+        });
+        b.clusters.push((15, stored_cluster(&[b"d"]))); // unassigned comp id
+        assert!(matches!(decode(&b.build()), Err(Error::Unsupported(_))));
+    }
+
+    #[cfg(feature = "zlib")]
+    #[test]
+    fn parses_zlib_cluster() {
+        let blob_data = b"zlib compressed blob";
+        let cluster_plain = stored_cluster(&[blob_data]);
+        let compressed = crate::compress::zlib::encode::encode(&cluster_plain);
+        let mut b = ZimBuilder::new();
+        b.entries.push(DirentSpec::Content {
+            cluster: 0,
+            blob: 0,
+            ns: b'C',
+            path: "a",
+        });
+        b.clusters.push((CLUSTER_ZLIB, compressed));
+        let entries = decode(&b.build()).unwrap();
+        assert_eq!(entries[0].data, blob_data);
+    }
+
+    #[cfg(feature = "bzip2")]
+    #[test]
+    fn parses_bzip2_cluster() {
+        let blob_data = b"bzip2 compressed blob";
+        let cluster_plain = stored_cluster(&[blob_data]);
+        let compressed = crate::compress::bzip2::encode::encode(&cluster_plain);
+        let mut b = ZimBuilder::new();
+        b.entries.push(DirentSpec::Content {
+            cluster: 0,
+            blob: 0,
+            ns: b'C',
+            path: "a",
+        });
+        b.clusters.push((CLUSTER_BZIP2, compressed));
+        let entries = decode(&b.build()).unwrap();
+        assert_eq!(entries[0].data, blob_data);
     }
 
     #[test]

@@ -4,7 +4,7 @@
 |------|------|
 | 形式概要 | Einar Saukas の ZX2 が使用する raw LZ77 ストリーム。ZX1 の minimalist 版で、new-offset フィールドが 1 バイト固定 (最大 offset 255)。制御ビット列とデータバイトがインターリーブする。magic・コンテナヘッダ・チェックサムは持たない |
 | 基準仕様 | [ZX2 README](https://github.com/einar-saukas/ZX2) "File Format" (ローカルスナップショット: `docs/spec/sources/zx2_README_v1.1.md`) + 参照実装 `dzx2.c` / `compress.c` (Einar Saukas, BSD 3-Clause) |
-| 実装 | `archive::compress::zx2` (decode / decode_bounded / encode)。pure-Rust 実装 |
+| 実装 | `archive::compress::zx2` (decode / decode_bounded / decode_variant / decode_with_prefix / encode / encode_no_default_offset / encode_no_length_increment / encode_max_len / encode_with_prefix)。pure-Rust 実装 |
 
 ## 対応バリアント・仕様版
 
@@ -12,10 +12,10 @@
 |---|---|---|---|---|
 | forward / デフォルト (initial offset=1, len=elias+1) | [ZX2 README](https://github.com/einar-saukas/ZX2) + `dzx2.c` (BSD-3) | ✅ | ✅ | |
 | backwards (`-b`) | [ZX2 README](https://github.com/einar-saukas/ZX2) | ❌ | ❌ | intentional scope |
-| ignore default offset (`-z`) | [ZX2 README](https://github.com/einar-saukas/ZX2) | ✅ | ❌ | `decode_no_default_offset` / `decode_variant` (初期 last_offset=0) |
-| skip length increment (`-x`) | [ZX2 README](https://github.com/einar-saukas/ZX2) | ✅ | ❌ | `decode_no_length_increment` / `decode_variant` (長の +1 バイアスなし) |
-| limit block length (`-y`) | [ZX2 README](https://github.com/einar-saukas/ZX2) | ✅ | ❌ | エンコーダ側制約のみ、wire 形式は不変 (decode は既存経路で網羅) |
-| prefix (`+N` skip) / suffix 圧縮 | [ZX2 README](https://github.com/einar-saukas/ZX2) "Advanced Features" | ✅ | ❌ | `decode_with_prefix` で外部履歴を前置。suffix 圧縮はエンコーダ側概念のため対象外 |
+| ignore default offset (`-z`) | [ZX2 README](https://github.com/einar-saukas/ZX2) | ✅ | ✅ | `decode_no_default_offset` / `decode_variant` (初期 last_offset=0)、encode は `encode_no_default_offset` |
+| skip length increment (`-x`) | [ZX2 README](https://github.com/einar-saukas/ZX2) | ✅ | ✅ | `decode_no_length_increment` / `decode_variant` (長の +1 バイアスなし)、encode は `encode_no_length_increment` |
+| limit block length (`-y`) | [ZX2 README](https://github.com/einar-saukas/ZX2) | ✅ | ✅ | エンコーダ側制約のみ、wire 形式は不変。`encode_max_len` でブロック長上限を強制 |
+| prefix (`+N` skip) / suffix 圧縮 | [ZX2 README](https://github.com/einar-saukas/ZX2) "Advanced Features" | ✅ | ✅ | `decode_with_prefix` / `encode_with_prefix` で外部履歴を前置。suffix 圧縮はエンコーダ側概念のため対象外 |
 
 ## ストリーム構造
 
@@ -61,6 +61,6 @@
 
 - 参照実装 ZX2 v1.1 (Einar Saukas) は BSD 3-Clause。本実装は README のフォーマット記述と `dzx2.c` / `compress.c` の動作解析から書かれた独立実装であり、コードの移植は行っていない。
 - 統合テストの `ZX2_*` は参照 C コンプレッサ (ZX2 v1.1) をローカルでコンパイルして生成した既知解答ベクタ (decode のみ検証): literal+match 混在、rep-offset、長マッチ連鎖、offset=255 (形式上限) を含む。
-- backwards モード (`-b`) は intentional scope 外。`-z`/`decode_no_default_offset`、`-x`/`decode_no_length_increment`、prefix (`decode_with_prefix`) は対応済み (`decode_variant` で組み合わせ可)。`-y` はエンコーダ側制約のみで wire 形式は不変。
+- backwards モード (`-b`) は intentional scope 外。`-z`/`decode_no_default_offset`/`encode_no_default_offset`、`-x`/`decode_no_length_increment`/`encode_no_length_increment`、prefix (`decode_with_prefix`/`encode_with_prefix`) は対応済み (`decode_variant` で組み合わせ可)。`-y` はエンコーダ側制約のみで wire 形式は不変 (`encode_max_len`)。
 - ZX2 は ZX1 の minimalist 版で、Z80 デコンプレッサが 48〜56 バイトに収まるよう設計されている (1KB デモ用途)。
 - 実装メモ: Elias gamma 値には `1 << 20` の安全性ガードを設けている (無制限増大する malformed 入力の DoS 防止。フォーマット定義ではなく実装追加の制限)。

@@ -77,15 +77,15 @@ pub mod mtree;
 #[cfg(feature = "warc")]
 pub mod warc;
 
-/// LHA/LZH archive support (store methods only).
+/// LHA/LZH archive support (header levels 0-3; lh0-lh7/LArc/PMarc decode, lh0/lh4-lh7 write).
 #[cfg(feature = "lha")]
 pub mod lha;
 
-/// ARJ archive support (store method only).
+/// ARJ archive support (methods 0-4 read/write incl. multi-volume).
 #[cfg(feature = "arj")]
 pub mod arj;
 
-/// SEA ARC archive support (store methods only).
+/// SEA ARC archive support (method 1-9/0xa/0xb read; method 1/2/3/4/8/9 write).
 #[cfg(feature = "arc")]
 pub mod arc;
 

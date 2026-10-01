@@ -1077,9 +1077,15 @@ fn extract_entry(
                 "zip: PPMd compression (enable sevenz feature)",
             ));
         }
+        #[cfg(feature = "cmpsc")]
+        16 => crate::compress::cmpsc::decode(
+            &effective_compressed,
+            effective_uncompressed_size as usize,
+        )?,
+        #[cfg(not(feature = "cmpsc"))]
         16 => {
             return Err(Error::Unsupported(
-                "zip: IBM z/OS CMPSC compression (method 16)",
+                "zip: IBM z/OS CMPSC compression (method 16; enable cmpsc feature)",
             ));
         }
         _ => return Err(Error::Unsupported("zip: compression method")),
@@ -1655,6 +1661,32 @@ mod tests {
         assert_eq!(entries[0].data, b"descriptor");
     }
 
+    #[cfg(feature = "cmpsc")]
+    #[test]
+    fn test_decode_cmpsc_method16_roundtrip() {
+        let payload = b"cmpsc method 16 payload payload payload";
+        let archive = build_test_zip("cmpsc.bin", payload, 16, false, false, false);
+        let entries = decode(&archive).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "cmpsc.bin");
+        assert_eq!(entries[0].header.compression_method, 16);
+        assert_eq!(entries[0].data, payload);
+    }
+
+    #[cfg(feature = "cmpsc")]
+    #[test]
+    fn test_decode_cmpsc_method16_corrupt_rejected() {
+        let name = "cmpsc.bin";
+        let mut archive = build_test_zip(name, b"payload", 16, false, false, false);
+        // The compressed payload starts right after the fixed 30-byte local
+        // header and the file name; its first byte is the method-16
+        // container version, which must be 1.
+        let payload_pos = 30 + name.len();
+        assert_eq!(archive[payload_pos], 1);
+        archive[payload_pos] = 0;
+        assert!(matches!(decode(&archive), Err(Error::InvalidData(_))));
+    }
+
     #[test]
     fn test_decode_zip64_sizes_and_offsets() {
         let archive = build_test_zip("zip64.txt", b"zip64", 0, false, true, true);
@@ -2089,6 +2121,8 @@ mod tests {
         let compressed = match method {
             0 => data.to_vec(),
             8 => encode::encode(data, Level::Default),
+            #[cfg(feature = "cmpsc")]
+            16 => crate::compress::cmpsc::encode(data),
             _ => unreachable!(),
         };
         let crc = crc32::crc32(data);

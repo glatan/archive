@@ -242,6 +242,80 @@ fn test_lha_level2_7z_interop() {
 }
 
 #[test]
+fn test_lha_level3_roundtrip() {
+    let data = b"lha level 3 payload".repeat(4);
+    let a = lha_fixture_level("sub/dir/three.txt", &data, 3);
+    let entries = archive::archive::lha::decode::decode(&a).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "sub/dir/three.txt");
+    assert_eq!(entries[0].level, 3);
+    assert_eq!(entries[0].data, data.as_slice());
+}
+
+#[test]
+fn test_lha_level3_7z_interop() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_lha3_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("test3.lzh");
+    let data = b"level three data".repeat(3);
+    std::fs::write(&path, lha_fixture_level("lvl3.txt", &data, 3)).unwrap();
+
+    let output = Command::new("7z").args(["l"]).arg(&path).output();
+    let Ok(output) = output else { return };
+    if !output.status.success() {
+        return; // 7z build without LZH level-3 support
+    }
+    let listing = String::from_utf8_lossy(&output.stdout);
+    assert!(listing.contains("lvl3.txt"), "7z l output: {listing}");
+
+    // Extraction verifies the u32 total-header-size semantics.
+    let out_dir = dir.join("out");
+    let output = Command::new("7z")
+        .args(["x", "-y"])
+        .arg(format!("-o{}", out_dir.display()))
+        .arg(&path)
+        .output()
+        .unwrap();
+    if output.status.success() {
+        let extracted = std::fs::read(out_dir.join("lvl3.txt")).unwrap();
+        assert_eq!(extracted, data.as_slice());
+    }
+}
+
+#[test]
+fn test_lha_level3_bsdtar_interop() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_lha3b_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("test3.lzh");
+    std::fs::write(&path, lha_fixture_level("lvl3b.txt", b"level three", 3)).unwrap();
+
+    let output = Command::new("bsdtar").args(["-tf"]).arg(&path).output();
+    let Ok(output) = output else { return };
+    if !output.status.success() {
+        return; // libarchive build without lzh level-3 support
+    }
+    let listing = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        listing.contains("lvl3b.txt"),
+        "bsdtar -tf output: {listing}"
+    );
+}
+
+#[test]
 fn test_lha_level2_bsdtar_interop() {
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -438,4 +512,100 @@ fn test_lha_fixture_oracle_extract() {
             );
         }
     }
+}
+
+// ============================================================
+// LHA compressed-method encode (-lh4- .. -lh7- via LhaEncoder::
+// with_method, stored fallback, system-extractor interop)
+// ============================================================
+
+fn lha_fixture_method(name: &str, data: &[u8], method: &[u8; 5]) -> Vec<u8> {
+    let mut enc = archive::archive::lha::encode::LhaEncoder::new()
+        .with_method(method)
+        .unwrap();
+    enc.add_file(name, data, 0).unwrap();
+    enc.finish()
+}
+
+/// Compressed write→read roundtrip for every writable st1 method.
+#[test]
+fn test_lha_compressed_method_roundtrip() {
+    let mut data = Vec::new();
+    data.extend_from_slice(&b"lha compressed roundtrip ".repeat(2000));
+    data.extend_from_slice(&[7u8; 1000]);
+    for method in [b"-lh4-", b"-lh5-", b"-lh6-", b"-lh7-"] {
+        let a = lha_fixture_method("c.bin", &data, method);
+        // Method tag at offset 2; packed size (u32le) at offset 7.
+        assert_eq!(&a[2..7], method.as_slice());
+        let packed = u32::from_le_bytes(a[7..11].try_into().unwrap()) as usize;
+        assert!(
+            packed < data.len(),
+            "{method:?}: packed {packed} >= orig {}",
+            data.len()
+        );
+        let entries = archive::archive::lha::decode::decode(&a).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "c.bin");
+        assert_eq!(entries[0].data, data.as_slice());
+    }
+}
+
+/// An incompressible entry under a compressed method selection is
+/// emitted `-lh0-`, like real LHA.
+#[test]
+fn test_lha_compressed_method_stored_fallback() {
+    let mut data = Vec::new();
+    let mut s = 0x1357_9bdfu32;
+    while data.len() < 1024 {
+        s ^= s << 13;
+        s ^= s >> 17;
+        s ^= s << 5;
+        data.push((s >> 24) as u8);
+    }
+    let a = lha_fixture_method("r.bin", &data, b"-lh5-");
+    assert_eq!(&a[2..7], b"-lh0-");
+    let entries = archive::archive::lha::decode::decode(&a).unwrap();
+    assert_eq!(entries[0].data, data.as_slice());
+}
+
+/// libarchive reads `-lh5-`: a crate-generated compressed archive
+/// must list and extract under `bsdtar`.
+#[test]
+fn test_lha_lh5_bsdtar_interop() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_lha5b_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("test5.lzh");
+    let data = b"bsdtar lh5 compressed payload ".repeat(64);
+    std::fs::write(&path, lha_fixture_method("lh5.txt", &data, b"-lh5-")).unwrap();
+
+    let output = Command::new("bsdtar").args(["-tf"]).arg(&path).output();
+    let Ok(output) = output else { return };
+    if !output.status.success() {
+        return; // libarchive build without lzh support
+    }
+    let listing = String::from_utf8_lossy(&output.stdout);
+    assert!(listing.contains("lh5.txt"), "bsdtar -tf output: {listing}");
+
+    let out_dir = dir.join("out");
+    std::fs::create_dir_all(&out_dir).unwrap();
+    let output = Command::new("bsdtar")
+        .args(["-xf"])
+        .arg(&path)
+        .current_dir(&out_dir)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "bsdtar -xf failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let extracted = std::fs::read(out_dir.join("lh5.txt")).unwrap();
+    assert_eq!(extracted, data.as_slice());
 }

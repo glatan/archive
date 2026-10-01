@@ -25,12 +25,14 @@
 //! `elias(len-1)` emitted ahead of the offset fields; the decoder replays
 //! it when reading the length. Offset MSB value 256 is the EOF marker.
 //!
-//! The classic v1 format (`-c`) is supported via [`decode_classic`]: its
-//! only wire difference is that the offset-MSB Elias gamma data bits are
-//! stored non-inverted. Streams produced with the `+N` prefix option can
-//! be decoded via [`decode_with_prefix`], which lets match offsets reach
-//! into caller-supplied external history. The `-q` quick mode only
-//! constrains the encoder (offsets <= 2176); such streams decode with
+//! The classic v1 format (`-c`) is supported via [`decode_classic`] and
+//! [`encode_classic`]: its only wire difference is that the offset-MSB
+//! Elias gamma data bits are stored non-inverted. Streams produced with
+//! the `+N` prefix option can be decoded via [`decode_with_prefix`], which
+//! lets match offsets reach into caller-supplied external history;
+//! [`encode_with_prefix`] emits such streams. The `-q` quick mode only
+//! constrains the encoder (offsets <= 2176, the ZX7 limit);
+//! [`encode_quick`] emits such streams and they decode with
 //! [`decode`].
 //!
 //! Backwards (`-b`) mode is outside the current scope.
@@ -42,6 +44,8 @@ use crate::error::Error;
 
 /// Largest encodable offset (ZX5 v2 limit).
 const MAX_OFFSET: usize = 65280;
+/// Largest encodable offset in `-q` quick mode (the ZX7 limit).
+const MAX_OFFSET_QUICK: usize = 2176;
 const MIN_MATCH: usize = 3;
 
 struct BitReader<'a> {
@@ -310,6 +314,44 @@ impl BitWriter {
 /// valid ZX5 but does not aim to match the reference compressor's optimal
 /// parsing output.
 pub fn encode(input: &[u8]) -> Vec<u8> {
+    encode_impl(input, &[], true, MAX_OFFSET)
+}
+
+/// Encode data as a ZX5 v1 (`-c` classic) stream.
+///
+/// The only wire difference from [`encode`] (v2) is that the offset-MSB
+/// Elias gamma data bits are stored non-inverted. Decode with
+/// [`decode_classic`].
+pub fn encode_classic(input: &[u8]) -> Vec<u8> {
+    encode_impl(input, &[], false, MAX_OFFSET)
+}
+
+/// Encode data as a ZX5 v2 stream with the `-q` quick-mode constraint:
+/// match offsets are limited to 2176 (the ZX7 limit). The wire format
+/// is unchanged; decode with [`decode`].
+pub fn encode_quick(input: &[u8]) -> Vec<u8> {
+    encode_impl(input, &[], true, MAX_OFFSET_QUICK)
+}
+
+/// Encode data as a ZX5 v2 stream whose match offsets may reach into
+/// `prefix`, external history logically prepended to the input (the
+/// upstream `+N` prefix option). Decode with [`decode_with_prefix`].
+pub fn encode_with_prefix(input: &[u8], prefix: &[u8]) -> Vec<u8> {
+    encode_impl(input, prefix, true, MAX_OFFSET)
+}
+
+/// Encode data as a ZX5 v1 (`-c` classic) stream with a `prefix`
+/// history as in [`encode_with_prefix`]. Decode with
+/// [`decode_classic_with_prefix`].
+pub fn encode_classic_with_prefix(input: &[u8], prefix: &[u8]) -> Vec<u8> {
+    encode_impl(input, prefix, false, MAX_OFFSET)
+}
+
+/// `prefix` is external history logically prepended to `input`: matches
+/// may copy from it using normal wire offsets, as `decode_with_prefix`
+/// expects. Match positions are tracked in the virtual `prefix ++ input`
+/// coordinate space.
+fn encode_impl(input: &[u8], prefix: &[u8], inverted_msb: bool, max_offset: usize) -> Vec<u8> {
     if input.is_empty() {
         // The ZX5 format cannot represent an empty output (the opening
         // literal block requires a length >= 1); emit an empty stream which
@@ -317,8 +359,23 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
         return Vec::new();
     }
 
+    let plen = prefix.len();
+    // Byte at virtual position `v` of the `prefix ++ input` history.
+    let byte_at = |v: usize| -> u8 { if v < plen { prefix[v] } else { input[v - plen] } };
+    let hash = |v: usize| -> usize {
+        (((byte_at(v) as usize) << 8) ^ ((byte_at(v + 1) as usize) << 4) ^ byte_at(v + 2) as usize)
+            & ((1 << 15) - 1)
+    };
+
     let mut w = BitWriter::new();
     let mut head = vec![-1i32; 1 << 15];
+    // Seed the matcher with the prefix history so matches can reach
+    // into it via normal wire offsets.
+    let mut v = 0usize;
+    while v < plen && v + MIN_MATCH <= plen + input.len() {
+        head[hash(v)] = v as i32;
+        v += 1;
+    }
     let mut last1 = 1usize;
     let mut last2 = 0usize;
     let mut last3 = 0usize;
@@ -328,21 +385,22 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
     let mut after_literals = false;
 
     while pos < input.len() {
-        // Search for a match at pos.
+        // Search for a match at pos (virtual position plen + pos).
+        let pos_v = plen + pos;
         let mut best: Option<(usize, usize)> = None;
         if pos + MIN_MATCH <= input.len() {
-            let h = (((input[pos] as usize) << 8)
-                ^ ((input[pos + 1] as usize) << 4)
-                ^ input[pos + 2] as usize)
-                & ((1 << 15) - 1);
+            let h = hash(pos_v);
             let cand = head[h];
-            head[h] = pos as i32;
+            head[h] = pos_v as i32;
             if cand >= 0 {
                 let c = cand as usize;
-                let dist = pos - c;
-                if dist <= MAX_OFFSET && input[c] == input[pos] && input[c + 1] == input[pos + 1] {
+                let dist = pos_v - c;
+                if dist <= max_offset
+                    && byte_at(c) == byte_at(pos_v)
+                    && byte_at(c + 1) == byte_at(pos_v + 1)
+                {
                     let mut len = MIN_MATCH;
-                    while pos + len < input.len() && input[c + len] == input[pos + len] {
+                    while pos + len < input.len() && byte_at(c + len) == byte_at(pos_v + len) {
                         len += 1;
                     }
                     best = Some((len, dist));
@@ -353,6 +411,13 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
         if let Some((len, dist)) = best {
             // Flush pending literals first.
             let lit_len = pos - lit_start;
+            if lit_len == 0 && first_block {
+                // The stream must open with a literal block of length
+                // >= 1, so a match at position 0 cannot be emitted;
+                // the byte is emitted as a literal instead.
+                pos += 1;
+                continue;
+            }
             if lit_len > 0 || first_block {
                 debug_assert!(lit_len > 0); // first match implies >=1 literal
                 if !first_block {
@@ -388,7 +453,7 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
                 } else {
                     w.write_bit(true);
                     w.write_bit(len <= 2); // `*` bit: first bit of elias(len-1)
-                    w.write_elias((dist - 1) / 256 + 1, true);
+                    w.write_elias((dist - 1) / 256 + 1, inverted_msb);
                     w.write_byte((255 - (dist - 1) % 256) as u8);
                     w.write_elias_tail(len - 1, false);
                     last3 = last2;
@@ -420,7 +485,7 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
     w.write_bit(true);
     w.write_bit(true);
     w.write_bit(false);
-    w.write_elias(256, true);
+    w.write_elias(256, inverted_msb);
     w.out
 }
 
@@ -453,6 +518,245 @@ mod tests {
         w.write_bit(false);
         w.write_elias(256, inverted);
         w.out
+    }
+
+    /// Decode `stream`, returning every match offset it references in
+    /// emission order. Mirrors `decode_impl`'s offset bookkeeping so
+    /// tests can inspect which offsets an encoder emitted. `inverted`
+    /// selects the v2 (true) vs v1 classic (false) offset-MSB elias.
+    fn used_offsets(stream: &[u8], inverted: bool) -> Vec<usize> {
+        let mut offsets = Vec::new();
+        if stream.is_empty() {
+            return offsets;
+        }
+        let mut r = BitReader::new(stream);
+        let mut last1 = 1usize;
+        let mut last2 = 0usize;
+        let mut last3 = 0usize;
+        let mut literals = true;
+        loop {
+            if literals {
+                let len = r.elias(None, false).unwrap() as usize;
+                for _ in 0..len {
+                    r.read_byte().unwrap();
+                }
+                if r.read_bit().unwrap() == 0 {
+                    r.elias(None, false).unwrap();
+                    offsets.push(last1);
+                    literals = r.read_bit().unwrap() == 0;
+                    continue;
+                }
+            }
+            if r.read_bit().unwrap() == 0 {
+                if r.read_bit().unwrap() == 0 {
+                    core::mem::swap(&mut last1, &mut last2);
+                } else {
+                    let o3 = last3;
+                    last3 = last2;
+                    last2 = last1;
+                    last1 = o3;
+                }
+                r.elias(None, false).unwrap();
+                offsets.push(last1);
+            } else {
+                let ahead = r.read_bit().unwrap();
+                last3 = last2;
+                last2 = last1;
+                let msb = r.elias(None, inverted).unwrap() as usize;
+                if msb == 256 {
+                    return offsets;
+                }
+                last1 = msb * 256 - r.read_byte().unwrap() as usize;
+                r.elias(Some(ahead), false).unwrap();
+                offsets.push(last1);
+            }
+            literals = r.read_bit().unwrap() == 0;
+        }
+    }
+
+    fn rt_classic(data: &[u8]) {
+        let enc = encode_classic(data);
+        assert_eq!(decode_classic(&enc).unwrap(), data);
+        assert_eq!(decode_classic_bounded(&enc, data.len()).unwrap(), data);
+    }
+
+    #[test]
+    fn encode_classic_roundtrip() {
+        rt_classic(b"");
+        rt_classic(b"a");
+        rt_classic(b"ab");
+        rt_classic(b"abcabcabc");
+        rt_classic(b"aaaaaaaaaaaaaaaaaaaa");
+        rt_classic(b"hello world hello world hello world");
+        rt_classic(&[0u8; 2000]);
+        // Alternating patterns exercise the 2nd/3rd-last offset blocks.
+        let mut alt = Vec::new();
+        for _ in 0..12 {
+            alt.extend_from_slice(b"ABCDEFGH");
+            alt.extend_from_slice(b"12345678");
+            alt.extend_from_slice(b"abcdefgh");
+        }
+        rt_classic(&alt);
+        // Distance > 255 forces a multi-bit offset MSB where the v1/v2
+        // elias encodings actually differ.
+        let mut far = vec![0u8; 300];
+        far.extend_from_slice(b"PATTERN-AT-DISTANCE");
+        far.extend_from_slice(&[1u8; 300]);
+        far.extend_from_slice(b"PATTERN-AT-DISTANCE");
+        rt_classic(&far);
+        assert_eq!(encode_classic(b""), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn encode_classic_wire_format() {
+        // Known vector: literal 'A' + EOF marker. v1 stores the eight
+        // offset-MSB elias data bits verbatim; v2 inverts them.
+        assert_eq!(encode_classic(b"A"), [0xe0, b'A', 0x00, 0x08]);
+        assert_eq!(encode(b"A"), [0xe5, b'A', 0x55, 0x58]);
+        // The EOF elias(256) has 8 data bits (all zero -> all ones when
+        // inverted), so v1/v2 streams differ even when every offset MSB
+        // is 1.
+        assert_ne!(encode_classic(b"abcabcabc"), encode(b"abcabcabc"));
+        // Cross-decoding fails: the EOF marker resolves to MSB 511.
+        assert!(decode(&encode_classic(b"abcabcabc")).is_err());
+        assert!(decode_classic(&encode(b"abcabcabc")).is_err());
+    }
+
+    #[test]
+    fn encode_quick_roundtrip() {
+        let rt_quick = |data: &[u8]| {
+            assert_eq!(decode(&encode_quick(data)).unwrap(), data);
+            // Same cap under the v1 wire.
+            assert_eq!(
+                decode_classic(&encode_impl(data, &[], false, MAX_OFFSET_QUICK)).unwrap(),
+                data
+            );
+        };
+        rt_quick(b"");
+        rt_quick(b"a");
+        rt_quick(b"ab");
+        rt_quick(b"abcabcabc");
+        rt_quick(b"aaaaaaaaaaaaaaaaaaaa");
+        rt_quick(&[0u8; 2000]);
+        let mut text = Vec::new();
+        for _ in 0..150 {
+            text.extend_from_slice(b"the quick brown fox jumps over the lazy dog. ");
+        }
+        rt_quick(&text);
+        assert_eq!(encode_quick(b""), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn encode_quick_caps_offsets() {
+        // A block repeated just beyond the quick limit: the default
+        // encoder uses a match there, the quick encoder cannot.
+        let mut data = Vec::new();
+        data.extend_from_slice(b"FAR-APART-REPEATED-BLOCK-0123456789");
+        data.extend_from_slice(&[0u8; 3000]);
+        data.extend_from_slice(b"FAR-APART-REPEATED-BLOCK-0123456789");
+
+        let normal = encode(&data);
+        let quick = encode_quick(&data);
+        assert_eq!(decode(&normal).unwrap(), data);
+        assert_eq!(decode(&quick).unwrap(), data);
+
+        let normal_offsets = used_offsets(&normal, true);
+        assert!(normal_offsets.iter().any(|&o| o > MAX_OFFSET_QUICK));
+        assert!(normal_offsets.iter().all(|&o| o <= MAX_OFFSET));
+        assert!(
+            used_offsets(&quick, true)
+                .iter()
+                .all(|&o| o <= MAX_OFFSET_QUICK)
+        );
+        // Forfeiting the far match costs bytes.
+        assert!(quick.len() > normal.len());
+
+        // The cap also holds for the classic v1 wire variant.
+        let quick_classic = encode_impl(&data, &[], false, MAX_OFFSET_QUICK);
+        assert_eq!(decode_classic(&quick_classic).unwrap(), data);
+        assert!(
+            used_offsets(&quick_classic, false)
+                .iter()
+                .all(|&o| o <= MAX_OFFSET_QUICK)
+        );
+    }
+
+    #[test]
+    fn encode_with_prefix_roundtrip() {
+        // The repeated block occurs only in the prefix: the emitted
+        // match offset must reach into the external history.
+        let prefix = b"HELLO-PREFIX-DATA-0123456789";
+        let input = b"xHELLO-PREFIX-DATA-0123456789!";
+        let enc = encode_with_prefix(input, prefix);
+        assert_eq!(decode_with_prefix(&enc, prefix).unwrap(), input);
+        assert_eq!(used_offsets(&enc, true), [prefix.len() + 1]);
+        // Reusing the prefix history saves bytes vs standalone encoding.
+        assert!(enc.len() < encode(input).len());
+        // Without the prefix the offset exceeds the produced output.
+        assert!(decode(&enc).is_err());
+    }
+
+    #[test]
+    fn encode_with_prefix_various() {
+        let rt_prefix = |input: &[u8], prefix: &[u8]| {
+            let enc = encode_with_prefix(input, prefix);
+            assert_eq!(decode_with_prefix(&enc, prefix).unwrap(), input);
+        };
+        // Match crossing the prefix/output boundary (overlapping copy).
+        rt_prefix(b"aABaAB", b"AB");
+        rt_prefix(b"abcabcabc", b"abcabc");
+        // Input that repeats the whole prefix; the match crosses the
+        // prefix/output boundary for its second half.
+        rt_prefix(b"hello world hello world", b"hello world ");
+        // Far prefix match: distance > 255 exercises the multi-bit
+        // offset MSB into the prefix region.
+        let mut prefix = Vec::new();
+        prefix.extend_from_slice(b"FAR-PREFIX-BLOCK");
+        prefix.extend_from_slice(&[7u8; 600]);
+        let mut input = b"z".to_vec();
+        input.extend_from_slice(b"FAR-PREFIX-BLOCK");
+        rt_prefix(&input, &prefix);
+        let enc = encode_with_prefix(&input, &prefix);
+        assert!(used_offsets(&enc, true).iter().any(|&o| o > 256));
+        // Larger mixed data.
+        let mut prefix = Vec::new();
+        let mut input = Vec::new();
+        for i in 0..40u32 {
+            prefix.extend_from_slice(&i.to_le_bytes());
+        }
+        input.extend_from_slice(&prefix[20..80]);
+        input.extend_from_slice(b"unique-tail-data");
+        input.extend_from_slice(&prefix[..60]);
+        rt_prefix(&input, &prefix);
+        // Empty input still yields an empty stream.
+        assert_eq!(encode_with_prefix(b"", b"prefix"), Vec::<u8>::new());
+        assert_eq!(decode_with_prefix(&[], b"prefix").unwrap(), b"");
+    }
+
+    #[test]
+    fn encode_with_prefix_empty_prefix() {
+        // An empty prefix must produce exactly the standalone encoding.
+        for data in [
+            &b"a"[..],
+            b"abcabcabc",
+            b"aaaaaaaaaaaaaaaaaaaa",
+            b"hello world hello world hello world",
+        ] {
+            assert_eq!(encode_with_prefix(data, b""), encode(data));
+            assert_eq!(encode_classic_with_prefix(data, b""), encode_classic(data));
+        }
+    }
+
+    #[test]
+    fn encode_classic_with_prefix_roundtrip() {
+        let prefix = b"HELLO-PREFIX-DATA-0123456789";
+        let input = b"xHELLO-PREFIX-DATA-0123456789!";
+        let enc = encode_classic_with_prefix(input, prefix);
+        assert_eq!(decode_classic_with_prefix(&enc, prefix).unwrap(), input);
+        assert_eq!(used_offsets(&enc, false), [prefix.len() + 1]);
+        assert!(decode_classic(&enc).is_err());
+        // The v2 wire decodes it differently / rejects it.
+        assert!(decode_with_prefix(&enc, prefix).is_err());
     }
 
     #[test]

@@ -20,15 +20,20 @@
 //! byte stores `255 - offset`, so byte `0xff` (offset 0) is the
 //! end-of-stream marker.
 //!
-//! Variant flags are supported on the decode side:
+//! Variant flags:
 //! - `-z` (ignore default offset): [`decode_no_default_offset`] starts
-//!   with `last_offset = 0` instead of 1.
-//! - `-x` (skip length increment): [`decode_no_length_increment`] stores
-//!   new-offset block lengths as `elias(len)` without the -1 bias.
-//! - `-y` (limit block length) only constrains the encoder; such streams
-//!   decode with [`decode`].
+//!   with `last_offset = 0` instead of 1; [`encode_no_default_offset`]
+//!   produces matching streams. The first match is always emitted as a
+//!   new-offset block, so the output also decodes with [`decode`].
+//! - `-x` (skip length increment): [`decode_no_length_increment`] reads
+//!   new-offset block lengths as `elias(len)` without the -1 bias;
+//!   [`encode_no_length_increment`] produces matching streams.
+//! - `-y` (limit block length) only constrains the encoder:
+//!   [`encode_max_len`] splits match blocks at a caller-chosen bound;
+//!   such streams decode with [`decode`].
 //! - `+N` prefix compression: [`decode_with_prefix`] lets match offsets
-//!   reach into caller-supplied external history.
+//!   reach into caller-supplied external history; [`encode_with_prefix`]
+//!   produces matching streams.
 //! [`decode_variant`] covers arbitrary combinations of the above.
 //!
 //! Backwards (`-b`) mode is outside the current scope.
@@ -295,23 +300,120 @@ impl BitWriter {
 /// valid ZX2 but does not aim to match the reference compressor's optimal
 /// parsing output.
 pub fn encode(input: &[u8]) -> Vec<u8> {
+    // An unbounded max_len can never be exceeded, so this cannot fail.
+    encode_variant(input, 1, false, usize::MAX).expect("zx2: unbounded encode cannot fail")
+}
+
+/// Encode data as a ZX2 stream decodable by [`decode_no_default_offset`]
+/// (the upstream `-z` option): the initial last-offset is 0, so the
+/// first match is always emitted as a new-offset block. Because the
+/// produced stream contains no copy-from-last-offset before the first
+/// new-offset block, it also decodes correctly with [`decode`].
+pub fn encode_no_default_offset(input: &[u8]) -> Vec<u8> {
+    encode_variant(input, 0, false, usize::MAX).expect("zx2: unbounded encode cannot fail")
+}
+
+/// Encode data as a ZX2 stream decodable by
+/// [`decode_no_length_increment`] (the upstream `-x` option): new-offset
+/// block lengths are stored as `elias(len)` without the usual -1 bias.
+pub fn encode_no_length_increment(input: &[u8]) -> Vec<u8> {
+    encode_variant(input, 1, true, usize::MAX).expect("zx2: unbounded encode cannot fail")
+}
+
+/// Encode data as a ZX2 stream with every emitted block limited to at
+/// most `max_len` decoded bytes (the upstream `-y` "limit block length"
+/// option, parameterized). The wire format is unchanged, so the output
+/// decodes with [`decode`]. Passing `max_len = 255` additionally keeps
+/// every stored Elias value within a byte, matching upstream `-y`.
+///
+/// Match blocks are split as needed. Since ZX2 does not allow
+/// consecutive literal blocks, a byte run without a usable match cannot
+/// be split: [`Error::InvalidData`] is returned when such a run exceeds
+/// `max_len`, or when `max_len` is 0 for non-empty input.
+pub fn encode_max_len(input: &[u8], max_len: usize) -> Result<Vec<u8>, Error> {
+    encode_variant(input, 1, false, max_len)
+}
+
+/// Encode data as a ZX2 stream decodable by [`decode_with_prefix`] (the
+/// upstream `+N` prefix option): the matcher treats `prefix` as history
+/// logically prepended to `input`, so emitted matches may copy from it
+/// using normal wire offsets. Only the last 255 bytes of `prefix` are
+/// reachable (ZX2's maximum offset); older prefix bytes are ignored.
+///
+/// The first block must be a literal, so a match starting at `input[0]`
+/// is never emitted even when the prefix offers one.
+pub fn encode_with_prefix(input: &[u8], prefix: &[u8]) -> Vec<u8> {
+    encode_impl(input, prefix, 1, false, usize::MAX).expect("zx2: unbounded encode cannot fail")
+}
+
+/// Encode a ZX2 stream with selectable variant flags, mirroring
+/// [`decode_variant`].
+///
+/// * `initial_offset` — initial last-offset value: 0 for `-z`
+///   compatibility, 1 (the default) otherwise.
+/// * `skip_len_increment` — `true` for `-x` compatibility: new-offset
+///   block lengths are stored as `elias(len)` without the -1 bias.
+/// * `max_len` — bound on the decoded length of every emitted block
+///   (the `-y` constraint); `usize::MAX` disables it. An unmatchable
+///   literal run longer than `max_len` is an error since literal blocks
+///   cannot be consecutive.
+fn encode_variant(
+    input: &[u8],
+    initial_offset: usize,
+    skip_len_increment: bool,
+    max_len: usize,
+) -> Result<Vec<u8>, Error> {
+    encode_impl(input, &[], initial_offset, skip_len_increment, max_len)
+}
+
+/// Shared encoder core. `prefix` is external history logically prepended
+/// to the output as in [`decode_with_prefix`]; it may be empty.
+fn encode_impl(
+    input: &[u8],
+    prefix: &[u8],
+    initial_offset: usize,
+    skip_len_increment: bool,
+    max_len: usize,
+) -> Result<Vec<u8>, Error> {
     if input.is_empty() {
         // The ZX2 format cannot represent an empty output (the opening
         // literal block requires a length >= 1); emit an empty stream which
         // decode() maps back to empty output.
-        return Vec::new();
+        return Ok(Vec::new());
     }
+    if max_len == 0 {
+        return Err(Error::InvalidData("zx2: max_len must be at least 1"));
+    }
+
+    // Offsets are limited to MAX_OFFSET, so only the tail of the prefix
+    // is reachable history.
+    let prefix = &prefix[prefix.len().saturating_sub(MAX_OFFSET)..];
+    let plen = prefix.len();
+    // Byte at virtual position `i` of the `prefix ++ input` history.
+    let hist = |i: usize| {
+        if i < plen { prefix[i] } else { input[i - plen] }
+    };
 
     let mut w = BitWriter::new();
     let mut head = vec![-1i32; 1 << 15];
-    let mut last_offset = 1usize;
+    // Seed the matcher with the reachable prefix positions.
+    for c in 0..plen {
+        if c + MIN_MATCH > plen + input.len() {
+            break;
+        }
+        let h = (((hist(c) as usize) << 8) ^ ((hist(c + 1) as usize) << 4) ^ hist(c + 2) as usize)
+            & ((1 << 15) - 1);
+        head[h] = c as i32;
+    }
+    let mut last_offset = initial_offset;
     let mut lit_start = 0usize;
     let mut pos = 0usize;
     let mut first_block = true;
     let mut after_literals = false;
 
     while pos < input.len() {
-        // Search for a match at pos.
+        // Search for a match at pos. Candidates are virtual positions
+        // in `prefix ++ input`, so `dist` may reach into the prefix.
         let mut best: Option<(usize, usize)> = None;
         if pos + MIN_MATCH <= input.len() {
             let h = (((input[pos] as usize) << 8)
@@ -319,13 +421,17 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
                 ^ input[pos + 2] as usize)
                 & ((1 << 15) - 1);
             let cand = head[h];
-            head[h] = pos as i32;
+            head[h] = (plen + pos) as i32;
             if cand >= 0 {
                 let c = cand as usize;
-                let dist = pos - c;
-                if dist <= MAX_OFFSET && input[c] == input[pos] && input[c + 1] == input[pos + 1] {
+                let dist = plen + pos - c;
+                if dist <= MAX_OFFSET
+                    && hist(c) == input[pos]
+                    && hist(c + 1) == input[pos + 1]
+                    && hist(c + 2) == input[pos + 2]
+                {
                     let mut len = MIN_MATCH;
-                    while pos + len < input.len() && input[c + len] == input[pos + len] {
+                    while pos + len < input.len() && hist(c + len) == input[pos + len] {
                         len += 1;
                     }
                     best = Some((len, dist));
@@ -333,9 +439,35 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
             }
         }
 
-        if let Some((len, dist)) = best {
-            // Flush pending literals first.
+        if let Some((mut len, dist)) = best {
             let lit_len = pos - lit_start;
+
+            // The opening block is always a literal (the format omits
+            // its indicator bit), so a match at the very start - only
+            // possible through prefix history - stays a literal.
+            if first_block && lit_len == 0 {
+                pos += 1;
+                continue;
+            }
+
+            // `-y`: cap the emitted block length. A new-offset block
+            // stores `len - 1` (or `len` with `-x`), so its minimum
+            // encodable length is 2 (or 1); a copy-from-last-offset
+            // stores `len` and may only follow a literal block.
+            len = len.min(max_len);
+            let rep_ok = (after_literals || lit_len > 0) && dist == last_offset;
+            let min_new = if skip_len_increment { 1 } else { 2 };
+            if len < min_new && !rep_ok {
+                // Too short to emit as a match; leave it to literals.
+                pos += 1;
+                continue;
+            }
+
+            // Flush pending literals first.
+            if lit_len > max_len {
+                // Consecutive literal blocks are not representable.
+                return Err(Error::InvalidData("zx2: literal run exceeds max_len"));
+            }
             if lit_len > 0 || first_block {
                 debug_assert!(lit_len > 0); // first match implies >=1 literal
                 if !first_block {
@@ -357,7 +489,9 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
                 // Copy from new offset.
                 w.write_bit(true);
                 w.write_byte((255 - dist) as u8);
-                w.write_elias(len - 1);
+                // `-x` stores the length verbatim; the default stores
+                // len - 1 (upstream min_length 1 vs 2).
+                w.write_elias(if skip_len_increment { len } else { len - 1 });
                 last_offset = dist;
             }
             after_literals = false;
@@ -370,6 +504,9 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
 
     // Trailing literal block, if any.
     let lit_len = input.len() - lit_start;
+    if lit_len > max_len {
+        return Err(Error::InvalidData("zx2: literal run exceeds max_len"));
+    }
     if lit_len > 0 {
         if !first_block {
             w.write_bit(false);
@@ -383,7 +520,7 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
     // End marker: new-offset indicator + 0xff.
     w.write_bit(true);
     w.write_byte(0xff);
-    w.out
+    Ok(w.out)
 }
 
 #[cfg(test)]
@@ -502,6 +639,228 @@ mod tests {
     fn empty_input() {
         assert_eq!(encode(b""), Vec::<u8>::new());
         assert_eq!(decode(&[]).unwrap(), Vec::<u8>::new());
+    }
+
+    /// Largest decoded block length in a default-flags ZX2 `stream`
+    /// (literal runs and matches counted in decoded bytes).
+    fn max_block_len(stream: &[u8]) -> usize {
+        let mut r = BitReader::new(stream);
+        let mut max = 0usize;
+        let mut literals = true;
+        loop {
+            if literals {
+                let len = r.elias().unwrap() as usize;
+                max = max.max(len);
+                for _ in 0..len {
+                    r.read_byte().unwrap();
+                }
+                if r.read_bit().unwrap() == 0 {
+                    let len = r.elias().unwrap() as usize;
+                    max = max.max(len);
+                    literals = r.read_bit().unwrap() == 0;
+                    continue;
+                }
+            }
+            let offset = 255 - r.read_byte().unwrap() as usize;
+            if offset == 0 {
+                return max;
+            }
+            let len = r.elias().unwrap() as usize + 1;
+            max = max.max(len);
+            literals = r.read_bit().unwrap() == 0;
+        }
+    }
+
+    #[test]
+    fn encode_no_default_offset_roundtrip() {
+        let cases: Vec<Vec<u8>> = vec![
+            b"a".to_vec(),
+            b"abcabcabcabcabcabc".to_vec(),
+            b"aaaaaaaaaaaaaaaaaaaa".to_vec(),
+            b"hello world hello world hello world".to_vec(),
+            vec![0u8; 2000],
+        ];
+        for data in &cases {
+            let enc = encode_no_default_offset(data);
+            assert_eq!(decode_no_default_offset(&enc).unwrap(), *data);
+            assert_eq!(decode_variant(&enc, &[], 0, false).unwrap(), *data);
+            // No copy-from-last-offset is emitted before the first
+            // new-offset block, so the default decoder accepts it too.
+            assert_eq!(decode(&enc).unwrap(), *data);
+        }
+        // The `-z` stream really differs: "aaaa" uses a rep-offset under
+        // the default initial offset 1, a new-offset block under `-z`.
+        let rep = encode(b"aaaa");
+        let zed = encode_no_default_offset(b"aaaa");
+        assert_ne!(rep, zed);
+        // And the default stream's early rep-offset is invalid under `-z`.
+        assert!(decode_no_default_offset(&rep).is_err());
+    }
+
+    #[test]
+    fn encode_no_length_increment_roundtrip() {
+        let cases: Vec<Vec<u8>> = vec![
+            b"a".to_vec(),
+            b"abcabcabcabcabcabc".to_vec(),
+            b"aaaaaaaaaaaaaaaaaaaa".to_vec(),
+            b"hello world hello world hello world".to_vec(),
+            vec![7u8; 1500],
+        ];
+        for data in &cases {
+            let enc = encode_no_length_increment(data);
+            assert_eq!(decode_no_length_increment(&enc).unwrap(), *data);
+            assert_eq!(decode_variant(&enc, &[], 1, true).unwrap(), *data);
+        }
+        // New-offset lengths are stored one higher than the default
+        // decoder expects, so a stream containing a new-offset block must
+        // not decode correctly under the default flags (it either errors
+        // or produces different bytes).
+        let enc = encode_no_length_increment(b"abcabcabcabcabcabc");
+        assert!(decode(&enc).map_or(true, |v| v != b"abcabcabcabcabcabc"));
+        // Rep-offset lengths carry no bias, so a stream without any
+        // new-offset block is identical in both variants.
+        let enc = encode_no_length_increment(b"aaaaaaaaaaaaaaaaaaaa");
+        assert_eq!(decode(&enc).unwrap(), b"aaaaaaaaaaaaaaaaaaaa");
+    }
+
+    #[test]
+    fn encode_max_len_roundtrip() {
+        // Inputs whose longest literal run fits small bounds.
+        let cases: Vec<Vec<u8>> = vec![
+            b"abcabcabcabcabcabc".to_vec(),
+            b"aaaaaaaaaaaaaaaaaaaa".to_vec(),
+            vec![0u8; 2000],
+        ];
+        for max_len in [4usize, 8, 255] {
+            for data in &cases {
+                let enc = encode_max_len(data, max_len).unwrap();
+                assert_eq!(decode(&enc).unwrap(), *data);
+                assert!(max_block_len(&enc) <= max_len);
+            }
+        }
+        // The opening unmatched run of this text is ~32 bytes, so it
+        // needs a proportionally larger bound.
+        let mut text = Vec::new();
+        for _ in 0..80 {
+            text.extend_from_slice(b"the quick brown fox jumps over the lazy dog. ");
+        }
+        let enc = encode_max_len(&text, 64).unwrap();
+        assert_eq!(decode(&enc).unwrap(), text);
+        assert!(max_block_len(&enc) <= 64);
+    }
+
+    #[test]
+    fn encode_max_len_errors() {
+        // max_len 0 cannot encode any block of non-empty input.
+        assert!(encode_max_len(b"abc", 0).is_err());
+        assert_eq!(encode_max_len(b"", 0).unwrap(), Vec::<u8>::new());
+        // A byte run with no usable match within 255 bytes stays one
+        // literal block; it cannot be split below max_len.
+        let literal_run: Vec<u8> = (0..300u32).map(|i| i as u8).collect();
+        assert!(encode_max_len(&literal_run, 64).is_err());
+        let enc = encode_max_len(&literal_run, 300).unwrap();
+        assert_eq!(decode(&enc).unwrap(), literal_run);
+        // A bound of 1 still works for a single literal byte, but a
+        // match can never cover the last two input bytes (the matcher
+        // needs 3 lookahead bytes), so any longer input fails.
+        assert_eq!(decode(&encode_max_len(b"a", 1).unwrap()).unwrap(), b"a");
+        assert!(encode_max_len(b"ab", 1).is_err());
+        assert!(encode_max_len(&[b'a'; 100], 1).is_err());
+        // Bound 2 covers self-repeating data via len-2 copy blocks.
+        let enc = encode_max_len(&[b'a'; 100], 2).unwrap();
+        assert_eq!(decode(&enc).unwrap(), vec![b'a'; 100]);
+        assert!(max_block_len(&enc) <= 2);
+    }
+
+    #[test]
+    fn encode_with_prefix_roundtrip() {
+        // literal 'Z', then a distance-4 len-3 match reaching into the
+        // 3-byte prefix "abc", then EOF.
+        let enc = encode_with_prefix(b"Zabc", b"abc");
+        assert_eq!(enc, [0x64, b'Z', 0xfb, 0xff]);
+        assert_eq!(decode_with_prefix(&enc, b"abc").unwrap(), b"Zabc");
+        assert_eq!(decode_variant(&enc, b"abc", 1, false).unwrap(), b"Zabc");
+
+        // A mix of prefix-referencing and in-input matches.
+        let enc = encode_with_prefix(b"xabcabc", b"abc");
+        assert_eq!(decode_with_prefix(&enc, b"abc").unwrap(), b"xabcabc");
+
+        // Only the last 255 prefix bytes are reachable; longer prefixes
+        // still roundtrip through the matching decoder.
+        let prefix: Vec<u8> = (0..300u32).map(|i| i as u8).collect();
+        let mut data = Vec::new();
+        data.extend_from_slice(&prefix[200..]);
+        data.extend_from_slice(b" -- ");
+        data.extend_from_slice(&prefix[200..]);
+        let enc = encode_with_prefix(&data, &prefix);
+        assert_eq!(decode_with_prefix(&enc, &prefix).unwrap(), data);
+
+        let mut text = Vec::new();
+        for _ in 0..40 {
+            text.extend_from_slice(b"the quick brown fox jumps over the lazy dog. ");
+        }
+        let enc = encode_with_prefix(&text, b"the quick brown fox ");
+        assert_eq!(
+            decode_with_prefix(&enc, b"the quick brown fox ").unwrap(),
+            text
+        );
+    }
+
+    #[test]
+    fn encode_with_prefix_empty_prefix() {
+        // An empty prefix leaves the input history unchanged, so the
+        // output is identical to plain encode() and decodes plainly.
+        for data in [
+            &b"abcabcabcabc"[..],
+            &b"hello world hello world hello world"[..],
+        ] {
+            let enc = encode_with_prefix(data, b"");
+            assert_eq!(enc, encode(data));
+            assert_eq!(decode(&enc).unwrap(), data);
+        }
+    }
+
+    #[test]
+    fn encode_with_prefix_requires_prefix() {
+        // The emitted match copies from prefix history; decoding the
+        // same stream without the prefix must not reproduce the input
+        // (the offset exceeds the produced output, so it errors).
+        let enc = encode_with_prefix(b"Zabc", b"abc");
+        assert!(decode(&enc).map_or(true, |v| v != b"Zabc"));
+        // A wrong prefix decodes but yields different bytes.
+        assert_eq!(decode_with_prefix(&enc, b"XYZ").unwrap(), b"ZXYZ");
+    }
+
+    #[test]
+    fn encode_variants_edge_cases() {
+        // Empty input: the format has no empty-output representation.
+        assert_eq!(encode_no_default_offset(b""), Vec::<u8>::new());
+        assert_eq!(encode_no_length_increment(b""), Vec::<u8>::new());
+        assert_eq!(decode_no_default_offset(&[]).unwrap(), Vec::<u8>::new());
+        assert_eq!(decode_no_length_increment(&[]).unwrap(), Vec::<u8>::new());
+        // All-literal input (no repeats at all).
+        let lit = b"abcdefghijklmnop";
+        assert_eq!(
+            decode_no_default_offset(&encode_no_default_offset(lit)).unwrap(),
+            lit
+        );
+        assert_eq!(
+            decode_no_length_increment(&encode_no_length_increment(lit)).unwrap(),
+            lit
+        );
+        // Long runs through every variant.
+        let run = vec![b'x'; 3000];
+        assert_eq!(
+            decode_no_default_offset(&encode_no_default_offset(&run)).unwrap(),
+            run
+        );
+        assert_eq!(
+            decode_no_length_increment(&encode_no_length_increment(&run)).unwrap(),
+            run
+        );
+        let enc = encode_max_len(&run, 16).unwrap();
+        assert_eq!(decode(&enc).unwrap(), run);
+        assert!(max_block_len(&enc) <= 16);
     }
 
     #[test]

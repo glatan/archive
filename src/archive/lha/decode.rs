@@ -9,9 +9,11 @@
 //!   LArc `-lzs-`/`-lz4-`/`-lz5-`, and PMarc
 //!   `-pm0-`/`-pm1-`/`-pm2-` for reading; other methods are rejected with
 //!   [Error::Unsupported];
-//! - writing emits `-lh0-`/`-lhd-` entries at header level 0, 1, or 2
-//!   (`LhaEncoder::with_level`). Level 0 requires the whole filename to
-//!   fit in one byte (at most 255 bytes); levels 1/2 carry the name
+//! - writing emits `-lh0-`/`-lhd-` entries at header level 0, 1, 2, or 3
+//!   (`LhaEncoder::with_level`), plus `-lh4-`/`-lh5-`/`-lh6-`/`-lh7-`
+//!   file entries via `LhaEncoder::with_method` (stored fallback when
+//!   compression does not win). Level 0 requires the whole filename to
+//!   fit in one byte (at most 255 bytes); levels 1/2/3 carry the name
 //!   through extended headers.
 //!
 //! Layout (level 0):
@@ -46,7 +48,7 @@ pub struct LhaEntry {
     /// File or directory name (directories end with `/` when built from
     /// level-2 directory extension blocks or `-lhd-` entries).
     pub name: String,
-    /// Header level (0, 1, or 2) this entry was read with.
+    /// Header level (0-3) this entry was read with.
     pub level: u8,
     /// `true` for `-lhd-` directory entries.
     pub is_dir: bool,
@@ -605,8 +607,76 @@ mod tests {
     }
 
     #[test]
+    fn level3_roundtrip() {
+        let mut enc = crate::archive::lha::encode::LhaEncoder::with_level(3).unwrap();
+        enc.add_file("dir/sub/hello.txt", b"level three", 0x6000_0000)
+            .unwrap();
+        enc.add_dir("docs", 0).unwrap();
+        let a = enc.finish();
+        let e = decode(&a).unwrap();
+        assert_eq!(e.len(), 2);
+        assert_eq!(e[0].level, 3);
+        assert_eq!(e[0].name, "dir/sub/hello.txt");
+        assert_eq!(e[0].data, b"level three");
+        assert_eq!(e[0].mtime, 0x6000_0000);
+        assert!(e[1].is_dir);
+        assert_eq!(e[1].name, "docs/");
+    }
+
+    #[test]
+    fn level3_wire_layout() {
+        // Spot-check the level-3 wire format: u16 word size = 4, level
+        // byte 3 at offset 20, u32 total header size at offset 24, and
+        // u32-sized extended headers ending on a u32 zero.
+        let a = crate::archive::lha::encode::encode_level(&[("f.txt", b"x")], 3).unwrap();
+        assert_eq!(&a[..2], &[4, 0]);
+        assert_eq!(&a[2..7], b"-lh0-");
+        assert_eq!(a[19], 0x20); // reserved
+        assert_eq!(a[20], 3); // level
+        assert_eq!(u16le(&a[21..]), crate::util::crc16::crc16(b"x"));
+        let hsize = u32le(&a[24..]) as usize;
+        // First extended block: u32 size 7 + type 0x00 header CRC.
+        assert_eq!(u32le(&a[28..]), 7);
+        assert_eq!(a[32], 0x00);
+        // Second block: u32 size + type 0x01 filename ("f.txt" = 5).
+        assert_eq!(u32le(&a[35..]), 4 + 1 + 5);
+        assert_eq!(a[39], 0x01);
+        assert_eq!(&a[40..45], b"f.txt");
+        // Chain ends on a u32 zero at the tail of the header.
+        assert_eq!(&a[hsize - 4..hsize], &[0; 4]);
+        assert_eq!(a[hsize], b'x'); // payload follows the header
+        assert_eq!(a[hsize + 1], 0); // archive terminator
+        let e = decode(&a).unwrap();
+        assert_eq!(e[0].level, 3);
+    }
+
+    #[test]
+    fn level3_long_name() {
+        // u32 extended-header sizes lift the level-2 64 KiB limit:
+        // exercise a filename that does not fit a u16 ext size.
+        let name = "n".repeat(70_000);
+        let a = crate::archive::lha::encode::encode_level(&[(&name, b"d")], 3).unwrap();
+        // 0x01 filename block (second ext) carries a u32 size > u16::MAX.
+        assert_eq!(u32le(&a[35..]), 70_000 + 5);
+        let e = decode(&a).unwrap();
+        assert_eq!(e[0].name, name);
+        assert_eq!(e[0].data, b"d");
+    }
+
+    #[test]
+    fn level3_header_too_large() {
+        // The decoder caps level-3 headers at 1 MiB; the encoder
+        // refuses names that would exceed it instead of emitting
+        // undecodable bytes.
+        let name = "n".repeat(1024 * 1024);
+        let mut enc = crate::archive::lha::encode::LhaEncoder::with_level(3).unwrap();
+        assert!(enc.add_file(&name, b"d", 0).is_err());
+    }
+
+    #[test]
     fn level_rejects_bad_level() {
-        assert!(crate::archive::lha::encode::LhaEncoder::with_level(3).is_err());
+        assert!(crate::archive::lha::encode::LhaEncoder::with_level(3).is_ok());
+        assert!(crate::archive::lha::encode::LhaEncoder::with_level(4).is_err());
         assert!(crate::archive::lha::encode::LhaEncoder::with_level(9).is_err());
     }
 
@@ -683,5 +753,120 @@ mod tests {
         let e = decode(&a).unwrap();
         assert_eq!(e[0].name, name);
         assert_eq!(e[0].data, b"z");
+    }
+
+    /// Packed size field of the first entry (level-0/1 header: u32le
+    /// at archive offset 7).
+    fn packed_size(a: &[u8]) -> usize {
+        u32le(&a[7..]) as usize
+    }
+
+    #[test]
+    fn lh5_encode_roundtrip() {
+        // Compressible data must produce a packed stream smaller than
+        // the input and tagged `-lh5-`.
+        let data = b"the quick brown fox jumps over the lazy dog. ".repeat(500);
+        let mut enc = crate::archive::lha::encode::LhaEncoder::new()
+            .with_method(b"-lh5-")
+            .unwrap();
+        enc.add_file("fox.txt", &data, 0).unwrap();
+        let a = enc.finish();
+        assert_eq!(&a[2..7], b"-lh5-");
+        assert!(packed_size(&a) < data.len());
+        let e = decode(&a).unwrap();
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].name, "fox.txt");
+        assert_eq!(e[0].data, data.as_slice());
+    }
+
+    #[test]
+    fn lh4_lh6_lh7_encode_roundtrip() {
+        // Same stream format parameterized by window/offset width.
+        for (method, tag) in [
+            (b"-lh4-", "-lh4-"),
+            (b"-lh6-", "-lh6-"),
+            (b"-lh7-", "-lh7-"),
+        ] {
+            let mut data = Vec::new();
+            data.extend_from_slice(&b"abcabcabc".repeat(20_000));
+            data.extend_from_slice(&b"tail-unique-bytes-0123456789"[..]);
+            let mut enc = crate::archive::lha::encode::LhaEncoder::new()
+                .with_method(method)
+                .unwrap();
+            enc.add_file("big.bin", &data, 0).unwrap();
+            let a = enc.finish();
+            assert_eq!(&a[2..7], tag.as_bytes());
+            let e = decode(&a).unwrap();
+            assert_eq!(e[0].data, data.as_slice());
+        }
+    }
+
+    #[test]
+    fn lh5_falls_back_to_stored() {
+        // Incompressible input: the entry is written `-lh0-`, like
+        // real LHA.
+        let mut data = Vec::new();
+        let mut s = 0x9e3779b9u32;
+        while data.len() < 512 {
+            s ^= s << 13;
+            s ^= s >> 17;
+            s ^= s << 5;
+            data.push((s >> 24) as u8);
+        }
+        let mut enc = crate::archive::lha::encode::LhaEncoder::new()
+            .with_method(b"-lh5-")
+            .unwrap();
+        enc.add_file("rand.bin", &data, 0).unwrap();
+        let a = enc.finish();
+        assert_eq!(&a[2..7], b"-lh0-");
+        let e = decode(&a).unwrap();
+        assert_eq!(e[0].data, data.as_slice());
+    }
+
+    #[test]
+    fn lh5_level2_roundtrip() {
+        // Compressed payload behind a level-2 header.
+        let data = b"level two lh5 payload ".repeat(300);
+        let mut enc = crate::archive::lha::encode::LhaEncoder::with_level(2)
+            .unwrap()
+            .with_method(b"-lh5-")
+            .unwrap();
+        enc.add_file("d2/sub/file.txt", &data, 0x6000_0000).unwrap();
+        let e = decode(&enc.finish()).unwrap();
+        assert_eq!(e[0].level, 2);
+        assert_eq!(e[0].name, "d2/sub/file.txt");
+        assert_eq!(e[0].data, data.as_slice());
+    }
+
+    #[test]
+    fn with_method_rejects_unsupported() {
+        use crate::archive::lha::encode::LhaEncoder;
+        assert!(matches!(
+            LhaEncoder::new().with_method(b"-lh1-"),
+            Err(Error::Unsupported(_))
+        ));
+        assert!(matches!(
+            LhaEncoder::new().with_method(b"-lz5-"),
+            Err(Error::Unsupported(_))
+        ));
+        // `-lh0-` and the stored aliases stay valid selections.
+        assert!(LhaEncoder::new().with_method(b"-lh0-").is_ok());
+        assert!(LhaEncoder::new().with_method(b"-lz4-").is_ok());
+        assert!(LhaEncoder::new().with_method(b"-pm0-").is_ok());
+    }
+
+    #[test]
+    fn stored_alias_methods_roundtrip() {
+        // `-lz4-` / `-pm0-` are stored payloads under a different tag.
+        for method in [b"-lz4-", b"-pm0-"] {
+            let mut enc = crate::archive::lha::encode::LhaEncoder::new()
+                .with_method(method)
+                .unwrap();
+            enc.add_file("a.bin", b"raw stored bytes", 0).unwrap();
+            let a = enc.finish();
+            assert_eq!(&a[2..7], method.as_slice());
+            let e = decode(&a).unwrap();
+            assert_eq!(e[0].data, b"raw stored bytes");
+        }
     }
 }

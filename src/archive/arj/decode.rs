@@ -371,6 +371,59 @@ mod tests {
     }
 
     #[test]
+    fn st1_methods_roundtrip() {
+        // Compressible payload producing real matches.
+        let mut data = Vec::new();
+        for i in 0..300u32 {
+            data.extend_from_slice(b"arj static huffman payload ");
+            data.extend_from_slice(&i.to_le_bytes());
+        }
+        // Methods 1-3 share the st1 wire format (15-bit window).
+        for method in [1u8, 2, 3] {
+            let mut enc = crate::archive::arj::encode::ArjEncoder::with_method(method).unwrap();
+            enc.add_file("f.bin", &data, 0).unwrap();
+            let a = enc.finish();
+            let e = decode(&a).unwrap();
+            assert_eq!(e.len(), 1);
+            assert_eq!(e[0].method, method);
+            assert_eq!(e[0].data, data);
+            // The compressed member must beat a stored archive.
+            let mut stored = crate::archive::arj::encode::ArjEncoder::new();
+            stored.add_file("f.bin", &data, 0).unwrap();
+            assert!(a.len() < stored.finish().len());
+        }
+    }
+
+    #[test]
+    fn st1_incompressible_falls_back_to_stored() {
+        let mut s = 0x243F_6A88u32;
+        let data: Vec<u8> = (0..4096)
+            .map(|_| {
+                s ^= s << 13;
+                s ^= s >> 17;
+                s ^= s << 5;
+                (s >> 24) as u8
+            })
+            .collect();
+        let mut enc = crate::archive::arj::encode::ArjEncoder::with_method(2).unwrap();
+        enc.add_file("rand.bin", &data, 0).unwrap();
+        let e = decode(&enc.finish()).unwrap();
+        assert_eq!(e[0].method, 0);
+        assert_eq!(e[0].data, data);
+    }
+
+    #[test]
+    fn encoder_rejects_unsupported_method() {
+        use crate::archive::arj::encode::ArjEncoder;
+        for m in [0u8, 1, 2, 3, 4] {
+            assert!(ArjEncoder::with_method(m).is_ok());
+        }
+        for m in [5u8, 9, u8::MAX] {
+            assert!(ArjEncoder::with_method(m).is_err());
+        }
+    }
+
+    #[test]
     fn rejects_bad_header_crc() {
         let mut a = crate::archive::arj::encode::encode(&[("f", b"x")]).unwrap();
         let second = second_header_off(&a);

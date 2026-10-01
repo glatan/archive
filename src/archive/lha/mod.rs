@@ -12,10 +12,13 @@
 //!   `-pm0-`/`-pm1-`/`-pm2-`; `-lz4-` and `-pm0-` are stored
 //!   variants. Every other method (`-lhx-`, ...) is rejected with
 //!   [Error::Unsupported];
-//! - writing emits `-lh0-`/`-lhd-` entries at header level 0, 1, or 2
-//!   (`LhaEncoder::with_level`). Level 0 requires the whole filename to
-//!   fit in one byte (at most 255 bytes); levels 1/2 carry the name
-//!   through extended headers.
+//! - writing emits `-lh0-`/`-lhd-` entries at header level 0, 1, 2, or 3
+//!   (`LhaEncoder::with_level`), or static-Huffman `-lh4-`/`-lh5-`/
+//!   `-lh6-`/`-lh7-` file entries via `LhaEncoder::with_method`
+//!   (falling back to `-lh0-` when compression does not shrink the
+//!   input). Level 0 requires the whole filename to fit in one byte
+//!   (at most 255 bytes); levels 1/2/3 carry the name through
+//!   extended headers.
 //!
 //! Layout (level 0):
 //! [hdr_size u8][checksum u8][method 5B][packed u32le][orig u32le]

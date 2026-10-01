@@ -95,8 +95,8 @@
 //! | `warc` (default) | WARC (`.warc`) record read/write support |
 //! | `git-pack` (default) | Git pack (`pack-*.pack`/`pack-*.idx`) read/write support |
 //! | `xar` (default) | XAR (`.xar`) archive read/write support |
-//! | `lha` (default) | LHA/LZH archive support (header levels 0-3; lh0-lh7/LArc/PMarc decode, lh0 write) |
-//! | `arj` (default) | ARJ archive support (stored + methods 1-4 decode incl. garbled/multi-volume, stored write) |
+//! | `lha` (default) | LHA/LZH archive support (header levels 0-3 read/write; lh0-lh7/LArc/PMarc decode, lh0/lh4-lh7 write) |
+//! | `arj` (default) | ARJ archive support (stored + methods 1-4 decode incl. garbled/multi-volume, methods 0-4 write incl. multi-volume) |
 //! | `arc` (default) | SEA ARC archive support (method 1-9/0xa/0xb read; method 1/2/3/4/8/9 write) |
 //! | `zip` | ZIP archive format |
 //! | `sevenz` | 7z archive format |

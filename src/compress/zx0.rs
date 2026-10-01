@@ -17,9 +17,10 @@
 //! of the offset-MSB elias are inverted, and the low bit of the offset-LSB
 //! byte is reused as the first bit of the following length elias.
 //!
-//! The classic v1 format (`-c`) is supported via [`decode_classic`]: its
-//! only wire difference is that the offset-MSB Elias gamma data bits are
-//! stored non-inverted. Streams produced with the `+N` prefix option can
+//! The classic v1 format (`-c`) is supported via [`decode_classic`] and
+//! [`encode_classic`]: its only wire difference is that the offset-MSB
+//! Elias gamma data bits are stored non-inverted. Streams produced with
+//! the `+N` prefix option can
 //! be decoded via [`decode_with_prefix`], which lets match offsets reach
 //! into caller-supplied external history.
 //!
@@ -294,6 +295,19 @@ impl BitWriter {
 /// valid ZX0 but does not aim to match the reference compressor's optimal
 /// parsing output.
 pub fn encode(input: &[u8]) -> Vec<u8> {
+    encode_impl(input, true)
+}
+
+/// Encode data as a ZX0 v1 (`-c` classic) stream.
+///
+/// Identical to [`encode`] except that the offset-MSB Elias gamma data
+/// bits (including the EOF marker) are stored non-inverted, matching
+/// [`decode_classic`].
+pub fn encode_classic(input: &[u8]) -> Vec<u8> {
+    encode_impl(input, false)
+}
+
+fn encode_impl(input: &[u8], inverted_msb: bool) -> Vec<u8> {
     if input.is_empty() {
         // The ZX0 format cannot represent an empty output (the opening
         // literal block requires a length >= 1); emit an empty stream which
@@ -356,7 +370,8 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
                 // Copy from new offset.
                 w.write_bit(true);
                 let msb = (dist - 1) / 128 + 1;
-                w.write_elias(msb, true); // v2: inverted data bits
+                // v2 stores the data bits inverted; v1 classic verbatim.
+                w.write_elias(msb, inverted_msb);
                 w.write_byte(((127 - (dist - 1) % 128) << 1) as u8);
                 w.backtrack = true;
                 w.write_elias(len - 1, false);
@@ -382,9 +397,10 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
         }
     }
 
-    // End marker: new-offset indicator + elias 256 (inverted data bits).
+    // End marker: new-offset indicator + elias 256 (data bits follow the
+    // same inverted/verbatim rule as the match offset MSB).
     w.write_bit(true);
-    w.write_elias(256, true);
+    w.write_elias(256, inverted_msb);
     w.out
 }
 
@@ -395,6 +411,11 @@ mod tests {
     fn rt(data: &[u8]) {
         let enc = encode(data);
         assert_eq!(decode(&enc).unwrap(), data);
+    }
+
+    fn rt_classic(data: &[u8]) {
+        let enc = encode_classic(data);
+        assert_eq!(decode_classic(&enc).unwrap(), data);
     }
 
     /// Build a stream: one literal block `lits`, one new-offset match
@@ -446,6 +467,66 @@ mod tests {
         // offset lands outside the produced output.
         assert!(decode(&v1).is_err());
         assert!(decode_classic(&v2).is_err());
+    }
+
+    #[test]
+    fn encode_classic_roundtrip() {
+        rt_classic(b"a");
+        rt_classic(b"ab");
+        rt_classic(b"abcabcabc");
+        rt_classic(b"hello world hello world hello world");
+        rt_classic(&[0u8; 2000]);
+        // dist > 128 gives an offset MSB > 1, so the elias carries data
+        // bits: the point where the v1 and v2 wire formats differ.
+        let mut far: Vec<u8> = (0..140u8).collect();
+        far.extend_from_slice(&[10, 11, 12, 13, 14]); // len-5 match at dist 130
+        rt_classic(&far);
+        let mut rep = b"abcd".to_vec();
+        rep.extend_from_slice(b"abcdabcdabcd");
+        rt_classic(&rep);
+        let mut text = Vec::new();
+        for _ in 0..100 {
+            text.extend_from_slice(b"the quick brown fox jumps over the lazy dog. ");
+        }
+        rt_classic(&text);
+    }
+
+    #[test]
+    fn encode_classic_vs_v2() {
+        // The EOF marker's elias(256) data bits differ between variants,
+        // so the streams differ for every non-empty input. Cross-decoding
+        // a classic stream as v2 (or vice versa) must not reproduce the
+        // input; in practice it fails on the first offset-MSB elias.
+        for data in [
+            b"a".as_slice(),
+            b"abcabcabc".as_slice(),
+            b"hello world hello world hello world".as_slice(),
+        ] {
+            let v1 = encode_classic(data);
+            let v2 = encode(data);
+            assert_ne!(v1, v2);
+            assert_ne!(decode(&v1).ok().as_deref(), Some(data));
+            assert_ne!(decode_classic(&v2).ok().as_deref(), Some(data));
+        }
+    }
+
+    #[test]
+    fn encode_classic_empty() {
+        assert_eq!(encode_classic(b""), Vec::<u8>::new());
+        assert_eq!(decode_classic(&[]).unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn encode_classic_known_vector() {
+        // 140 distinct literal bytes then a len-5 match at dist 130: the
+        // offset MSB is 2, so its elias carries a data bit that differs
+        // between v1 and v2. The greedy encoder emits exactly the
+        // literal-block + match + EOF layout built by `match_stream`.
+        let lits: Vec<u8> = (0..140u8).collect();
+        let mut input = lits.clone();
+        input.extend_from_slice(&[10, 11, 12, 13, 14]);
+        assert_eq!(encode_classic(&input), match_stream(&lits, 130, 5, false));
+        assert_eq!(encode(&input), match_stream(&lits, 130, 5, true));
     }
 
     #[test]
