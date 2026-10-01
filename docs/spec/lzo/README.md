@@ -21,7 +21,7 @@
 | 3 | M4 マッチ (offset 16385-49151, len 3+, 3バイト命令) | [Linux kernel `Documentation/lzo.txt`](https://docs.kernel.org/staging/lzo.html) | ✅ | `test_m4_max_offset_roundtrip` |
 | 4 | M1 短マッチ (state>0, offset 1-2048, len 2) | [Linux kernel `Documentation/lzo.txt`](https://docs.kernel.org/staging/lzo.html) | ✅ | `test_m1_short_match_state_1_to_3` |
 | 5 | S ビット (LE16 下位2ビット: 後続リテラル数) | [Linux kernel `Documentation/lzo.txt`](https://docs.kernel.org/staging/lzo.html) | ✅ | デコーダーで M2/M3/M4 すべてで S ビット抽出 |
-| 6 | VLE (可変長エンコーディング: 0バイト×255 + 非零バイト) | [Linux kernel `Documentation/lzo.txt`](https://docs.kernel.org/staging/lzo.html) | ✅ | `test_roundtrip_large` (18超リテラルで VLE 使用) |
+| 6 | VLE (可変長エンコーディング: 0バイト×255 + 非零バイト) | [Linux kernel `Documentation/lzo.txt`](https://docs.kernel.org/staging/lzo.html) | ✅ | `test_roundtrip_large` (18超リテラルで VLE 使用), `test_lzo_vle_255_boundary`, `test_write_vle_boundary_values` |
 | 7 | State=0 リテラルラン (byte 1-15 → count=byte+3) | [Linux kernel `Documentation/lzo.txt`](https://docs.kernel.org/staging/lzo.html) | ✅ | `test_roundtrip_short`, `test_roundtrip_all_bytes` |
 | 8 | State=0 拡張リテラルラン (byte 0 → count=18+VLE) | [Linux kernel `Documentation/lzo.txt`](https://docs.kernel.org/staging/lzo.html) | ✅ | `test_roundtrip_all_bytes` (256バイト) |
 | 9 | End-of-stream マーカー (M4, offset=16384, len=3) | [Linux kernel `Documentation/lzo.txt`](https://docs.kernel.org/staging/lzo.html) | ✅ | `test_roundtrip_repeated`, 全ラウンドトリップテスト |

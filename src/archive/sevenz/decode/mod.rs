@@ -395,7 +395,7 @@ mod tests {
     fn encode_uint64_local(output: &mut Vec<u8>, value: u64) {
         for extra in 0..8u8 {
             let total_bits = 7 * (u32::from(extra) + 1);
-            if extra < 8 && value < (1u64 << total_bits) {
+            if value < (1u64 << total_bits) {
                 let prefix = if extra == 0 {
                     0
                 } else {
@@ -410,16 +410,15 @@ mod tests {
                 };
                 let high_bits = (value >> (u32::from(extra) * 8)) as u8 & mask;
                 output.push(prefix | high_bits);
-                for shift in (0..usize::from(extra)).rev() {
+                // Extension bytes are little-endian (least-significant first).
+                for shift in 0..usize::from(extra) {
                     output.push((value >> (shift * 8)) as u8);
                 }
                 return;
             }
         }
         output.push(0xFF);
-        for shift in (0..8).rev() {
-            output.push((value >> (shift * 8)) as u8);
-        }
+        output.extend_from_slice(&value.to_le_bytes());
     }
 
     #[test]
@@ -438,6 +437,35 @@ mod tests {
             encode_uint64_local(&mut encoded, value);
             let mut cursor = Cursor::new(&encoded);
             assert_eq!(cursor.read_uint64().unwrap(), value, "value {value:#x}");
+            assert!(cursor.is_eof());
+        }
+    }
+
+    #[test]
+    fn test_uint64_le_extension_bytes() {
+        // 7z UINT64 stores extension bytes little-endian (7zIn.c
+        // SzReadNumber): the first byte's remaining low bits are the
+        // most-significant part, extension bytes follow LSB-first. `c7 9b a1`
+        // is the pack size 500123 as written by system 7z.
+        let cases: [(&[u8], u64); 7] = [
+            (&[0x00], 0),
+            (&[0x7F], 0x7F),
+            (&[0x80, 0x80], 0x80),
+            (&[0xBF, 0xFF], 0x3FFF),
+            (&[0xC0, 0x0E, 0x40], 0x400E),
+            (&[0xC7, 0x9B, 0xA1], 0x7A19B),
+            (
+                &[0xFF, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01],
+                0x0102_0304_0506_0708,
+            ),
+        ];
+        for (bytes, expected) in cases {
+            let mut cursor = Cursor::new(bytes);
+            assert_eq!(
+                cursor.read_uint64().unwrap(),
+                expected,
+                "bytes {bytes:02x?}"
+            );
             assert!(cursor.is_eof());
         }
     }

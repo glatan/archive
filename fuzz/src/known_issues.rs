@@ -66,7 +66,8 @@ fn is_lrzip_external_output_gap(algo: Algorithm, pattern: TestPattern, error: &s
     ) && pattern == TestPattern::OriginalCompress
         && (error.contains("unsupported: lrzip: unsupported compression type")
             || error.contains("unexpected end of input")
-            || error.contains("invalid data: rzip: match offset out of range"))
+            || error.contains("invalid data: rzip: match offset out of range")
+            || (algo == Algorithm::LrzipZpaq && error.contains("zpaq: unsupported hcomp opcode")))
 }
 
 fn is_lzw_empty_input_quirk(
@@ -163,6 +164,17 @@ mod tests {
             TestPattern::OriginalCompress,
             b"hello",
             "invalid data: rzip: match offset out of range",
+        );
+        assert!(issue.is_some());
+    }
+
+    #[test]
+    fn classifies_lrzip_original_compress_zpaq_hcomp_as_known_issue() {
+        let issue = classify(
+            Algorithm::LrzipZpaq,
+            TestPattern::OriginalCompress,
+            b"hello",
+            "invalid data: zpaq: unsupported hcomp opcode",
         );
         assert!(issue.is_some());
     }

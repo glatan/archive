@@ -12,7 +12,6 @@
 //! the position where the decoder's 16-bit reads have reached.
 
 use alloc::vec::Vec;
-use core::cmp::Reverse;
 
 use crate::error::Error;
 
@@ -437,9 +436,11 @@ fn code_lengths(freq: &[u32; NUM_SYMBOLS]) -> [u8; NUM_SYMBOLS] {
         bl_count[l as usize] += 1;
     }
 
-    // Resolve over-subscription the standard way: repeatedly move one leaf
-    // down from the deepest populated shorter length and pull one leaf up
-    // from the maximum.
+    // Resolve over-subscription the zlib gen_bitlen way: move one leaf
+    // down from the deepest populated shorter length (Kraft-neutral: the
+    // freed 2^(MAX_BITS-bits) slot is refilled by two codes one bit
+    // longer) and pull one leaf up from the maximum length, which frees
+    // exactly one 2^0 slot. Repeat once per excess slot.
     let mut overflow: i64 = bl_count
         .iter()
         .enumerate()
@@ -448,17 +449,29 @@ fn code_lengths(freq: &[u32; NUM_SYMBOLS]) -> [u8; NUM_SYMBOLS] {
         - (1i64 << MAX_BITS);
     while overflow > 0 {
         let mut bits = MAX_BITS - 1;
-        while bl_count[bits] == 0 {
+        while bits > 0 && bl_count[bits] == 0 {
             bits -= 1;
+        }
+        if bits == 0 {
+            break;
         }
         bl_count[bits] -= 1;
         bl_count[bits + 1] += 2;
         bl_count[MAX_BITS] -= 1;
-        overflow -= 2;
+        overflow -= 1;
     }
+    debug_assert_eq!(
+        bl_count
+            .iter()
+            .enumerate()
+            .map(|(l, &c)| (c as u64) << (MAX_BITS - l))
+            .sum::<u64>(),
+        1u64 << MAX_BITS,
+        "huffman code lengths must fill the decode table exactly"
+    );
 
     // Redistribute lengths: least frequent symbols get the longest codes.
-    active.sort_by_key(|a| Reverse((a.1, a.0))); // freq desc, sym desc
+    active.sort_by_key(|a| (a.1, a.0)); // freq asc, sym asc
     let mut idx = 0usize;
     for l in (1..=MAX_BITS).rev() {
         for _ in 0..bl_count[l] {
@@ -684,6 +697,63 @@ mod tests {
             }
         }
         assert_eq!(slot, 1 << 15);
+    }
+
+    #[test]
+    fn test_xpress_huff_oversubscribed() {
+        // A Fibonacci-like frequency ladder yields an optimal Huffman
+        // tree deeper than the 15-bit table limit. The length-capping
+        // repair used to decrement the Kraft excess by two slots per pass
+        // while freeing only one, leaving an over-subscribed table that
+        // the decoder rejects — and `canonical_codes` then produced a
+        // 15-bit code value of 2^15, tripping `BitWriter::bits`
+        // (fuzz failure run-1790792738/xpress-huff_self_*).
+        let mut freq = [0u32; NUM_SYMBOLS];
+        let (mut a, mut b) = (1u32, 1u32);
+        for f in freq.iter_mut().take(20) {
+            *f = a;
+            let next = a + b;
+            a = b;
+            b = next;
+        }
+        let lengths = code_lengths(&freq);
+        // The repaired lengths must form a complete code: the Kraft sum
+        // fills the 2^15 decode-table slots exactly.
+        let slots: u64 = lengths
+            .iter()
+            .filter(|&&l| l > 0)
+            .map(|&l| 1u64 << (15 - l))
+            .sum();
+        assert_eq!(slots, 1 << 15);
+        // Every canonical code value fits its bit length.
+        let codes = canonical_codes(&lengths);
+        for (sym, &l) in lengths.iter().enumerate() {
+            assert!(l == 0 || (codes[sym] as u32) < (1 << l));
+        }
+        // Least frequent symbols get the longest codes.
+        assert_eq!(lengths[0], 15);
+        assert_eq!(lengths[19], 1);
+
+        // End-to-end: printable-text-shaped data (about 10% newlines)
+        // makes the LZ77 parse emit a long tail of rare match symbols,
+        // which pushed the Huffman tree past the limit on real input.
+        let mut seed = 5u64;
+        let mut next = || {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            seed >> 33
+        };
+        let data: Vec<u8> = (0..40000)
+            .map(|_| {
+                if next() % 10 == 0 {
+                    b'\n'
+                } else {
+                    0x20 + (next() % 0x5f) as u8
+                }
+            })
+            .collect();
+        rt(&data);
     }
 
     #[test]

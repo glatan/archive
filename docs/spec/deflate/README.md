@@ -65,7 +65,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 51 | Max Huffman code length 15 bits | RFC 1951 §3.2.2 | ✅ | Huffman builder で制限 |
+| 51 | Max Huffman code length 15 bits。エンコーダは kraft_limit で over-subscription を修復し complete code (Σ2^-len = 1) のみを emit | RFC 1951 §3.2.2 | ✅ | `test_deflate_complete_dist_tree`, `test_build_code_lengths_over_subscribed_complete` |
 | 52 | Oversubscribed Huffman tree rejection | RFC 1951 §3.2.2 | ✅ | table build で検出 |
 | 53 | Distance codes 30-31 は invalid | RFC 1951 §3.2.5 | ✅ | テーブル範囲外 |
 | 54 | HLIT range 257-286 validation | RFC 1951 §3.2.7 | ✅ | パーサーで検証 |

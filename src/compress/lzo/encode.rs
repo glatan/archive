@@ -213,10 +213,13 @@ fn emit_literal_run(output: &mut Vec<u8>, count: usize) {
     }
 }
 
-/// Write VLE (variable-length encoding): emit zeros for multiples of 255,
-/// then the remainder (must be 1-255).
+/// Write VLE (variable-length encoding): emit a zero byte for each full
+/// chunk of 255 beyond the first, then the remainder as a non-zero
+/// terminator byte (1..=255). The terminator must never be 0x00, since the
+/// decoder treats 0x00 as a continuation byte.
 fn write_vle(output: &mut Vec<u8>, mut value: usize) {
-    while value >= 255 {
+    debug_assert!(value >= 1, "VLE terminator byte must be non-zero");
+    while value > 255 {
         output.push(0);
         value -= 255;
     }
@@ -421,5 +424,47 @@ mod tests {
         let wrapped = encode(data);
         let decompressed = super::super::decode::decode(&wrapped).unwrap();
         assert_eq!(decompressed, data);
+    }
+
+    #[test]
+    fn test_lzo_vle_255_boundary() {
+        // Regression test: write_vle must terminate with a non-zero byte.
+        // 297 identical bytes produce an M3 match with match_len = 288,
+        // which calls write_vle(288 - 33 = 255). The buggy encoder emitted
+        // two 0x00 bytes, which the decoder treated as a continuation byte
+        // and desynchronized the stream.
+        let data = [b'A'; 297];
+        let compressed = encode(&data);
+        let decompressed = super::super::decode::decode(&compressed).unwrap();
+        assert_eq!(decompressed, data);
+    }
+
+    #[test]
+    fn test_write_vle_boundary_values() {
+        // VLE encodes value as floor((value - 1) / 255) zero continuation
+        // bytes followed by a non-zero terminator in 1..=255.
+        let mut out = Vec::new();
+
+        write_vle(&mut out, 1);
+        assert_eq!(out, [0x01]);
+
+        write_vle(&mut out, 254);
+        assert_eq!(out, [0x01, 0xFE]);
+
+        out.clear();
+        write_vle(&mut out, 255);
+        assert_eq!(out, [0xFF]);
+
+        out.clear();
+        write_vle(&mut out, 256);
+        assert_eq!(out, [0x00, 0x01]);
+
+        out.clear();
+        write_vle(&mut out, 510);
+        assert_eq!(out, [0x00, 0xFF]);
+
+        out.clear();
+        write_vle(&mut out, 511);
+        assert_eq!(out, [0x00, 0x00, 0x01]);
     }
 }

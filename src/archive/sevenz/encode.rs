@@ -1077,10 +1077,14 @@ fn encode_filetime_property(
     output.extend_from_slice(&data);
 }
 
+/// Write a 7z UINT64. The first byte's leading 1-bits count the extension
+/// bytes and its remaining low bits hold the most-significant part of the
+/// value; extension bytes are stored little-endian (least-significant first),
+/// matching the reference implementation in 7zIn.c.
 fn encode_uint64(output: &mut Vec<u8>, value: u64) {
     for extra in 0..8u8 {
         let total_bits = 7 * (u32::from(extra) + 1);
-        if extra < 8 && value < (1u64 << total_bits) {
+        if value < (1u64 << total_bits) {
             let prefix = if extra == 0 {
                 0
             } else {
@@ -1095,16 +1099,14 @@ fn encode_uint64(output: &mut Vec<u8>, value: u64) {
             };
             let high_bits = (value >> (u32::from(extra) * 8)) as u8 & mask;
             output.push(prefix | high_bits);
-            for shift in (0..usize::from(extra)).rev() {
+            for shift in 0..usize::from(extra) {
                 output.push((value >> (shift * 8)) as u8);
             }
             return;
         }
     }
     output.push(0xFF);
-    for shift in (0..8).rev() {
-        output.push((value >> (shift * 8)) as u8);
-    }
+    output.extend_from_slice(&value.to_le_bytes());
 }
 
 fn canonical_lzma2_dict_size(dict_size: u32) -> Result<u32, Error> {
@@ -1169,6 +1171,44 @@ mod tests {
         let archive = encoder.finish().unwrap();
         let entries = decode(&archive).unwrap();
         assert_eq!(entries[0].data, b"plain text");
+    }
+
+    #[test]
+    fn test_encode_uint64_le_extension_bytes() {
+        // Extension bytes are little-endian; `c7 9b a1` matches what system
+        // 7z writes for pack size 500123 (0x7A19B).
+        let cases: [(u64, &[u8]); 7] = [
+            (0, &[0x00]),
+            (0x7F, &[0x7F]),
+            (0x80, &[0x80, 0x80]),
+            (0x3FFF, &[0xBF, 0xFF]),
+            (0x400E, &[0xC0, 0x0E, 0x40]),
+            (0x7A19B, &[0xC7, 0x9B, 0xA1]),
+            (
+                0x0102_0304_0506_0708,
+                &[0xFF, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01],
+            ),
+        ];
+        for (value, expected) in cases {
+            let mut output = Vec::new();
+            encode_uint64(&mut output, value);
+            assert_eq!(output, expected, "value {value:#x}");
+        }
+    }
+
+    #[test]
+    fn test_encode_copy_large_payload_roundtrip() {
+        // Payloads >= 16 KiB produce multi-extension-byte UINT64 header
+        // fields (pack size / unpack size), which are little-endian.
+        let payload: Vec<u8> = (0..100_000u32).map(|i| ((i * 31) % 251) as u8).collect();
+        let mut encoder = SevenZEncoder::new();
+        encoder.set_method(SevenZMethod::Copy);
+        encoder.add_file("large.bin", &payload);
+        let archive = encoder.finish().unwrap();
+        let entries = decode(&archive).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "large.bin");
+        assert_eq!(entries[0].data, payload);
     }
 
     #[test]

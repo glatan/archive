@@ -97,7 +97,7 @@ cargo run --release -p archive-fuzz -- --import-regression fuzz/failures/run-...
 | アルゴリズム | パターン | フィルタ理由 |
 |------------|---------|-----------|
 | `lrzip-*` (全 backend) | `original-decompress` | system `lrzip` の outer `.lrz` framing との完全互換を主張しない (intentional scope) |
-| `lrzip-*` (全 backend) | `original-compress` | 特定エラー (`unsupported compression type` / `unexpected end of input` / `match offset out of range`) は system lrzip 側の制限 |
+| `lrzip-*` (全 backend) | `original-compress` | 特定エラー (`unsupported compression type` / `unexpected end of input` / `match offset out of range` / `zpaq: unsupported hcomp opcode`) は system lrzip 側の制限 |
 | `lzw`, `lzw-bits9` | `original-compress`, `original-decompress` | `ncompress` は空入力を exit status 2 で拒否する外部ツール固有の動作 |
 | `lzw-bits9` | `original-compress` | `compress -b 9` は一部入力でロッシーな roundtrip を起こす外部ツール自身のバグ |
 | `7z`, `7z-copy`, `7z-lzma`, `7z-ppmd`, `7z-deflate`, `7z-bzip2` | `original-compress` | system `7z` は空入力を empty-stream エントリーとして格納するが、このエントリー種別は intentional exclusion |
@@ -106,6 +106,7 @@ cargo run --release -p archive-fuzz -- --import-regression fuzz/failures/run-...
 
 アルゴリズムごとにエンコード後サイズの下限（`min_encoded_floor`）が異なる。
 特に `tar-gnu`, `tar-ustar`, `tar-pax` は、GNU tar が常に 20 ブロック × 512 バイト = 10,240 バイト以上を出力するため、下限を 10,240 に設定している。
+`cmpsc` (固定 4KiB 辞書 + ヘッダ) と `deb` (ar + 内部 tar ×2 の構造オーバーヘッド) は極小入力でも ~4KiB を超えるため、下限を 8,192 に設定している。
 
 ## 対応アルゴリズム
 

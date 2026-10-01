@@ -185,6 +185,26 @@ fn test_sevenz_bzip2_method_system_extract_compat() {
     );
 }
 
+/// System `7z` creates a Copy archive whose header fields exceed 0x4000 and
+/// therefore use multiple little-endian UINT64 extension bytes; this crate
+/// decodes it. Regression coverage for the UINT64 extension-byte endianness
+/// fix (the pack size 500123 = 0x7A19B is encoded as `c7 9b a1` by 7z).
+#[cfg(feature = "sevenz")]
+#[test]
+fn test_sevenz_large_copy_method_system_decode_compat() {
+    let payload: Vec<u8> = (0..500_123u32).map(|i| (i % 251) as u8).collect();
+    system_method_decode_compat("Copy", &payload);
+}
+
+/// This crate encodes a Copy archive with multi-extension-byte UINT64
+/// header fields and system `7z` extracts it.
+#[cfg(feature = "sevenz")]
+#[test]
+fn test_sevenz_large_copy_method_system_extract_compat() {
+    let payload: Vec<u8> = (0..500_123u32).map(|i| (i % 251) as u8).collect();
+    encoded_method_system_extract_compat(sevenz::encode::SevenZMethod::Copy, &payload);
+}
+
 #[cfg(feature = "sevenz")]
 #[test]
 fn test_sevenz_empty_archive_roundtrip_and_system_list() {
