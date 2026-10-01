@@ -52,8 +52,8 @@
 | アーカイブ | warc (read) | ✅ | — |
 | アーカイブ | git pack (pack/idx v1-v3) | ✅ | ✅ |
 | アーカイブ | xar | ✅ | ✅ |
-| アーカイブ | lha/lzh (store のみ) | ✅ | ✅ |
-| アーカイブ | arj (method 0-4 decode、store write) | ✅ | ✅ |
+| アーカイブ | lha/lzh (level 0-3、lh4-lh7 圧縮 write 対応) | ✅ | ✅ |
+| アーカイブ | arj (method 0-4、multi-volume write 対応) | ✅ | ✅ |
 | アーカイブ | arc (store のみ) | ✅ | ✅ |
 | アーカイブ | zip | ✅ | ✅ |
 | アーカイブ | 7z | ✅ | ✅ |

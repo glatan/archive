@@ -6,7 +6,6 @@
 //! behaviour while tracking the real end so callers can decide whether
 //! running out of bits is an error.
 
-#[cfg(test)]
 use alloc::vec::Vec;
 
 /// MSB-first bit cursor over a byte slice.
@@ -50,15 +49,13 @@ impl<'a> MsbReader<'a> {
     }
 }
 
-/// MSB-first bit writer used by the mirror encoders in tests.
-#[cfg(test)]
+/// MSB-first bit writer (encoders and test mirror encoders).
 pub(crate) struct MsbWriter {
     bytes: Vec<u8>,
     acc: u32,
     nbits: u32,
 }
 
-#[cfg(test)]
 impl MsbWriter {
     pub(crate) fn new() -> Self {
         MsbWriter {

@@ -20,6 +20,7 @@
 //! bits and the length as Shannon-Fano coded symbols. Length symbol 63 is
 //! followed by an extra length byte.
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::Error;

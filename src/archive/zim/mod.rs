@@ -2,7 +2,8 @@
 //!
 //! Decoder for the ZIM file format used by Kiwix/openZIM, plus a
 //! minimal v5/v6 writer. Supports major versions 5 and 6, stored and
-//! xz/zstd-compressed clusters, extended (8-byte offset) clusters,
+//! xz/zstd-compressed clusters (plus legacy zlib/bzip2 clusters behind
+//! the `zlib`/`bzip2` features), extended (8-byte offset) clusters,
 //! and redirect entry resolution. `decode_parts` reads split
 //! `.zimaa`/`.zimab` archives, and the archive MD5 checksum is
 //! verified when present. The writer emits a single-cluster archive

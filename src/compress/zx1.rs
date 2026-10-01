@@ -22,7 +22,8 @@
 //!
 //! Streams produced with the `+N` prefix option can be decoded via
 //! [`decode_with_prefix`], which lets match offsets reach into
-//! caller-supplied external history.
+//! caller-supplied external history; [`encode_with_prefix`] produces
+//! such streams.
 //!
 //! Backwards (`-b`) mode is outside the current scope.
 
@@ -249,6 +250,18 @@ impl BitWriter {
 /// valid ZX1 but does not aim to match the reference compressor's optimal
 /// parsing output.
 pub fn encode(input: &[u8]) -> Vec<u8> {
+    encode_impl(input, &[])
+}
+
+/// Encode data as a ZX1 stream whose match offsets may reach into
+/// `prefix`, external history logically prepended to the input (the
+/// upstream `+N` prefix option). The result must be decoded with
+/// [`decode_with_prefix`] using the same `prefix`.
+pub fn encode_with_prefix(input: &[u8], prefix: &[u8]) -> Vec<u8> {
+    encode_impl(input, prefix)
+}
+
+fn encode_impl(input: &[u8], prefix: &[u8]) -> Vec<u8> {
     if input.is_empty() {
         // The ZX1 format cannot represent an empty output (the opening
         // literal block requires a length >= 1); emit an empty stream which
@@ -256,30 +269,51 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
         return Vec::new();
     }
 
+    // Offsets are measured over the virtual history `prefix ++ input`,
+    // matching how decode_with_prefix resolves them: a distance `d` at the
+    // current output position copies from `d` bytes back, which reaches
+    // into `prefix` when `d` exceeds the bytes emitted so far.
+    let base = prefix.len();
+    let hist_len = base + input.len();
+    let at = |i: usize| -> u8 { if i < base { prefix[i] } else { input[i - base] } };
+
     let mut w = BitWriter::new();
     let mut head = vec![-1i32; 1 << 15];
     let mut last_offset = 1usize;
-    let mut lit_start = 0usize;
-    let mut pos = 0usize;
+    let mut lit_start = base;
+    let mut pos = base;
     let mut first_block = true;
     let mut after_literals = false;
 
-    while pos < input.len() {
+    // Seed the match chain with prefix positions so the search below can
+    // emit offsets that reach into the external history.
+    for p in 0..base.min(hist_len.saturating_sub(MIN_MATCH - 1)) {
+        let h = (((at(p) as usize) << 8) ^ ((at(p + 1) as usize) << 4) ^ at(p + 2) as usize)
+            & ((1 << 15) - 1);
+        head[h] = p as i32;
+    }
+
+    while pos < hist_len {
         // Search for a match at pos.
         let mut best: Option<(usize, usize)> = None;
-        if pos + MIN_MATCH <= input.len() {
-            let h = (((input[pos] as usize) << 8)
-                ^ ((input[pos + 1] as usize) << 4)
-                ^ input[pos + 2] as usize)
-                & ((1 << 15) - 1);
+        if pos + MIN_MATCH <= hist_len {
+            let h =
+                (((at(pos) as usize) << 8) ^ ((at(pos + 1) as usize) << 4) ^ at(pos + 2) as usize)
+                    & ((1 << 15) - 1);
             let cand = head[h];
             head[h] = pos as i32;
-            if cand >= 0 {
+            // The stream must open with a literal block of length >= 1, so
+            // no match may start at the very first output position.
+            if cand >= 0 && !(first_block && pos == lit_start) {
                 let c = cand as usize;
                 let dist = pos - c;
-                if dist <= MAX_OFFSET && input[c] == input[pos] && input[c + 1] == input[pos + 1] {
+                if dist <= MAX_OFFSET
+                    && at(c) == at(pos)
+                    && at(c + 1) == at(pos + 1)
+                    && at(c + 2) == at(pos + 2)
+                {
                     let mut len = MIN_MATCH;
-                    while pos + len < input.len() && input[c + len] == input[pos + len] {
+                    while pos + len < hist_len && at(c + len) == at(pos + len) {
                         len += 1;
                     }
                     best = Some((len, dist));
@@ -296,8 +330,8 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
                     w.write_bit(false); // literal indicator after a match
                 }
                 w.write_elias(lit_len);
-                for &b in &input[lit_start..pos] {
-                    w.write_byte(b);
+                for i in lit_start..pos {
+                    w.write_byte(at(i));
                 }
                 first_block = false;
                 after_literals = true;
@@ -329,14 +363,14 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
     }
 
     // Trailing literal block, if any.
-    let lit_len = input.len() - lit_start;
+    let lit_len = hist_len - lit_start;
     if lit_len > 0 {
         if !first_block {
             w.write_bit(false);
         }
         w.write_elias(lit_len);
-        for &b in &input[lit_start..] {
-            w.write_byte(b);
+        for i in lit_start..hist_len {
+            w.write_byte(at(i));
         }
     }
 
@@ -354,6 +388,81 @@ mod tests {
     fn rt(data: &[u8]) {
         let enc = encode(data);
         assert_eq!(decode(&enc).unwrap(), data);
+    }
+
+    fn rt_prefix(data: &[u8], prefix: &[u8]) {
+        let enc = encode_with_prefix(data, prefix);
+        assert_eq!(decode_with_prefix(&enc, prefix).unwrap(), data);
+    }
+
+    #[test]
+    fn encode_with_prefix_uses_prefix_match() {
+        // The input opens with a literal byte (the first block is always a
+        // literal) followed by bytes that only occur inside the prefix, so
+        // the match must reach back into the external history.
+        let prefix = b"0123456789abcdef";
+        let mut input = b"Z".to_vec();
+        input.extend_from_slice(prefix);
+        input.extend_from_slice(b" tail tail tail");
+
+        let enc = encode_with_prefix(&input, prefix);
+        assert_eq!(decode_with_prefix(&enc, prefix).unwrap(), input);
+        // Using the prefix dictionary must beat plain encoding here.
+        assert!(enc.len() < encode(&input).len());
+    }
+
+    #[test]
+    fn encode_with_prefix_first_block_stays_literal() {
+        // Input starts exactly with prefix content: a match at position 0
+        // is not representable, so the encoder must emit a leading literal
+        // before matching into the prefix.
+        let prefix = b"abcdefghij";
+        let mut input = prefix.to_vec();
+        input.extend_from_slice(b"XYZ");
+        input.extend_from_slice(prefix);
+        rt_prefix(&input, prefix);
+    }
+
+    #[test]
+    fn encode_with_prefix_roundtrip() {
+        rt_prefix(b"hello hello hello", b"prefix data");
+        rt_prefix(b"aaaaaaaaaaaaaaaaaaaa", b"aaaa");
+        // Match crossing the prefix/output boundary plus rep-offset reuse.
+        let prefix = b"the quick brown fox jumps over the lazy dog. ";
+        let mut input = b"!".to_vec();
+        for _ in 0..4 {
+            input.extend_from_slice(prefix);
+        }
+        input.extend_from_slice(b"0123456789");
+        rt_prefix(&input, prefix);
+        // Larger binary input with a sizeable dictionary.
+        let dict: Vec<u8> = (0u16..1000).flat_map(|i| i.to_le_bytes()).collect();
+        let mut binary = dict[1500..1800].to_vec();
+        for i in 0..2000u32 {
+            binary.extend_from_slice(&i.to_le_bytes());
+        }
+        binary.extend_from_slice(&dict[0..300]);
+        rt_prefix(&binary, &dict);
+    }
+
+    #[test]
+    fn encode_with_empty_prefix_matches_encode() {
+        let data = b"abcabcabc---abcabcabc";
+        assert_eq!(encode_with_prefix(data, b""), encode(data));
+        assert_eq!(encode_with_prefix(b"", b"prefix"), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn encode_with_prefix_stream_needs_prefix() {
+        // Decoding a prefix-compressed stream without the prefix must not
+        // silently produce the original data.
+        let prefix = b"0123456789abcdef";
+        let mut input = b"Z".to_vec();
+        input.extend_from_slice(prefix);
+        let enc = encode_with_prefix(&input, prefix);
+        if let Ok(v) = decode(&enc) {
+            assert_ne!(v, input);
+        }
     }
 
     #[test]

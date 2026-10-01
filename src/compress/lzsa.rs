@@ -19,7 +19,8 @@
 //! reaching before the start of the decoded data) decode via
 //! [`decode_with_prefix`]; raw-block equivalents are
 //! [`decode_lzsa1_block_with_prefix`] and [`decode_lzsa2_block_with_prefix`].
-//! The backwards `-b` mode is outside the current scope.
+//! [`encode_with_prefix`] and [`encode_lzsa2_with_prefix`] emit such
+//! streams. The backwards `-b` mode is outside the current scope.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -440,27 +441,60 @@ fn decode_lzsa2_commands(
 
 /// Encode data as an LZSA stream using LZSA1 blocks.
 pub fn encode(input: &[u8]) -> Vec<u8> {
-    encode_with(input, false)
+    encode_impl(input, &[], false)
 }
 
 /// Encode data as an LZSA stream using LZSA2 blocks.
 pub fn encode_lzsa2(input: &[u8]) -> Vec<u8> {
-    encode_with(input, true)
+    encode_impl(input, &[], true)
 }
 
-fn encode_with(input: &[u8], level2: bool) -> Vec<u8> {
+/// Encode data as an LZSA stream (LZSA1 blocks) whose match offsets may
+/// reach into `prefix`, external history logically prepended to the
+/// input (the upstream `-D` dictionary option). The result must be
+/// decoded with [`decode_with_prefix`] using the same `prefix`.
+pub fn encode_with_prefix(input: &[u8], prefix: &[u8]) -> Vec<u8> {
+    encode_impl(input, prefix, false)
+}
+
+/// Encode data as an LZSA stream (LZSA2 blocks) with `prefix` history
+/// as in [`encode_with_prefix`]. Decode with [`decode_with_prefix`].
+pub fn encode_lzsa2_with_prefix(input: &[u8], prefix: &[u8]) -> Vec<u8> {
+    encode_impl(input, prefix, true)
+}
+
+/// `prefix` is external history logically prepended to `input`: matches
+/// may copy from it using normal wire offsets, as `decode_with_prefix`
+/// expects. Match positions are tracked in the virtual `prefix ++ input`
+/// history, so a distance that exceeds the output produced so far lands
+/// inside `prefix`. Unlike ZX1 the first command may be a match, so no
+/// leading literal is required.
+fn encode_impl(input: &[u8], prefix: &[u8], level2: bool) -> Vec<u8> {
     let mut out = Vec::with_capacity(3 + input.len() / 8);
     out.extend_from_slice(&MAGIC);
     out.push(if level2 { 1 << 5 } else { 0 });
+    // `window` is the virtual `prefix ++ input` history and `base` the
+    // input's start inside it; an empty prefix aliases `input` directly.
+    let combined;
+    let window: &[u8] = if prefix.is_empty() {
+        input
+    } else {
+        let mut v = Vec::with_capacity(prefix.len() + input.len());
+        v.extend_from_slice(prefix);
+        v.extend_from_slice(input);
+        combined = v;
+        &combined
+    };
+    let base = window.len() - input.len();
     // Frames of up to 64 KiB of decompressed data; a frame's match
-    // offsets may reach back into earlier frames.
+    // offsets may reach back into earlier frames (and into `prefix`).
     let mut frame_start = 0usize;
     while frame_start < input.len() {
         let frame_end = (frame_start + 0x10000).min(input.len());
         let block = if level2 {
-            encode_lzsa2_block(&input[..frame_end], frame_start, false)
+            encode_lzsa2_block(&window[..base + frame_end], base + frame_start, false)
         } else {
-            encode_lzsa1_block(&input[..frame_end], frame_start, false)
+            encode_lzsa1_block(&window[..base + frame_end], base + frame_start, false)
         };
         match block {
             Some(b) if b.len() < frame_end - frame_start => {
@@ -1023,5 +1057,98 @@ mod tests {
         // lit-len marker 239 -> u16 LE literal length (3).
         let b = [0x1f, 0xfe, 0xef, 0x03, 0x00, b'x', b'y', b'z', 0xf0, 0xe8];
         assert_eq!(decode_lzsa2_block(&b).unwrap(), b"xyz");
+    }
+
+    fn rt_prefix(data: &[u8], prefix: &[u8]) {
+        assert_eq!(
+            decode_with_prefix(&encode_with_prefix(data, prefix), prefix).unwrap(),
+            data
+        );
+        assert_eq!(
+            decode_with_prefix(&encode_lzsa2_with_prefix(data, prefix), prefix).unwrap(),
+            data
+        );
+    }
+
+    #[test]
+    fn encode_with_prefix_uses_prefix_match() {
+        // The input opens with bytes that only occur inside the prefix:
+        // the very first command is a match reaching back into the
+        // external history (LZSA needs no leading literal).
+        let prefix = b"0123456789abcdef";
+        let mut input = prefix.to_vec();
+        input.extend_from_slice(b" tail tail tail");
+
+        let enc1 = encode_with_prefix(&input, prefix);
+        let enc2 = encode_lzsa2_with_prefix(&input, prefix);
+        assert_eq!(decode_with_prefix(&enc1, prefix).unwrap(), input);
+        assert_eq!(decode_with_prefix(&enc2, prefix).unwrap(), input);
+        // Using the prefix dictionary beats plain encoding here.
+        assert!(enc1.len() < encode(&input).len());
+        assert!(enc2.len() < encode_lzsa2(&input).len());
+    }
+
+    #[test]
+    fn encode_with_prefix_roundtrip() {
+        rt_prefix(b"hello hello hello", b"prefix data");
+        rt_prefix(b"aaaaaaaaaaaaaaaaaaaa", b"aaaa");
+        rt_prefix(b"", b"nonempty prefix");
+        // Distance-2 match at position 0: starts in the 2-byte prefix
+        // and continues into produced output (boundary crossing).
+        rt_prefix(b"ababab", b"ab");
+        // Match into the prefix after some output, then rep-matches.
+        let prefix = b"the quick brown fox jumps over the lazy dog. ";
+        let mut input = b"!".to_vec();
+        for _ in 0..4 {
+            input.extend_from_slice(prefix);
+        }
+        input.extend_from_slice(b"0123456789");
+        rt_prefix(&input, prefix);
+        // Larger binary input with a sizeable dictionary.
+        let dict: Vec<u8> = (0u16..1000).flat_map(|i| i.to_le_bytes()).collect();
+        let mut binary = dict[1500..1800].to_vec();
+        for i in 0..2000u32 {
+            binary.extend_from_slice(&i.to_le_bytes());
+        }
+        binary.extend_from_slice(&dict[0..300]);
+        rt_prefix(&binary, &dict);
+        // Prefix still usable as history across a frame boundary.
+        let mut big = b"0123456789abcdef".to_vec();
+        big.extend_from_slice(&[0u8; 70000]);
+        big.extend_from_slice(b"0123456789abcdef");
+        rt_prefix(&big, b"0123456789abcdef");
+    }
+
+    #[test]
+    fn encode_with_empty_prefix_matches_encode() {
+        for data in [
+            b"abcabcabc---abcabcabc".as_slice(),
+            &[7u8; 70000][..], // multi-frame
+        ] {
+            assert_eq!(encode_with_prefix(data, b""), encode(data));
+            assert_eq!(encode_lzsa2_with_prefix(data, b""), encode_lzsa2(data));
+        }
+        // Empty input with a prefix still yields a valid empty stream.
+        assert_eq!(
+            decode_with_prefix(&encode_with_prefix(b"", b"prefix"), b"prefix").unwrap(),
+            Vec::<u8>::new()
+        );
+    }
+
+    #[test]
+    fn encode_with_prefix_stream_needs_prefix() {
+        // Decoding a prefix-compressed stream without the prefix must
+        // not silently produce the original data.
+        let prefix = b"0123456789abcdef";
+        let mut input = prefix.to_vec();
+        input.extend_from_slice(b" tail tail tail");
+        for enc in [
+            encode_with_prefix(&input, prefix),
+            encode_lzsa2_with_prefix(&input, prefix),
+        ] {
+            if let Ok(v) = decode(&enc) {
+                assert_ne!(v, input);
+            }
+        }
     }
 }

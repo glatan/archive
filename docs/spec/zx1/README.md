@@ -4,7 +4,7 @@
 |------|------|
 | 形式概要 | Einar Saukas の ZX1 が使用する raw LZ77 ストリーム。ZX0 から派生した形式で、制御ビット列とデータバイトがインターリーブする。ZX0 との差分は Elias 符号の継続ビット反転 (ZX1 では `1` が継続) とオフセット表現 (ZX1 は 1〜2 バイトの反転格納)。magic・コンテナヘッダ・チェックサムは持たない |
 | 基準仕様 | [ZX1 README](https://github.com/einar-saukas/ZX1) "File Format" (ローカルスナップショット: `docs/spec/sources/zx1_README.md`) + 参照実装 `dzx1.c` / `zx1.c` (Einar Saukas, BSD 3-Clause) |
-| 実装 | `archive::compress::zx1` (decode / decode_bounded / encode)。pure-Rust 実装 |
+| 実装 | `archive::compress::zx1` (decode / decode_bounded / decode_with_prefix / encode / encode_with_prefix)。pure-Rust 実装 |
 
 ## 対応バリアント・仕様版
 
@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | forward / non-inverted | [ZX1 README](https://github.com/einar-saukas/ZX1) + `dzx1.c` (BSD-3) | ✅ | ✅ | |
 | backwards (`-b`) | [ZX1 README](https://github.com/einar-saukas/ZX1) | ❌ | ❌ | intentional scope |
-| prefix (`+N` skip) / suffix 圧縮 | [ZX1 README](https://github.com/einar-saukas/ZX1) "Advanced Features" | ✅ | ❌ | `decode_with_prefix` で外部履歴を前置。suffix 圧縮はエンコーダ側概念のため対象外 |
+| prefix (`+N` skip) / suffix 圧縮 | [ZX1 README](https://github.com/einar-saukas/ZX1) "Advanced Features" | ✅ | ✅ | `decode_with_prefix` / `encode_with_prefix` で外部履歴を前置。suffix 圧縮はエンコーダ側概念のため対象外 |
 
 ## ストリーム構造
 
@@ -59,6 +59,6 @@
 
 - 参照実装 ZX1 v1.5 (Einar Saukas) は BSD 3-Clause。本実装は README のフォーマット記述と `dzx1.c` の動作解析から書かれた独立実装であり、コードの移植は行っていない。
 - 統合テストの `ZX1_*` は参照 C コンプレッサ (ZX1 v1.5) をローカルでコンパイルして生成した既知解答ベクタ (decode のみ検証): literal+match 混在、rep-offset、長マッチ連鎖、2 バイト offset 形式を含む。
-- backwards モード (`-b`、後方読み) は intentional scope 外。prefix decode は `decode_with_prefix` で対応済み (suffix 圧縮はエンコーダ側概念のため対象外)。
+- backwards モード (`-b`、後方読み) は intentional scope 外。prefix モードは `decode_with_prefix`/`encode_with_prefix` で対応済み (suffix 圧縮はエンコーダ側概念のため対象外)。
 - ZX1 は ZX Spectrum 等のレトロプラットフォーム向けに設計された codec で、ZX0 より伸張コードが小さい代わりに圧縮率がわずかに劣る設計。
 - 実装メモ: Elias gamma 値には `1 << 20` の安全性ガードを設けている (無制限増大する malformed 入力の DoS 防止。フォーマット定義ではなく実装追加の制限)。

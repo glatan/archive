@@ -4,14 +4,14 @@
 |------|------|
 | 形式概要 | Einar Saukas の ZX0 v2 が使用する raw LZ77 ストリーム。制御ビット列とデータバイトがインターリーブする形式で、8bit CPU での高速伸張に最適化されている。magic・コンテナヘッダ・チェックサムは持たない |
 | 基準仕様 | [ZX0 README](https://github.com/einar-saukas/ZX0) "File Format" (ローカルスナップショット: `docs/spec/sources/zx0_README_v2.2.md`) + 参照実装 `dzx0.c` / `compress.c` (Einar Saukas, BSD 3-Clause) |
-| 実装 | `archive::compress::zx0` (decode / decode_bounded / encode)。pure-Rust 実装 |
+| 実装 | `archive::compress::zx0` (decode / decode_bounded / decode_classic / decode_with_prefix / decode_classic_with_prefix / encode / encode_classic)。pure-Rust 実装 |
 
 ## 対応バリアント・仕様版
 
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
 | v2 forward / non-inverted | [ZX0 README](https://github.com/einar-saukas/ZX0) + `dzx0.c` (BSD-3) | ✅ | ✅ | |
-| v1 (`-c` classic) | [ZX0 README](https://github.com/einar-saukas/ZX0) | ✅ | ❌ | `decode_classic` / `decode_classic_with_prefix` (offset-MSB Elias 非反転のみ差分) |
+| v1 (`-c` classic) | [ZX0 README](https://github.com/einar-saukas/ZX0) | ✅ | ✅ | `decode_classic` / `decode_classic_with_prefix` / `encode_classic` (offset-MSB Elias 非反転のみ差分) |
 | backward (`-b`) / inverted (`-i`) | [ZX0 README](https://github.com/einar-saukas/ZX0) | ❌ | ❌ | intentional scope |
 
 ## ストリーム構造
@@ -58,6 +58,6 @@
 
 - 参照実装 ZX0 v2.2 (Einar Saukas) は BSD 3-Clause。本実装は README のフォーマット記述と `dzx0.c` の動作解析から書かれた独立実装であり、コードの移植は行っていない。
 - 統合テストの `ZX0_*` は参照 C コンプレッサ (ZX0 v2.2) をローカルでコンパイルして生成した既知解答ベクタ (decode のみ検証): literal+match 混在、rep-offset、長マッチ連鎖を含む。
-- backwards モード (`-b`、後方読み)、inverted モード (`-i`) は intentional scope 外。classic v1 (`-c`、offset-MSB Elias 非反転) と prefix decode (`decode_with_prefix`/`decode_classic_with_prefix`) は対応済み。
+- backwards モード (`-b`、後方読み)、inverted モード (`-i`) は intentional scope 外。classic v1 (`-c`、offset-MSB Elias 非反転) は `decode_classic`/`encode_classic` 系で、prefix decode は `decode_with_prefix`/`decode_classic_with_prefix` で対応済み。
 - ZX0 は ZX Spectrum 等のレトロプラットフォーム向けに設計された codec で、同一フォーマットの decompressor が Z80/6502/68k/x86 等多数のアセンブリ実装を持つ。
 - 実装メモ: Elias gamma 値には `1 << 20` の安全性ガードを設けている (無制限増大する malformed 入力の DoS 防止。フォーマット定義ではなく実装追加の制限)。

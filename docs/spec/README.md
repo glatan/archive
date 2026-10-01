@@ -132,7 +132,7 @@
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 25 | 0 | 2 | 27 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
 | [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 29 | 0 | 1 | 30 |
-| [lha](lha/README.md) | lha header documentation + jLHA Notes + lzhformat.html + lhasa/compcol 参照実装 | 21 | 0 | 2 | 23 |
+| [lha](lha/README.md) | lha header documentation + jLHA Notes + lzhformat.html + lhasa/compcol 参照実装 | 22 | 1 | 1 | 24 |
 | [arj](arj/README.md) | ARJ technical note (ARJ 2.x) + UNARJ/newtua_dos 参照実装 | 21 | 0 | 4 | 25 |
 | [arc](arc/README.md) | SEA ARC file format description + hyc/arc `Arcinfo` | 23 | 0 | 2 | 26 |
 | [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 38 | 0 | 5 | 43 |
@@ -160,9 +160,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 2203 |
-| ⚠️ 部分実装 | 2 |
-| ❌ 未実装 | 73 |
-| **合計** | **2279** |
+| ✅ 実装+テスト済み | 2204 |
+| ⚠️ 部分実装 | 3 |
+| ❌ 未実装 | 72 |
+| **合計** | **2280** |
 
-**全体カバー率**: 2203 / 2279 = **96.7%** (intentional exclusion 除外後: 2203 / 2206 = **99.9%**)
+**全体カバー率**: 2204 / 2280 = **96.7%** (intentional exclusion 除外後: 2204 / 2208 = **99.8%**)

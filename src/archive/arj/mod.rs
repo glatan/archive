@@ -1,4 +1,4 @@
-//! ARJ archive read and store-method write support.
+//! ARJ archive read and write support.
 //!
 //! Reference: ARJ technical note (ARJ 2.x file format description).
 //! Supported scope:
@@ -11,7 +11,11 @@
 //!   (flag 0x04 split files reassembled across volume buffers).
 //!   Other methods and the security-envelope features are rejected
 //!   with [`Error::Unsupported`];
-//! - writing: method-0 binary file entries only.
+//! - writing: stored (method 0), methods 1-3 (LZH-static, one shared
+//!   15-bit-window wire format) and method-4 "fastest" LZSS file
+//!   entries (ArjEncoder::with_method, falling back to stored when
+//!   compression does not shrink the input), directory entries, and
+//!   multi-volume output via ArjEncoder::finish_parts.
 //!
 //! Layout: each header starts with the two-byte signature `0x60 0xEA`
 //! followed by a `u16le` header size (0 = end of archive). The basic
@@ -27,7 +31,7 @@ use crate::error::Error;
 
 /// ARJ archive decoding.
 pub mod decode;
-/// ARJ store-method encoding.
+/// ARJ encoding (stored and compressed methods).
 pub mod encode;
 mod method4;
 

@@ -4,7 +4,7 @@
 |------|------|
 | 基準仕様 | lha header documentation (apphead / lzh_note、GNU lha 系資料)。実参照: [LHa for UNIX `header.doc.md`](https://github.com/jca02266/lha/blob/master/header.doc.md) ([jca02266/lha](https://github.com/jca02266/lha)) + jLHA Notes (Michel Ishizuka、[Wayback index](https://web.archive.org/web/20080724142842/http://homepage1.nifty.com/dangan/en/Content/Program/Java/jLHA/Notes/Notes.html)) + Joe Jared `lzhformat.html` + [Just Solve Wiki: LHarc](http://justsolve.archiveteam.org/wiki/LHarc)。ローカルスナップショット: `docs/spec/sources/lha_header.doc.md`, `jlha_notes_*.html`, `lzhformat.html`。一次実装: [LHA 2.11 ソース (Vector fh002420)](https://www.vector.co.jp/download/file/dos/util/fh002420.html) |
 | 形式概要 | `[u8/u16 header size][checksum?][method 5B][packed u32][orig u32][time u32][attr u8][level u8](level 別フィールド)[ext headers][data]` のエントリ列。終端は header size = 0 |
-| 実装範囲 | level 0-3 read、`-lh0-` (stored) / `-lhd-` (dir) / `-lh1-`-`-lh7-` / LArc `-lzs-`/`-lz4-`/`-lz5-` / PMarc `-pm0-`-`-pm2-` の decode。write は `-lh0-`/`-lhd-` のみ (`LhaEncoder::with_level` で level 0/1/2 を選択) |
+| 実装範囲 | level 0-3 read、`-lh0-` (stored) / `-lhd-` (dir) / `-lh1-`-`-lh7-` / LArc `-lzs-`/`-lz4-`/`-lz5-` / PMarc `-pm0-`-`-pm2-` の decode。write は header level 0-3 (`with_level`) + method `-lh0-`/`-lhd-`/`-lh4-`-`-lh7-` と stored alias `-lz4-`/`-pm0-` (`with_method`) |
 
 ## 対応バリアント・仕様版
 
@@ -12,9 +12,9 @@
 |---|---|---|---|---|
 | header level 0 | lha header documentation | ✅ | ✅ | |
 | header level 1 / 2 | lha header documentation + LHa for UNIX header.c 実測 | ✅ | ✅ | ext header (0x01 filename / 0x02 dir、raw 0xff 区切り) |
-| header level 3 | jLHA Notes Level3Header (`sources/jlha_notes_level3_header.html`) + lhasa (ISC) | decode のみ ✅ | ❌ | write は非対応。32 バイト基本ヘッダ + u32 サイズ + u32 ext チェーン |
+| header level 3 | jLHA Notes Level3Header (`sources/jlha_notes_level3_header.html`) + lhasa (ISC) | ✅ | ✅ | `with_level(3)` で write 対応 (`emit_level3`)。32 バイト基本ヘッダ + u32 サイズ + u32 ext チェーン |
 | method `-lh0-` (stored) / `-lhd-` (dir) | lha header documentation | ✅ | `-lh0-` のみ ✅ | |
-| LZH 圧縮メソッド (`-lh1-`〜`-lh7-`, `-lzs-`/`-lz4-`/`-lz5-`, `-pm0-`-`-pm2-`) | jLHA Notes CompressMethod + 一次実装 LHA 2.11/LHa 1.14i ソース + lhasa (ISC) が de facto decode 参照 | ✅ | ❌ | decode のみ。`-lhx-` (UNLHA32 独自) 等の未対応メソッドは `Error::Unsupported` |
+| LZH 圧縮メソッド (`-lh1-`〜`-lh7-`, `-lzs-`/`-lz4-`/`-lz5-`, `-pm0-`-`-pm2-`) | jLHA Notes CompressMethod + 一次実装 LHA 2.11/LHa 1.14i ソース + lhasa (ISC) が de facto decode 参照 | ✅ | ⚠️ | encode は st1 系 `-lh4-`〜`-lh7-` (`with_method` → `compress::lzh::st1_enc`) と stored alias `-lz4-`/`-pm0-` のみ。`-lh1-`〜`-lh3-`/`-lzs-`/`-lz5-`/`-pm1-`/`-pm2-` の圧縮 write は未対応。`-lhx-` (UNLHA32 独自) 等の未対応メソッドは decode 側でも `Error::Unsupported` |
 
 ### ヘッダ構造
 
@@ -68,6 +68,7 @@ decode 参照は lhasa (ISC) / XADMaster + LHa 1.14i 一次ソース (dhuf.c, sh
 |---|------|----------|-----------|----------------|
 | 13 | `LhaEncoder::add_file` / `add_dir` / `encode`: level-0 `-lh0-`/`-lhd-` ヘッダを生成、name 1-255B・NUL/`\` なし。パス区切りは raw `0xff` に変換、dir エントリは末尾 `0xff` + attr `0x10` | lha note level-0 + header.c 実測 | ✅ | `level0_roundtrip` |
 | 13a | `LhaEncoder::with_level(1|2)` / `encode_level`: level-1 は基本 name field に basename (230B 超は ext `0x01`)、packed フィールドは skip size、dir は ext `0x02` (raw `0xff` 区切り・末尾付き)。level-2 は u16 総サイズ (自身込み) + ext `0x00` header-CRC + filename ext 必須 + 下位 8bit 0 時 1B pad | lha note level-1/level-2 + header.c write_header_level1/write_header_level2 | ✅ | `level1_roundtrip`, `level2_roundtrip`, `level2_long_path`, `level1_long_basename_uses_ext`, `level2_zero_low_byte_padding` |
+| 13b | `LhaEncoder::with_level(3)`: `[u16 word_size=4][method][u32 packed][u32 orig][u32 unix time][0x20][level=3][u16 crc16][u8 osid][u32 hsize][u32 ext chain][u32 0]` (ext 順序: 0x00 header-CRC → 0x01 filename → 0x02 dir)。`with_method`: `-lh4-`〜`-lh7-` を st1 共有エンコーダ (`compress::lzh::st1_enc`) で圧縮、stored alias `-lz4-`/`-pm0-`、圧縮不利時は `-lh0-` fallback | jLHA Notes Level3Header + lhasa 実測 | ✅ | `level3_roundtrip`, `level3_wire_layout`, `level3_long_name`, `lh5_encode_roundtrip`, `lh4_lh6_lh7_encode_roundtrip`, `lh5_falls_back_to_stored`, `stored_alias_methods_roundtrip` |
 | 14 | 終端 `0x00` を付与 | lha note | ✅ | 往復テスト |
 
 ### システム相互運用
@@ -89,9 +90,9 @@ decode 参照は lhasa (ISC) / XADMaster + LHa 1.14i 一次ソース (dhuf.c, sh
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 19 | 圧縮メソッドの write は非対応 | ❌ | encode は `-lh0-`/`-lhd-` のみ。`-lhx-` 等の未実装メソッドの decode は `Error::Unsupported` |
+| 19 | 圧縮メソッドの write は st1 系のみ対応 | ⚠️ | `with_method` は `-lh4-`〜`-lh7-` + stored alias `-lz4-`/`-pm0-` を受理。`-lh1-`〜`-lh3-`/`-lzs-`/`-lz5-`/`-pm1-`/`-pm2-` の圧縮 write は未対応。`-lhx-` 等の未実装メソッドの decode は `Error::Unsupported` |
 | 20 | write の mtime は level 0/1 で DOS time、level 2 で UNIX time をそのまま格納。UNIX ext 0x50/0x51/0x54 は発行しない | ✅ | `level1_roundtrip`, `level2_roundtrip`, `level2_long_path`, `level_rejects_bad_level` |
-| 21 | マルチボリューム/リンク属性/OS 別属性の解釈は非対応 | ❌ | header level 3 の read は対応済み (write は非対応)。multi-disk/spanning (ext header 0x39・SPAN mode) は `sources/lzhformat.html` が記述 |
+| 21 | マルチボリューム/リンク属性/OS 別属性の解釈は非対応 | ❌ | header level 3 は read/write 対応済み (`with_level(3)`)。multi-disk/spanning (ext header 0x39・SPAN mode) は `sources/lzhformat.html` が記述 |
 
 ### vendor 別拡張・拡張ヘッダの整理
 
@@ -133,4 +134,6 @@ LHA 系の「独自拡張」は出自が分散している。出典別に整理�
 - level-1 エンコーダは基本ヘッダのみを `hsize` に計上し、packed フィールドには skip size (packed + ext バイト) を書く。basename が 230B を超えると name field は空にして ext `0x01` に移す。
 - level-2 エンコーダは `u16` 総サイズ (自身込み) を書き、ext `0x00` header CRC-16 ブロックを発行する。総サイズの下位 8bit が 0 になるとき 1 バイト pad を追加する (終端マーカとの衝突回避)。
 - dir エントリ (`-lhd-`) は filename 部を空にし、フルパスを ext `0x02` (level-0 は name field) に末尾区切り付きで書く。level-1/2 では OS id `U` を発行するが UNIX ext (0x50/0x51/0x54) は発行しない。
-- level 0/1 の mtime フィールドは DOS time、level 2 は UNIX time をそのまま格納する。
+- level 0/1 の mtime フィールドは DOS time、level 2/3 は UNIX time をそのまま格納する。
+- level-3 エンコーダは先頭 `u16 word_size=4` (固定) + u32 packed/orig + u32 ext チェーン (0x00 header-CRC → 0x01 filename → 0x02 dir の順、各エントリの u32 size は size フィールド自身 + type + payload を含む) を出力し、packed フィールドには実バイト数 (skip size ではない) を書く。
+- 圧縮メソッドエンコーダ (`with_method` の `-lh4-`〜`-lh7-`) は `compress::lzh::st1_enc` 共有実装 (greedy hash-chain + 頻度ベース Huffman、ARJ method 1-3 と共用)。stored alias `-lz4-`/`-pm0-` は wire 上 `-lh0-` と同型のためタグのみ付け替えて受理する。

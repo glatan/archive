@@ -187,3 +187,27 @@ fn zx2_prefix_history() {
     assert!(zx2::decode(&stream).is_err());
     assert_eq!(zx2::decode_with_prefix(&stream, b"XYZ").unwrap(), b"aXYZ");
 }
+
+#[test]
+fn zx2_variant_encode_roundtrips() {
+    let cases: Vec<Vec<u8>> = vec![
+        Vec::new(),
+        b"x".to_vec(),
+        b"abcabcabcabcabcabc".to_vec(),
+        b"aaaaaaaaaaaaaaaaaaaa".to_vec(),
+        vec![0u8; 3000],
+    ];
+    for data in &cases {
+        // -z: the first match is always a new-offset block, so the
+        // stream is accepted by both decoders.
+        let enc = zx2::encode_no_default_offset(data);
+        assert_eq!(&zx2::decode_no_default_offset(&enc).unwrap(), data);
+        assert_eq!(&zx2::decode(&enc).unwrap(), data);
+        // -x: new-offset lengths are stored without the -1 bias.
+        let enc = zx2::encode_no_length_increment(data);
+        assert_eq!(&zx2::decode_no_length_increment(&enc).unwrap(), data);
+        // -y: encoder-side block length bound; wire format unchanged.
+        let enc = zx2::encode_max_len(data, 8).unwrap();
+        assert_eq!(&zx2::decode(&enc).unwrap(), data);
+    }
+}

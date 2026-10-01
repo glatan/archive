@@ -4,7 +4,7 @@
 |------|------|
 | 基準仕様 | openZIM Wiki "[ZIM file format](https://wiki.openzim.org/wiki/ZIM_file_format)" (ローカルスナップショット: `docs/spec/sources/zim_file_format.html`) |
 | 形式概要 | 80B header + MIME list + path/title pointer list + dirent + cluster pointer list + blob cluster |
-| 実装範囲 | read/write (write は v5 単一 cluster・content entry のみ)。fulltext index 検索 API は intentional scope 外 |
+| 実装範囲 | read/write (write は v5/v6、compression none/xz/zstd、redirect/deprecated entry も emit 可)。fulltext index 検索 API は intentional scope 外 |
 
 参照: <https://wiki.openzim.org/wiki/ZIM_file_format>
 
@@ -13,9 +13,9 @@
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
 | format v5 / v6 | [ZIM file format wiki](https://wiki.openzim.org/wiki/ZIM_file_format) | ✅ | ✅ | v5/v6 とも write 可。extended cluster (bit5 + 8B offset table)・redirect (0xffff)・deprecated (0xfffe/0xfffd) dirent の emit に対応 (`ZimEncoder::with_version`/`with_extended_cluster`/`add_redirect`/`add_deprecated`) |
-| compression none (1) / xz-lzma2 (4) / zstd (5) | [ZIM file format wiki](https://wiki.openzim.org/wiki/ZIM_file_format) | ✅ | — | |
-| compression zlib (2) / bzip2 (3) | [ZIM file format wiki](https://wiki.openzim.org/wiki/ZIM_file_format) | ❌ | — | legacy id → `Unsupported` |
-| extended cluster (8B offset) | [ZIM file format wiki](https://wiki.openzim.org/wiki/ZIM_file_format) | ✅ | — | cluster info bit5 |
+| compression none (1) / xz-lzma2 (4) / zstd (5) | [ZIM file format wiki](https://wiki.openzim.org/wiki/ZIM_file_format) | ✅ | ✅ | encode は `ZimEncoder::with_compression` |
+| compression zlib (2) / bzip2 (3) | [ZIM file format wiki](https://wiki.openzim.org/wiki/ZIM_file_format) | ✅ | — | legacy id。`zlib` / `bzip2` feature 有効時に decode (無効時は `Unsupported`) |
+| extended cluster (8B offset) | [ZIM file format wiki](https://wiki.openzim.org/wiki/ZIM_file_format) | ✅ | ✅ | cluster info bit5。encode は `with_extended_cluster` (v6 のみ) |
 
 ### Header / エントリ構造
 
@@ -33,10 +33,10 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 8 | cluster info byte: 下位 4bit = compression (1:none / 4:xz(lzma2) / 5:zstd)、bit5 = extended offset | Clusters | ✅ | `parses_xz_cluster` / `test_zim_decode_zstd_cluster` |
+| 8 | cluster info byte: 下位 4bit = compression (1:none / 2:zlib / 3:bzip2 / 4:xz(lzma2) / 5:zstd)、bit5 = extended offset | Clusters | ✅ | `parses_xz_cluster` / `test_zim_decode_zstd_cluster` / `parses_zlib_cluster` / `parses_bzip2_cluster` |
 | 9 | extended (8B offset) cluster は major 6 のみ受理 | Clusters | ✅ | `rejects_extended_cluster_below_major6`, `parses_extended_cluster_major6` |
 | 10 | blob offset list: 先頭 offset / OFFSET_SIZE で entry 数を決定、連続 offset 差分が blob | Clusters | ✅ | `parses_multi_blob_cluster`。先頭 offset の OFFSET_SIZE アライメントも検査。cluster 終端は次クラスタ位置→checksumPos→input 末尾の順でフォールバック |
-| 11 | legacy compression id (2 zlib / 3 bzip2) → Unsupported | Clusters | ✅ | `rejects_bzip_cluster`, `rejects_zlib_cluster` |
+| 11 | legacy compression id (2 zlib / 3 bzip2): `zlib`/`bzip2` feature 有効時は decode、無効時は `Unsupported` | Clusters | ✅ | `parses_zlib_cluster`, `parses_bzip2_cluster`, `rejects_zlib_cluster`, `rejects_bzip_cluster` (feature 無効経路) |
 | 12 | bounds 検査 (pointer list / blob offset / truncation) | crate エラー規約 | ✅ | `rejects_truncated`, `rejects_blob_out_of_range` |
 
 ### 実ファイル検証

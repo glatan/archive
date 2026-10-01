@@ -673,3 +673,209 @@ fn test_arj_oracle_extract() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ============================================================
+// Encoder-side method 4 and multi-volume (finish_parts) tests.
+// ============================================================
+
+#[test]
+fn test_arj_method4_encode_roundtrip() {
+    use archive::archive::arj::encode::ArjEncoder;
+    // Compressible payload: repeated phrase plus a counter tail.
+    let mut data = Vec::new();
+    for i in 0..400u32 {
+        data.extend_from_slice(b"arj fastest method ");
+        data.extend_from_slice(&i.to_le_bytes());
+    }
+    let mut enc = ArjEncoder::with_method(4).unwrap();
+    enc.add_file("m4.bin", &data, 0).unwrap();
+    let compressed = enc.finish();
+
+    let entries = arj_decode::decode(&compressed).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "m4.bin");
+    assert_eq!(entries[0].method, 4);
+    assert_eq!(entries[0].data, data);
+
+    // The compressed archive must beat stored for this input.
+    let mut stored = ArjEncoder::new();
+    stored.add_file("m4.bin", &data, 0).unwrap();
+    assert!(compressed.len() < stored.finish().len());
+}
+
+#[test]
+fn test_arj_method4_incompressible_stored() {
+    use archive::archive::arj::encode::ArjEncoder;
+    // High-entropy bytes (xorshift64*): a literal-only stream costs
+    // 9/8 the input, so the encoder must fall back to method 0.
+    let mut s = 0x1234_5678_9ABC_DEF0u64;
+    let data: Vec<u8> = (0..2048)
+        .map(|_| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            (s >> 32) as u8
+        })
+        .collect();
+    let mut enc = ArjEncoder::with_method(4).unwrap();
+    enc.add_file("rand.bin", &data, 0).unwrap();
+    let entries = arj_decode::decode(&enc.finish()).unwrap();
+    assert_eq!(entries[0].method, 0);
+    assert_eq!(entries[0].data, data);
+}
+
+#[test]
+fn test_arj_finish_parts_roundtrip() {
+    use archive::archive::arj::encode::ArjEncoder;
+    let data: Vec<u8> = (0u8..=255).cycle().take(2000).collect();
+    let mut enc = ArjEncoder::new();
+    enc.add_file("big.bin", &data, 0).unwrap();
+    let parts = enc.finish_parts(512).unwrap();
+    assert!(parts.len() >= 3);
+    assert!(parts.iter().all(|p| p.len() <= 512));
+    let refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+    let entries = arj_decode::decode_parts(&refs).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "big.bin");
+    assert_eq!(entries[0].data, data);
+    // A truncated part list is rejected as an unfinished split.
+    assert!(arj_decode::decode_parts(&refs[..refs.len() - 1]).is_err());
+    // The first volume alone ends mid-file.
+    assert!(arj_decode::decode(&parts[0]).is_err());
+}
+
+#[test]
+fn test_arj_finish_parts_mixed_entries() {
+    use archive::archive::arj::encode::ArjEncoder;
+    let a: Vec<u8> = (0u32..700).map(|i| (i * 31 % 256) as u8).collect();
+    let b = b"second file stays whole".repeat(10);
+    let mut enc = ArjEncoder::new();
+    enc.add_dir("dir", 0).unwrap();
+    enc.add_file("dir/a.bin", &a, 0).unwrap();
+    enc.add_file("b.bin", &b, 0).unwrap();
+    let parts = enc.finish_parts(600).unwrap();
+    assert!(parts.len() >= 2);
+    assert!(parts.iter().all(|p| p.len() <= 600));
+    let refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+    let entries = arj_decode::decode_parts(&refs).unwrap();
+    assert_eq!(entries.len(), 3);
+    assert!(entries[0].is_dir);
+    assert_eq!(entries[1].name, "dir/a.bin");
+    assert_eq!(entries[1].data, a);
+    assert_eq!(entries[2].data, b);
+}
+
+#[test]
+fn test_arj_finish_parts_method4() {
+    use archive::archive::arj::encode::ArjEncoder;
+    let data = b"method four across volumes ".repeat(400);
+    let mut enc = ArjEncoder::with_method(4).unwrap();
+    enc.add_file("m4.bin", &data, 0).unwrap();
+    let parts = enc.finish_parts(128).unwrap();
+    assert!(parts.len() >= 2);
+    assert!(parts.iter().all(|p| p.len() <= 128));
+    let refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+    let entries = arj_decode::decode_parts(&refs).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].method, 4);
+    assert_eq!(entries[0].data, data);
+}
+
+#[test]
+fn test_arj_finish_parts_single_volume() {
+    use archive::archive::arj::encode::ArjEncoder;
+    let mut enc = ArjEncoder::new();
+    enc.add_file("one.bin", b"fits entirely", 0).unwrap();
+    let parts = enc.finish_parts(1 << 20).unwrap();
+    assert_eq!(parts.len(), 1);
+    // A lone volume is a plain single-volume archive.
+    let entries = arj_decode::decode(&parts[0]).unwrap();
+    assert_eq!(entries[0].data, b"fits entirely");
+}
+
+#[test]
+fn test_arj_finish_parts_rejects_tiny_volume() {
+    use archive::archive::arj::encode::ArjEncoder;
+    let mut enc = ArjEncoder::new();
+    enc.add_file("x.bin", b"data", 0).unwrap();
+    // No room for a member header plus payload in 64-byte volumes.
+    assert!(enc.finish_parts(64).is_err());
+}
+
+// ============================================================
+// Encoder-side methods 1-3 (LZH st1 static Huffman, 15-bit window).
+// ============================================================
+
+#[test]
+fn test_arj_st1_encode_roundtrip() {
+    use archive::archive::arj::encode::ArjEncoder;
+    // Compressible payload with repeated phrases plus a counter.
+    let mut data = Vec::new();
+    for i in 0..400u32 {
+        data.extend_from_slice(b"arj static huffman method ");
+        data.extend_from_slice(&i.to_le_bytes());
+    }
+    // Methods 1-3 share one st1 wire format; each must roundtrip.
+    for method in [1u8, 2, 3] {
+        let mut enc = ArjEncoder::with_method(method).unwrap();
+        enc.add_file("m.bin", &data, 0).unwrap();
+        let compressed = enc.finish();
+        let entries = arj_decode::decode(&compressed).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "m.bin");
+        assert_eq!(entries[0].method, method);
+        assert_eq!(entries[0].data, data);
+        // The compressed archive must beat stored for this input.
+        let mut stored = ArjEncoder::new();
+        stored.add_file("m.bin", &data, 0).unwrap();
+        assert!(compressed.len() < stored.finish().len());
+    }
+}
+
+#[test]
+fn test_arj_st1_incompressible_stored() {
+    use archive::archive::arj::encode::ArjEncoder;
+    // High-entropy bytes (xorshift32): the st1 stream plus table
+    // overhead cannot win, so the encoder must fall back to stored.
+    let mut s = 0x243F_6A88u32;
+    let data: Vec<u8> = (0..2048)
+        .map(|_| {
+            s ^= s << 13;
+            s ^= s >> 17;
+            s ^= s << 5;
+            (s >> 24) as u8
+        })
+        .collect();
+    let mut enc = ArjEncoder::with_method(1).unwrap();
+    enc.add_file("rand.bin", &data, 0).unwrap();
+    let entries = arj_decode::decode(&enc.finish()).unwrap();
+    assert_eq!(entries[0].method, 0);
+    assert_eq!(entries[0].data, data);
+}
+
+#[test]
+fn test_arj_encoder_rejects_unsupported_method() {
+    use archive::archive::arj::encode::ArjEncoder;
+    for m in [0u8, 1, 2, 3, 4] {
+        assert!(ArjEncoder::with_method(m).is_ok());
+    }
+    for m in [5u8, 9, u8::MAX] {
+        assert!(ArjEncoder::with_method(m).is_err());
+    }
+}
+
+#[test]
+fn test_arj_encoder_filename_length_boundary() {
+    use archive::archive::arj::encode::ArjEncoder;
+    // The u16 header-size field must cover the fixed fields plus the
+    // NUL-terminated name and comment: 30 + name_len + 2 <= u16::MAX.
+    let ok_name = "a".repeat(u16::MAX as usize - 32);
+    let too_long = "a".repeat(u16::MAX as usize - 31);
+    let mut enc = ArjEncoder::new();
+    enc.add_file(&ok_name, b"x", 0).unwrap();
+    enc.add_dir(&ok_name, 0).unwrap();
+    assert!(enc.add_file(&too_long, b"x", 0).is_err());
+    assert!(enc.add_dir(&too_long, 0).is_err());
+    let entries = arj_decode::decode(&enc.finish()).unwrap();
+    assert_eq!(entries.len(), 2);
+}
