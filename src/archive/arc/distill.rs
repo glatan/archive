@@ -17,11 +17,13 @@
 //!
 //! Ported from the newtua_dos transliteration of XADMaster `XADARCDistillHandle` (LGPL-3.0-or-later).
 
+use alloc::collections::BTreeMap;
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::Error;
 
-use super::bits::LsbBits;
+use super::bits::{LsbBits, LsbWriter};
 
 /// LZSS window size.
 const WINDOW: usize = 8192;
@@ -166,6 +168,274 @@ pub(crate) fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
     }
 }
 
+/// Minimum LZSS match length (symbols encode length - 3).
+const MIN_MATCH: usize = 3;
+/// Bound on the number of distinct match-length symbols: the
+/// serialised tree holds at most MAX_NODES / 2 + 1 leaves and 257
+/// are taken by the literal alphabet plus the end-of-stream symbol.
+const MAX_LENGTH_SYMS: usize = MAX_NODES / 2 + 1 - 257;
+/// Hash-chain table size for the match finder.
+const HASH_SIZE: usize = 1 << 15;
+/// Chain candidates examined per position.
+const CHAIN_DEPTH: usize = 64;
+
+/// A parse token: a literal byte or a back reference.
+#[derive(Clone, Copy)]
+enum Tok {
+    Lit(u8),
+    Match { len: usize, dist: usize },
+}
+
+fn hash3(input: &[u8], i: usize) -> usize {
+    let v = u32::from(input[i]) | (u32::from(input[i + 1]) << 8) | (u32::from(input[i + 2]) << 16);
+    (v.wrapping_mul(2_654_435_761) >> 17) as usize
+}
+
+/// Greedy hash-chain LZSS parse of the input over the 8 KiB window;
+/// overlapping matches (dist below len) are allowed.
+fn parse(input: &[u8]) -> Vec<Tok> {
+    let mut toks = Vec::new();
+    let mut head = vec![usize::MAX; HASH_SIZE];
+    let mut prev = vec![usize::MAX; input.len().max(1)];
+    let mut i = 0usize;
+    while i < input.len() {
+        let remaining = input.len() - i;
+        let mut best_len = 0usize;
+        let mut best_dist = 0usize;
+        if remaining >= MIN_MATCH {
+            let mut cand = head[hash3(input, i)];
+            let limit = remaining.min(WINDOW);
+            for _ in 0..CHAIN_DEPTH {
+                if cand == usize::MAX {
+                    break;
+                }
+                let dist = i - cand;
+                if dist > WINDOW {
+                    break;
+                }
+                let mut l = 0usize;
+                while l < limit && input[cand + l] == input[i + l] {
+                    l += 1;
+                }
+                if l > best_len {
+                    best_len = l;
+                    best_dist = dist;
+                    if l >= limit {
+                        break;
+                    }
+                }
+                cand = prev[cand];
+            }
+        }
+        let advance = if best_len >= MIN_MATCH {
+            toks.push(Tok::Match {
+                len: best_len,
+                dist: best_dist,
+            });
+            best_len
+        } else {
+            toks.push(Tok::Lit(input[i]));
+            1
+        };
+        for (j, slot) in prev.iter_mut().enumerate().skip(i).take(advance) {
+            if j + MIN_MATCH <= input.len() {
+                let h = hash3(input, j);
+                *slot = head[h];
+                head[h] = j;
+            }
+        }
+        i += advance;
+    }
+    toks
+}
+
+/// Rewrite matches whose length is outside the allowed set (ascending) as a
+/// sum of allowed lengths; irreducible remainders degrade to literals.
+/// The second and later pieces keep the original distance: distance
+/// d still resolves correctly after a more output bytes.
+fn expand(input: &[u8], toks: &[Tok], allowed: &[usize]) -> Vec<Tok> {
+    let mut out = Vec::with_capacity(toks.len());
+    let mut pos = 0usize;
+    for t in toks {
+        match *t {
+            Tok::Lit(b) => {
+                out.push(Tok::Lit(b));
+                pos += 1;
+            }
+            Tok::Match { len, dist } => {
+                let mut rem = len;
+                while rem > 0 {
+                    let piece = allowed
+                        .iter()
+                        .rev()
+                        .copied()
+                        .find(|&a| a <= rem && (rem == a || rem - a >= MIN_MATCH));
+                    match piece {
+                        Some(a) => {
+                            out.push(Tok::Match { len: a, dist });
+                            rem -= a;
+                            pos += a;
+                        }
+                        None => {
+                            out.push(Tok::Lit(input[pos]));
+                            rem -= 1;
+                            pos += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A Huffman-tree child reference during construction: a leaf symbol
+/// or the index of an internal pair in .
+#[derive(Clone, Copy)]
+enum Child {
+    Leaf(u32),
+    Pair(u32),
+}
+
+/// Assign every leaf its root-to-leaf bit path (emitted first bit
+/// first by the LSB-first writer).
+fn assign_codes(
+    pairs: &[[Child; 2]],
+    idx: usize,
+    path: &mut Vec<bool>,
+    codes: &mut BTreeMap<u32, Vec<bool>>,
+) {
+    for (bit, child) in pairs[idx].iter().enumerate() {
+        path.push(bit == 1);
+        match *child {
+            Child::Leaf(s) => {
+                codes.insert(s, path.clone());
+            }
+            Child::Pair(i) => assign_codes(pairs, i as usize, path, codes),
+        }
+        path.pop();
+    }
+}
+
+/// Encode `input` as a distilled member payload.
+pub(crate) fn encode(input: &[u8]) -> Result<Vec<u8>, Error> {
+    let toks = parse(input);
+
+    // Cap the number of distinct match lengths to what the serialised
+    // tree can hold; over-long or rare lengths are split into pieces.
+    let mut lenfreq = [0u32; WINDOW + 1];
+    for t in &toks {
+        if let Tok::Match { len, .. } = *t {
+            lenfreq[len] += 1;
+        }
+    }
+    let mut lengths: Vec<usize> = (MIN_MATCH..=WINDOW).filter(|&l| lenfreq[l] > 0).collect();
+    let toks = if lengths.len() > MAX_LENGTH_SYMS {
+        lengths.sort_by_key(|&l| core::cmp::Reverse(lenfreq[l]));
+        lengths.truncate(MAX_LENGTH_SYMS);
+        lengths.sort_unstable();
+        expand(input, &toks, &lengths)
+    } else {
+        toks
+    };
+
+    // Symbol frequencies: literals 0-255, end-of-stream 256 and match
+    // length symbols `len + 0xfe` (= 0x101 + len - 3).
+    let mut freq = BTreeMap::<u32, u64>::new();
+    for t in &toks {
+        let sym = match *t {
+            Tok::Lit(b) => u32::from(b),
+            Tok::Match { len, .. } => len as u32 + 0xfe,
+        };
+        *freq.entry(sym).or_insert(0) += 1;
+    }
+    *freq.entry(256).or_insert(0) += 1;
+    let mut syms: Vec<u32> = freq.keys().copied().collect();
+    if syms.len() == 1 {
+        // A lone leaf (empty input) cannot form a pair; add a dummy
+        // leaf that is never emitted.
+        syms.insert(0, 0);
+    }
+
+    // Huffman merge. Every internal node is one serialised pair; the
+    // merge order already places the root pair last, matching the
+    // decoder which starts walking at nodes[numnodes - 2].
+    let mut pairs: Vec<[Child; 2]> = Vec::new();
+    let mut heap: Vec<(u64, usize, Child)> = syms
+        .iter()
+        .enumerate()
+        .map(|(i, &s)| (freq.get(&s).copied().unwrap_or(0), i, Child::Leaf(s)))
+        .collect();
+    while heap.len() > 1 {
+        heap.sort_by_key(|&(f, seq, _)| (f, seq));
+        let (fa, _, a) = heap.remove(0);
+        let (fb, _, b) = heap.remove(0);
+        let idx = pairs.len() as u32;
+        pairs.push([a, b]);
+        heap.push((fa + fb, syms.len() + idx as usize, Child::Pair(idx)));
+    }
+
+    let numnodes = pairs.len() * 2;
+    if numnodes > MAX_NODES {
+        return Err(Error::InvalidData("arc: distill tree too large"));
+    }
+    let mut nodes = Vec::with_capacity(numnodes);
+    for &[l, r] in &pairs {
+        let s = |c: Child| match c {
+            Child::Leaf(s) => numnodes as u32 + s,
+            Child::Pair(i) => i * 2,
+        };
+        nodes.push(s(l));
+        nodes.push(s(r));
+    }
+    let maxval = nodes.iter().copied().max().unwrap_or(1);
+    let codelength = (32 - maxval.leading_zeros()).max(1) as u8;
+
+    let mut codes = BTreeMap::<u32, Vec<bool>>::new();
+    let mut path = Vec::new();
+    assign_codes(&pairs, pairs.len() - 1, &mut path, &mut codes);
+    let emit_sym = |w: &mut LsbWriter, sym: u32| {
+        for &b in &codes[&sym] {
+            w.put(u32::from(b), 1);
+        }
+    };
+
+    let mut w = LsbWriter::new();
+    for &v in &nodes {
+        w.put(v, u32::from(codelength));
+    }
+    let mut pos = 0u64;
+    for t in &toks {
+        match *t {
+            Tok::Lit(b) => {
+                emit_sym(&mut w, u32::from(b));
+                pos += 1;
+            }
+            Tok::Match { len, dist } => {
+                emit_sym(&mut w, len as u32 + 0xfe);
+                // distance - 1 = (offsym << extralen) | extrabits; the
+                // extralen ladder runs on the output position.
+                let extralen = extra_offset_bits(pos);
+                let v = (dist - 1) as u32;
+                let offsym = (v >> extralen) as usize;
+                let (&code, &clen) = OFFSET_CODES
+                    .get(offsym)
+                    .zip(OFFSET_LENGTHS.get(offsym))
+                    .ok_or(Error::InvalidData("arc: distill offset out of range"))?;
+                w.put(code, u32::from(clen));
+                w.put(v & ((1u32 << extralen) - 1), u32::from(extralen));
+                pos += len as u64;
+            }
+        }
+    }
+    emit_sym(&mut w, 256);
+
+    let mut out = (numnodes as u16).to_le_bytes().to_vec();
+    out.push(codelength);
+    out.extend_from_slice(&w.finish());
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::vec;
@@ -305,5 +575,82 @@ mod tests {
         assert!(decode(&[0x01, 0x00, 0x09]).is_err());
         // Truncated node table.
         assert!(decode(&[0x02, 0x00, 0x09, 0x00]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod encode_tests {
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    use super::*;
+
+    fn roundtrip(data: &[u8]) -> Vec<u8> {
+        let enc = encode(data).unwrap();
+        decode(&enc).unwrap()
+    }
+
+    #[test]
+    fn encode_roundtrip_basic() {
+        assert_eq!(roundtrip(b""), b"");
+        assert_eq!(roundtrip(b"x"), b"x");
+        assert_eq!(roundtrip(b"AAAA"), b"AAAA");
+        assert_eq!(roundtrip(b"banana banana"), b"banana banana");
+        assert_eq!(roundtrip(b"the quick brown fox"), b"the quick brown fox");
+    }
+
+    #[test]
+    fn encode_roundtrip_matches() {
+        // Long run: overlapping matches at distance 1 exercising the
+        // largest length symbols.
+        let run = vec![b'a'; 20000];
+        assert_eq!(roundtrip(&run), run);
+        // Repeated block crossing the 8 KiB window.
+        let rep = b"abcdefghij".repeat(3000);
+        assert_eq!(roundtrip(&rep), rep);
+    }
+
+    #[test]
+    fn encode_roundtrip_mixed() {
+        let mut data = b"the quick brown fox. ".repeat(500).to_vec();
+        data.extend((0..40000usize).map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8));
+        let head = data[..8000].to_vec();
+        data.extend_from_slice(&head);
+        assert_eq!(roundtrip(&data), data);
+    }
+
+    #[test]
+    fn encode_caps_match_length_symbols() {
+        // More than MAX_LENGTH_SYMS distinct match lengths: repeated
+        // unique blocks of every size 3..=140. Rare lengths are split
+        // into allowed pieces; the node count must stay in bounds.
+        let mut data = Vec::new();
+        let mut x = 0x1234_5678u32;
+        for n in MIN_MATCH..=140usize {
+            let blk: Vec<u8> = (0..n)
+                .map(|_| {
+                    x = x.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                    (x >> 16) as u8
+                })
+                .collect();
+            data.extend_from_slice(&blk);
+            data.extend_from_slice(&blk);
+        }
+        let enc = encode(&data).unwrap();
+        let numnodes = usize::from(u16::from_le_bytes([enc[0], enc[1]]));
+        assert!(numnodes <= MAX_NODES);
+        assert_eq!(decode(&enc).unwrap(), data);
+    }
+
+    #[test]
+    fn encode_header_layout() {
+        // Empty input: a single pair joining a dummy leaf and EOF.
+        let enc = encode(b"").unwrap();
+        assert_eq!(&enc[..2], &2u16.to_le_bytes());
+        let codelength = enc[2];
+        assert!((1..=24).contains(&codelength));
+        // numnodes * codelength bits of node table plus the EOF path.
+        let bits = 2 * usize::from(codelength) + 1;
+        assert_eq!(enc.len(), 3 + bits.div_ceil(8));
     }
 }

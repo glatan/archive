@@ -18,11 +18,12 @@
 //! Ported from the newtua_dos transliteration of XADMaster `XADARCCrushHandle` (LGPL-3.0-or-later). nomarch `readlzw.c` (GPL-2) was consulted for
 //! behaviour confirmation only.
 
+use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 use crate::error::Error;
 
-use super::bits::LsbBits;
+use super::bits::{LsbBits, LsbWriter};
 
 /// Maximum number of symbols in the crush string table.
 const MAX_SYMBOLS: usize = 8192;
@@ -215,6 +216,214 @@ pub(crate) fn decode(input: &[u8], limit: usize) -> Result<Vec<u8>, Error> {
     Ok(out)
 }
 
+/// Encoder-side mirror of the decoder's string table. A greedy LZW
+/// parse emits codes that only ever reference strings the decoder has
+/// already committed, so the decoder's `symbol == numsymbols` (KwKwK)
+/// path is never triggered. `map`/`slot_key` track which
+/// `(parent, byte)` pair occupies each slot so lookups never see a
+/// stale string once a slot is evicted.
+struct Encoder {
+    bits: LsbWriter,
+    map: BTreeMap<u32, u16>,
+    slot_key: [u32; MAX_SYMBOLS],
+    chr: [u8; MAX_SYMBOLS],
+    parent: [i32; MAX_SYMBOLS],
+    usage: [u8; MAX_SYMBOLS],
+    numsymbols: usize,
+    prevsymbol: i32,
+    symbolsize: u8,
+    nextsizebump: i32,
+    useliteralbit: bool,
+    numrecentstrings: i32,
+    ringindex: usize,
+    stringring: [bool; RING],
+    usageindex: usize,
+}
+
+/// `slot_key` value for slots not carrying a string yet.
+const NO_KEY: u32 = u32::MAX;
+
+impl Encoder {
+    fn new() -> Self {
+        let mut chr = [0u8; MAX_SYMBOLS];
+        for (i, c) in chr.iter_mut().enumerate().take(256) {
+            *c = i as u8;
+        }
+        Encoder {
+            bits: LsbWriter::new(),
+            map: BTreeMap::new(),
+            slot_key: [NO_KEY; MAX_SYMBOLS],
+            chr,
+            parent: [-1i32; MAX_SYMBOLS],
+            usage: [0u8; MAX_SYMBOLS],
+            numsymbols: 257,
+            prevsymbol: -1,
+            symbolsize: 1,
+            nextsizebump: 2,
+            useliteralbit: true,
+            numrecentstrings: 0,
+            ringindex: 0,
+            stringring: [false; RING],
+            usageindex: 0x101,
+        }
+    }
+
+    /// Slot of the `w + b` string, if the decoder has it committed.
+    fn find(&self, w: usize, b: u8) -> Option<usize> {
+        self.map
+            .get(&((w as u32) << 8 | u32::from(b)))
+            .map(|&s| s as usize)
+    }
+
+    /// Commit `(parent_code, byte) -> slot` to the lookup map.
+    fn link(&mut self, slot: usize, parent_code: i32, byte: u8) {
+        let key = (parent_code as u32) << 8 | u32::from(byte);
+        self.slot_key[slot] = key;
+        self.map.insert(key, slot as u16);
+    }
+
+    /// Emit `sym` on the wire in the current coding mode, then mirror
+    /// the exact decoder state transition for that symbol.
+    fn emit(&mut self, sym: usize) -> Result<(), Error> {
+        if self.useliteralbit {
+            if sym < 0x100 {
+                self.bits.put(0, 1);
+                self.bits.put(sym as u32, 8);
+            } else {
+                self.bits.put(1, 1);
+                self.bits
+                    .put((sym - 0x100) as u32, u32::from(self.symbolsize));
+            }
+        } else {
+            // Non-literal mode always has symbolsize >= 9: reaching it
+            // takes >= 375 recent strings, which implies that many
+            // inserts and a bump past 8 bits.
+            debug_assert!(self.symbolsize >= 9);
+            let v = if sym < 0x100 { sym ^ 0xff } else { sym };
+            self.bits.put(v as u32, u32::from(self.symbolsize));
+        }
+        if sym == EOF_CODE {
+            return Ok(());
+        }
+
+        // Bump the usage of the symbol's ancestry, same as decode.
+        let mut m = sym as i32;
+        let mut depth = 0;
+        while m >= 0 {
+            self.usage[m as usize] = 4;
+            m = self.parent[m as usize];
+            depth += 1;
+            if depth > MAX_SYMBOLS {
+                return Err(Error::InvalidData("arc: crush parent cycle"));
+            }
+        }
+
+        // Slide the sliding window and recount recent strings.
+        if self.stringring[self.ringindex] {
+            self.numrecentstrings -= 1;
+        }
+        let is_string = sym >= 0x100;
+        self.stringring[self.ringindex] = is_string;
+        if is_string {
+            self.numrecentstrings += 1;
+        }
+        self.ringindex = (self.ringindex + 1) % RING;
+
+        let manyliterals = self.numrecentstrings < RING_THRESHOLD;
+        if manyliterals != self.useliteralbit {
+            self.useliteralbit = manyliterals;
+            self.nextsizebump = 1i32 << self.symbolsize;
+            if !self.useliteralbit {
+                self.nextsizebump -= 0x100;
+            }
+        }
+
+        // Commit `string(prevsymbol) + first_byte(sym)`, mirroring the
+        // decoder's grow-or-evict insert.
+        if self.numsymbols != MAX_SYMBOLS {
+            if self.prevsymbol >= 0 {
+                debug_assert!(sym < self.numsymbols);
+                let postfix = first_byte(sym, &self.parent, &self.chr);
+                self.parent[self.numsymbols] = self.prevsymbol;
+                self.chr[self.numsymbols] = postfix;
+                self.link(self.numsymbols, self.prevsymbol, postfix);
+                self.numsymbols += 1;
+            }
+            self.usage[self.numsymbols - 1] = 2;
+            self.prevsymbol = sym as i32;
+        } else {
+            // Evict the least-used slot; verbatim sweep from decode.
+            let (mut minindex, mut minusage) = (0usize, i32::MAX);
+            let mut index = self.usageindex;
+            loop {
+                index += 1;
+                if index == MAX_SYMBOLS {
+                    index = 0x101;
+                }
+                let u = i32::from(self.usage[index]);
+                if u < minusage {
+                    minindex = index;
+                    minusage = u;
+                }
+                self.usage[index] = self.usage[index].wrapping_sub(1);
+                if self.usage[index] == 0 || index == self.usageindex {
+                    break;
+                }
+            }
+            self.usageindex = index;
+            // sym's chain was just bumped to 4, so the evicted slot
+            // can only alias it if every scanned slot is saturated —
+            // unreachable in practice, refuse rather than corrupt.
+            if minusage >= 4 {
+                return Err(Error::InvalidData("arc: crush evict saturated"));
+            }
+            let old = self.slot_key[minindex];
+            if old != NO_KEY && self.map.get(&old) == Some(&(minindex as u16)) {
+                self.map.remove(&old);
+            }
+            self.parent[minindex] = self.prevsymbol;
+            self.chr[minindex] = first_byte(sym, &self.parent, &self.chr);
+            self.link(minindex, self.prevsymbol, self.chr[minindex]);
+            self.prevsymbol = sym as i32;
+            self.usage[minindex] = 2;
+        }
+
+        // Widen string codes on the same trigger as the decoder.
+        if self.numsymbols as i32 - 257 >= self.nextsizebump {
+            self.symbolsize += 1;
+            self.nextsizebump = 1i32 << self.symbolsize;
+            if !self.useliteralbit {
+                self.nextsizebump -= 0x100;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Encode `input` (the RLE90-packed member bytes) as a crushed stream.
+///
+/// The decoder lags the encoder by one string insert, so a newly added
+/// `w + b` string is only visible to `find` from the following emitted
+/// symbol on — exactly matching what the decoder can resolve.
+pub(crate) fn encode(input: &[u8]) -> Result<Vec<u8>, Error> {
+    let mut enc = Encoder::new();
+    if let Some((&first, rest)) = input.split_first() {
+        let mut w = usize::from(first);
+        for &b in rest {
+            match enc.find(w, b) {
+                Some(slot) => w = slot,
+                None => {
+                    enc.emit(w)?;
+                    w = usize::from(b);
+                }
+            }
+        }
+        enc.emit(w)?;
+    }
+    enc.emit(EOF_CODE)?;
+    Ok(enc.bits.finish())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,5 +460,78 @@ mod tests {
     fn truncated_stops() {
         let out = decode(&hex("c48471"), 64).unwrap();
         assert!(b"banana banana".starts_with(&out[..]));
+    }
+
+    #[test]
+    fn encode_reference_streams() {
+        // The greedy parse mirrors the original encoder on these
+        // vectors, so wire output is byte-identical.
+        assert_eq!(encode(b"AAAA").unwrap(), hex("82041d"));
+        assert_eq!(encode(b"ABABABAB").unwrap(), hex("8208bd05"));
+        assert_eq!(encode(b"banana banana").unwrap(), hex("c48471ab3020731700"));
+        assert_eq!(
+            encode(b"the quick brown fox").unwrap(),
+            hex("e8a02903224e9d3463d6801023e7cd1d3720ccbcc10b00")
+        );
+        assert_eq!(encode(b"").unwrap(), hex("01"));
+    }
+
+    #[test]
+    fn encode_decode_roundtrip() {
+        fn roundtrip(data: &[u8]) {
+            let packed = encode(data).unwrap();
+            assert_eq!(decode(&packed, data.len()).unwrap(), data);
+        }
+        roundtrip(&[]);
+        roundtrip(b"a");
+        roundtrip(b"AAAA");
+        roundtrip(b"hello, world!");
+        roundtrip(b"banana banana");
+        // Every byte value, twice.
+        let mut v: Vec<u8> = (0..=255).collect();
+        v.extend_from_within(..);
+        roundtrip(&v);
+        // Repetitive input: string density crosses the 375/500
+        // threshold, switching to non-literal coding and back.
+        roundtrip(&b"abcdefghij".repeat(6000));
+        // Pseudo-random input: inserts outgrow the table, exercising
+        // the eviction sweep on every later symbol.
+        let noise: Vec<u8> = (0..60000usize)
+            .map(|i| (i.wrapping_mul(2654435761) >> 13) as u8)
+            .collect();
+        roundtrip(&noise);
+        // Both paths in one stream.
+        let mut mixed = b"the quick brown fox. ".repeat(3000);
+        mixed.extend_from_slice(&noise);
+        mixed.extend_from_within(..10000);
+        roundtrip(&mixed);
+    }
+
+    #[test]
+    fn encode_reaches_evict_and_nonliteral_mode() {
+        // Drive the encoder by hand to observe the internal mode flip
+        // and the table filling (eviction sweep entry).
+        let mut data = b"abcdefghij".repeat(6000);
+        data.extend((0..60000usize).map(|i| (i.wrapping_mul(2654435761) >> 13) as u8));
+        let mut enc = Encoder::new();
+        let mut saw_nonliteral = false;
+        let mut filled = false;
+        let mut w = usize::from(data[0]);
+        for &b in &data[1..] {
+            match enc.find(w, b) {
+                Some(s) => w = s,
+                None => {
+                    enc.emit(w).unwrap();
+                    w = usize::from(b);
+                    saw_nonliteral |= !enc.useliteralbit;
+                    filled |= enc.numsymbols == MAX_SYMBOLS;
+                }
+            }
+        }
+        enc.emit(w).unwrap();
+        enc.emit(EOF_CODE).unwrap();
+        assert!(saw_nonliteral, "never left literal-bit mode");
+        assert!(filled, "table never filled");
+        assert_eq!(decode(&enc.bits.finish(), data.len()).unwrap(), data);
     }
 }
