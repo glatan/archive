@@ -213,6 +213,26 @@ pub fn compress_input(command: CompressCommand) -> Result<(), CliError> {
             reject_unexpected_backend(command.backend.as_deref(), "zx5")?;
             compress::zx5::encode(&input)
         }
+        CompressionFormat::Zx0b => {
+            reject_unexpected_level(command.level, "zx0b")?;
+            reject_unexpected_backend(command.backend.as_deref(), "zx0b")?;
+            compress::zx0::encode_backwards(&input)
+        }
+        CompressionFormat::Zx1b => {
+            reject_unexpected_level(command.level, "zx1b")?;
+            reject_unexpected_backend(command.backend.as_deref(), "zx1b")?;
+            compress::zx1::encode_backwards(&input)
+        }
+        CompressionFormat::Zx2b => {
+            reject_unexpected_level(command.level, "zx2b")?;
+            reject_unexpected_backend(command.backend.as_deref(), "zx2b")?;
+            compress::zx2::encode_backwards(&input)
+        }
+        CompressionFormat::Zx5b => {
+            reject_unexpected_level(command.level, "zx5b")?;
+            reject_unexpected_backend(command.backend.as_deref(), "zx5b")?;
+            compress::zx5::encode_backwards(&input)
+        }
         CompressionFormat::Vcdiff => {
             reject_unexpected_level(command.level, "vcdiff")?;
             reject_unexpected_backend(command.backend.as_deref(), "vcdiff")?;

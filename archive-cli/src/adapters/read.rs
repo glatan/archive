@@ -768,6 +768,30 @@ fn decode_items(
             compress_formats::zx5::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
+        Format::Zx0b => decode_single_payload(
+            path,
+            input,
+            compress_formats::zx0::decode_backwards(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Zx1b => decode_single_payload(
+            path,
+            input,
+            compress_formats::zx1::decode_backwards(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Zx2b => decode_single_payload(
+            path,
+            input,
+            compress_formats::zx2::decode_backwards(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Zx5b => decode_single_payload(
+            path,
+            input,
+            compress_formats::zx5::decode_backwards(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
         Format::Vcdiff => decode_single_payload(
             path,
             input,

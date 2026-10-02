@@ -178,3 +178,141 @@ fn zx1_prefix_history() {
     assert!(zx1::decode(&stream).is_err());
     assert_eq!(zx1::decode_with_prefix(&stream, b"HELLO").unwrap(), b"aHEL");
 }
+
+// ---------------------------------------------------------------
+// Variant coverage: `-b` backwards streams.
+// ---------------------------------------------------------------
+//
+// ZX1B_* streams below were produced by the reference ZX1 compressor
+// (Einar Saukas, BSD 3-Clause, ZX1 v1.5) invoked as `zx1 -b`.
+
+const ZX1B_FOX: &[u8] = &[
+    0x00, 0x01, 0xb9, 0x58, 0x20, 0x6a, 0x75, 0x6d, 0x70, 0x73, 0xe6, 0x6f, 0x76, 0x65, 0x72, 0xa0,
+    0x1a, 0x6c, 0x61, 0x7a, 0x79, 0x20, 0x64, 0x6f, 0x67, 0x2e, 0x20, 0x74, 0x68, 0x65, 0x20, 0x71,
+    0x75, 0x69, 0x63, 0x6b, 0x20, 0x62, 0x72, 0x6f, 0x77, 0x6e, 0x20, 0x66, 0x6f, 0x78, 0x2e, 0x0a,
+    0x68, 0xff,
+];
+
+const ZX1B_A300: &[u8] = &[0x00, 0x01, 0xe4, 0xee, 0x61, 0x00, 0x8a];
+
+const ZX1B_T4K: &[u8] = &[
+    0x00, 0x01, 0x40, 0xff, 0xfe, 0x26, 0x74, 0x68, 0x65, 0x20, 0x71, 0x75, 0x69, 0x63, 0x6b, 0x20,
+    0x62, 0x72, 0x6f, 0x77, 0x6e, 0x20, 0x66, 0x6f, 0x78, 0x20, 0x7f, 0xba,
+];
+
+// `zx1 -b +20` on t4k.bin: the trailing 20 bytes "the quick brown fox "
+// are kept uncompressed and serve as match history.
+const ZX1B_T4K_P20: &[u8] = &[0x00, 0x01, 0x40, 0xfe, 0xfe, 0x26, 0x20, 0x7f];
+
+fn zx1b_t4k() -> Vec<u8> {
+    let mut v = Vec::new();
+    for _ in 0..205 {
+        v.extend_from_slice(b"the quick brown fox ");
+    }
+    v
+}
+
+#[test]
+fn zx1_backwards_reference_vector_text() {
+    let dec = zx1::decode_backwards(ZX1B_FOX).unwrap();
+    assert_eq!(
+        dec,
+        b"the quick brown fox jumps over the lazy dog. the quick brown fox.\n"
+    );
+}
+
+#[test]
+fn zx1_backwards_reference_vector_rep_offset() {
+    let mut expected = vec![b'a'; 299];
+    expected.push(0);
+    assert_eq!(zx1::decode_backwards(ZX1B_A300).unwrap(), expected);
+}
+
+#[test]
+fn zx1_backwards_reference_vector_long_match() {
+    assert_eq!(zx1::decode_backwards(ZX1B_T4K).unwrap(), zx1b_t4k());
+}
+
+#[test]
+fn zx1_backwards_reference_vector_suffix() {
+    // Output covers the first 4080 bytes; the 20-byte input tail is the
+    // external history and is not emitted.
+    let expected = zx1b_t4k();
+    assert_eq!(
+        zx1::decode_backwards_with_suffix(ZX1B_T4K_P20, b"the quick brown fox ").unwrap(),
+        &expected[..4080]
+    );
+    // The stream is not self-contained: without the suffix the match
+    // offset reaches before the start of the output.
+    assert!(zx1::decode_backwards(ZX1B_T4K_P20).is_err());
+}
+
+#[test]
+fn zx1_backwards_roundtrips() {
+    let mut cases: Vec<Vec<u8>> = vec![
+        Vec::new(),
+        b"x".to_vec(),
+        b"ab".to_vec(),
+        b"hello hello hello".to_vec(),
+        vec![0u8; 3000],
+        zx1b_t4k(),
+    ];
+    // Far-offset case: a repeated pattern >128 bytes apart exercises the
+    // two-byte offset form in backwards mode.
+    let mut far = vec![b'A'; 200];
+    let seg: Vec<u8> = (0u8..=250).collect();
+    for _ in 0..4 {
+        far.extend_from_slice(&seg);
+    }
+    far.truncate(1200);
+    far.extend_from_slice(&[b'A'; 200]);
+    cases.push(far);
+    let mut binary = Vec::new();
+    for i in 0..30000u32 {
+        binary.extend_from_slice(&i.to_le_bytes());
+    }
+    cases.push(binary);
+
+    for data in &cases {
+        assert_eq!(
+            &zx1::decode_backwards(&zx1::encode_backwards(data)).unwrap(),
+            data
+        );
+    }
+}
+
+#[test]
+fn zx1_backwards_suffix_roundtrips() {
+    let t4k = zx1b_t4k();
+    let (data, suffix) = t4k.split_at(4080);
+    assert_eq!(suffix, b"the quick brown fox ");
+    let enc = zx1::encode_backwards_with_suffix(data, suffix);
+    assert_eq!(
+        zx1::decode_backwards_with_suffix(&enc, suffix).unwrap(),
+        data
+    );
+
+    let dict: Vec<u8> = (0u16..1000).flat_map(|i| i.to_le_bytes()).collect();
+    let mut binary = dict[1500..1800].to_vec();
+    for i in 0..2000u32 {
+        binary.extend_from_slice(&i.to_le_bytes());
+    }
+    binary.extend_from_slice(&dict[0..300]);
+    let enc = zx1::encode_backwards_with_suffix(&binary, &dict);
+    assert_eq!(
+        zx1::decode_backwards_with_suffix(&enc, &dict).unwrap(),
+        binary
+    );
+}
+
+#[test]
+fn zx1_backwards_rejects_malformed() {
+    assert!(zx1::decode_backwards(&[0x80]).is_err());
+    assert!(zx1::decode_backwards(&[0xf2, 0xf8]).is_err());
+    // Stream with the EOF marker (leading `00 01`) removed.
+    assert!(zx1::decode_backwards(&ZX1B_FOX[2..]).is_err());
+    // A byte before the stream lands after the EOF marker once reversed.
+    let mut c = ZX1B_FOX.to_vec();
+    c.insert(0, 0xaa);
+    assert!(zx1::decode_backwards(&c).is_err());
+}

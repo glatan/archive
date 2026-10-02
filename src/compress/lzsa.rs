@@ -20,7 +20,14 @@
 //! [`decode_with_prefix`]; raw-block equivalents are
 //! [`decode_lzsa1_block_with_prefix`] and [`decode_lzsa2_block_with_prefix`].
 //! [`encode_with_prefix`] and [`encode_lzsa2_with_prefix`] emit such
-//! streams. The backwards `-b` mode is outside the current scope.
+//! streams.
+//!
+//! The upstream backwards `-b` option applies only to raw blocks
+//! (`-r`), never to the stream container, and is a pure byte-reversal
+//! wrapper over the same block grammar: the compressed block is the
+//! byte-reversed image of a forward block for the reversed input. See
+//! [`decode_lzsa1_block_backwards`], [`decode_lzsa2_block_backwards`],
+//! [`encode_lzsa1_block_backwards`] and [`encode_lzsa2_block_backwards`].
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -138,6 +145,69 @@ pub fn decode_lzsa2_block(input: &[u8]) -> Result<Vec<u8>, Error> {
 pub fn decode_lzsa2_block_with_prefix(input: &[u8], prefix: &[u8]) -> Result<Vec<u8>, Error> {
     let mut out = Vec::new();
     decode_lzsa2_commands(input, &mut out, usize::MAX, true, prefix)?;
+    Ok(out)
+}
+
+/// Decode a raw LZSA1 block produced in backwards (`-b`) mode.
+///
+/// A backwards block is the byte-reversed image of the equivalent
+/// forward block: undoing the reversal yields a standard LZSA1 command
+/// stream whose decoded bytes are the original input reversed, so the
+/// output is reversed back here. The wire format itself is unchanged,
+/// so a backwards block is not valid input for [`decode_lzsa1_block`].
+///
+/// Upstream supports `-b` only for raw blocks (`-r`), never for the
+/// `7b 9e` stream container.
+pub fn decode_lzsa1_block_backwards(input: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_lzsa1_block_backwards_with_prefix(input, &[])
+}
+
+/// Decode a backwards (`-b`) raw LZSA1 block whose match offsets may
+/// reach into `prefix` (the upstream `-b -D` combination).
+///
+/// **Note:** `prefix` is forward-order history (a `-D` dictionary or an
+/// earlier block's decoded output), used as-is — upstream reverses only
+/// the new block data, never the history window. This differs from the
+/// ZX-family backwards decoders, where the `suffix` argument is the
+/// tail of the uncompressed data.
+pub fn decode_lzsa1_block_backwards_with_prefix(
+    input: &[u8],
+    prefix: &[u8],
+) -> Result<Vec<u8>, Error> {
+    decode_block_backwards_impl(input, prefix, false)
+}
+
+/// Decode a raw LZSA2 block produced in backwards (`-b`) mode; see
+/// [`decode_lzsa1_block_backwards`].
+pub fn decode_lzsa2_block_backwards(input: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_lzsa2_block_backwards_with_prefix(input, &[])
+}
+
+/// Decode a backwards (`-b`) raw LZSA2 block whose match offsets may
+/// reach into `prefix` (the upstream `-b -D` combination); see
+/// [`decode_lzsa1_block_backwards_with_prefix`] for the forward-order
+/// history convention.
+pub fn decode_lzsa2_block_backwards_with_prefix(
+    input: &[u8],
+    prefix: &[u8],
+) -> Result<Vec<u8>, Error> {
+    decode_block_backwards_impl(input, prefix, true)
+}
+
+fn decode_block_backwards_impl(
+    input: &[u8],
+    prefix: &[u8],
+    level2: bool,
+) -> Result<Vec<u8>, Error> {
+    let mut block = input.to_vec();
+    block.reverse();
+    let mut out = Vec::new();
+    if level2 {
+        decode_lzsa2_commands(&block, &mut out, usize::MAX, true, prefix)?;
+    } else {
+        decode_lzsa1_commands(&block, &mut out, usize::MAX, true, prefix)?;
+    }
+    out.reverse();
     Ok(out)
 }
 
@@ -463,6 +533,113 @@ pub fn encode_lzsa2_with_prefix(input: &[u8], prefix: &[u8]) -> Vec<u8> {
     encode_impl(input, prefix, true)
 }
 
+/// Encode a raw LZSA1 block terminated by the EOD marker, in the format
+/// read by `lzsa -r -f1` (decode with [`decode_lzsa1_block`]).
+///
+/// Returns `None` when `input` cannot be represented as a single block
+/// (a literal run exceeding 64 KiB): a raw block has no verbatim
+/// fallback, and the reference compressor reports failure as well.
+pub fn encode_lzsa1_block(input: &[u8]) -> Option<Vec<u8>> {
+    encode_block_impl(input, &[], false)
+}
+
+/// Encode a raw LZSA1 block whose match offsets may reach into
+/// `prefix`, external history logically prepended to `input` (the
+/// upstream `-r -D` combination). Decode with
+/// [`decode_lzsa1_block_with_prefix`] using the same `prefix`.
+pub fn encode_lzsa1_block_with_prefix(input: &[u8], prefix: &[u8]) -> Option<Vec<u8>> {
+    encode_block_impl(input, prefix, false)
+}
+
+/// Encode a raw LZSA2 block terminated by the EOD marker, in the format
+/// read by `lzsa -r -f2` (decode with [`decode_lzsa2_block`]). See
+/// [`encode_lzsa1_block`] for the failure condition.
+pub fn encode_lzsa2_block(input: &[u8]) -> Option<Vec<u8>> {
+    encode_block_impl(input, &[], true)
+}
+
+/// Encode a raw LZSA2 block whose match offsets may reach into
+/// `prefix`, external history logically prepended to `input` (the
+/// upstream `-r -D` combination). Decode with
+/// [`decode_lzsa2_block_with_prefix`] using the same `prefix`.
+pub fn encode_lzsa2_block_with_prefix(input: &[u8], prefix: &[u8]) -> Option<Vec<u8>> {
+    encode_block_impl(input, prefix, true)
+}
+
+/// Encode a backwards (`-b`) raw LZSA1 block, in the format written by
+/// `lzsa -r -b -f1` (decode with [`decode_lzsa1_block_backwards`]).
+///
+/// The result is the byte-reversed image of the forward block for the
+/// reversed input; the block grammar itself is unchanged. See
+/// [`encode_lzsa1_block`] for the failure condition.
+pub fn encode_lzsa1_block_backwards(input: &[u8]) -> Option<Vec<u8>> {
+    encode_block_backwards_impl(input, &[], false)
+}
+
+/// Encode a backwards (`-b`) raw LZSA1 block whose match offsets may
+/// reach into `prefix` (the upstream `-r -b -D` combination). Decode
+/// with [`decode_lzsa1_block_backwards_with_prefix`] using the same
+/// `prefix`.
+///
+/// **Note:** `prefix` is forward-order history — upstream reverses only
+/// the new block data, never the history window, so unlike the
+/// ZX-family backwards encoders `prefix` must *not* be reversed first.
+pub fn encode_lzsa1_block_backwards_with_prefix(input: &[u8], prefix: &[u8]) -> Option<Vec<u8>> {
+    encode_block_backwards_impl(input, prefix, false)
+}
+
+/// Encode a backwards (`-b`) raw LZSA2 block, in the format written by
+/// `lzsa -r -b -f2` (decode with [`decode_lzsa2_block_backwards`]). See
+/// [`encode_lzsa1_block_backwards`].
+pub fn encode_lzsa2_block_backwards(input: &[u8]) -> Option<Vec<u8>> {
+    encode_block_backwards_impl(input, &[], true)
+}
+
+/// Encode a backwards (`-b`) raw LZSA2 block whose match offsets may
+/// reach into `prefix` (the upstream `-r -b -D` combination). See
+/// [`encode_lzsa1_block_backwards_with_prefix`] for the forward-order
+/// history convention.
+pub fn encode_lzsa2_block_backwards_with_prefix(input: &[u8], prefix: &[u8]) -> Option<Vec<u8>> {
+    encode_block_backwards_impl(input, prefix, true)
+}
+
+/// `prefix` is forward-order history logically prepended to `input`,
+/// as `decode_*_block_with_prefix` expects.
+fn encode_block_impl(input: &[u8], prefix: &[u8], level2: bool) -> Option<Vec<u8>> {
+    let combined;
+    let window: &[u8] = if prefix.is_empty() {
+        input
+    } else {
+        let mut v = Vec::with_capacity(prefix.len() + input.len());
+        v.extend_from_slice(prefix);
+        v.extend_from_slice(input);
+        combined = v;
+        &combined
+    };
+    if level2 {
+        encode_lzsa2_block_window(window, prefix.len(), true)
+    } else {
+        encode_lzsa1_block_window(window, prefix.len(), true)
+    }
+}
+
+/// The backwards wrapper reverses only the new block data (`input`),
+/// matching upstream's `lzsa_reverse_buffer(pInWindow +
+/// nPreviousBlockSize, ...)`; the `prefix` history stays in forward
+/// order.
+fn encode_block_backwards_impl(input: &[u8], prefix: &[u8], level2: bool) -> Option<Vec<u8>> {
+    let mut window = Vec::with_capacity(prefix.len() + input.len());
+    window.extend_from_slice(prefix);
+    window.extend(input.iter().rev().copied());
+    let mut block = if level2 {
+        encode_lzsa2_block_window(&window, prefix.len(), true)?
+    } else {
+        encode_lzsa1_block_window(&window, prefix.len(), true)?
+    };
+    block.reverse();
+    Some(block)
+}
+
 /// `prefix` is external history logically prepended to `input`: matches
 /// may copy from it using normal wire offsets, as `decode_with_prefix`
 /// expects. Match positions are tracked in the virtual `prefix ++ input`
@@ -492,9 +669,9 @@ fn encode_impl(input: &[u8], prefix: &[u8], level2: bool) -> Vec<u8> {
     while frame_start < input.len() {
         let frame_end = (frame_start + 0x10000).min(input.len());
         let block = if level2 {
-            encode_lzsa2_block(&window[..base + frame_end], base + frame_start, false)
+            encode_lzsa2_block_window(&window[..base + frame_end], base + frame_start, false)
         } else {
-            encode_lzsa1_block(&window[..base + frame_end], base + frame_start, false)
+            encode_lzsa1_block_window(&window[..base + frame_end], base + frame_start, false)
         };
         match block {
             Some(b) if b.len() < frame_end - frame_start => {
@@ -524,7 +701,7 @@ fn encode_impl(input: &[u8], prefix: &[u8], level2: bool) -> Vec<u8> {
 /// prefix ending at the data to compress; `block_start` is the offset
 /// inside `window` where this block's input begins (matches may reach
 /// back before it). Returns `None` when a literal run cannot be encoded.
-fn encode_lzsa1_block(window: &[u8], block_start: usize, eod: bool) -> Option<Vec<u8>> {
+fn encode_lzsa1_block_window(window: &[u8], block_start: usize, eod: bool) -> Option<Vec<u8>> {
     let input = &window[block_start..];
     let mut out = Vec::with_capacity(input.len() + input.len() / 8 + 8);
     let mut head = vec![-1i32; 1 << 16];
@@ -655,7 +832,7 @@ fn l1_command(out: &mut Vec<u8>, lits: &[u8], tail: L1Tail) -> Option<()> {
     Some(())
 }
 
-fn encode_lzsa2_block(window: &[u8], block_start: usize, eod: bool) -> Option<Vec<u8>> {
+fn encode_lzsa2_block_window(window: &[u8], block_start: usize, eod: bool) -> Option<Vec<u8>> {
     let input = &window[block_start..];
     let mut enc = Lzsa2Encoder {
         out: Vec::with_capacity(input.len() + input.len() / 8 + 8),
@@ -1150,5 +1327,210 @@ mod tests {
                 assert_ne!(v, input);
             }
         }
+    }
+
+    // -----------------------------------------------------------------
+    // Backwards (`-b`) raw blocks: a pure byte-reversal wrapper over the
+    // same block grammar (raw blocks only, no stream container).
+    // -----------------------------------------------------------------
+
+    fn rt_backwards(data: &[u8]) {
+        let b1 = encode_lzsa1_block_backwards(data).unwrap();
+        let b2 = encode_lzsa2_block_backwards(data).unwrap();
+        assert_eq!(decode_lzsa1_block_backwards(&b1).unwrap(), data);
+        assert_eq!(decode_lzsa2_block_backwards(&b2).unwrap(), data);
+        // A backwards block is the byte-reversed forward block for the
+        // reversed input: rev(b) must decode forward to rev(data).
+        let mut rev = data.to_vec();
+        rev.reverse();
+        let mut fwd = b1.clone();
+        fwd.reverse();
+        assert_eq!(decode_lzsa1_block(&fwd).unwrap(), rev);
+        let mut fwd = b2.clone();
+        fwd.reverse();
+        assert_eq!(decode_lzsa2_block(&fwd).unwrap(), rev);
+        // Encoder equivalence: bwd(data) == rev(fwd(rev(data))).
+        let mut expect = encode_lzsa1_block(&rev).unwrap();
+        expect.reverse();
+        assert_eq!(b1, expect);
+        let mut expect = encode_lzsa2_block(&rev).unwrap();
+        expect.reverse();
+        assert_eq!(b2, expect);
+        // The forward decoder does not silently accept a backwards
+        // block as the same data.
+        if let Ok(v) = decode_lzsa1_block(&b1) {
+            assert_ne!(v, data);
+        }
+        if let Ok(v) = decode_lzsa2_block(&b2) {
+            assert_ne!(v, data);
+        }
+    }
+
+    #[test]
+    fn backwards_roundtrip() {
+        for data in [
+            b"a".as_slice(),
+            b"ab",
+            b"abc",
+            b"abcabcabcabcabc",
+            b"hello world hello world hello world",
+        ] {
+            rt_backwards(data);
+        }
+        rt_backwards(&[0u8; 2000]);
+        rt_backwards(&[9u8; 90000]); // len > 64 KiB, runs of one byte
+        let mut text = Vec::new();
+        for _ in 0..300 {
+            text.extend_from_slice(b"the quick brown fox jumps over the lazy dog. ");
+        }
+        rt_backwards(&text);
+        // Rep-matches and distances covering the LZSA2 offset tiers.
+        let mut tier = Vec::new();
+        for _ in 0..40 {
+            tier.extend_from_slice(b"0123456789abcdef");
+        }
+        tier.extend_from_slice(&[7u8; 100]);
+        for _ in 0..40 {
+            tier.extend_from_slice(b"0123456789abcdef");
+        }
+        rt_backwards(&tier);
+    }
+
+    #[test]
+    fn backwards_empty_input() {
+        // Empty input encodes to the reversed EOD-only blocks.
+        let b1 = encode_lzsa1_block_backwards(b"").unwrap();
+        assert_eq!(b1, [0x00, 0x00, 0xee, 0x00, 0x0f]);
+        assert_eq!(decode_lzsa1_block_backwards(&b1).unwrap(), b"");
+        let b2 = encode_lzsa2_block_backwards(b"").unwrap();
+        assert_eq!(b2, [0xe8, 0xf0, 0xe7]);
+        assert_eq!(decode_lzsa2_block_backwards(&b2).unwrap(), b"");
+    }
+
+    #[test]
+    fn backwards_rejects_malformed() {
+        assert!(decode_lzsa1_block_backwards(&[]).is_err());
+        assert!(decode_lzsa2_block_backwards(&[]).is_err());
+        assert!(decode_lzsa1_block_backwards(&[0x00]).is_err());
+        assert!(decode_lzsa2_block_backwards(&[0x00]).is_err());
+        // Reversed truncated forward block: no (reversed) EOD head.
+        assert!(decode_lzsa1_block_backwards(&[0x0f, 0x00, 0xee]).is_err());
+        // Bytes before a backwards block land after the EOD marker once
+        // the reversal is undone: still rejected as trailing data.
+        let mut b = vec![0xde, 0xad];
+        b.extend_from_slice(&encode_lzsa1_block_backwards(b"abc").unwrap());
+        assert!(decode_lzsa1_block_backwards(&b).is_err());
+    }
+
+    #[test]
+    fn backwards_decode_hand_built_with_prefix() {
+        // Byte-reversed copies of the dictionary blocks used in the
+        // forward tests above: [0x10,'a',0xfa, 0x0f,0x00,238,0x00,0x00]
+        // decodes to "aHEL" with prefix "HELLO"; backwards, to "LEHa".
+        let raw = [0x00, 0x00, 238, 0x00, 0x0f, 0xfa, b'a', 0x10];
+        assert!(decode_lzsa1_block_backwards(&raw).is_err());
+        assert_eq!(
+            decode_lzsa1_block_backwards_with_prefix(&raw, b"HELLO").unwrap(),
+            b"LEHa"
+        );
+        // LZSA2: forward [0x29,'a',0xdf, 0xe7,0xe8] -> "aHEL".
+        let raw = [0xe8, 0xe7, 0xdf, b'a', 0x29];
+        assert!(decode_lzsa2_block_backwards(&raw).is_err());
+        assert_eq!(
+            decode_lzsa2_block_backwards_with_prefix(&raw, b"HELLO").unwrap(),
+            b"LEHa"
+        );
+    }
+
+    #[test]
+    fn backwards_prefix_is_forward_history() {
+        // In backwards mode `prefix` stays in forward order: upstream
+        // reverses only the new block data, never the history window
+        // (unlike the ZX-family `suffix`, which is the data tail).
+        // `input` contains reverse(prefix), so the reversed block data
+        // contains a forward substring of the prefix and can match
+        // into it.
+        let prefix = b"0123456789abcdef";
+        let mut input = b" fedcba9876543210".to_vec(); // space + reverse(prefix)
+        input.extend_from_slice(b" tail tail tail");
+
+        let b1 = encode_lzsa1_block_backwards_with_prefix(&input, prefix).unwrap();
+        let b2 = encode_lzsa2_block_backwards_with_prefix(&input, prefix).unwrap();
+        // History only: the prefix itself is not part of the output.
+        assert_eq!(
+            decode_lzsa1_block_backwards_with_prefix(&b1, prefix).unwrap(),
+            input
+        );
+        assert_eq!(
+            decode_lzsa2_block_backwards_with_prefix(&b2, prefix).unwrap(),
+            input
+        );
+        // The encoder actually emitted a match reaching into `prefix`:
+        // decoding without it fails on the out-of-range offset.
+        assert!(decode_lzsa1_block_backwards(&b1).is_err());
+        assert!(decode_lzsa2_block_backwards(&b2).is_err());
+        // Feeding the prefix in reverse (ZX-style suffix semantics)
+        // must not reproduce the input.
+        let mut rev_prefix = prefix.to_vec();
+        rev_prefix.reverse();
+        if let Ok(v) = decode_lzsa1_block_backwards_with_prefix(&b1, &rev_prefix) {
+            assert_ne!(v, input);
+        }
+        if let Ok(v) = decode_lzsa2_block_backwards_with_prefix(&b2, &rev_prefix) {
+            assert_ne!(v, input);
+        }
+    }
+
+    #[test]
+    fn raw_block_encode_roundtrip() {
+        for data in [
+            b"abcabcabc---abcabcabc".as_slice(),
+            &[7u8; 70000][..],
+            b"the quick brown fox jumps over the lazy dog. ",
+        ] {
+            assert_eq!(
+                decode_lzsa1_block(&encode_lzsa1_block(data).unwrap()).unwrap(),
+                data
+            );
+            assert_eq!(
+                decode_lzsa2_block(&encode_lzsa2_block(data).unwrap()).unwrap(),
+                data
+            );
+            let prefix = b"dict: the quick brown fox ";
+            assert_eq!(
+                decode_lzsa1_block_with_prefix(
+                    &encode_lzsa1_block_with_prefix(data, prefix).unwrap(),
+                    prefix
+                )
+                .unwrap(),
+                data
+            );
+            assert_eq!(
+                decode_lzsa2_block_with_prefix(
+                    &encode_lzsa2_block_with_prefix(data, prefix).unwrap(),
+                    prefix
+                )
+                .unwrap(),
+                data
+            );
+        }
+        // Empty prefix aliases plain encoding.
+        assert_eq!(
+            encode_lzsa1_block_with_prefix(b"abcabc", b"").unwrap(),
+            encode_lzsa1_block(b"abcabc").unwrap()
+        );
+        assert_eq!(
+            encode_lzsa2_block_with_prefix(b"abcabc", b"").unwrap(),
+            encode_lzsa2_block(b"abcabc").unwrap()
+        );
+        // Empty input is a valid EOD-only block.
+        assert_eq!(
+            decode_lzsa1_block(&encode_lzsa1_block(b"").unwrap()).unwrap(),
+            b""
+        );
+        assert_eq!(
+            decode_lzsa2_block(&encode_lzsa2_block(b"").unwrap()).unwrap(),
+            b""
+        );
     }
 }

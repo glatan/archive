@@ -90,10 +90,10 @@
 | [xca](xca/README.md) | [MS-XCA] (Microsoft Open Specifications) | 40 | 0 | 0 | 40 |
 | [lzf](lzf/README.md) | liblzf `lzfP.h` / ning LZFFormat (de facto) | 20 | 0 | 0 | 20 |
 | [fastlz](fastlz/README.md) | fastlz.c 参照実装 (MIT) | 22 | 0 | 0 | 22 |
-| [zx0](zx0/README.md) | ZX0 v2 README (BSD-3) | 20 | 0 | 0 | 20 |
-| [zx1](zx1/README.md) | ZX1 README (BSD-3) | 21 | 0 | 0 | 21 |
-| [zx2](zx2/README.md) | ZX2 README (BSD-3) | 20 | 0 | 0 | 20 |
-| [zx5](zx5/README.md) | ZX5 README (BSD-3) | 24 | 0 | 0 | 24 |
+| [zx0](zx0/README.md) | ZX0 v2 README (BSD-3) | 23 | 0 | 0 | 23 |
+| [zx1](zx1/README.md) | ZX1 README (BSD-3) | 23 | 0 | 0 | 23 |
+| [zx2](zx2/README.md) | ZX2 README (BSD-3) | 22 | 0 | 0 | 22 |
+| [zx5](zx5/README.md) | ZX5 README (BSD-3) | 26 | 0 | 0 | 26 |
 | [vcdiff](vcdiff/README.md) | RFC 3284 | 30 | 0 | 0 | 30 |
 | [mppc](mppc/README.md) | RFC 2118 | 32 | 0 | 0 | 32 |
 | [lzs](lzs/README.md) | RFC 2395 (§2.2 = ANSI X3.241 informational 転記) | 26 | 0 | 0 | 26 |
@@ -102,7 +102,7 @@
 | [lzrw2](lzrw2/README.md) | lzrw2.c 参照実装 (public domain) | 22 | 0 | 0 | 22 |
 | [lzrw3](lzrw3/README.md) | lzrw3.c 参照実装 (public domain) | 23 | 0 | 0 | 23 |
 | [lzrw3a](lzrw3a/README.md) | lzrw3-a.c 参照実装 (public domain) | 23 | 0 | 0 | 23 |
-| [lzsa](lzsa/README.md) | LZSA StreamFormat / BlockFormat_LZSA1/LZSA2 v1.4.1 | 31 | 0 | 0 | 31 |
+| [lzsa](lzsa/README.md) | LZSA StreamFormat / BlockFormat_LZSA1/LZSA2 v1.4.1 | 33 | 0 | 0 | 33 |
 | [lzxd](lzxd/README.md) | [MS-PATCH] LZX DELTA (Microsoft Open Specifications) | 22 | 0 | 0 | 22 |
 | [cmpsc](cmpsc/README.md) | IBM z/Arch POP App.D / ESA/390 Data Compression + APPNOTE method 16 | 20 | 0 | 0 | 20 |
 | [rzip](rzip/README.md) | rzip `.rz` format (upstream 2.1) | 20 | 0 | 0 | 20 |
@@ -160,9 +160,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 2204 |
+| ✅ 実装+テスト済み | 2215 |
 | ⚠️ 部分実装 | 3 |
 | ❌ 未実装 | 72 |
-| **合計** | **2280** |
+| **合計** | **2291** |
 
-**全体カバー率**: 2204 / 2280 = **96.7%** (intentional exclusion 除外後: 2204 / 2208 = **99.8%**)
+**全体カバー率**: 2215 / 2291 = **96.7%** (intentional exclusion 除外後: 2215 / 2219 = **99.8%**)

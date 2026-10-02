@@ -86,7 +86,7 @@ archive compress bzip2 data.bin -o data.bin.bz2 --level 9
 archive compress lrzip data.bin -o data.bin.lrz --backend bzip2
 ```
 
-対応フォーマット: `gzip`, `zstd`, `zstd-seekable`, `bzip2`, `lzip`, `lzma`, `lzw`, `lz4`, `lzo`, `lrzip`, `rzip`, `zlib`, `snappy`, `brotli`, `deflate`, `xz`, `zpaq`, `xpress`, `xpress-huff`, `lznt1`, `lzf`, `fastlz`, `lzsa`, `lzsa2`, `lzrw1`, `lzrw1a`, `lzrw2`, `lzrw3`, `lzrw3a`, `zx0`, `zx1`, `zx2`, `zx5`, `vcdiff`, `mppc`, `lzs`, `lzxd`, `cmpsc`
+対応フォーマット: `gzip`, `zstd`, `zstd-seekable`, `bzip2`, `lzip`, `lzma`, `lzw`, `lz4`, `lzo`, `lrzip`, `rzip`, `zlib`, `snappy`, `brotli`, `deflate`, `xz`, `zpaq`, `xpress`, `xpress-huff`, `lznt1`, `lzf`, `fastlz`, `lzsa`, `lzsa2`, `lzrw1`, `lzrw1a`, `lzrw2`, `lzrw3`, `lzrw3a`, `zx0`, `zx1`, `zx2`, `zx5`, `zx0b`, `zx1b`, `zx2b`, `zx5b`, `vcdiff`, `mppc`, `lzs`, `lzxd`, `cmpsc`
 
 `--level` は gzip (0-9), bzip2 (1-9), rzip (1-9), lzw (9-16), zpaq (1-3) で有効。
 `--backend` は lrzip のみ (`none`, `bzip2`, `lzo`, `lzma`, `gzip`, `zpaq`)。
@@ -118,7 +118,7 @@ magic bytes からフォーマットを自動検出する。
 - `.arc`: `0x1A` marker + method byte で識別（method 1/2 stored のみ。packed/squeezed/crunched は非対応）。
 - lzsa ストリーム: `7b 9e` magic + traits byte で識別（raw ブロックは検出不可のため `--format` が必要）。
 
-自動検出に対応しない形式（raw deflate, brotli, snappy, lzma, xpress, xpress-huff, lznt1, lzf, fastlz, lzrw1, lzrw1a, lzrw2, lzrw3, lzrw3a, zx0, zx1, zx2, zx5, mppc, lzs, lzxd, cmpsc など）は `--format` で明示する。
+自動検出に対応しない形式（raw deflate, brotli, snappy, lzma, xpress, xpress-huff, lznt1, lzf, fastlz, lzrw1, lzrw1a, lzrw2, lzrw3, lzrw3a, zx0, zx1, zx2, zx5, zx0b, zx1b, zx2b, zx5b, mppc, lzs, lzxd, cmpsc など）は `--format` で明示する。
 lzxd の decode は、ストリーム外パラメータであるウィンドウサイズに仕様上の最大値（32MiB）を仮定してデコードする。小さいウィンドウで生成されたストリームであっても、後方参照距離はそのウィンドウサイズ以下に収まるため正常に展開できる。
 cmpsc は PKWARE APPNOTE method-16 コンテナ（辞書ヘッダ + 展開辞書 + CMPSC データ）を扱う。encode は alphabet-only 辞書を使うためデータは実質非圧縮となる。
 
