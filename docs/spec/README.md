@@ -134,7 +134,7 @@
 | [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 29 | 0 | 1 | 30 |
 | [lha](lha/README.md) | lha header documentation + jLHA Notes + lzhformat.html + lhasa/compcol 参照実装 | 22 | 1 | 1 | 24 |
 | [arj](arj/README.md) | ARJ technical note (ARJ 2.x) + UNARJ/newtua_dos 参照実装 | 21 | 0 | 4 | 25 |
-| [arc](arc/README.md) | SEA ARC file format description + hyc/arc `Arcinfo` | 23 | 0 | 2 | 26 |
+| [arc](arc/README.md) | SEA ARC file format description + hyc/arc `Arcinfo` | 24 | 0 | 1 | 30 |
 | [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 38 | 0 | 5 | 43 |
 | [xar](xar/README.md) | xarformat (mackyle/xar wiki) | 32 | 0 | 5 | 37 |
 | [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 152 | 0 | 1 | 154 |

@@ -7,8 +7,9 @@ use crate::error::Error;
 use super::decode::{MARKER, NAME_LEN};
 
 /// Encoder for ARC archives supporting methods 1 (obsolete unpacked),
-/// 2 (stored), 3 (packed/RLE90), 4 (squeezed), 8 (crunched) and 9
-/// (squashed).
+/// 2 (stored), 3 (packed/RLE90), 4 (squeezed), 5/6/7 (crunched
+/// hash-LZW), 8 (crunched), 9 (squashed), 0x0a (crushed) and
+/// 0x0b (distilled).
 pub struct ArcEncoder {
     out: Vec<u8>,
 }
@@ -27,12 +28,13 @@ impl ArcEncoder {
     }
 
     /// Add a file entry with an explicit method byte. Supported
-    /// methods: `1` (obsolete unpacked — the record carries no
-    /// date/time/CRC-16/length fields), `2` (stored), `3`
-    /// (packed/RLE90), `4` (squeezed), `8` (crunched) and `9`
-    /// (squashed). Any other method is rejected with
-    /// [`Error::Unsupported`]. `date`/`time` are ignored
-    /// for method 1.
+    /// methods: `1` (obsolete unpacked — the regular member
+    /// header minus the original-length field), `2` (stored), `3`
+    /// (packed/RLE90), `4` (squeezed), `5`/`6`/`7` (crunched hash-LZW;
+    /// 6 and 7 add an RLE90 stage), `8` (crunched), `9` (squashed) and
+    /// `0x0a` (crushed = adaptive LZW over an RLE90 stream) and
+    /// `0x0b` (distilled = LZSS + header Huffman). Any other
+    /// method is rejected with [`Error::Unsupported`].
     pub fn add_file_with_method(
         &mut self,
         name: &str,
@@ -49,13 +51,22 @@ impl ArcEncoder {
         {
             return Err(Error::InvalidData("arc: bad filename"));
         }
-        if !matches!(method, 1..=4 | 8 | 9) {
+        if !matches!(method, 1..=0x0b) {
             return Err(Error::Unsupported("arc: unsupported method"));
         }
         let body = match method {
             1 | 2 => data.to_vec(),
             3 => super::rle90::encode(data),
             4 => super::squeeze::encode(data),
+            5 => super::crunch::encode(data, super::crunch::CrunchHash::Quadratic),
+            6 => super::crunch::encode(
+                &super::rle90::encode(data),
+                super::crunch::CrunchHash::Quadratic,
+            ),
+            7 => super::crunch::encode(
+                &super::rle90::encode(data),
+                super::crunch::CrunchHash::Multiplicative,
+            ),
             8 => {
                 // Crunched: maxbits byte (12) then a dynamic-LZW stream
                 // over the RLE90-packed data.
@@ -66,6 +77,16 @@ impl ArcEncoder {
                 b
             }
             9 => crate::compress::lzw::encode::encode_body(data, 13, true),
+            0x0a => {
+                // Crushed member: adaptive LZW over the RLE90-packed
+                // data.
+                super::crush::encode(&super::rle90::encode(data))?
+            }
+            0x0b => {
+                // Distilled member: LZSS + header-serialised Huffman,
+                // no RLE stage.
+                super::distill::encode(data)?
+            }
             _ => unreachable!(),
         };
         self.out.push(MARKER);
@@ -76,20 +97,17 @@ impl ArcEncoder {
         // The header carries the stored (compressed) size first.
         self.out
             .extend_from_slice(&(body.len() as u32).to_le_bytes());
-        if method == 1 {
-            // Obsolete unpacked member: raw data follows the size
-            // directly, with no date/time/CRC-16/length fields.
-            self.out.extend_from_slice(&body);
-            return Ok(());
-        }
         self.out.extend_from_slice(&date.to_le_bytes());
         self.out.extend_from_slice(&time.to_le_bytes());
         // The CRC-16 covers the uncompressed data.
         self.out
             .extend_from_slice(&crate::util::crc16::crc16(data).to_le_bytes());
-        // Original (uncompressed) file length closes the header.
-        self.out
-            .extend_from_slice(&(data.len() as u32).to_le_bytes());
+        if method != 1 {
+            // Original (uncompressed) file length closes the header;
+            // method-1 headers omit this field.
+            self.out
+                .extend_from_slice(&(data.len() as u32).to_le_bytes());
+        }
         self.out.extend_from_slice(&body);
         Ok(())
     }

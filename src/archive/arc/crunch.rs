@@ -19,7 +19,7 @@ use alloc::vec::Vec;
 
 use crate::error::Error;
 
-use super::bits::MsbBits;
+use super::bits::{MsbBits, MsbWriter};
 
 /// Number of slots in the hash-coded string table (12-bit codes).
 const TABLE_SIZE: usize = 4096;
@@ -46,43 +46,77 @@ fn hash(kind: CrunchHash, parent: i32, byte: u8) -> usize {
     }
 }
 
+/// The 4096-entry string table. Each slot holds the `(parent, byte)`
+/// expansion of one string; `next` links entries that hashed to an
+/// already-used slot. Encoder and decoder run identical placement so
+/// that a slot index doubles as the wire code.
+struct Table {
+    used: [bool; TABLE_SIZE],
+    byte: [u8; TABLE_SIZE],
+    next: [usize; TABLE_SIZE],
+    parent: [i32; TABLE_SIZE],
+    kind: CrunchHash,
+}
+
+impl Table {
+    fn new(kind: CrunchHash) -> Self {
+        Table {
+            used: [false; TABLE_SIZE],
+            byte: [0; TABLE_SIZE],
+            next: [0; TABLE_SIZE],
+            parent: [-1; TABLE_SIZE],
+            kind,
+        }
+    }
+
+    /// Insert `(parent_code, b)` at its hash slot, probing on
+    /// collision; returns the slot used.
+    fn update(&mut self, parent_code: i32, b: u8) -> usize {
+        let mut index = hash(self.kind, parent_code, b);
+        if self.used[index] {
+            while self.next[index] != 0 {
+                index = self.next[index];
+            }
+            let mut nxt = (index + 101) & 0xfff;
+            while self.used[nxt] {
+                nxt = (nxt + 1) & 0xfff;
+            }
+            self.next[index] = nxt;
+            index = nxt;
+        }
+        self.used[index] = true;
+        self.next[index] = 0;
+        self.parent[index] = parent_code;
+        self.byte[index] = b;
+        index
+    }
+
+    /// Slot of the `(parent_code, b)` string, following the collision
+    /// chain from its hash slot.
+    fn find(&self, parent_code: i32, b: u8) -> Option<usize> {
+        let mut index = hash(self.kind, parent_code, b);
+        while self.used[index] {
+            if self.parent[index] == parent_code && self.byte[index] == b {
+                return Some(index);
+            }
+            if self.next[index] == 0 {
+                return None;
+            }
+            index = self.next[index];
+        }
+        None
+    }
+}
+
 /// Decode a crunched stream (methods 5/6/7 share the codec; the
 /// caller picks the hash and post-processing). Stops at end of input
 /// or when `limit` output bytes were produced.
 pub(crate) fn decode(input: &[u8], kind: CrunchHash, limit: usize) -> Result<Vec<u8>, Error> {
-    let mut used = [false; TABLE_SIZE];
-    let mut byte = [0u8; TABLE_SIZE];
-    let mut next = [0usize; TABLE_SIZE];
-    let mut parent = [-1i32; TABLE_SIZE];
+    let mut tab = Table::new(kind);
     let mut numfree = TABLE_SIZE - 256;
 
-    // Insert `(parent, byte)` at its hash slot, probing on collision.
-    let update = |parent_code: i32,
-                  b: u8,
-                  used: &mut [bool; TABLE_SIZE],
-                  byte: &mut [u8; TABLE_SIZE],
-                  next: &mut [usize; TABLE_SIZE],
-                  parent: &mut [i32; TABLE_SIZE]| {
-        let mut index = hash(kind, parent_code, b);
-        if used[index] {
-            while next[index] != 0 {
-                index = next[index];
-            }
-            let mut nxt = (index + 101) & 0xfff;
-            while used[nxt] {
-                nxt = (nxt + 1) & 0xfff;
-            }
-            next[index] = nxt;
-            index = nxt;
-        }
-        used[index] = true;
-        next[index] = 0;
-        parent[index] = parent_code;
-        byte[index] = b;
-    };
-
     for i in 0..256 {
-        update(-1, i as u8, &mut used, &mut byte, &mut next, &mut parent);
+        tab.update(-1, i as u8);
     }
 
     let mut bits = MsbBits::new(input);
@@ -94,28 +128,28 @@ pub(crate) fn decode(input: &[u8], kind: CrunchHash, limit: usize) -> Result<Vec
         Some(c) => c as usize,
         None => return Ok(out),
     };
-    out.push(byte[first]);
+    out.push(tab.byte[first]);
     let mut lastcode = first;
 
     while let Some(c) = bits.read(12) {
         let c = c as usize;
         seq.clear();
         let mut idx = c;
-        let kwk = !used[idx];
+        let kwk = !tab.used[idx];
         if kwk {
             // Code not yet assigned: previous string plus its first
             // byte.
             idx = lastcode;
         }
-        while parent[idx] != -1 {
-            seq.push(byte[idx]);
-            idx = parent[idx] as usize;
+        while tab.parent[idx] != -1 {
+            seq.push(tab.byte[idx]);
+            idx = tab.parent[idx] as usize;
             if seq.len() > TABLE_SIZE {
                 return Err(Error::InvalidData("arc: crunch parent cycle"));
             }
         }
-        seq.push(byte[idx]);
-        let firstbyte = byte[idx];
+        seq.push(tab.byte[idx]);
+        let firstbyte = tab.byte[idx];
 
         for &b in seq.iter().rev() {
             if out.len() >= limit {
@@ -131,19 +165,48 @@ pub(crate) fn decode(input: &[u8], kind: CrunchHash, limit: usize) -> Result<Vec
         }
 
         if numfree != 0 {
-            update(
-                lastcode as i32,
-                firstbyte,
-                &mut used,
-                &mut byte,
-                &mut next,
-                &mut parent,
-            );
+            tab.update(lastcode as i32, firstbyte);
             numfree -= 1;
         }
         lastcode = c;
     }
     Ok(out)
+}
+
+/// Encode `input` as a crunched stream: 12-bit codes, MSB-first,
+/// where each code is the slot [`Table::update`] assigned to the
+/// string. Insertions stop when the table budget runs out, matching
+/// the decoder.
+pub(crate) fn encode(input: &[u8], kind: CrunchHash) -> Vec<u8> {
+    let mut tab = Table::new(kind);
+    let mut lit = [0usize; 256];
+    for (i, slot) in lit.iter_mut().enumerate() {
+        *slot = tab.update(-1, i as u8);
+    }
+
+    let mut bits = MsbWriter::new();
+    let mut numfree = TABLE_SIZE - 256;
+    let Some((&first, rest)) = input.split_first() else {
+        return bits.finish();
+    };
+
+    // `w` is the slot (== wire code) of the current string.
+    let mut w = lit[usize::from(first)];
+    for &b in rest {
+        match tab.find(w as i32, b) {
+            Some(slot) => w = slot,
+            None => {
+                bits.put(w as u32, 12);
+                if numfree != 0 {
+                    tab.update(w as i32, b);
+                    numfree -= 1;
+                }
+                w = lit[usize::from(b)];
+            }
+        }
+    }
+    bits.put(w as u32, 12);
+    bits.finish()
 }
 
 #[cfg(test)]
@@ -194,11 +257,54 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+        assert!(encode(&[], CrunchHash::Quadratic).is_empty());
+        assert!(encode(&[], CrunchHash::Multiplicative).is_empty());
     }
 
     #[test]
     fn bound_enforced() {
         // "AAAA" decoded with a tighter limit must error.
         assert!(decode(&hex("0a5d1f0a50"), CrunchHash::Quadratic, 3).is_err());
+    }
+
+    #[test]
+    fn encode_reference_streams() {
+        // Encoder output is the canonical code stream: slot-coded
+        // LZW is fully determined by input plus table placement, so
+        // it must match the decoder vectors byte-for-byte.
+        assert_eq!(encode(b"AAAA", CrunchHash::Quadratic), hex("0a5d1f0a50"));
+        assert_eq!(
+            encode(b"banana banana", CrunchHash::Quadratic),
+            hex("938890bf93d58907cf07523e23e0")
+        );
+        assert_eq!(
+            encode(b"AAAA", CrunchHash::Multiplicative),
+            hex("8403618400")
+        );
+    }
+
+    #[test]
+    fn encode_decode_roundtrip() {
+        fn roundtrip(data: &[u8], kind: CrunchHash) {
+            let packed = encode(data, kind);
+            assert_eq!(decode(&packed, kind, data.len()).unwrap(), data);
+        }
+        for kind in [CrunchHash::Quadratic, CrunchHash::Multiplicative] {
+            roundtrip(&[], kind);
+            roundtrip(b"a", kind);
+            roundtrip(b"AAAA", kind);
+            roundtrip(b"hello, world!", kind);
+            roundtrip(b"banana banana", kind);
+            // All byte values, then long runs.
+            let mut v: Vec<u8> = (0..=255).collect();
+            v.extend_from_within(..);
+            v.extend_from_slice(&[7u8; 4000]);
+            roundtrip(&v, kind);
+            // Long input: exceeds the 3840-entry string budget, so
+            // the table-full path is exercised.
+            let big: Vec<u8> = (0..20000).map(|i| ((i * 31) ^ (i >> 3)) as u8).collect();
+            roundtrip(&big, kind);
+            roundtrip(&b"the quick brown fox. ".repeat(500), kind);
+        }
     }
 }

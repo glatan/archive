@@ -322,7 +322,7 @@ pub fn detect_format(input: &[u8]) -> Option<Format> {
     if input.starts_with(&[0x60, 0xEA]) {
         return Some(Format::Arj);
     }
-    if input.len() >= 2 && input[0] == 0x1A && (1..=0x0b).contains(&input[1]) {
+    if input.len() >= 2 && input[0] == 0x1A && matches!(input[1], 1..=0x0b | 20..=39) {
         return Some(Format::Arc);
     }
     if input.len() >= 21
@@ -447,7 +447,7 @@ pub fn scope_notes(format: Format) -> Vec<String> {
             "arj write support covers method-0 (stored) entries only; compressed write and garbled read without a password are rejected".to_owned(),
         ],
         Format::Arc => vec![
-            "arc support covers stored methods (1/2) only; packed/squeezed/crunched members are rejected".to_owned(),
+            "arc read covers methods 1-9/0x0a/0x0b and skips ARC 6.0+ info/control items; pack writes method-2 stored members".to_owned(),
         ],
         Format::Xpress | Format::XpressHuff | Format::Lznt1 => vec![
             "MS-XCA streams carry no container header or magic; --format is required".to_owned(),
@@ -657,7 +657,7 @@ mod tests {
         d[20] = 4; // level 4 is out of range
         assert_eq!(detect_format(&d), None);
         // PMarc members use a "-pmX-" method marker.
-        let mut d = *b"xx-pm2-.............\x00.";
+        let d = *b"xx-pm2-.............\x00.";
         assert_eq!(detect_format(&d), Some(Format::Lha));
     }
     #[test]
@@ -672,5 +672,9 @@ mod tests {
         assert_eq!(detect_format(&[0x1A, 0x09]), Some(Format::Arc));
         assert_eq!(detect_format(&[0x1A, 0x0b]), Some(Format::Arc));
         assert_eq!(detect_format(&[0x1A, 0x0c]), None);
+        // ARC 6.0+ archives may lead with informational/control items.
+        assert_eq!(detect_format(&[0x1A, 20]), Some(Format::Arc));
+        assert_eq!(detect_format(&[0x1A, 39]), Some(Format::Arc));
+        assert_eq!(detect_format(&[0x1A, 40]), None);
     }
 }

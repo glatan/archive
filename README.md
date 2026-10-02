@@ -54,7 +54,7 @@
 | アーカイブ | xar | ✅ | ✅ |
 | アーカイブ | lha/lzh (level 0-3、lh4-lh7 圧縮 write 対応) | ✅ | ✅ |
 | アーカイブ | arj (method 0-4、multi-volume write 対応) | ✅ | ✅ |
-| アーカイブ | arc (store のみ) | ✅ | ✅ |
+| アーカイブ | arc (method 1-9/0xa/0xb) | ✅ | ✅ |
 | アーカイブ | zip | ✅ | ✅ |
 | アーカイブ | 7z | ✅ | ✅ |
 

@@ -7,20 +7,23 @@
 //! observation only).
 //! Supported scope:
 //!
-//! - reading: method 1 (obsolete unpacked, no CRC), method 2
+//! - reading: method 1 (obsolete unpacked), method 2
 //!   (stored), method 3 (packed/RLE90), method 4 (squeezed = RLE90 +
 //!   static Huffman), method 5 (crunched, obsolete — quadratic-hash
 //!   LZW), method 6 (crunched = quadratic-hash LZW + RLE90), method 7
 //!   (crunched = multiplicative-hash LZW + RLE90), method 8 (crunched
 //!   = dynamic LZW + RLE90), method 9 (squashed = dynamic LZW), method
 //!   0x0a (crushed = adaptive LZW + RLE90) and method 0x0b (distilled =
-//!   LZSS + header Huffman). Method 0x0c and higher are rejected with
-//!   [`Error::Unsupported`];
-//! - writing: methods 1, 2, 3, 4, 8 and 9 entries.
+//!   LZSS + header Huffman). ARC 6.0+ informational/control items
+//!   (methods 20-39) are parsed and skipped without producing entries;
+//!   methods 12-19 and 40+ are rejected with [`Error::Unsupported`];
+//! - writing: methods 1-0x0b entries.
 //!
 //! Layout: each member starts with `0x1A` and a method byte; method 0
 //! marks end of archive. Method-1 records are
-//! `[name 13B][size u32le][data]`; methods >= 2 use
+//! `[name 13B][size u32le][date u16le][time u16le][crc16 u16le]
+//! [data]` — the regular header minus the original-length field;
+//! methods >= 2 use
 //! `[name 13B][length u32le][date u16le][time u16le][crc16 u16le]
 //! [size u32le][data]` where `length` is the stored (compressed) data
 //! size and `size` is the original uncompressed size (equal for method

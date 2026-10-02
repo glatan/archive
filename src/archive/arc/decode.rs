@@ -4,16 +4,20 @@
 //! Enhancement Associates (arc specification / wotsit "arc" entry).
 //! Supported scope:
 //!
-//! - reading: method 1 (obsolete unpacked, no CRC), method 2
+//! - reading: method 1 (obsolete unpacked), method 2
 //!   (stored), method 3 (packed/RLE90), method 4 (squeezed), methods
 //!   5-7 (crunched hash-LZW variants), method 8 (crunched), method 9
 //!   (squashed), method 0x0a (crushed) and method 0x0b (distilled).
-//!   Method 0x0c and higher are rejected with [`Error::Unsupported`];
-//! - writing: methods 1, 2, 3, 4, 8 and 9 entries.
+//!   ARC 6.0+ informational/control items (methods 20-39) share the
+//!   regular member header and are skipped without producing entries;
+//!   methods 12-19 and 40+ are rejected with [`Error::Unsupported`];
+//! - writing: methods 1-0x0b entries.
 //!
 //! Layout: each member starts with `0x1A` and a method byte; method 0
 //! marks end of archive. Method-1 records are
-//! `[name 13B][size u32le][data]`; methods >= 2 use
+//! `[name 13B][size u32le][date u16le][time u16le][crc16 u16le]
+//! [data]` — the regular header minus the original-length field;
+//! methods >= 2 use
 //! `[name 13B][length u32le][date u16le][time u16le][crc16 u16le]
 //! [size u32le][data]` where `length` is the stored (compressed) data
 //! size and `size` is the original uncompressed size (equal for method
@@ -43,7 +47,7 @@ pub struct ArcEntry {
     pub date: u16,
     /// DOS time field (0 when absent/unset).
     pub time: u16,
-    /// Data CRC-16, `None` for method-1 members which carry no CRC.
+    /// Data CRC-16 carried in the member header (all methods).
     pub crc16: Option<u16>,
     /// Member payload.
     pub data: Vec<u8>,
@@ -95,6 +99,22 @@ pub fn decode(input: &[u8]) -> Result<Vec<ArcEntry>, Error> {
         if method == 0 {
             return Ok(entries);
         }
+        if (20..=39).contains(&method) {
+            // ARC 6.0+ informational/control item: same 27-byte
+            // header as a regular member (name + length + date/
+            // time/crc16/size); the payload is skipped and no
+            // entry is produced.
+            if pos + NAME_LEN + 14 > input.len() {
+                return Err(Error::InvalidData("arc: truncated header"));
+            }
+            let length = u32le(&input[pos + NAME_LEN..]) as usize;
+            pos += NAME_LEN + 14;
+            if pos + length > input.len() {
+                return Err(Error::InvalidData("arc: truncated member data"));
+            }
+            pos += length;
+            continue;
+        }
         if !matches!(method, 1..=0x0b) {
             return Err(Error::Unsupported("arc: unsupported method"));
         }
@@ -107,9 +127,18 @@ pub fn decode(input: &[u8]) -> Result<Vec<ArcEntry>, Error> {
         let length = u32le(&input[pos..]) as usize;
         pos += 4;
         let (date, time, crc16, size) = if method == 1 {
-            // Obsolete unpacked member: no date/time/CRC/orig-size
-            // fields; the stored size doubles as the original size.
-            (0, 0, None, length)
+            // Obsolete unpacked member: the header is the regular
+            // member header minus the original-length field (25
+            // bytes), so date/time/CRC-16 are still present; the
+            // stored size doubles as the original size.
+            if pos + 6 > input.len() {
+                return Err(Error::InvalidData("arc: truncated header"));
+            }
+            let date = u16le(&input[pos..]);
+            let time = u16le(&input[pos + 2..]);
+            let crc = u16le(&input[pos + 4..]);
+            pos += 6;
+            (date, time, Some(crc), length)
         } else {
             if pos + 10 > input.len() {
                 return Err(Error::InvalidData("arc: truncated header"));
@@ -244,22 +273,45 @@ mod tests {
         assert!(e[1].crc16.is_some());
     }
 
+    /// Build a method-1 member record: name + size + date + time +
+    /// crc16 + raw data (the regular header minus the
+    /// original-length field).
+    fn build_method1_member(name: &str, date: u16, time: u16, data: &[u8]) -> Vec<u8> {
+        let mut a = Vec::new();
+        a.extend_from_slice(&[MARKER, 1]);
+        let mut field = [0u8; NAME_LEN];
+        field[..name.len()].copy_from_slice(name.as_bytes());
+        a.extend_from_slice(&field);
+        a.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        a.extend_from_slice(&date.to_le_bytes());
+        a.extend_from_slice(&time.to_le_bytes());
+        a.extend_from_slice(&crate::util::crc16::crc16(data).to_le_bytes());
+        a.extend_from_slice(data);
+        a.extend_from_slice(&[MARKER, 0]);
+        a
+    }
+
     #[test]
     fn method1_member() {
         // Hand-built method-1 (obsolete unpacked) record.
-        let mut a = Vec::new();
-        a.push(MARKER);
-        a.push(1);
-        let mut field = [0u8; NAME_LEN];
-        field[..3].copy_from_slice(b"F.B");
-        a.extend_from_slice(&field);
-        a.extend_from_slice(&3u32.to_le_bytes());
-        a.extend_from_slice(b"xyz");
-        a.extend_from_slice(&[MARKER, 0]);
+        let a = build_method1_member("F.B", 0x1234, 0x5678, b"xyz");
         let e = decode(&a).unwrap();
         assert_eq!(e[0].name, "F.B");
         assert_eq!(e[0].data, b"xyz");
-        assert_eq!(e[0].crc16, None);
+        assert_eq!(e[0].date, 0x1234);
+        assert_eq!(e[0].time, 0x5678);
+        assert_eq!(e[0].crc16, Some(crate::util::crc16::crc16(b"xyz")));
+    }
+
+    #[test]
+    fn method1_rejects_bad_crc() {
+        // Method-1 members carry a CRC-16 like every other method.
+        let mut a = build_method1_member("F.B", 0, 0, b"xyz");
+        let n = a.len();
+        a[n - 3] ^= 0xff;
+        assert!(decode(&a).is_err());
+        // A header cut short inside the date/time/crc16 fields.
+        assert!(decode(&a[..2 + NAME_LEN + 4 + 4]).is_err());
     }
 
     #[test]
@@ -272,7 +324,7 @@ mod tests {
         assert_eq!(e.len(), 2);
         assert_eq!(e[0].name, "OLD.TXT");
         assert_eq!(e[0].method, 1);
-        assert_eq!(e[0].crc16, None);
+        assert!(e[0].crc16.is_some());
         assert_eq!(e[0].data, b"raw data");
         assert_eq!(e[1].name, "NEW.TXT");
         assert_eq!(e[1].method, 2);
@@ -282,7 +334,8 @@ mod tests {
     #[test]
     fn method1_header_layout() {
         // Method-1 record: marker + method=1 + name[13] + size u32le +
-        // data. No date/time/CRC-16/length fields follow the size.
+        // date + time + crc16 + data. Only the original-length field
+        // of the regular header is absent (25-byte header).
         let mut enc = crate::archive::arc::encode::ArcEncoder::new();
         enc.add_file_with_method("F.B", b"xyz", 0x1234, 0x5678, 1)
             .unwrap();
@@ -293,16 +346,21 @@ mod tests {
         field[..3].copy_from_slice(b"F.B");
         assert_eq!(&a[2..2 + NAME_LEN], &field);
         assert_eq!(&a[2 + NAME_LEN..2 + NAME_LEN + 4], &3u32.to_le_bytes());
-        // Data immediately follows the size field, then terminator.
-        assert_eq!(&a[2 + NAME_LEN + 4..2 + NAME_LEN + 7], b"xyz");
-        assert_eq!(&a[2 + NAME_LEN + 7..], &[MARKER, 0]);
-        assert_eq!(a.len(), 2 + NAME_LEN + 4 + 3 + 2);
+        let mut tail = Vec::new();
+        tail.extend_from_slice(&0x1234u16.to_le_bytes());
+        tail.extend_from_slice(&0x5678u16.to_le_bytes());
+        tail.extend_from_slice(&crate::util::crc16::crc16(b"xyz").to_le_bytes());
+        assert_eq!(&a[2 + NAME_LEN + 4..2 + NAME_LEN + 10], &tail[..]);
+        // Data follows the 25-byte header, then the terminator.
+        assert_eq!(&a[2 + NAME_LEN + 10..2 + NAME_LEN + 13], b"xyz");
+        assert_eq!(&a[2 + NAME_LEN + 13..], &[MARKER, 0]);
+        assert_eq!(a.len(), 2 + NAME_LEN + 10 + 3 + 2);
     }
 
     #[test]
     fn rejects_unsupported_encode_method() {
         let mut e = crate::archive::arc::encode::ArcEncoder::new();
-        for m in [5u8, 6, 7, 0x0a, 0x0b, 0] {
+        for m in [0x0cu8, 0] {
             assert!(matches!(
                 e.add_file_with_method("F", b"", 0, 0, m),
                 Err(Error::Unsupported(_))
@@ -312,13 +370,61 @@ mod tests {
 
     #[test]
     fn rejects_compressed_method() {
-        // Methods 0x0c and above remain out of scope.
-        for m in [0x0cu8, 0x0d, 0x7e, 0xFF] {
+        // Methods 12-19 (ARC 6.0/7.0, unpublished) and 40+
+        // (reserved) remain out of scope; 20-39 are skipped (see
+        // skips_info_control_items).
+        for m in [0x0cu8, 0x0d, 19, 40, 0x7e, 0xFF] {
             let mut a = Vec::new();
             a.extend_from_slice(&[MARKER, m]);
             a.extend_from_slice(&[0u8; NAME_LEN + 4]);
             assert!(matches!(decode(&a), Err(Error::Unsupported(_))));
         }
+    }
+
+    /// Build an ARC 6.0+ informational/control item (methods
+    /// 20-39): same header layout as a regular member; the payload
+    /// holds sub-type records and is ignored.
+    fn build_info_item(method: u8, name: &[u8], payload: &[u8]) -> Vec<u8> {
+        let mut a = Vec::new();
+        a.extend_from_slice(&[MARKER, method]);
+        let mut field = [0u8; NAME_LEN];
+        field[..name.len()].copy_from_slice(name);
+        a.extend_from_slice(&field);
+        a.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        a.extend_from_slice(&[0u8; 10]); // date/time/crc16/orig size
+        a.extend_from_slice(payload);
+        a
+    }
+
+    #[test]
+    fn skips_info_control_items() {
+        // Informational (20-29) and control (30-39) items around a
+        // file member are skipped and never surface as entries. The
+        // name field is not a file name and may be non-UTF-8.
+        let mut a = Vec::new();
+        a.extend_from_slice(&build_info_item(20, b"INFO", b"archive info"));
+        a.extend_from_slice(&build_info_item(21, &[0xFF, 0xFE], b"file info"));
+        let mid = crate::archive::arc::encode::encode(&[("REAL.TXT", b"data")]).unwrap();
+        a.extend_from_slice(&mid[..mid.len() - 2]); // strip terminator
+        a.extend_from_slice(&build_info_item(30, b"SUBDIR", b"subdir"));
+        a.extend_from_slice(&build_info_item(39, b"CTL", &[0xAA; 7]));
+        a.extend_from_slice(&[MARKER, 0]);
+        let e = decode(&a).unwrap();
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].name, "REAL.TXT");
+        assert_eq!(e[0].data, b"data");
+    }
+
+    #[test]
+    fn rejects_truncated_info_item() {
+        // Fixed fields cut short inside the item header.
+        let mut a = build_info_item(20, b"INFO", b"payload");
+        a.truncate(2 + NAME_LEN + 4); // name + length only
+        assert!(matches!(decode(&a), Err(Error::InvalidData(_))));
+        // Payload shorter than the declared length.
+        let mut a = build_info_item(20, b"INFO", b"payload");
+        a.pop();
+        assert!(matches!(decode(&a), Err(Error::InvalidData(_))));
     }
 
     /// Build a method-3 member record from raw packed bytes.
@@ -420,6 +526,25 @@ mod tests {
         let n = a.len();
         a[n - 3] ^= 0xff;
         assert!(decode(&a).is_err());
+    }
+
+    #[test]
+    fn rejects_bad_name() {
+        // Path separators and non-UTF-8 names are refused.
+        for name in [
+            &b"../ETC"[..],
+            &[b'A', 0x5c, b'B', b'.', b'C'][..],
+            &[0xFF, 0xFE][..],
+        ] {
+            let mut a = Vec::new();
+            a.extend_from_slice(&[MARKER, 2]);
+            let mut field = [0u8; NAME_LEN];
+            field[..name.len()].copy_from_slice(name);
+            a.extend_from_slice(&field);
+            a.extend_from_slice(&[0u8; 4 + 10]); // size + date/time/crc16/orig
+            a.extend_from_slice(&[MARKER, 0]);
+            assert!(decode(&a).is_err());
+        }
     }
 
     #[test]

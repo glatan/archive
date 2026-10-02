@@ -1,5 +1,5 @@
 // ============================================================
-// SEA ARC container tests (methods 1/2/3; 4+ rejected)
+// SEA ARC container tests (methods 1-0x0b)
 // ============================================================
 
 fn arc_fixture(name: &str, data: &[u8]) -> Vec<u8> {
@@ -40,8 +40,9 @@ fn test_arc_rejects_truncated() {
 
 #[test]
 fn test_arc_rejects_compressed_method() {
-    // Methods 0x0c and above remain out of scope and refused.
-    for m in [0x0cu8, 0x0d, 0x7e, 0xFF] {
+    // Methods 12-19 (ARC 6.0/7.0, unpublished) and 40+ (reserved)
+    // remain out of scope and refused; 20-39 items are skipped.
+    for m in [0x0cu8, 0x0d, 19, 40, 0x7e, 0xFF] {
         let mut a = Vec::new();
         a.extend_from_slice(&[0x1a, m]);
         a.extend_from_slice(&[0u8; 17]); // name + size
@@ -49,6 +50,40 @@ fn test_arc_rejects_compressed_method() {
         let err = archive::archive::arc::decode::decode(&a).unwrap_err();
         assert!(matches!(err, archive::error::Error::Unsupported(_)));
     }
+}
+
+/// Build an ARC 6.0+ informational/control item (methods 20-39),
+/// which uses the regular member header layout.
+fn arc_info_item(method: u8, payload: &[u8]) -> Vec<u8> {
+    let mut a = Vec::new();
+    a.extend_from_slice(&[0x1a, method]);
+    a.extend_from_slice(&[0u8; 13]); // name (ignored)
+    a.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+    a.extend_from_slice(&[0u8; 10]); // date/time/crc16/orig size
+    a.extend_from_slice(payload);
+    a
+}
+
+#[test]
+fn test_arc_skips_info_control_items() {
+    // ARC 6.0+ informational/control items (methods 20-39) mixed
+    // with file members are skipped and never listed.
+    let mut a = Vec::new();
+    a.extend_from_slice(&arc_info_item(20, b"archive description"));
+    let stored = arc_fixture("REAL.TXT", b"payload");
+    a.extend_from_slice(&stored[..stored.len() - 2]); // strip terminator
+    a.extend_from_slice(&arc_info_item(30, b"subdir marker"));
+    a.extend_from_slice(&arc_info_item(39, &[0xAA; 5]));
+    a.extend_from_slice(&[0x1a, 0]);
+    let entries = archive::archive::arc::decode::decode(&a).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "REAL.TXT");
+    assert_eq!(entries[0].data, b"payload");
+
+    // A truncated item header is still an error.
+    let mut a = arc_info_item(20, b"abc");
+    a.truncate(2 + 13 + 4);
+    assert!(archive::archive::arc::decode::decode(&a).is_err());
 }
 
 /// CRC-16/ARC (poly 0x8005, reflected, init 0x0000, xorout 0) — the
@@ -153,7 +188,7 @@ fn test_arc_method1_encode_decode_roundtrip() {
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].name, "OLD.TXT");
     assert_eq!(entries[0].method, 1);
-    assert_eq!(entries[0].crc16, None);
+    assert!(entries[0].crc16.is_some());
     assert_eq!(entries[0].data, b"obsolete");
     assert_eq!(entries[1].method, 2);
     assert!(entries[1].crc16.is_some());
@@ -162,7 +197,8 @@ fn test_arc_method1_encode_decode_roundtrip() {
 #[test]
 fn test_arc_method1_header_layout() {
     // Method-1 record: marker + method=1 + name[13] + size u32le +
-    // data. date/time are ignored and no CRC-16/length fields exist.
+    // date + time + crc16 + data. Only the original-length field of
+    // the regular header is absent (25-byte header).
     let mut enc = archive::archive::arc::encode::ArcEncoder::new();
     enc.add_file_with_method("F.B", b"xyz", 0x1234, 0x5678, 1)
         .unwrap();
@@ -173,35 +209,78 @@ fn test_arc_method1_header_layout() {
     name[..3].copy_from_slice(b"F.B");
     assert_eq!(&a[2..15], &name);
     assert_eq!(&a[15..19], &3u32.to_le_bytes());
-    assert_eq!(&a[19..22], b"xyz");
-    assert_eq!(&a[22..], &[0x1a, 0]);
-    assert_eq!(a.len(), 24);
+    assert_eq!(&a[19..21], &0x1234u16.to_le_bytes());
+    assert_eq!(&a[21..23], &0x5678u16.to_le_bytes());
+    assert_eq!(&a[23..25], &arc_crc16(b"xyz").to_le_bytes());
+    assert_eq!(&a[25..28], b"xyz");
+    assert_eq!(&a[28..], &[0x1a, 0]);
+    assert_eq!(a.len(), 30);
 }
 
 #[test]
 fn test_arc_rejects_unsupported_encode_method() {
     let mut enc = archive::archive::arc::encode::ArcEncoder::new();
-    let err = enc
-        .add_file_with_method("F.TXT", b"x", 0, 0, 5)
-        .unwrap_err();
-    assert!(matches!(err, archive::error::Error::Unsupported(_)));
+    for method in [0x0cu8, 0x0d] {
+        let err = enc
+            .add_file_with_method("F.TXT", b"x", 0, 0, method)
+            .unwrap_err();
+        assert!(matches!(err, archive::error::Error::Unsupported(_)));
+    }
 }
 
 #[test]
 fn test_arc_method1_member() {
-    // Obsolete unpacked member: name[13] + size + raw data, no CRC.
+    // Obsolete unpacked member: name[13] + size + date + time +
+    // crc16 + raw data (the regular header minus the original-length
+    // field).
     let mut a = Vec::new();
     a.extend_from_slice(&[0x1a, 1]);
     let mut name = [0u8; 13];
     name[..7].copy_from_slice(b"OLD.TXT");
     a.extend_from_slice(&name);
     a.extend_from_slice(&4u32.to_le_bytes());
+    a.extend_from_slice(&0x1234u16.to_le_bytes());
+    a.extend_from_slice(&0x5678u16.to_le_bytes());
+    a.extend_from_slice(&arc_crc16(b"data").to_le_bytes());
     a.extend_from_slice(b"data");
     a.extend_from_slice(&[0x1a, 0]);
     let entries = archive::archive::arc::decode::decode(&a).unwrap();
     assert_eq!(entries[0].name, "OLD.TXT");
     assert_eq!(entries[0].data, b"data");
-    assert_eq!(entries[0].crc16, None);
+    assert_eq!(entries[0].date, 0x1234);
+    assert_eq!(entries[0].crc16, Some(arc_crc16(b"data")));
+}
+
+#[test]
+fn test_arc_method1_rejects_bad_crc() {
+    // Method-1 members carry a CRC-16 and a corrupt payload is
+    // rejected through the same check as the other methods.
+    let mut a = arc_fixture_with_method(1, b"xyz");
+    let n = a.len();
+    a[n - 3] ^= 0xff;
+    assert!(archive::archive::arc::decode::decode(&a).is_err());
+    // A header cut short inside the date/time/crc16 fields.
+    assert!(archive::archive::arc::decode::decode(&a[..2 + 13 + 4 + 4]).is_err());
+}
+
+#[test]
+fn test_arc_rejects_bad_name() {
+    // Names containing path separators and non-UTF-8 names are
+    // refused by the decoder.
+    for name in [
+        &b"../ETC"[..],
+        &[b'A', 0x5c, b'B', b'.', b'C'][..],
+        &[0xff, 0xfe][..],
+    ] {
+        let mut a = Vec::new();
+        a.extend_from_slice(&[0x1a, 2]);
+        let mut field = [0u8; 13];
+        field[..name.len()].copy_from_slice(name);
+        a.extend_from_slice(&field);
+        a.extend_from_slice(&[0u8; 4 + 10]); // size + date/time/crc16/orig
+        a.extend_from_slice(&[0x1a, 0]);
+        assert!(archive::archive::arc::decode::decode(&a).is_err());
+    }
 }
 
 // ============================================================
@@ -242,9 +321,9 @@ fn test_arc_decode_squashed_fixture() {
 }
 
 #[test]
-fn test_arc_method4_8_9_encode_decode_roundtrip() {
+fn test_arc_compressed_encode_decode_roundtrip() {
     let data = b"the quick brown fox jumps over the lazy dog. ".repeat(40);
-    for method in [4u8, 8, 9] {
+    for method in [4u8, 5, 6, 7, 8, 9, 0x0a, 0x0b] {
         let mut enc = archive::archive::arc::encode::ArcEncoder::new();
         enc.add_file_with_method("A.TXT", &data, 0, 0, method)
             .unwrap();
@@ -264,6 +343,31 @@ fn arc_fixture_with_method(method: u8, data: &[u8]) -> Vec<u8> {
     enc.add_file_with_method("PAYLD.TXT", data, 0, 0, method)
         .unwrap();
     enc.finish()
+}
+
+#[test]
+fn test_arc_method5_6_7_edge_roundtrip() {
+    // Empty member, single byte, and a long run (RLE90 stage for 6/7).
+    for method in [5u8, 6, 7, 0x0a, 0x0b] {
+        for data in [&b""[..], &b"x"[..], &[0u8; 600][..]] {
+            let a = arc_fixture_with_method(method, data);
+            let entries = archive::archive::arc::decode::decode(&a).unwrap();
+            assert_eq!(entries[0].method, method);
+            assert_eq!(entries[0].data, data, "method {method}");
+        }
+    }
+}
+
+#[test]
+fn test_arc_method0a_encode_roundtrip() {
+    // Crushed: adaptive LZW + RLE90. Exercise the literal-bit switch
+    // (dense strings) and the eviction sweep (table overflow).
+    let mut big = b"abcdefghij".repeat(4000).to_vec();
+    big.extend((0..50000usize).map(|i| (i.wrapping_mul(2654435761) >> 13) as u8));
+    let a = arc_fixture_with_method(0x0a, &big);
+    let entries = archive::archive::arc::decode::decode(&a).unwrap();
+    assert_eq!(entries[0].method, 0x0a);
+    assert_eq!(entries[0].data, big);
 }
 
 #[test]
@@ -293,9 +397,27 @@ fn test_arc_encode_extracted_by_oracle() {
         .unwrap()
         .as_nanos();
 
-    for method in [4u8, 8, 9] {
+    // Per-method oracle support: all three decoders read the
+    // obsolete unpacked (method-1) header. nomarch never implemented
+    // the method-7 hash variant (development-only), so 5/6 are
+    // checked against arc+nomarch and 7 against arc alone. Method
+    // 0x0a (crushed) is only understood by unar.
+    let cases: &[(u8, &[&str])] = &[
+        (1, &["arc", "nomarch", "unar"]),
+        (4, &["arc", "nomarch", "unar"]),
+        (5, &["arc", "nomarch"]),
+        (6, &["arc", "nomarch"]),
+        (7, &["arc"]),
+        (8, &["arc", "nomarch", "unar"]),
+        (9, &["arc", "nomarch", "unar"]),
+        (0x0a, &["unar"]),
+    ];
+    for &(method, tools) in cases {
         let archive = arc_fixture_with_method(method, &data);
         for oracle in &oracles {
+            if !tools.contains(&oracle.as_str()) {
+                continue;
+            }
             let dir =
                 std::env::temp_dir().join(format!("archive_arc_oracle_{uniq}_{oracle}_{method}"));
             std::fs::create_dir_all(&dir).unwrap();
@@ -500,4 +622,19 @@ fn test_arc_packed_oracle_crosscheck() {
     if ran == 0 {
         eprintln!("no arc oracle installed; skipped");
     }
+}
+
+#[test]
+fn test_arc_method0b_encode_roundtrip() {
+    // Distilled: LZSS + header-serialised Huffman. Exercise matches
+    // across the 8 KiB window, the extra-offset-bits ladder and a
+    // data set with many distinct match lengths.
+    let mut big = b"abcdefghij".repeat(3000).to_vec();
+    big.extend((0..60000usize).map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8));
+    let head = big[..9000].to_vec();
+    big.extend_from_slice(&head);
+    let a = arc_fixture_with_method(0x0b, &big);
+    let entries = archive::archive::arc::decode::decode(&a).unwrap();
+    assert_eq!(entries[0].method, 0x0b);
+    assert_eq!(entries[0].data, big);
 }
