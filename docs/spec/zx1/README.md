@@ -4,14 +4,14 @@
 |------|------|
 | 形式概要 | Einar Saukas の ZX1 が使用する raw LZ77 ストリーム。ZX0 から派生した形式で、制御ビット列とデータバイトがインターリーブする。ZX0 との差分は Elias 符号の継続ビット反転 (ZX1 では `1` が継続) とオフセット表現 (ZX1 は 1〜2 バイトの反転格納)。magic・コンテナヘッダ・チェックサムは持たない |
 | 基準仕様 | [ZX1 README](https://github.com/einar-saukas/ZX1) "File Format" (ローカルスナップショット: `docs/spec/sources/zx1_README.md`) + 参照実装 `dzx1.c` / `zx1.c` (Einar Saukas, BSD 3-Clause) |
-| 実装 | `archive::compress::zx1` (decode / decode_bounded / decode_with_prefix / encode / encode_with_prefix)。pure-Rust 実装 |
+| 実装 | `archive::compress::zx1` (decode / decode_bounded / decode_with_prefix / decode_backwards / decode_backwards_bounded / decode_backwards_with_suffix / encode / encode_with_prefix / encode_backwards / encode_backwards_with_suffix)。pure-Rust 実装 |
 
 ## 対応バリアント・仕様版
 
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
 | forward / non-inverted | [ZX1 README](https://github.com/einar-saukas/ZX1) + `dzx1.c` (BSD-3) | ✅ | ✅ | |
-| backwards (`-b`) | [ZX1 README](https://github.com/einar-saukas/ZX1) | ❌ | ❌ | intentional scope |
+| backwards (`-b`) | [ZX1 README](https://github.com/einar-saukas/ZX1) + compress.c `backwards_mode` / `dzx1_standard_back.asm` | ✅ | ✅ | `decode_backwards` / `decode_backwards_bounded` / `decode_backwards_with_suffix` / `encode_backwards` / `encode_backwards_with_suffix`。backwards 時の最大 offset は 32511 |
 | prefix (`+N` skip) / suffix 圧縮 | [ZX1 README](https://github.com/einar-saukas/ZX1) "Advanced Features" | ✅ | ✅ | `decode_with_prefix` / `encode_with_prefix` で外部履歴を前置。suffix 圧縮はエンコーダ側概念のため対象外 |
 
 ## ストリーム構造
@@ -53,12 +53,14 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 21 | CLI `--format zx1` で decode/encode (magic がないため自動検出なし) | crate CLI contract | ✅ | archive-cli 配線 |
+| 21 | CLI `--format zx1` で decode/encode (magic がないため自動検出なし) | crate CLI contract | ✅ | archive-cli 配線。`--format zx1b` で backwards |
+| 22 | backwards (`-b`) ストリーム: `reverse(input)` を backwards 規約で符号化し `reverse` したもの。elias は不変、offset は正値形式 (1-byte: `(off-1)*2`、2-byte: `((off-1)&254)+1` / `(off>>8)*2+((off-1)&1)+2`)、EOF は `01 00` | compress.c `backwards_mode` + `dzx1_standard_back.asm` | ✅ | `backwards_reference_vectors` / `zx1_backwards_reference_vector_*` (upstream `zx1 -b` KAT) |
+| 23 | `-b +N` (backwards with suffix): 元データの末尾 N バイトが圧縮対象外 + マッチ履歴。suffix は正順で受け内部で reverse して仮想履歴とする | zx1.c `skip`/`reverse` + README "COMPRESSING BACKWARDS WITH SUFFIX" | ✅ | `backwards_reference_vector_suffix` / `zx1_backwards_suffix_*` |
 
 ## 出典 / 検証メモ
 
 - 参照実装 ZX1 v1.5 (Einar Saukas) は BSD 3-Clause。本実装は README のフォーマット記述と `dzx1.c` の動作解析から書かれた独立実装であり、コードの移植は行っていない。
 - 統合テストの `ZX1_*` は参照 C コンプレッサ (ZX1 v1.5) をローカルでコンパイルして生成した既知解答ベクタ (decode のみ検証): literal+match 混在、rep-offset、長マッチ連鎖、2 バイト offset 形式を含む。
-- backwards モード (`-b`、後方読み) は intentional scope 外。prefix モードは `decode_with_prefix`/`encode_with_prefix` で対応済み (suffix 圧縮はエンコーダ側概念のため対象外)。
+- backwards モード (`-b`、後方読み) は `decode_backwards`/`encode_backwards` 系で対応済み (`-b +N` suffix は `*_with_suffix` 系。backwards 時の最大 offset は 32511)。prefix モードは `decode_with_prefix`/`encode_with_prefix` で対応済み (suffix 圧縮はエンコーダ側概念のため対象外)。
 - ZX1 は ZX Spectrum 等のレトロプラットフォーム向けに設計された codec で、ZX0 より伸張コードが小さい代わりに圧縮率がわずかに劣る設計。
 - 実装メモ: Elias gamma 値には `1 << 20` の安全性ガードを設けている (無制限増大する malformed 入力の DoS 防止。フォーマット定義ではなく実装追加の制限)。

@@ -211,3 +211,154 @@ fn zx2_variant_encode_roundtrips() {
         assert_eq!(&zx2::decode(&enc).unwrap(), data);
     }
 }
+
+// ---------------------------------------------------------------
+// Backwards (`-b`) variant: streams produced by `zx2 -b` (v1.1) are
+// the byte-reversed form of a forward stream whose new-offset byte
+// stores `offset - 1` instead of `255 - offset`.
+// ---------------------------------------------------------------
+
+const ZX2B_FOX: &[u8] = &[
+    0xff, 0xb9, 0x2c, 0x20, 0x6a, 0x75, 0x6d, 0x70, 0x73, 0xe6, 0x6f, 0x76, 0x65, 0x72, 0xa0, 0x0d,
+    0x6c, 0x61, 0x7a, 0x79, 0x20, 0x64, 0x6f, 0x67, 0x2e, 0x20, 0x74, 0x68, 0x65, 0x20, 0x71, 0x75,
+    0x69, 0x63, 0x6b, 0x20, 0x62, 0x72, 0x6f, 0x77, 0x6e, 0x20, 0x66, 0x6f, 0x78, 0x2e, 0x0a, 0x68,
+    0xff,
+];
+
+const ZX2B_A300: &[u8] = &[0xff, 0xe4, 0xee, 0x61, 0x00, 0x8a];
+
+const ZX2B_T4K: &[u8] = &[
+    0xff, 0x40, 0xff, 0xfe, 0x13, 0x74, 0x68, 0x65, 0x20, 0x71, 0x75, 0x69, 0x63, 0x6b, 0x20, 0x62,
+    0x72, 0x6f, 0x77, 0x6e, 0x20, 0x66, 0x6f, 0x78, 0x20, 0x7f, 0xba,
+];
+
+// `zx2 -b -x` on the fox text.
+const ZX2B_FOX_X: &[u8] = &[
+    0xff, 0xd0, 0x2c, 0x6b, 0x6a, 0x6d, 0x70, 0x73, 0xc0, 0x1c, 0x6f, 0x76, 0x65, 0x72, 0xa4, 0x0d,
+    0x6c, 0x61, 0x7a, 0x79, 0x20, 0x64, 0x6f, 0x67, 0x2e, 0x20, 0x74, 0x68, 0x65, 0x20, 0x71, 0x75,
+    0x69, 0x63, 0x6b, 0x20, 0x62, 0x72, 0x6f, 0x77, 0x6e, 0x20, 0x66, 0x6f, 0x78, 0x2e, 0x0a, 0x6c,
+    0xff,
+];
+
+// `zx2 -b -z` on 299 'a' + NUL.
+const ZX2B_A300_Z: &[u8] = &[0xff, 0xb4, 0xee, 0x00, 0x61, 0x00, 0x9a];
+
+// `zx2 -b +20` on the 4100-byte T4K input: covers the first 4080 bytes;
+// the last 20 bytes ("the quick brown fox ") are suffix history.
+const ZX2B_T4K_P20: &[u8] = &[0xff, 0x40, 0xfe, 0xfe, 0x13, 0x20, 0x7f];
+
+#[test]
+fn zx2b_reference_vector_text() {
+    let dec = zx2::decode_backwards(ZX2B_FOX).unwrap();
+    assert_eq!(
+        dec,
+        b"the quick brown fox jumps over the lazy dog. the quick brown fox.\n"
+    );
+}
+
+#[test]
+fn zx2b_reference_vector_rep_offset() {
+    let mut expected = vec![b'a'; 299];
+    expected.push(0);
+    assert_eq!(zx2::decode_backwards(ZX2B_A300).unwrap(), expected);
+}
+
+#[test]
+fn zx2b_reference_vector_long_match() {
+    let pat = b"the quick brown fox ";
+    let mut expected = Vec::new();
+    for _ in 0..205 {
+        expected.extend_from_slice(pat);
+    }
+    assert_eq!(zx2::decode_backwards(ZX2B_T4K).unwrap(), expected);
+}
+
+#[test]
+fn zx2b_variant_vectors() {
+    // -b -x: new-offset lengths stored without the -1 bias.
+    assert_eq!(
+        zx2::decode_backwards_variant(ZX2B_FOX_X, &[], 1, true, usize::MAX).unwrap(),
+        b"the quick brown fox jumps over the lazy dog. the quick brown fox.\n"
+    );
+    // -b -z: initial last-offset is 0.
+    let mut expected = vec![b'a'; 299];
+    expected.push(0);
+    assert_eq!(
+        zx2::decode_backwards_variant(ZX2B_A300_Z, &[], 0, false, usize::MAX).unwrap(),
+        expected
+    );
+}
+
+#[test]
+fn zx2b_suffix_vector() {
+    // -b +20: match offsets reach into the trailing history.
+    let suffix = b"the quick brown fox ";
+    let mut expected = Vec::new();
+    for _ in 0..204 {
+        expected.extend_from_slice(suffix);
+    }
+    assert_eq!(
+        zx2::decode_backwards_with_suffix(ZX2B_T4K_P20, suffix).unwrap(),
+        expected
+    );
+    // Without the suffix the first match points beyond the output.
+    assert!(zx2::decode_backwards(ZX2B_T4K_P20).is_err());
+}
+
+#[test]
+fn zx2b_roundtrips() {
+    let mut cases: Vec<Vec<u8>> = vec![
+        Vec::new(),
+        b"x".to_vec(),
+        b"ab".to_vec(),
+        b"hello hello hello".to_vec(),
+        vec![0u8; 3000],
+    ];
+    let mut text = Vec::new();
+    for _ in 0..200 {
+        text.extend_from_slice(b"the quick brown fox jumps over the lazy dog. ");
+    }
+    cases.push(text);
+    let mut mixed = Vec::new();
+    for _ in 0..80 {
+        mixed.extend_from_slice(b"aaaaa");
+        mixed.extend_from_slice(b"bcdefg");
+    }
+    cases.push(mixed);
+
+    for data in &cases {
+        assert_eq!(
+            &zx2::decode_backwards(&zx2::encode_backwards(data)).unwrap(),
+            data
+        );
+        // -b +N suffix history.
+        let enc = zx2::encode_backwards_with_suffix(data, b"the quick brown fox ");
+        assert_eq!(
+            &zx2::decode_backwards_with_suffix(&enc, b"the quick brown fox ").unwrap(),
+            data
+        );
+        // -b -z and -b -x flag combinations.
+        let enc = zx2::encode_backwards_variant(data, &[], 0, true, usize::MAX).unwrap();
+        assert_eq!(
+            &zx2::decode_backwards_variant(&enc, &[], 0, true, usize::MAX).unwrap(),
+            data
+        );
+        // -b -y: encoder-side block bound on the backwards stream.
+        let enc = zx2::encode_backwards_variant(data, &[], 1, false, 64).unwrap();
+        assert_eq!(&zx2::decode_backwards(&enc).unwrap(), data);
+    }
+}
+
+#[test]
+fn zx2b_rejects_malformed() {
+    // A backwards stream opens with the EOF byte of the forward view;
+    // dropping trailing bytes corrupts the leading control byte.
+    assert!(zx2::decode_backwards(&ZX2B_FOX[..ZX2B_FOX.len() - 1]).is_err());
+    // Prepended garbage is trailing data after the EOF marker.
+    let mut c = Vec::new();
+    c.push(0xaa);
+    c.extend_from_slice(ZX2B_FOX);
+    assert!(zx2::decode_backwards(&c).is_err());
+    // Empty input is the conventional empty stream.
+    assert_eq!(zx2::decode_backwards(&[]).unwrap(), Vec::<u8>::new());
+}

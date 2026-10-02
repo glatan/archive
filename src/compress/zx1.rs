@@ -25,7 +25,15 @@
 //! caller-supplied external history; [`encode_with_prefix`] produces
 //! such streams.
 //!
-//! Backwards (`-b`) mode is outside the current scope.
+//! The backwards (`-b`) variant is supported via [`decode_backwards`] and
+//! [`encode_backwards`]. A backwards stream is the byte-reversed image of
+//! the normal stream; after undoing that reversal the block grammar is
+//! identical and only the offset byte encoding (mirrored rather than
+//! centred on MAX_OFFSET+1, so the largest offset is 32511) and the end
+//! marker (`0x01 0x00` in place of `0xff 0xff`) differ. For the `-b +N`
+//! combination, where the trailing bytes of the uncompressed data serve
+//! as match history, use [`decode_backwards_with_suffix`] and
+//! [`encode_backwards_with_suffix`].
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -91,14 +99,44 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 
 /// Decode a ZX1 stream with an output size limit.
 pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
-    decode_impl(input, &[], max_output)
+    decode_impl(input, &[], max_output, false)
 }
 
 /// Decode a ZX1 stream whose match offsets may reach into `prefix`,
 /// external history logically prepended to the output (the upstream
 /// `+N` prefix option).
 pub fn decode_with_prefix(input: &[u8], prefix: &[u8]) -> Result<Vec<u8>, Error> {
-    decode_impl(input, prefix, usize::MAX)
+    decode_impl(input, prefix, usize::MAX, false)
+}
+
+/// Decode a ZX1 stream produced in backwards (`-b`) mode.
+pub fn decode_backwards(input: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_backwards_bounded(input, usize::MAX)
+}
+
+/// Decode a backwards (`-b`) ZX1 stream with an output size limit.
+pub fn decode_backwards_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
+    decode_backwards_impl(input, &[], max_output)
+}
+
+/// Decode a backwards (`-b`) ZX1 stream whose match offsets may reach
+/// into `suffix`, external history logically appended after the output
+/// (the upstream `-b +N` option). `suffix` is given in normal forward
+/// order, i.e. it is the tail of the original uncompressed data.
+pub fn decode_backwards_with_suffix(input: &[u8], suffix: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_backwards_impl(input, suffix, usize::MAX)
+}
+
+fn decode_backwards_impl(input: &[u8], suffix: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
+    // A backwards stream is the byte-reversed forward stream: undo the
+    // reversal, decode with the backwards offset/EOF encoding, then
+    // reverse the output. The suffix history of the original data becomes
+    // a prefix in the reversed domain.
+    let rev: Vec<u8> = input.iter().rev().copied().collect();
+    let rev_suffix: Vec<u8> = suffix.iter().rev().copied().collect();
+    let mut out = decode_impl(&rev, &rev_suffix, max_output, true)?;
+    out.reverse();
+    Ok(out)
 }
 
 /// Append `len` bytes copied `offset` back in the virtual history
@@ -129,7 +167,12 @@ fn copy_match(
     Ok(())
 }
 
-fn decode_impl(input: &[u8], prefix: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
+fn decode_impl(
+    input: &[u8],
+    prefix: &[u8],
+    max_output: usize,
+    backwards: bool,
+) -> Result<Vec<u8>, Error> {
     if input.is_empty() {
         return Ok(Vec::new());
     }
@@ -168,9 +211,20 @@ fn decode_impl(input: &[u8], prefix: &[u8], max_output: usize) -> Result<Vec<u8>
             }
         }
 
-        // COPY_FROM_NEW_OFFSET.
+        // COPY_FROM_NEW_OFFSET. The backwards variant stores the offset
+        // mirrored: an even first byte is the 1-byte form
+        // `off = (v>>1)+1`; an odd first byte is followed by a second byte
+        // carrying the offset MSB plus the bit robbed from the LSB, and a
+        // second byte of 0 or 1 (`v2>>1 == 0`) marks end of stream.
         let v = r.read_byte()? as usize;
-        let offset = if v & 1 != 0 {
+        let offset = if backwards {
+            if v & 1 == 0 {
+                ((v >> 1) + 1) as i64
+            } else {
+                let i = r.read_byte()? as usize;
+                ((i >> 1) as i64 - 1) * 256 + ((((v & 0xfe) | (i & 1)) + 1) & 0xff) as i64
+            }
+        } else if v & 1 != 0 {
             let i = r.read_byte()? as usize;
             32512i64 - ((i & 254) * 128) as i64 - (v & 254) as i64 - (i & 1) as i64
         } else {
@@ -250,7 +304,7 @@ impl BitWriter {
 /// valid ZX1 but does not aim to match the reference compressor's optimal
 /// parsing output.
 pub fn encode(input: &[u8]) -> Vec<u8> {
-    encode_impl(input, &[])
+    encode_impl(input, &[], false)
 }
 
 /// Encode data as a ZX1 stream whose match offsets may reach into
@@ -258,10 +312,34 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
 /// upstream `+N` prefix option). The result must be decoded with
 /// [`decode_with_prefix`] using the same `prefix`.
 pub fn encode_with_prefix(input: &[u8], prefix: &[u8]) -> Vec<u8> {
-    encode_impl(input, prefix)
+    encode_impl(input, prefix, false)
 }
 
-fn encode_impl(input: &[u8], prefix: &[u8]) -> Vec<u8> {
+/// Encode data as a backwards (`-b`) ZX1 stream.
+///
+/// The encoder uses greedy single-candidate matching; the emitted stream
+/// is valid ZX1 but does not aim to match the reference compressor's
+/// optimal parsing output.
+pub fn encode_backwards(input: &[u8]) -> Vec<u8> {
+    encode_backwards_with_suffix(input, &[])
+}
+
+/// Encode data as a backwards (`-b`) ZX1 stream whose match offsets may
+/// reach into `suffix`, the trailing bytes of the uncompressed data kept
+/// as external history (the upstream `-b +N` option). `suffix` is given
+/// in normal forward order. The result must be decoded with
+/// [`decode_backwards_with_suffix`] using the same `suffix`.
+pub fn encode_backwards_with_suffix(input: &[u8], suffix: &[u8]) -> Vec<u8> {
+    // Compress the reversed input with the reversed suffix as external
+    // history, then reverse the emitted stream.
+    let rev_input: Vec<u8> = input.iter().rev().copied().collect();
+    let rev_suffix: Vec<u8> = suffix.iter().rev().copied().collect();
+    let mut enc = encode_impl(&rev_input, &rev_suffix, true);
+    enc.reverse();
+    enc
+}
+
+fn encode_impl(input: &[u8], prefix: &[u8], backwards: bool) -> Vec<u8> {
     if input.is_empty() {
         // The ZX1 format cannot represent an empty output (the opening
         // literal block requires a length >= 1); emit an empty stream which
@@ -276,6 +354,10 @@ fn encode_impl(input: &[u8], prefix: &[u8]) -> Vec<u8> {
     let base = prefix.len();
     let hist_len = base + input.len();
     let at = |i: usize| -> u8 { if i < base { prefix[i] } else { input[i - base] } };
+
+    // The backwards offset encoding tops out one byte lower: the offset
+    // MSB byte carries `(off>>8)*2 + low + 2`, which must stay <= 254.
+    let max_offset = MAX_OFFSET - backwards as usize;
 
     let mut w = BitWriter::new();
     let mut head = vec![-1i32; 1 << 15];
@@ -307,7 +389,7 @@ fn encode_impl(input: &[u8], prefix: &[u8]) -> Vec<u8> {
             if cand >= 0 && !(first_block && pos == lit_start) {
                 let c = cand as usize;
                 let dist = pos - c;
-                if dist <= MAX_OFFSET
+                if dist <= max_offset
                     && at(c) == at(pos)
                     && at(c + 1) == at(pos + 1)
                     && at(c + 2) == at(pos + 2)
@@ -344,7 +426,15 @@ fn encode_impl(input: &[u8], prefix: &[u8]) -> Vec<u8> {
             } else {
                 // Copy from new offset.
                 w.write_bit(true);
-                if dist <= 128 {
+                if backwards {
+                    if dist <= 128 {
+                        w.write_byte(((dist - 1) * 2) as u8);
+                    } else {
+                        let m = dist - 1;
+                        w.write_byte(((m & 254) + 1) as u8);
+                        w.write_byte(((dist >> 8) * 2 + (m & 1) + 2) as u8);
+                    }
+                } else if dist <= 128 {
                     w.write_byte((256 - 2 * dist) as u8);
                 } else {
                     let m = dist - 1;
@@ -374,10 +464,16 @@ fn encode_impl(input: &[u8], prefix: &[u8]) -> Vec<u8> {
         }
     }
 
-    // End marker: new-offset indicator + offset bytes decoding to <= 0.
+    // End marker: new-offset indicator + offset bytes decoding to <= 0
+    // (`0x01 0x00` backwards, `0xff 0xff` forward).
     w.write_bit(true);
-    w.write_byte(0xff);
-    w.write_byte(0xff);
+    if backwards {
+        w.write_byte(0x01);
+        w.write_byte(0x00);
+    } else {
+        w.write_byte(0xff);
+        w.write_byte(0xff);
+    }
     w.out
 }
 
@@ -580,5 +676,231 @@ mod tests {
         far.extend_from_slice(&[1u8; 100]);
         far.extend_from_slice(b"PATTERN-AT-DISTANCE");
         rt(&far);
+    }
+
+    // ---------------------------------------------------------------
+    // Backwards (`-b`) variant.
+    // ---------------------------------------------------------------
+
+    // Reference vectors produced by upstream `zx1 -b` (v1.5).
+    const ZX1B_FOX: &[u8] = &[
+        0x00, 0x01, 0xb9, 0x58, 0x20, 0x6a, 0x75, 0x6d, 0x70, 0x73, 0xe6, 0x6f, 0x76, 0x65, 0x72,
+        0xa0, 0x1a, 0x6c, 0x61, 0x7a, 0x79, 0x20, 0x64, 0x6f, 0x67, 0x2e, 0x20, 0x74, 0x68, 0x65,
+        0x20, 0x71, 0x75, 0x69, 0x63, 0x6b, 0x20, 0x62, 0x72, 0x6f, 0x77, 0x6e, 0x20, 0x66, 0x6f,
+        0x78, 0x2e, 0x0a, 0x68, 0xff,
+    ];
+    const ZX1B_A300: &[u8] = &[0x00, 0x01, 0xe4, 0xee, 0x61, 0x00, 0x8a];
+    const ZX1B_T4K: &[u8] = &[
+        0x00, 0x01, 0x40, 0xff, 0xfe, 0x26, 0x74, 0x68, 0x65, 0x20, 0x71, 0x75, 0x69, 0x63, 0x6b,
+        0x20, 0x62, 0x72, 0x6f, 0x77, 0x6e, 0x20, 0x66, 0x6f, 0x78, 0x20, 0x7f, 0xba,
+    ];
+    // `zx1 -b +20` on t4k.bin: the last 20 bytes of the input are kept
+    // uncompressed as match history.
+    const ZX1B_T4K_P20: &[u8] = &[0x00, 0x01, 0x40, 0xfe, 0xfe, 0x26, 0x20, 0x7f];
+
+    fn t4k() -> Vec<u8> {
+        let mut v = Vec::new();
+        for _ in 0..205 {
+            v.extend_from_slice(b"the quick brown fox ");
+        }
+        v
+    }
+
+    fn rt_back(data: &[u8]) {
+        let enc = encode_backwards(data);
+        assert_eq!(decode_backwards(&enc).unwrap(), data);
+    }
+
+    fn rt_back_suffix(data: &[u8], suffix: &[u8]) {
+        let enc = encode_backwards_with_suffix(data, suffix);
+        assert_eq!(decode_backwards_with_suffix(&enc, suffix).unwrap(), data);
+    }
+
+    #[test]
+    fn backwards_reference_vectors() {
+        assert_eq!(
+            decode_backwards(ZX1B_FOX).unwrap(),
+            b"the quick brown fox jumps over the lazy dog. the quick brown fox.\n"
+        );
+        let mut a300 = vec![b'a'; 299];
+        a300.push(0);
+        assert_eq!(decode_backwards(ZX1B_A300).unwrap(), a300);
+        assert_eq!(decode_backwards(ZX1B_T4K).unwrap(), t4k());
+    }
+
+    #[test]
+    fn backwards_reference_vector_suffix() {
+        // `zx1 -b +20` on t4k.bin: output is the first 4080 bytes and the
+        // 20-byte tail "the quick brown fox " is the external history.
+        let expected = t4k();
+        assert_eq!(
+            decode_backwards_with_suffix(ZX1B_T4K_P20, b"the quick brown fox ").unwrap(),
+            &expected[..4080]
+        );
+        // Without the suffix history the stream must not decode cleanly.
+        assert!(decode_backwards(ZX1B_T4K_P20).is_err());
+    }
+
+    #[test]
+    fn backwards_decode_far_offset() {
+        // Hand-built backwards stream exercising the two-byte offset form:
+        // 140 distinct literals then a len-5 match at distance 130.
+        // Reversed-domain layout: elias(140), lits, `1` + offset bytes
+        // (dist 130 -> v1 = (129 & 254) + 1 = 129, v2 = 0*2 + 1 + 2 = 3),
+        // elias(4), `1` + 0x01 0x00 EOF; the stream is that reversed.
+        let mut w = BitWriter::new();
+        w.write_elias(140);
+        for i in 0..140u8 {
+            w.write_byte(i);
+        }
+        w.write_bit(true);
+        w.write_byte(129);
+        w.write_byte(3);
+        w.write_elias(4);
+        w.write_bit(true);
+        w.write_byte(0x01);
+        w.write_byte(0x00);
+        let mut stream = w.out;
+        stream.reverse();
+
+        // Internal output is lits ++ lits[10..15]; decode_backwards
+        // returns its reverse.
+        let mut expected: Vec<u8> = (0..140u8).collect();
+        expected.extend_from_slice(&[10, 11, 12, 13, 14]);
+        expected.reverse();
+        assert_eq!(decode_backwards(&stream).unwrap(), expected);
+        assert_eq!(
+            decode_backwards_bounded(&stream, expected.len()).unwrap(),
+            expected
+        );
+        assert!(matches!(
+            decode_backwards_bounded(&stream, expected.len() - 1),
+            Err(Error::OutputLimitExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn backwards_suffix_history() {
+        // In the reversed domain this is literal 'a', then a distance-6
+        // len-3 match reaching into the suffix "HELLO" (reversed-domain
+        // history "OLLEH"), then EOF; reversing the internal output
+        // "aOLL" yields "LLOa". Distance 6 uses the 1-byte form:
+        // byte = (6-1)*2 = 0x0a. Reversed-domain stream before byte
+        // reversal: [0x64, 'a', 0x0a, 0x01, 0x00].
+        let stream = [0x00, 0x01, 0x0a, b'a', 0x64];
+        assert!(decode_backwards(&stream).is_err());
+        assert_eq!(
+            decode_backwards_with_suffix(&stream, b"HELLO").unwrap(),
+            b"LLOa"
+        );
+    }
+
+    #[test]
+    fn backwards_roundtrip() {
+        rt_back(b"a");
+        rt_back(b"ab");
+        rt_back(b"abcabcabc");
+        rt_back(b"hello world hello world hello world");
+        rt_back(&[0u8; 2000]);
+        rt_back(&t4k());
+        let mut binary = Vec::new();
+        for i in 0..4000u32 {
+            binary.extend_from_slice(&i.to_le_bytes());
+        }
+        rt_back(&binary);
+        // Match at distance > 128 exercises the two-byte offset form.
+        let mut far = vec![0u8; 300];
+        far.extend_from_slice(b"PATTERN-AT-DISTANCE");
+        far.extend_from_slice(&[1u8; 100]);
+        far.extend_from_slice(b"PATTERN-AT-DISTANCE");
+        rt_back(&far);
+    }
+
+    #[test]
+    fn backwards_encode_eof_marker_placement() {
+        // The reversed EOF marker `01 00` shows up as the leading bytes
+        // of every non-empty backwards stream.
+        let enc = encode_backwards(b"abcabcabc");
+        assert_eq!(&enc[..2], &[0x00, 0x01]);
+    }
+
+    #[test]
+    fn backwards_roundtrip_with_suffix() {
+        rt_back_suffix(b"hello hello hello", b"suffix data");
+        rt_back_suffix(b"aaaaaaaaaaaaaaaaaaaa", b"aaaa");
+        // The suffix is only history, not part of the output.
+        let t = t4k();
+        let (data, suffix) = t.split_at(4080);
+        rt_back_suffix(data, suffix);
+        // Binary data with a sizeable tail dictionary.
+        let dict: Vec<u8> = (0u16..1000).flat_map(|i| i.to_le_bytes()).collect();
+        let mut binary = dict[1500..1800].to_vec();
+        for i in 0..2000u32 {
+            binary.extend_from_slice(&i.to_le_bytes());
+        }
+        binary.extend_from_slice(&dict[0..300]);
+        rt_back_suffix(&binary, &dict);
+    }
+
+    #[test]
+    fn backwards_empty() {
+        assert_eq!(encode_backwards(b""), Vec::<u8>::new());
+        assert_eq!(encode_backwards_with_suffix(b"", b"hist"), Vec::<u8>::new());
+        assert_eq!(decode_backwards(&[]).unwrap(), Vec::<u8>::new());
+        assert_eq!(
+            decode_backwards_with_suffix(&[], b"hist").unwrap(),
+            Vec::<u8>::new()
+        );
+    }
+
+    #[test]
+    fn backwards_rejects_malformed() {
+        assert!(decode_backwards(&[0x80]).is_err());
+        assert!(decode_backwards(&[0xf2, 0xf8]).is_err());
+        // Truncated stream (reversed domain: missing trailing bytes).
+        assert!(decode_backwards(&ZX1B_FOX[2..]).is_err());
+        // Data after the EOF marker (a leading byte in the backwards
+        // stream lands after the end marker in the reversed domain).
+        let mut c = ZX1B_FOX.to_vec();
+        c.insert(0, 0xaa);
+        assert!(decode_backwards(&c).is_err());
+        // Offset beyond available history: corrupt the last offset byte
+        // of a round-tripped stream.
+        let enc = encode_backwards(b"abababababab");
+        let mut any_err = false;
+        for i in 0..enc.len() {
+            let mut m = enc.clone();
+            m[i] = 0xff;
+            if decode_backwards(&m).is_err() {
+                any_err = true;
+            }
+        }
+        assert!(any_err);
+    }
+
+    #[test]
+    fn backwards_encode_caps_offset() {
+        // The backwards offset byte tops out at 32511: a lone candidate
+        // match at distance 32512+ must not be emitted (its second offset
+        // byte would alias the EOF marker). Build input whose only repeat
+        // sits beyond the backwards limit; the encode/decode roundtrip
+        // must still reproduce the data.
+        let mut data = Vec::new();
+        data.extend_from_slice(b"UNIQ");
+        let mut x = 0x5au8;
+        while data.len() < 32600 {
+            data.push(x);
+            x = x.wrapping_mul(73).wrapping_add(41);
+        }
+        data.extend_from_slice(b"UNIQ");
+        rt_back(&data);
+        // A repeat just inside the limit is encodable.
+        let mut near = Vec::new();
+        near.extend_from_slice(b"MARK!");
+        while near.len() < 32500 {
+            near.push((near.len() % 251) as u8);
+        }
+        near.extend_from_slice(b"MARK!");
+        rt_back(&near);
     }
 }

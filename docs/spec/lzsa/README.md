@@ -4,7 +4,7 @@
 |------|------|
 | 形式概要 | Emmanuel Marty らの LZSA。ストリーム形式 (`7b 9e` magic + traits + 64KiB フレーム列 + EOD フレーム) と、LZSA1 / LZSA2 という 2 種類のブロックフォーマットから構成される |
 | 基準仕様 | [`emmanuel-marty/lzsa`](https://github.com/emmanuel-marty/lzsa) リポジトリの [`StreamFormat.md`](https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/StreamFormat.md) / [`BlockFormat_LZSA1.md`](https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/BlockFormat_LZSA1.md) / [`BlockFormat_LZSA2.md`](https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/BlockFormat_LZSA2.md) (v1.4.1、ローカルスナップショット: `docs/spec/sources/lzsa_*_1.4.1.md`)。参照実装は zlib license (`src/matchfinder.c` のみ CC0) |
-| 実装 | `archive::compress::lzsa` (decode / decode_bounded / decode_lzsa1_block / decode_lzsa2_block / decode_with_prefix / decode_lzsa1_block_with_prefix / decode_lzsa2_block_with_prefix / encode / encode_lzsa2 / encode_with_prefix / encode_lzsa2_with_prefix)。pure-Rust 実装 |
+| 実装 | `archive::compress::lzsa` (decode / decode_bounded / decode_lzsa1_block / decode_lzsa2_block / decode_with_prefix / decode_lzsa1_block_with_prefix / decode_lzsa2_block_with_prefix / decode_lzsa1_block_backwards / decode_lzsa1_block_backwards_with_prefix / decode_lzsa2_block_backwards / decode_lzsa2_block_backwards_with_prefix / encode / encode_lzsa2 / encode_with_prefix / encode_lzsa2_with_prefix / encode_lzsa1_block / encode_lzsa1_block_with_prefix / encode_lzsa2_block / encode_lzsa2_block_with_prefix / encode_lzsa1_block_backwards / encode_lzsa1_block_backwards_with_prefix / encode_lzsa2_block_backwards / encode_lzsa2_block_backwards_with_prefix)。pure-Rust 実装 |
 
 ## 対応バリアント・仕様版
 
@@ -14,7 +14,7 @@
 | LZSA1 ブロック | [BlockFormat_LZSA1.md](https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/BlockFormat_LZSA1.md) | ✅ | ✅ | `encode` は LZSA1 ブロックを出力 |
 | LZSA2 ブロック | [BlockFormat_LZSA2.md](https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/BlockFormat_LZSA2.md) | ✅ | ✅ | |
 | dictionary モード (`-D`) | upstream CLI 用法 (StreamFormat.md 未記載) | ✅ | ✅ | `decode_with_prefix` / `decode_lzsa1_block_with_prefix` / `decode_lzsa2_block_with_prefix` で外部履歴を前置、encode は `encode_with_prefix` / `encode_lzsa2_with_prefix`。wire 形式は不変 |
-| backward モード (`-b`) | — | ❌ | ❌ | intentional scope: StreamFormat.md 未記載 (raw ブロック限定、upstream asm/CLI 実装のみが定義) |
+| backward モード (`-b`) | upstream `lzsa.c` (`-r -b`) / `src/shrink_context.c` 動作解析 | ✅ | ✅ | raw ブロック限定 (upstream も `-r` との組合せ必須)。`decode_lzsa{1,2}_block_backwards{,_with_prefix}` / `encode_lzsa{1,2}_block_backwards{,_with_prefix}`。stream コンテナは対象外 |
 
 ## ストリーム構造
 
@@ -75,7 +75,9 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 31 | CLI は `lzsa` (v1) / `lzsa2` (v2) フォーマットで compress、ストリームの `7b 9e` magic で自動検出、raw ブロックは `--format` 必須 | crate CLI contract | ✅ | `detect_lzsa` (detect 分岐を実装済み) |
+| 31 | CLI は `lzsa` (v1) / `lzsa2` (v2) フォーマットで compress、ストリームの `7b 9e` magic で自動検出、raw ブロックは `--format` 必須 | crate CLI contract | ✅ | `detect_lzsa` (detect 分岐を実装済み)。backward は raw ブロック限定のため CLI 露出なし (library API のみ) |
+| 32 | backward モード (`-r -b`): 入力を `reverse` → 通常ブロックとして符号化 → 出力を `reverse` する pure byte-reversal wrapper で wire 形式は不変。decode は逆順に適用。prefix 履歴は ZX 系の suffix 履歴と異なり正順のまま | 参照 `lzsa.c` / `shrink_context.c` 解析 + upstream 生成ベクタで検証 | ✅ | `lzsa1_raw_block_backwards_reference_vector` / `lzsa2_raw_block_backwards_reference_vector` / `backwards_block_byte_reversal_property` (統合) |
+| 33 | raw ブロック forward/backward encode (`encode_lzsa{1,2}_block{,_backwards}` 系) は `Option<Vec<u8>>` を返す。1 raw ブロックで表現不能な入力 (literal ラン上限超過等) では `None` — stream の verbatim フレーム fallback は利用不可 | BlockFormat_LZSA1/2.md | ✅ | `backwards_raw_block_roundtrip` (統合) |
 
 ## 出典 / 検証メモ
 
@@ -84,11 +86,11 @@
 - ローカル検証として、本実装の `encode` / `encode_lzsa2` 出力を参照 `lzsa -d` で復号し一致を確認 (テキスト・混合・乱数入力)。非圧縮入力では verbatim フレームが選ばれることも一致確認。
 - 仕様メモ: 拡張長フィールドの「特殊 byte」範囲は、仕様書にはエンコーダが出力する範囲のみ記載される。参照デコーダ (expand_block_v*.c) は byte 値を加算してオーバーフロー条件 (256/257) で分岐するため、仕様書未記載の byte 値 (LZSA1: 240-248,251-255 / LZSA2: 234-237,240-255 など) も非マーカー長として受理する。本実装は参照デコーダの挙動に合わせている。
 - LZSA2 のオフセットは、仕様書では「負値格納 + 未使用ビット=1」のモデルで説明されるが、参照デコーダは `(stored ^ mask) + 1` で正の距離を直接得る。両モデルは等価であり、本実装は参照と同じ正距離モデルで書いている。
-- LZSA1 の `lzsa -b` (backward) モード、`lzsa` 独自の小ブロックストリーム API は対象外 (StreamFormat.md 未記載)。辞書 (`-D`) は `decode_with_prefix` / `decode_lzsa*_block_with_prefix` / `encode_with_prefix` / `encode_lzsa2_with_prefix` で対応済み。
+- `lzsa -b` (backward) モードは raw ブロック限定で `decode_lzsa{1,2}_block_backwards` / `encode_lzsa{1,2}_block_backwards` 系に対応済み (upstream と同様 `-r` 相当の raw ブロックのみで、stream コンテナは対象外)。`lzsa` 独自の小ブロックストリーム API は対象外 (StreamFormat.md 未記載)。辞書 (`-D`) は `decode_with_prefix` / `decode_lzsa*_block_with_prefix` / `encode_with_prefix` / `encode_lzsa2_with_prefix` で対応済み。
 
 ## 集計
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 31 |
-| **合計** | **31** |
+| ✅ 実装+テスト済み | 33 |
+| **合計** | **33** |

@@ -36,7 +36,15 @@
 //!   produces matching streams.
 //! [`decode_variant`] covers arbitrary combinations of the above.
 //!
-//! Backwards (`-b`) mode is outside the current scope.
+//! Backwards (`-b`) mode: the stream is the byte-reversed form of a
+//! forward stream whose new-offset byte stores `offset - 1` instead of
+//! `255 - offset`; byte `0xff` remains the end marker in both modes.
+//! [`decode_backwards`] reverses the input, decodes, and reverses the
+//! output; [`decode_backwards_with_suffix`] accepts the upstream `-b +N`
+//! trailing history in normal (unreversed) order. The `-z`, `-x` and
+//! `-y` flags combine orthogonally through [`decode_backwards_variant`]
+//! and [`encode_backwards_variant`]; [`encode_backwards`] and
+//! [`encode_backwards_with_suffix`] produce matching streams.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -102,28 +110,28 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 
 /// Decode a ZX2 stream with an output size limit.
 pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
-    decode_impl(input, &[], max_output, 1, false)
+    decode_impl(input, &[], max_output, 1, false, false)
 }
 
 /// Decode a ZX2 stream produced with `-z` (ignore default offset): the
 /// initial last-offset is 0, so a copy-from-last-offset is invalid until
 /// a new-offset block sets one.
 pub fn decode_no_default_offset(input: &[u8]) -> Result<Vec<u8>, Error> {
-    decode_impl(input, &[], usize::MAX, 0, false)
+    decode_impl(input, &[], usize::MAX, 0, false, false)
 }
 
 /// Decode a ZX2 stream produced with `-x` (skip length increment):
 /// new-offset block lengths are stored as `elias(len)` without the
 /// usual -1 bias.
 pub fn decode_no_length_increment(input: &[u8]) -> Result<Vec<u8>, Error> {
-    decode_impl(input, &[], usize::MAX, 1, true)
+    decode_impl(input, &[], usize::MAX, 1, true, false)
 }
 
 /// Decode a ZX2 stream whose match offsets may reach into `prefix`,
 /// external history logically prepended to the output (the upstream
 /// `+N` prefix option).
 pub fn decode_with_prefix(input: &[u8], prefix: &[u8]) -> Result<Vec<u8>, Error> {
-    decode_impl(input, prefix, usize::MAX, 1, false)
+    decode_impl(input, prefix, usize::MAX, 1, false, false)
 }
 
 /// Decode a ZX2 stream with arbitrary combinations of the upstream
@@ -147,7 +155,71 @@ pub fn decode_variant(
         usize::MAX,
         initial_offset,
         skip_len_increment,
+        false,
     )
+}
+
+/// Decode a ZX2 stream produced with `-b` (backwards mode): the stream
+/// is the byte-reversed form of a forward stream whose new-offset byte
+/// stores `offset - 1` instead of `255 - offset`.
+pub fn decode_backwards(input: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_backwards_bounded(input, usize::MAX)
+}
+
+/// Decode a backwards (`-b`) ZX2 stream with an output size limit.
+pub fn decode_backwards_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
+    decode_backwards_variant(input, &[], 1, false, max_output)
+}
+
+/// Decode a backwards (`-b`) ZX2 stream whose match offsets may reach
+/// into `suffix`, external history logically appended to the output in
+/// the original data direction (the upstream `-b +N` option). `suffix`
+/// is given in normal (unreversed) order.
+pub fn decode_backwards_with_suffix(input: &[u8], suffix: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_backwards_variant(input, suffix, 1, false, usize::MAX)
+}
+
+/// Decode a backwards (`-b`) ZX2 stream with arbitrary combinations of
+/// the upstream variant flags applied.
+///
+/// * `suffix` — external history logically appended to the output in
+///   the original data direction (the `-b +N` option); given in normal
+///   (unreversed) order, may be empty.
+/// * `initial_offset` — initial last-offset value: 0 for `-z` streams,
+///   1 (the default) otherwise.
+/// * `skip_len_increment` — `true` for `-x` streams where new-offset
+///   block lengths are stored without the -1 bias.
+/// * `max_output` — bound on the decoded size; exceeding it returns
+///   [`Error::OutputLimitExceeded`].
+pub fn decode_backwards_variant(
+    input: &[u8],
+    suffix: &[u8],
+    initial_offset: usize,
+    skip_len_increment: bool,
+    max_output: usize,
+) -> Result<Vec<u8>, Error> {
+    if input.is_empty() {
+        return Ok(Vec::new());
+    }
+    // A backwards stream is a forward stream stored in reverse byte
+    // order: reversing the input exposes the regular block grammar, and
+    // the decoded output is likewise produced in reverse order. The
+    // same applies to the external history, which precedes the reversed
+    // input data in the reversed domain.
+    let mut stream = input.to_vec();
+    stream.reverse();
+    let mut history = suffix.to_vec();
+    history.reverse();
+    let mut out = decode_impl(
+        &stream,
+        &history,
+        max_output,
+        initial_offset,
+        skip_len_increment,
+        true,
+    )?;
+    out.reverse();
+    Ok(out)
 }
 
 /// Append `len` bytes copied `offset` back in the virtual history
@@ -184,6 +256,7 @@ fn decode_impl(
     max_output: usize,
     initial_offset: usize,
     skip_len_increment: bool,
+    backwards: bool,
 ) -> Result<Vec<u8>, Error> {
     if input.is_empty() {
         return Ok(Vec::new());
@@ -223,9 +296,11 @@ fn decode_impl(
             }
         }
 
-        // COPY_FROM_NEW_OFFSET: single byte `255 - offset`; 0xff is EOF.
-        let offset = 255 - r.read_byte()? as usize;
-        if offset == 0 {
+        // COPY_FROM_NEW_OFFSET: forward streams store `255 - offset`,
+        // the backwards (`-b`) variant stores `offset - 1`; byte 0xff is
+        // the EOF marker in both modes.
+        let byte = r.read_byte()?;
+        if byte == 0xff {
             // EOF marker: the reference decoder requires the input to be
             // fully consumed at this point.
             if r.pos != input.len() {
@@ -233,6 +308,11 @@ fn decode_impl(
             }
             return Ok(out);
         }
+        let offset = if backwards {
+            byte as usize + 1
+        } else {
+            255 - byte as usize
+        };
         last_offset = offset;
         // `-x` stores the length verbatim; the default stores len - 1.
         let len = r.elias()? as usize + if skip_len_increment { 0 } else { 1 };
@@ -343,7 +423,79 @@ pub fn encode_max_len(input: &[u8], max_len: usize) -> Result<Vec<u8>, Error> {
 /// The first block must be a literal, so a match starting at `input[0]`
 /// is never emitted even when the prefix offers one.
 pub fn encode_with_prefix(input: &[u8], prefix: &[u8]) -> Vec<u8> {
-    encode_impl(input, prefix, 1, false, usize::MAX).expect("zx2: unbounded encode cannot fail")
+    encode_impl(input, prefix, 1, false, usize::MAX, false)
+        .expect("zx2: unbounded encode cannot fail")
+}
+
+/// Encode data as a backwards (`-b`) ZX2 stream decodable by
+/// [`decode_backwards`]: the reversed input is compressed as a forward
+/// stream whose new-offset byte stores `offset - 1`, and the resulting
+/// stream itself is reversed.
+///
+/// The encoder uses greedy single-candidate matching; the emitted stream
+/// is valid ZX2 but does not aim to match the reference compressor's
+/// optimal parsing output.
+pub fn encode_backwards(input: &[u8]) -> Vec<u8> {
+    encode_backwards_variant(input, &[], 1, false, usize::MAX)
+        .expect("zx2: unbounded encode cannot fail")
+}
+
+/// Encode data as a backwards (`-b`) ZX2 stream decodable by
+/// [`decode_backwards_with_suffix`] (the upstream `-b +N` option):
+/// `suffix` is external history logically appended to `input` in the
+/// original data direction and is given in normal (unreversed) order.
+/// Only the first 255 bytes of `suffix` are reachable (ZX2's maximum
+/// offset); later suffix bytes are ignored.
+///
+/// The first block must be a literal, so a match starting at `input[0]`
+/// is never emitted even when the suffix offers one.
+pub fn encode_backwards_with_suffix(input: &[u8], suffix: &[u8]) -> Vec<u8> {
+    encode_backwards_variant(input, suffix, 1, false, usize::MAX)
+        .expect("zx2: unbounded encode cannot fail")
+}
+
+/// Encode a backwards (`-b`) ZX2 stream with selectable variant flags,
+/// mirroring [`decode_backwards_variant`].
+///
+/// * `suffix` — external history logically appended to `input` in the
+///   original data direction (the `-b +N` option); given in normal
+///   (unreversed) order, may be empty.
+/// * `initial_offset` — initial last-offset value: 0 for `-z`
+///   compatibility, 1 (the default) otherwise.
+/// * `skip_len_increment` — `true` for `-x` compatibility: new-offset
+///   block lengths are stored as `elias(len)` without the -1 bias.
+/// * `max_len` — bound on the decoded length of every emitted block
+///   (the `-y` constraint); `usize::MAX` disables it. An unmatchable
+///   literal run longer than `max_len` is an error since literal blocks
+///   cannot be consecutive.
+pub fn encode_backwards_variant(
+    input: &[u8],
+    suffix: &[u8],
+    initial_offset: usize,
+    skip_len_increment: bool,
+    max_len: usize,
+) -> Result<Vec<u8>, Error> {
+    if input.is_empty() {
+        // Same convention as encode_impl: the ZX2 format cannot
+        // represent an empty output; emit an empty stream.
+        return Ok(Vec::new());
+    }
+    // Compress the reversed input with the reversed suffix as prepend
+    // history, then reverse the emitted stream itself.
+    let mut rev_input = input.to_vec();
+    rev_input.reverse();
+    let mut rev_suffix = suffix.to_vec();
+    rev_suffix.reverse();
+    let mut out = encode_impl(
+        &rev_input,
+        &rev_suffix,
+        initial_offset,
+        skip_len_increment,
+        max_len,
+        true,
+    )?;
+    out.reverse();
+    Ok(out)
 }
 
 /// Encode a ZX2 stream with selectable variant flags, mirroring
@@ -363,17 +515,27 @@ fn encode_variant(
     skip_len_increment: bool,
     max_len: usize,
 ) -> Result<Vec<u8>, Error> {
-    encode_impl(input, &[], initial_offset, skip_len_increment, max_len)
+    encode_impl(
+        input,
+        &[],
+        initial_offset,
+        skip_len_increment,
+        max_len,
+        false,
+    )
 }
 
 /// Shared encoder core. `prefix` is external history logically prepended
-/// to the output as in [`decode_with_prefix`]; it may be empty.
+/// to the output as in [`decode_with_prefix`]; it may be empty. When
+/// `backwards` is set the new-offset byte is stored as `offset - 1`
+/// (the `-b` variant) instead of `255 - offset`.
 fn encode_impl(
     input: &[u8],
     prefix: &[u8],
     initial_offset: usize,
     skip_len_increment: bool,
     max_len: usize,
+    backwards: bool,
 ) -> Result<Vec<u8>, Error> {
     if input.is_empty() {
         // The ZX2 format cannot represent an empty output (the opening
@@ -488,7 +650,13 @@ fn encode_impl(
             } else {
                 // Copy from new offset.
                 w.write_bit(true);
-                w.write_byte((255 - dist) as u8);
+                // The backwards (`-b`) variant stores `offset - 1`
+                // instead of `255 - offset`.
+                w.write_byte(if backwards {
+                    (dist - 1) as u8
+                } else {
+                    (255 - dist) as u8
+                });
                 // `-x` stores the length verbatim; the default stores
                 // len - 1 (upstream min_length 1 vs 2).
                 w.write_elias(if skip_len_increment { len } else { len - 1 });
@@ -895,5 +1063,277 @@ mod tests {
         far.extend_from_slice(&[1u8; 40]);
         far.extend_from_slice(b"PATTERN-AT-DISTANCE");
         rt(&far);
+    }
+
+    // -- Backwards (`-b`) variant ------------------------------------
+
+    // Streams produced by upstream `zx2` v1.1.
+    const ZX2B_FOX: &[u8] = &[
+        0xff, 0xb9, 0x2c, 0x20, 0x6a, 0x75, 0x6d, 0x70, 0x73, 0xe6, 0x6f, 0x76, 0x65, 0x72, 0xa0,
+        0x0d, 0x6c, 0x61, 0x7a, 0x79, 0x20, 0x64, 0x6f, 0x67, 0x2e, 0x20, 0x74, 0x68, 0x65, 0x20,
+        0x71, 0x75, 0x69, 0x63, 0x6b, 0x20, 0x62, 0x72, 0x6f, 0x77, 0x6e, 0x20, 0x66, 0x6f, 0x78,
+        0x2e, 0x0a, 0x68, 0xff,
+    ];
+    const ZX2B_A300: &[u8] = &[0xff, 0xe4, 0xee, 0x61, 0x00, 0x8a];
+    const ZX2B_T4K: &[u8] = &[
+        0xff, 0x40, 0xff, 0xfe, 0x13, 0x74, 0x68, 0x65, 0x20, 0x71, 0x75, 0x69, 0x63, 0x6b, 0x20,
+        0x62, 0x72, 0x6f, 0x77, 0x6e, 0x20, 0x66, 0x6f, 0x78, 0x20, 0x7f, 0xba,
+    ];
+    // `zx2 -b -x`.
+    const ZX2B_FOX_X: &[u8] = &[
+        0xff, 0xd0, 0x2c, 0x6b, 0x6a, 0x6d, 0x70, 0x73, 0xc0, 0x1c, 0x6f, 0x76, 0x65, 0x72, 0xa4,
+        0x0d, 0x6c, 0x61, 0x7a, 0x79, 0x20, 0x64, 0x6f, 0x67, 0x2e, 0x20, 0x74, 0x68, 0x65, 0x20,
+        0x71, 0x75, 0x69, 0x63, 0x6b, 0x20, 0x62, 0x72, 0x6f, 0x77, 0x6e, 0x20, 0x66, 0x6f, 0x78,
+        0x2e, 0x0a, 0x6c, 0xff,
+    ];
+    // `zx2 -b -z`.
+    const ZX2B_A300_Z: &[u8] = &[0xff, 0xb4, 0xee, 0x00, 0x61, 0x00, 0x9a];
+    // `zx2 -b +20` on the 4100-byte T4K input: covers the first 4080
+    // bytes with the last 20 ("the quick brown fox ") as suffix history.
+    const ZX2B_T4K_P20: &[u8] = &[0xff, 0x40, 0xfe, 0xfe, 0x13, 0x20, 0x7f];
+
+    const FOX_TEXT: &[u8] = b"the quick brown fox jumps over the lazy dog. the quick brown fox.\n";
+
+    fn rtb(data: &[u8]) {
+        let enc = encode_backwards(data);
+        // A backwards stream is the reversed forward stream, so it
+        // always opens with the EOF marker byte.
+        assert_eq!(enc[0], 0xff);
+        assert_eq!(decode_backwards(&enc).unwrap(), data);
+    }
+
+    #[test]
+    fn decode_backwards_kat() {
+        assert_eq!(decode_backwards(ZX2B_FOX).unwrap(), FOX_TEXT);
+        let mut a300 = vec![b'a'; 299];
+        a300.push(0);
+        assert_eq!(decode_backwards(ZX2B_A300).unwrap(), a300);
+        let pat = b"the quick brown fox ";
+        let mut t4k = Vec::new();
+        for _ in 0..205 {
+            t4k.extend_from_slice(pat);
+        }
+        assert_eq!(decode_backwards(ZX2B_T4K).unwrap(), t4k);
+    }
+
+    #[test]
+    fn decode_backwards_variant_kat() {
+        // `-b -x` and `-b -z` streams through the general variant form.
+        assert_eq!(
+            decode_backwards_variant(ZX2B_FOX_X, &[], 1, true, usize::MAX).unwrap(),
+            FOX_TEXT
+        );
+        let mut a300 = vec![b'a'; 299];
+        a300.push(0);
+        assert_eq!(
+            decode_backwards_variant(ZX2B_A300_Z, &[], 0, false, usize::MAX).unwrap(),
+            a300
+        );
+    }
+
+    #[test]
+    fn decode_backwards_suffix_kat() {
+        // `zx2 -b +20`: the match at the start of the stream reaches
+        // into the 20-byte suffix history.
+        let suffix = b"the quick brown fox ";
+        let mut expected = Vec::new();
+        for _ in 0..204 {
+            expected.extend_from_slice(suffix);
+        }
+        assert_eq!(
+            decode_backwards_with_suffix(ZX2B_T4K_P20, suffix).unwrap(),
+            expected
+        );
+        assert_eq!(
+            decode_backwards_variant(ZX2B_T4K_P20, suffix, 1, false, usize::MAX).unwrap(),
+            expected
+        );
+        // Without the suffix the first match points beyond the output.
+        assert!(decode_backwards(ZX2B_T4K_P20).is_err());
+        // A wrong suffix decodes but yields different bytes.
+        let mut expected_bad = Vec::new();
+        for _ in 0..204 {
+            expected_bad.extend_from_slice(b"the quick brown FOX ");
+        }
+        assert_eq!(
+            decode_backwards_with_suffix(ZX2B_T4K_P20, b"the quick brown FOX ").unwrap(),
+            expected_bad
+        );
+    }
+
+    #[test]
+    fn decode_backwards_offset_byte() {
+        // The backwards offset byte stores `offset - 1`: byte 0x00 is a
+        // distance-1 match (0xfe would be distance 1 in forward mode).
+        //   F: literal 'a' | newoff byte 0x00 (dist 1) len elias(2) | EOF
+        //   B = reverse(F)
+        let stream = [0xff, 0x00, b'a', 0x64];
+        assert_eq!(decode_backwards(&stream).unwrap(), b"aaaa");
+        // Byte 0xfe encodes offset 255, beyond the single byte of
+        // available history.
+        assert!(decode_backwards(&[0xff, 0xfe, b'a', 0x64]).is_err());
+        // A rep-offset block carries no offset byte and is identical in
+        // both modes.
+        let stream = [0xff, b'a', 0x34];
+        assert_eq!(decode_backwards(&stream).unwrap(), b"aaaa");
+    }
+
+    #[test]
+    fn decode_backwards_rejects_malformed() {
+        let enc = encode_backwards(b"the quick brown fox jumps over the lazy dog");
+        // Truncating the backwards stream drops the leading control
+        // byte of the forward stream.
+        assert!(decode_backwards(&enc[..enc.len() - 1]).is_err());
+        // Bytes prepended to a backwards stream are trailing data after
+        // the EOF marker in the forward view.
+        let mut c = Vec::new();
+        c.push(0xaa);
+        c.extend_from_slice(&enc);
+        assert!(decode_backwards(&c).is_err());
+        // Corruption is detected somewhere in the stream.
+        let mut any_err = false;
+        for i in 0..enc.len() {
+            let mut c = enc.clone();
+            c[i] = 0x00;
+            if decode_backwards(&c).is_err() {
+                any_err = true;
+            }
+        }
+        assert!(any_err);
+        // Empty input maps to empty output in both directions.
+        assert_eq!(decode_backwards(&[]).unwrap(), Vec::<u8>::new());
+        assert_eq!(
+            decode_backwards_variant(&[], b"sfx", 0, true, 7).unwrap(),
+            Vec::<u8>::new()
+        );
+        assert_eq!(encode_backwards(b""), Vec::<u8>::new());
+        assert_eq!(
+            encode_backwards_variant(b"", b"sfx", 0, true, 0).unwrap(),
+            Vec::<u8>::new()
+        );
+    }
+
+    #[test]
+    fn decode_backwards_bounded_limit() {
+        let data = vec![b'z'; 500];
+        let enc = encode_backwards(&data);
+        assert!(matches!(
+            decode_backwards_bounded(&enc, 100),
+            Err(Error::OutputLimitExceeded { .. })
+        ));
+        assert_eq!(decode_backwards_bounded(&enc, 500).unwrap(), data);
+    }
+
+    #[test]
+    fn encode_backwards_roundtrip() {
+        rtb(b"a");
+        rtb(b"ab");
+        rtb(b"abcabcabc");
+        rtb(b"aaaaaaaaaaaaaaaaaaaa");
+        rtb(b"hello world hello world hello world");
+        rtb(&[0u8; 2000]);
+        let mut text = Vec::new();
+        for _ in 0..150 {
+            text.extend_from_slice(b"the quick brown fox jumps over the lazy dog. ");
+        }
+        rtb(&text);
+        let mut binary = Vec::new();
+        for i in 0..4000u32 {
+            binary.extend_from_slice(&i.to_le_bytes());
+        }
+        rtb(&binary);
+        let mut mixed = Vec::new();
+        for _ in 0..50 {
+            mixed.extend_from_slice(b"aaaaa");
+            mixed.extend_from_slice(b"abcdef");
+        }
+        rtb(&mixed);
+        // Distances near the 255-byte offset limit.
+        let mut far = Vec::new();
+        far.extend(0u8..=250);
+        far.extend_from_slice(b"PATTERN!");
+        far.extend(0u8..=250);
+        far.extend_from_slice(b"PATTERN!");
+        rtb(&far);
+        // Backwards encoding differs from forward encoding.
+        assert_ne!(encode_backwards(b"abcabcabc"), encode(b"abcabcabc"));
+    }
+
+    #[test]
+    fn encode_backwards_with_suffix_roundtrip() {
+        // The input tail "abc" repeats the suffix start; in the
+        // reversed (forward) domain this is a distance-4 new-offset
+        // match after literal 'Q', stored with backwards byte 0x03.
+        //   F = [0x64, 'Q', 0x03, 0xff]  ->  B = [0xff, 0x03, 'Q', 0x64]
+        let enc = encode_backwards_with_suffix(b"abcQ", b"abc");
+        assert_eq!(enc, [0xff, 0x03, b'Q', 0x64]);
+        assert_eq!(decode_backwards_with_suffix(&enc, b"abc").unwrap(), b"abcQ");
+
+        // A mix of suffix-referencing and in-input matches.
+        let enc = encode_backwards_with_suffix(b"xabcabc", b"abc");
+        assert_eq!(
+            decode_backwards_with_suffix(&enc, b"abc").unwrap(),
+            b"xabcabc"
+        );
+
+        // Only the first 255 suffix bytes are reachable; the emitted
+        // match must reference the suffix, so decoding without it fails.
+        let suffix: Vec<u8> = (0..300u32).map(|i| i as u8).collect();
+        let mut data = vec![b'x'; 40];
+        data.extend_from_slice(&suffix[..20]);
+        let enc = encode_backwards_with_suffix(&data, &suffix);
+        assert_eq!(decode_backwards_with_suffix(&enc, &suffix).unwrap(), data);
+        assert!(decode_backwards(&enc).map_or(true, |v| v != data));
+
+        // A wrong suffix decodes but yields different bytes.
+        assert_ne!(
+            decode_backwards_with_suffix(&[0xff, 0x03, b'Q', 0x64], b"XYZ").unwrap(),
+            b"abcQ"
+        );
+    }
+
+    #[test]
+    fn encode_backwards_variant_roundtrip() {
+        let cases: Vec<Vec<u8>> = vec![
+            b"a".to_vec(),
+            b"abcabcabcabcabcabc".to_vec(),
+            b"aaaaaaaaaaaaaaaaaaaa".to_vec(),
+            b"hello world hello world hello world".to_vec(),
+            vec![7u8; 1500],
+        ];
+        for data in &cases {
+            // -z: the first match is always a new-offset block, so the
+            // stream also decodes with the default flags.
+            let enc = encode_backwards_variant(data, &[], 0, false, usize::MAX).unwrap();
+            assert_eq!(
+                decode_backwards_variant(&enc, &[], 0, false, usize::MAX).unwrap(),
+                *data
+            );
+            assert_eq!(decode_backwards(&enc).unwrap(), *data);
+            // -x: new-offset lengths are stored without the -1 bias.
+            let enc = encode_backwards_variant(data, &[], 1, true, usize::MAX).unwrap();
+            assert_eq!(
+                decode_backwards_variant(&enc, &[], 1, true, usize::MAX).unwrap(),
+                *data
+            );
+            // -b -z -x + suffix combined.
+            let enc = encode_backwards_variant(data, b"tail history", 0, true, usize::MAX).unwrap();
+            assert_eq!(
+                decode_backwards_variant(&enc, b"tail history", 0, true, usize::MAX).unwrap(),
+                *data
+            );
+        }
+        // `-y` (max_len) constrains the backwards encoder as well.
+        let mut text = Vec::new();
+        for _ in 0..80 {
+            text.extend_from_slice(b"the quick brown fox jumps over the lazy dog. ");
+        }
+        let enc = encode_backwards_variant(&text, &[], 1, false, 64).unwrap();
+        assert_eq!(decode_backwards(&enc).unwrap(), text);
+        // max_block_len inspects the forward (unreversed) form; the
+        // offset byte encoding differs but 0xff is EOF in both modes.
+        let mut f = enc.clone();
+        f.reverse();
+        assert!(max_block_len(&f) <= 64);
     }
 }

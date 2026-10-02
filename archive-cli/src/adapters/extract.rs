@@ -550,6 +550,42 @@ pub fn extract_input(
             compress_formats::zx5::decode(input)
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?,
         ),
+        Format::Zx0b => extract_single_payload(
+            input_path,
+            &base_dir,
+            format,
+            selected_paths,
+            overwrite,
+            compress_formats::zx0::decode_backwards(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Zx1b => extract_single_payload(
+            input_path,
+            &base_dir,
+            format,
+            selected_paths,
+            overwrite,
+            compress_formats::zx1::decode_backwards(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Zx2b => extract_single_payload(
+            input_path,
+            &base_dir,
+            format,
+            selected_paths,
+            overwrite,
+            compress_formats::zx2::decode_backwards(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
+        Format::Zx5b => extract_single_payload(
+            input_path,
+            &base_dir,
+            format,
+            selected_paths,
+            overwrite,
+            compress_formats::zx5::decode_backwards(input)
+                .map_err(|error| CliError::from_archive_error(error, password_provided))?,
+        ),
         Format::Vcdiff => extract_single_payload(
             input_path,
             &base_dir,

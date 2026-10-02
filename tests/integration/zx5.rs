@@ -183,3 +183,173 @@ fn zx5_classic_v1_stream() {
     assert!(zx5::decode_with_prefix(&v1, &prefix).is_err());
     assert!(zx5::decode_classic_with_prefix(&v2, &prefix).is_err());
 }
+
+// ---------------------------------------------------------------
+// Variant coverage: -b backwards streams (and -b +N suffix).
+// ---------------------------------------------------------------
+//
+// ZX5B_* streams below were produced by `zx5 -b` from the reference
+// ZX5 compressor (Einar Saukas, BSD 3-Clause, ZX5 v2.0) and are used
+// as known-answer tests for the backwards wire format.
+
+const ZX5B_FOX: &[u8] = &[
+    0xa8, 0xaa, 0x9a, 0x2c, 0xcb, 0x20, 0x6a, 0x75, 0x6d, 0x70, 0x73, 0x39, 0x6f, 0x76, 0x65, 0x72,
+    0x28, 0x0d, 0x6c, 0x61, 0x7a, 0x79, 0x20, 0x64, 0x6f, 0x67, 0x2e, 0x20, 0x74, 0x68, 0x65, 0x20,
+    0x71, 0x75, 0x69, 0x63, 0x6b, 0x20, 0x62, 0x72, 0x6f, 0x77, 0x6e, 0x20, 0x66, 0x6f, 0x78, 0x2e,
+    0x0a, 0x72, 0xff,
+];
+
+const ZX5B_A300: &[u8] = &[0x00, 0xaa, 0xaa, 0xe6, 0xee, 0x61, 0x00, 0x8a];
+
+const ZX5B_T4K: &[u8] = &[
+    0xa8, 0xaa, 0xda, 0xbf, 0xff, 0x13, 0x74, 0x68, 0x65, 0x20, 0x71, 0x75, 0x69, 0x63, 0x6b, 0x20,
+    0x62, 0x72, 0x6f, 0x77, 0x6e, 0x20, 0x66, 0x6f, 0x78, 0x20, 0x77, 0xba,
+];
+
+// `zx5 -b +10` on the 300-byte 'a' input: the stream encodes the first
+// 290 bytes; the last 10 bytes serve as trailing match history.
+const ZX5B_A300_P10: &[u8] = &[0xa8, 0xaa, 0xda, 0xaa, 0x61, 0x2b];
+
+// `zx5 -b +10` on the fox text: encodes the first 56 bytes with the
+// last 10 bytes ("rown fox.\n") as trailing history. Unlike the a300
+// vector this one actually reaches into the suffix, so a wrong suffix
+// fails or yields wrong output.
+const ZX5B_FOX_P10: &[u8] = &[
+    0xa8, 0xaa, 0x9a, 0x2c, 0xcb, 0x20, 0x6a, 0x75, 0x6d, 0x70, 0x73, 0x39, 0x6f, 0x76, 0x65, 0x72,
+    0x28, 0x0d, 0x6c, 0x61, 0x7a, 0x79, 0x20, 0x64, 0x6f, 0x67, 0x2e, 0x20, 0x74, 0x68, 0x65, 0x20,
+    0x71, 0x75, 0x69, 0x63, 0x6b, 0x20, 0x62, 0x72, 0xbb,
+];
+
+fn fox_text() -> Vec<u8> {
+    b"the quick brown fox jumps over the lazy dog. the quick brown fox.\n".to_vec()
+}
+
+#[test]
+fn zx5b_reference_vector_text() {
+    let dec = zx5::decode_backwards(ZX5B_FOX).unwrap();
+    assert_eq!(dec, fox_text());
+}
+
+#[test]
+fn zx5b_reference_vector_rep_offset() {
+    // 299 'a' + NUL: exercises copy-from-last-offset under the mirrored
+    // backwards Elias coding.
+    let mut expected = vec![b'a'; 299];
+    expected.push(0);
+    assert_eq!(zx5::decode_backwards(ZX5B_A300).unwrap(), expected);
+}
+
+#[test]
+fn zx5b_reference_vector_long_match() {
+    // 4100 bytes: a 20-byte literal run followed by a long match chain.
+    let pat = b"the quick brown fox ";
+    let mut expected = Vec::new();
+    for _ in 0..205 {
+        expected.extend_from_slice(pat);
+    }
+    assert_eq!(zx5::decode_backwards(ZX5B_T4K).unwrap(), expected);
+}
+
+#[test]
+fn zx5b_reference_vector_suffix() {
+    let mut a300 = vec![b'a'; 299];
+    a300.push(0);
+    // `-b +10` on a300: last 10 bytes are the suffix history
+    // ('a' * 9 + NUL); the emitted output is a300[..290]. This stream
+    // decodes to the same output with any suffix of 'a's since every
+    // referenced history byte is 'a'.
+    let suffix = &a300[a300.len() - 10..];
+    assert_eq!(
+        zx5::decode_backwards_with_suffix(ZX5B_A300_P10, suffix).unwrap(),
+        &a300[..290]
+    );
+    assert_eq!(
+        zx5::decode_backwards_with_suffix(ZX5B_A300_P10, b"aaaaaaaaaa").unwrap(),
+        &a300[..290]
+    );
+
+    // The fox `+10` stream genuinely references the suffix: decoding
+    // it without the suffix fails, and a wrong suffix yields wrong bytes.
+    let fox = fox_text();
+    let suffix = &fox[fox.len() - 10..];
+    assert_eq!(suffix, b"rown fox.\n");
+    assert!(zx5::decode_backwards(ZX5B_FOX_P10).is_err());
+    assert_eq!(
+        zx5::decode_backwards_with_suffix(ZX5B_FOX_P10, suffix).unwrap(),
+        &fox[..fox.len() - 10]
+    );
+    if let Ok(out) = zx5::decode_backwards_with_suffix(ZX5B_FOX_P10, b"0123456789") {
+        assert_ne!(out, &fox[..fox.len() - 10]);
+    }
+}
+
+#[test]
+fn zx5b_roundtrips() {
+    let mut cases: Vec<Vec<u8>> = vec![
+        Vec::new(),
+        b"x".to_vec(),
+        b"ab".to_vec(),
+        b"hello hello hello".to_vec(),
+        vec![0u8; 3000],
+    ];
+    let mut text = Vec::new();
+    for _ in 0..200 {
+        text.extend_from_slice(b"the quick brown fox jumps over the lazy dog. ");
+    }
+    cases.push(text);
+    // Alternating patterns exercise 2nd/3rd-last offset blocks.
+    let mut alt = Vec::new();
+    for _ in 0..40 {
+        alt.extend_from_slice(b"ABCDEFGH");
+        alt.extend_from_slice(b"12345678");
+        alt.extend_from_slice(b"abcdefgh");
+    }
+    cases.push(alt);
+    // Mixed runs exercise copy-from-last-offset paths.
+    let mut mixed = Vec::new();
+    for _ in 0..80 {
+        mixed.extend_from_slice(b"aaaaa");
+        mixed.extend_from_slice(b"bcdefg");
+    }
+    cases.push(mixed);
+
+    for data in &cases {
+        assert_eq!(
+            &zx5::decode_backwards(&zx5::encode_backwards(data)).unwrap(),
+            data
+        );
+        assert_eq!(
+            &zx5::decode_backwards(&zx5::encode_backwards_quick(data)).unwrap(),
+            data
+        );
+    }
+
+    // Suffix roundtrip: encode the payload minus its tail, supplying the
+    // tail as `-b +N` history.
+    let mut data = Vec::new();
+    for _ in 0..50 {
+        data.extend_from_slice(b"pack my box with five dozen liquor jugs. ");
+    }
+    let suffix: Vec<u8> = data[data.len() - 20..].to_vec();
+    let body = &data[..data.len() - 20];
+    let enc = zx5::encode_backwards_with_suffix(body, &suffix);
+    assert_eq!(
+        zx5::decode_backwards_with_suffix(&enc, &suffix).unwrap(),
+        body
+    );
+}
+
+#[test]
+fn zx5b_rejects_malformed() {
+    assert_eq!(zx5::decode_backwards(&[]).unwrap(), Vec::<u8>::new());
+    // Truncated stream.
+    assert!(zx5::decode_backwards(&ZX5B_FOX[..ZX5B_FOX.len() - 1]).is_err());
+    // A leading byte is trailing garbage in the internal stream order.
+    let mut c = Vec::new();
+    c.push(0xaa);
+    c.extend_from_slice(ZX5B_FOX);
+    assert!(zx5::decode_backwards(&c).is_err());
+    // The forward wire variant does not decode as backwards.
+    assert!(zx5::decode_backwards(ZX5_FOX).is_err());
+    assert!(zx5::decode(ZX5B_FOX).is_err());
+}
