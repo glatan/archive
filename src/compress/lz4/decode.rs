@@ -219,14 +219,16 @@ fn decode_standard_frame(
     }
     let dict_id_present = (flg & 0x01) != 0;
 
-    // BD byte -- block max size (we don't need to enforce it for decoding)
+    // BD byte -- block max size
     if (bd & 0x8F) != 0 {
         return Err(Error::InvalidData("lz4: reserved BD bits set"));
     }
-    let _block_max_id = (bd >> 4) & 0x07;
-    if _block_max_id < 4 {
+    let block_max_id = (bd >> 4) & 0x07;
+    if block_max_id < 4 {
         return Err(Error::InvalidData("lz4: invalid block max size"));
     }
+    // Block_MaxSize in bytes: id 4 => 64KB, 5 => 256KB, 6 => 1MB, 7 => 4MB.
+    let block_max_size = (64 * 1024_usize) << (2 * (block_max_id as usize - 4));
 
     // Optional content size
     let content_size = if content_size_present {
@@ -276,6 +278,12 @@ fn decode_standard_frame(
         let is_uncompressed = (block_size_raw & 0x80000000) != 0;
         let block_data_size = (block_size_raw & 0x7FFFFFFF) as usize;
 
+        // Block_Size must not exceed Block_MaxSize for both compressed
+        // and uncompressed (highest bit set) blocks.
+        if block_data_size > block_max_size {
+            return Err(Error::InvalidData("lz4: block size exceeds block max size"));
+        }
+
         if *pos + block_data_size > input.len() {
             return Err(Error::UnexpectedEof);
         }
@@ -294,7 +302,15 @@ fn decode_standard_frame(
                 history = dependent_history(dict, output);
                 history.as_slice()
             };
-            decompress_block(block_data, &mut block_output, prefix, usize::MAX)?;
+            // The decompressed block size must not exceed Block_MaxSize.
+            decompress_block(block_data, &mut block_output, prefix, block_max_size).map_err(
+                |err| match err {
+                    Error::OutputLimitExceeded { .. } => {
+                        Error::InvalidData("lz4: block decompressed size exceeds block max size")
+                    }
+                    err => err,
+                },
+            )?;
             output.extend_from_slice(&block_output);
         }
 
@@ -399,8 +415,9 @@ fn dependent_history(dict: Option<&Lz4Dict>, output: &[u8]) -> Vec<u8> {
 
 /// Decompress a single LZ4 block into the output buffer.
 ///
-/// `max_dst_len` bounds the total bytes appended to `dst` beyond its
-/// current length; frame decoders pass `usize::MAX`.
+/// `max_block_output` bounds the total bytes appended to `dst` beyond
+/// its current length; standard frames pass their Block_MaxSize and
+/// legacy frames pass `usize::MAX`.
 fn decompress_block(
     src: &[u8],
     dst: &mut Vec<u8>,
@@ -838,6 +855,93 @@ mod tests {
             "expected invalid block max size error, got {:?}",
             result,
         );
+    }
+
+    #[test]
+    fn test_block_size_exceeds_max_rejected() {
+        use crate::util::xxhash::xxhash32;
+
+        // BD id 4 => Block_MaxSize = 64KB. A block header declaring
+        // 64KB + 1 bytes (compressed) must be rejected.
+        let flg: u8 = (1 << 6) | (1 << 5);
+        let bd: u8 = 4 << 4;
+        let mut frame = alloc::vec::Vec::new();
+        frame.extend_from_slice(&0x184D2204u32.to_le_bytes());
+        frame.push(flg);
+        frame.push(bd);
+        let hc = ((xxhash32(&frame[4..], 0) >> 8) & 0xFF) as u8;
+        frame.push(hc);
+        frame.extend_from_slice(&(65537u32).to_le_bytes());
+        frame.extend_from_slice(&[0u8; 8]);
+        frame.extend_from_slice(&0u32.to_le_bytes());
+
+        let result = decode(&frame);
+        assert!(
+            matches!(result, Err(Error::InvalidData(msg)) if msg.contains("block max size")),
+            "expected block size exceeds max error, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_uncompressed_block_size_exceeds_max_rejected() {
+        use crate::util::xxhash::xxhash32;
+
+        // Same as above but with the uncompressed-block bit (bit 31) set.
+        let flg: u8 = (1 << 6) | (1 << 5);
+        let bd: u8 = 4 << 4;
+        let mut frame = alloc::vec::Vec::new();
+        frame.extend_from_slice(&0x184D2204u32.to_le_bytes());
+        frame.push(flg);
+        frame.push(bd);
+        let hc = ((xxhash32(&frame[4..], 0) >> 8) & 0xFF) as u8;
+        frame.push(hc);
+        frame.extend_from_slice(&((65537u32) | 0x8000_0000).to_le_bytes());
+        frame.extend_from_slice(&[0u8; 8]);
+        frame.extend_from_slice(&0u32.to_le_bytes());
+
+        let result = decode(&frame);
+        assert!(
+            matches!(result, Err(Error::InvalidData(msg)) if msg.contains("block max size")),
+            "expected block size exceeds max error, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_block_decompressed_size_exceeds_max_rejected() {
+        // BD id 4 => Block_MaxSize = 64KB. A compressed block whose
+        // declared size fits but which decodes beyond 64KB must be
+        // rejected.
+        let flg: u8 = (1 << 6) | (1 << 5);
+        let bd: u8 = 4 << 4;
+
+        // Block: 1 literal 'A', then a match of offset=1 and length
+        // 65539 producing 65540 bytes of output (> 65536).
+        let mut block = alloc::vec::Vec::new();
+        block.push(0x1F); // token: literal len 1, match len nibble 15
+        block.push(b'A');
+        block.extend_from_slice(&1u16.to_le_bytes()); // match offset 1
+        block.extend(core::iter::repeat_n(0xFF, 256)); // 256 * 255 = 65280
+        block.push(0xF0); // +240 => match len extras total 65520
+        // match_len = 15 + 65520 + 4 = 65539; output = 1 + 65539 = 65540
+
+        let frame = build_frame_with_blocks(flg, bd, 0, &[(&block, false)]);
+        let result = decode(&frame);
+        assert!(
+            matches!(result, Err(Error::InvalidData(msg)) if msg.contains("block max size")),
+            "expected decompressed size exceeds max error, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_block_size_at_max_accepted() {
+        // BD id 4 => Block_MaxSize = 64KB. An uncompressed block of
+        // exactly 64KB is within the limit and must decode.
+        let flg: u8 = (1 << 6) | (1 << 5);
+        let bd: u8 = 4 << 4;
+        let block = alloc::vec![0xABu8; 64 * 1024];
+        let frame = build_frame_with_blocks(flg, bd, 0, &[(&block, true)]);
+        let decoded = decode(&frame).unwrap();
+        assert_eq!(decoded, block);
     }
 
     #[test]

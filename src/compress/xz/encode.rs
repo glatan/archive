@@ -529,6 +529,23 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_with_reserved_high_filter_id_rejected() {
+        // xz-file-format.txt §3.1.5: Filter IDs >= 2^62 must never appear
+        // in a List of Filter Flags.
+        let result = encode_with_filters(
+            b"hello",
+            &[Filter::Unknown {
+                id: 0x4000_0000_0000_0000,
+                properties: vec![],
+            }],
+        );
+        assert!(matches!(
+            result,
+            Err(Error::InvalidData("xz: reserved filter ID (>= 2^62)"))
+        ));
+    }
+
+    #[test]
     fn test_encode_with_empty_registry_matches_encode_with_filters() {
         let filters = [Filter::X86 { start_offset: 0 }];
         let registry = FilterRegistry::new();

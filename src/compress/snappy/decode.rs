@@ -100,7 +100,13 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 /// Decode a raw Snappy block.
 pub fn decode_raw(input: &[u8]) -> Result<Vec<u8>, Error> {
     let mut pos = 0;
-    let expected_len = read_varint(input, &mut pos)? as usize;
+    let expected_len = read_varint(input, &mut pos)?;
+    // Preamble is a 32-bit uncompressed length; reject larger values
+    // before trusting them as an allocation size.
+    if expected_len > u32::MAX as u64 {
+        return Err(Error::InvalidData("snappy: preamble length exceeds 2^32-1"));
+    }
+    let expected_len = expected_len as usize;
     let mut output = Vec::with_capacity(expected_len);
 
     while output.len() < expected_len {
@@ -397,5 +403,13 @@ mod tests {
         // Empty input is rejected by snappy decoder (missing stream identifier).
         let result = decode_bounded(b"", 1024);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_raw_preamble_over_u32_max_rejected() {
+        // Varint preamble declaring 2^32 must be rejected before it is
+        // trusted as an allocation size.
+        let input = [0x80, 0x80, 0x80, 0x80, 0x10]; // varint 2^32
+        assert!(matches!(decode_raw(&input), Err(Error::InvalidData(_))));
     }
 }

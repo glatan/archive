@@ -121,9 +121,9 @@ fn parse_header_block(block: &[u8]) -> Result<(BTreeMap<String, String>, Vec<Str
         if name.is_empty() || !name.bytes().all(|b| b.is_ascii_graphic() && b != b':') {
             return Err(Error::InvalidData("warc: bad field name"));
         }
-        let name = name.to_string();
+        let name = name.to_ascii_lowercase();
         let value = value.trim().to_string();
-        if name.eq_ignore_ascii_case("WARC-Concurrent-To") {
+        if name.eq_ignore_ascii_case("warc-concurrent-to") {
             concurrent_to.push(value.clone());
         }
         fields.insert(name.clone(), value);
@@ -198,9 +198,9 @@ fn payload_is_block(
         }
     }
     for f in [
-        "WARC-Segment-Origin-ID",
-        "WARC-Segment-Number",
-        "WARC-Truncated",
+        "warc-segment-origin-id",
+        "warc-segment-number",
+        "warc-truncated",
     ] {
         if fields.contains_key(f) {
             return false;
@@ -225,10 +225,10 @@ fn verify_digests(
     content_type: Option<&str>,
     block: &[u8],
 ) -> Result<(), Error> {
-    if let Some(v) = fields.get("WARC-Block-Digest") {
+    if let Some(v) = fields.get("warc-block-digest") {
         verify_digest(v, block, "warc: WARC-Block-Digest mismatch")?;
     }
-    if let Some(v) = fields.get("WARC-Payload-Digest")
+    if let Some(v) = fields.get("warc-payload-digest")
         && payload_is_block(fields, record_type, content_type)
     {
         verify_digest(v, block, "warc: WARC-Payload-Digest mismatch")?;
@@ -258,19 +258,19 @@ const FORBIDDEN_FIELD_TYPES: &[(&str, &[&str])] = &[
     // WARC-Concurrent-To: "shall not be used in 'warcinfo',
     // 'conversion', and 'continuation' records".
     (
-        "WARC-Concurrent-To",
+        "warc-concurrent-to",
         &["warcinfo", "conversion", "continuation"],
     ),
     // WARC-IP-Address: "shall not be used on 'warcinfo', 'conversion'
     // or 'continuation' records".
     (
-        "WARC-IP-Address",
+        "warc-ip-address",
         &["warcinfo", "conversion", "continuation"],
     ),
     // WARC-Refers-To: "shall not be used in 'warcinfo', 'response',
     // 'resource', 'request', and 'continuation' records".
     (
-        "WARC-Refers-To",
+        "warc-refers-to",
         &[
             "warcinfo",
             "response",
@@ -284,7 +284,7 @@ const FORBIDDEN_FIELD_TYPES: &[(&str, &[&str])] = &[
     // 'response', 'metadata', 'conversion', 'resource', 'request', and
     // 'continuation' records".
     (
-        "WARC-Refers-To-Target-URI",
+        "warc-refers-to-target-uri",
         &[
             "warcinfo",
             "response",
@@ -296,7 +296,7 @@ const FORBIDDEN_FIELD_TYPES: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "WARC-Refers-To-Date",
+        "warc-refers-to-date",
         &[
             "warcinfo",
             "response",
@@ -309,18 +309,18 @@ const FORBIDDEN_FIELD_TYPES: &[(&str, &[&str])] = &[
     ),
     // WARC-Warcinfo-ID: "may be used in any record type except
     // 'warcinfo'".
-    ("WARC-Warcinfo-ID", &["warcinfo"]),
+    ("warc-warcinfo-id", &["warcinfo"]),
     // WARC-Target-URI: "A 'warcinfo' record shall not have a
     // WARC-Target-URI field".
-    ("WARC-Target-URI", &["warcinfo"]),
+    ("warc-target-uri", &["warcinfo"]),
 ];
 
 /// Fields restricted to a single record type ("shall not be used for
 /// other record types" / "shall not be used elsewhere").
 const SINGLE_TYPE_FIELDS: &[(&str, &str)] = &[
-    ("WARC-Filename", "warcinfo"),
-    ("WARC-Segment-Origin-ID", "continuation"),
-    ("WARC-Segment-Total-Length", "continuation"),
+    ("warc-filename", "warcinfo"),
+    ("warc-segment-origin-id", "continuation"),
+    ("warc-segment-total-length", "continuation"),
 ];
 
 /// Record types that shall carry a WARC-Target-URI field
@@ -364,7 +364,7 @@ fn check_field_constraints(
             ));
         }
     }
-    if type_is(record_type, TARGET_URI_TYPES) && !fields.contains_key("WARC-Target-URI") {
+    if type_is(record_type, TARGET_URI_TYPES) && !fields.contains_key("warc-target-uri") {
         return Err(Error::InvalidData("warc: missing WARC-Target-URI"));
     }
     Ok(())
@@ -424,12 +424,12 @@ fn check_segmentation(
     block_len: u64,
     series: &mut BTreeMap<String, SegmentSeries>,
 ) -> Result<(), Error> {
-    let number = parse_digits(fields, "WARC-Segment-Number")?;
-    let total_len = parse_digits(fields, "WARC-Segment-Total-Length")?;
+    let number = parse_digits(fields, "warc-segment-number")?;
+    let total_len = parse_digits(fields, "warc-segment-total-length")?;
 
     if record_type.eq_ignore_ascii_case("continuation") {
         let origin = fields
-            .get("WARC-Segment-Origin-ID")
+            .get("warc-segment-origin-id")
             .ok_or(Error::InvalidData(
                 "warc: continuation missing WARC-Segment-Origin-ID",
             ))?;
@@ -443,7 +443,7 @@ fn check_segmentation(
                 "warc: bad continuation WARC-Segment-Number",
             ));
         }
-        let target_uri = fields.get("WARC-Target-URI").cloned();
+        let target_uri = fields.get("warc-target-uri").cloned();
         match series.get_mut(origin) {
             Some(s) => {
                 if s.closed {
@@ -508,7 +508,7 @@ fn check_segmentation(
             SegmentSeries {
                 last_number: 1,
                 block_total: block_len,
-                target_uri: fields.get("WARC-Target-URI").cloned(),
+                target_uri: fields.get("warc-target-uri").cloned(),
                 from_origin: true,
                 closed: false,
             },
@@ -567,19 +567,19 @@ pub fn decode(input: &[u8]) -> Result<Vec<WarcEntry>, Error> {
 
         // Mandatory fields per spec.
         let record_type = fields
-            .get("WARC-Type")
+            .get("warc-type")
             .ok_or(Error::InvalidData("warc: missing WARC-Type"))?
             .clone();
         let record_id = fields
-            .get("WARC-Record-ID")
+            .get("warc-record-id")
             .ok_or(Error::InvalidData("warc: missing WARC-Record-ID"))?
             .clone();
-        let date = fields.get("WARC-Date").cloned();
+        let date = fields.get("warc-date").cloned();
         if date.is_none() {
             return Err(Error::InvalidData("warc: missing WARC-Date"));
         }
         let content_length: usize = fields
-            .get("Content-Length")
+            .get("content-length")
             .and_then(|v| v.trim().parse().ok())
             .ok_or(Error::InvalidData("warc: missing/bad Content-Length"))?;
 
@@ -592,9 +592,9 @@ pub fn decode(input: &[u8]) -> Result<Vec<WarcEntry>, Error> {
         // the last record.
         pos = cur;
 
-        let target_uri = fields.get("WARC-Target-URI").cloned();
+        let target_uri = fields.get("warc-target-uri").cloned();
         let name = target_uri.clone().unwrap_or_else(|| record_id.clone());
-        let content_type = fields.get("Content-Type").cloned();
+        let content_type = fields.get("content-type").cloned();
 
         check_field_constraints(&fields, &record_type)?;
         check_segmentation(
@@ -606,17 +606,17 @@ pub fn decode(input: &[u8]) -> Result<Vec<WarcEntry>, Error> {
         )?;
         verify_digests(&fields, &record_type, content_type.as_deref(), &block)?;
 
-        let segment = parse_digits(&fields, "WARC-Segment-Number")?.map(|number| SegmentInfo {
+        let segment = parse_digits(&fields, "warc-segment-number")?.map(|number| SegmentInfo {
             origin_id: if number == 1 {
                 record_id.clone()
             } else {
                 fields
-                    .get("WARC-Segment-Origin-ID")
+                    .get("warc-segment-origin-id")
                     .cloned()
                     .unwrap_or_default()
             },
             number,
-            total_length: parse_digits(&fields, "WARC-Segment-Total-Length").unwrap_or(None),
+            total_length: parse_digits(&fields, "warc-segment-total-length").unwrap_or(None),
         });
         entries.push(WarcEntry {
             name,
@@ -1052,6 +1052,31 @@ mod tests {
         r.extend_from_slice(block);
         r.extend_from_slice(b"\r\n\r\n");
         r
+    }
+
+    /// Field-name matching is case-insensitive (WARC 1.1 "named
+    /// fields" header-name rule).
+    #[test]
+    fn field_names_are_case_insensitive() {
+        let mut r = Vec::new();
+        for line in [
+            "WARC/1.1",
+            "warc-type: resource",
+            "warc-record-id: <urn:x>",
+            "warc-date: 2024-01-01T00:00:00Z",
+            "warc-target-uri: http://e/",
+            "content-length: 4",
+        ] {
+            r.extend_from_slice(line.as_bytes());
+            r.extend_from_slice(&[13, 10]);
+        }
+        r.extend_from_slice(&[13, 10]);
+        r.extend_from_slice(b"body");
+        r.extend_from_slice(&[13, 10, 13, 10]);
+        let entries = decode(&r).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "http://e/");
+        assert_eq!(entries[0].data, b"body");
     }
 
     fn sha1_label(data: &[u8]) -> String {

@@ -12,7 +12,7 @@ use crate::error::Error;
 use crate::util::xxhash;
 
 use super::frame::{BlockHeader, BlockType, FrameHeader};
-use super::fse::FseTable;
+use super::fse::{FseEntry, FseTable};
 use super::huff::{HuffmanTable, parse_huffman_weights};
 use super::sequences::{self, LL_BASE, LL_EXTRA, ML_BASE, ML_EXTRA, Sequence};
 
@@ -131,6 +131,11 @@ impl ZstdDict {
         }
 
         let id = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        // RFC 8878 §5: Dictionary_ID can be any value except 0
+        // (which means "no Dictionary_ID").
+        if id == 0 {
+            return Err(Error::InvalidData("dictionary ID must be non-zero"));
+        }
         let mut pos = 8;
 
         // Parse Huffman table
@@ -166,6 +171,16 @@ impl ZstdDict {
         let rep3 = u32::from_le_bytes([remaining[8], remaining[9], remaining[10], remaining[11]]);
         let rep_offsets = [rep1, rep2, rep3];
         let content = remaining[12..].to_vec();
+
+        // RFC 8878 §5: each repeat offset must be non-zero and less than
+        // the dictionary size. Repeat offsets address positions inside the
+        // content history, so the content size bounds their valid range.
+        let content_size = content.len() as u64;
+        for &rep in &rep_offsets {
+            if rep == 0 || rep as u64 >= content_size {
+                return Err(Error::InvalidData("dictionary repeat offset out of range"));
+            }
+        }
 
         Ok(ZstdDict {
             id,
@@ -301,6 +316,14 @@ fn build_literals_huffman_table(weights: Vec<u8>) -> Result<HuffmanTable, Error>
     HuffmanTable::from_weights(&all_weights)
 }
 
+/// Whether a Dictionary_ID falls in a reserved range.
+///
+/// RFC 8878 §3.1.1.1.3: the ranges 1-32767 and 2^31-(2^32-1) are reserved
+/// for dictionaries registered in the IANA dictionary-ID registry.
+const fn is_reserved_dictionary_id(id: u32) -> bool {
+    (id >= 1 && id <= 32767) || id >= 0x8000_0000
+}
+
 /// Decode a single zstd frame.
 fn decode_frame(
     input: &[u8],
@@ -318,8 +341,15 @@ fn decode_frame(
         return Err(Error::InvalidData("zstd: window size below minimum (1024)"));
     }
 
+    // RFC 8878 §3.1.1.1.1.2 / §8: a decoder must limit its memory
+    // requirements. Frame_Content_Size is attacker-controlled, so cap the
+    // speculative pre-allocation at the same 128 MiB bound used for
+    // Window_Size and use try_reserve so that even the clamped amount
+    // failing to allocate is non-fatal -- the output buffer still grows as
+    // blocks decode.
+    const MAX_PREALLOC: u64 = 128 * 1024 * 1024;
     if let Some(size) = header.frame_content_size {
-        output.reserve(size as usize);
+        let _ = output.try_reserve(size.min(MAX_PREALLOC) as usize);
     }
 
     // Determine if this frame uses a dictionary
@@ -332,6 +362,17 @@ fn decode_frame(
                 ));
             }
             None => {
+                // RFC 8878 §3.1.1.1.3: Dictionary_IDs in [1, 32767] and
+                // [2^31, 2^32-1] are reserved for registered dictionaries.
+                // This crate has no dictionary registry, so a frame
+                // referencing a reserved ID without a matching provided
+                // dictionary is malformed input rather than just a missing
+                // dictionary.
+                if is_reserved_dictionary_id(frame_dict_id) {
+                    return Err(Error::InvalidData(
+                        "frame references a reserved Dictionary_ID",
+                    ));
+                }
                 return Err(Error::Unsupported(
                     "frame requires dictionary but none provided",
                 ));
@@ -420,6 +461,7 @@ fn decode_frame(
                     &mut prev_of_table,
                     &mut prev_ml_table,
                     dict_content,
+                    header.window_size,
                 )?;
                 // RFC 8878 §3.1.1.2: decompressed block size must not exceed
                 // Block_Maximum_Size = min(Window_Size, 128 KB).
@@ -482,6 +524,7 @@ fn decode_compressed_block(
     prev_of_table: &mut Option<FseTable>,
     prev_ml_table: &mut Option<FseTable>,
     dict_content: &[u8],
+    window_size: u64,
 ) -> Result<(), Error> {
     if data.is_empty() {
         return Err(Error::UnexpectedEof);
@@ -562,7 +605,13 @@ fn decode_compressed_block(
     )?;
 
     // Execute sequences
-    sequences::execute_sequences_with_dict(&literals, &decoded_sequences, output, dict_content)?;
+    sequences::execute_sequences_with_dict(
+        &literals,
+        &decoded_sequences,
+        output,
+        dict_content,
+        window_size,
+    )?;
 
     Ok(())
 }
@@ -592,9 +641,19 @@ fn get_fse_table(
             }
             let symbol = data[0];
             *pos += 1;
-            let mut probs = vec![0i16; symbol as usize + 1];
-            probs[symbol as usize] = 1;
-            FseTable::from_probabilities(&probs, 0)?
+            // RLE mode defines a degenerate one-symbol table
+            // (accuracy_log = 0, one entry emitting the symbol with 0 bits).
+            // It is not a spec FSE table description -- which requires >= 2
+            // non-zero-probability symbols (RFC 8878 §4.1.1) -- so build it
+            // directly instead of via FseTable::from_probabilities.
+            FseTable {
+                entries: vec![FseEntry {
+                    symbol,
+                    num_bits: 0,
+                    baseline: 0,
+                }],
+                accuracy_log: 0,
+            }
         }
         2 => {
             // FSE compressed
@@ -1577,15 +1636,146 @@ mod tests {
         ));
     }
 
+    /// Build a minimal well-formed dictionary blob (RFC 8878 §5) with a
+    /// direct-weight Huffman table and two-symbol FSE tables, followed
+    /// by the given repeat offsets and content.
+    fn build_test_dict(id: u32, rep_offsets: [u32; 3], content: &[u8]) -> Vec<u8> {
+        let mut dict = Vec::new();
+        dict.extend_from_slice(&0xEC30A437u32.to_le_bytes());
+        dict.extend_from_slice(&id.to_le_bytes());
+        // Huffman weights: direct representation (header >= 128), 1 weight.
+        dict.extend_from_slice(&[0x80, 0x10]);
+        // FSE tables (OF, ML, LL order): accuracy_log=5, symbols 0 and 1
+        // with probability 16 each. RFC 8878 §4.1.1 requires >= 2 symbols
+        // with non-zero probability, so a single-symbol description is
+        // not usable here.
+        for _ in 0..3 {
+            dict.extend_from_slice(&[0x10, 0x3F]);
+        }
+        for rep in rep_offsets {
+            dict.extend_from_slice(&rep.to_le_bytes());
+        }
+        dict.extend_from_slice(content);
+        dict
+    }
+
+    #[test]
+    fn test_dict_parse_minimal_valid() {
+        let content = b"0123456789abcdef";
+        let data = build_test_dict(0x1234, [1, 4, 8], content);
+        let dict = ZstdDict::parse(&data).unwrap();
+        assert_eq!(dict.id, 0x1234);
+        assert_eq!(dict.content, content);
+        assert_eq!(dict.rep_offsets, [1, 4, 8]);
+    }
+
+    #[test]
+    fn test_dict_parse_zero_dictionary_id() {
+        // RFC 8878 §5: Dictionary_ID can be any value except 0.
+        let data = build_test_dict(0, [1, 4, 8], b"0123456789abcdef");
+        let result = ZstdDict::parse(&data);
+        assert!(matches!(
+            result,
+            Err(Error::InvalidData("dictionary ID must be non-zero"))
+        ));
+    }
+
+    #[test]
+    fn test_dict_parse_rep_offset_out_of_range() {
+        // RFC 8878 §5: each repeat offset must be less than the dictionary
+        // size; a rep offset that cannot point into the content history is
+        // invalid.
+        let content = b"0123456789abcdef"; // 16 bytes
+        for rep in [16u32, 17, 100] {
+            let data = build_test_dict(1, [rep, 4, 8], content);
+            let result = ZstdDict::parse(&data);
+            assert!(
+                matches!(result, Err(Error::InvalidData(_))),
+                "expected InvalidData for rep offset {}, got {:?}",
+                rep,
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn test_dict_parse_rep_offset_zero() {
+        // A repeat offset of 0 is not a usable history distance.
+        let data = build_test_dict(1, [0, 4, 8], b"0123456789abcdef");
+        let result = ZstdDict::parse(&data);
+        assert!(matches!(result, Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn test_compressed_block_offset_exceeds_window() {
+        // RFC 8878 §3.1.1.4: offsets leading to previously decoded data
+        // must stay within Window_Size. The block decodes 10 literals and
+        // one sequence with offset 5; with window_size=4 the offset falls
+        // outside the valid window even though history is available.
+        let mut block = vec![
+            0x50, // raw literals header: size_format=0, size=10
+        ];
+        block.extend_from_slice(b"abcdefghij");
+        block.extend_from_slice(&[
+            0x01, // num_sequences = 1
+            0x54, // modes: LL/OF/ML all RLE
+            10,   // LL RLE symbol -> literal_length 10
+            3,    // OF RLE symbol -> offset code 3
+            0,    // ML RLE symbol -> match_length 3
+            0x08, // bitstream: sentinel + 3 zero bits -> offset_raw 8, real 5
+        ]);
+
+        let mut output = Vec::new();
+        let mut rep_offsets = [1u32, 4, 8];
+        let mut huff_table = None;
+        let mut prev_ll_table = None;
+        let mut prev_of_table = None;
+        let mut prev_ml_table = None;
+
+        let result = decode_compressed_block(
+            &block,
+            &mut output,
+            &mut rep_offsets,
+            &mut huff_table,
+            &mut prev_ll_table,
+            &mut prev_of_table,
+            &mut prev_ml_table,
+            &[],
+            4,
+        );
+        assert!(matches!(
+            result,
+            Err(Error::InvalidData("offset exceeds Window_Size"))
+        ));
+
+        // Same block with a window that covers the offset decodes fine.
+        let mut output = Vec::new();
+        decode_compressed_block(
+            &block,
+            &mut output,
+            &mut rep_offsets,
+            &mut huff_table,
+            &mut prev_ll_table,
+            &mut prev_of_table,
+            &mut prev_ml_table,
+            &[],
+            1024,
+        )
+        .unwrap();
+        assert_eq!(output, b"abcdefghijfgh");
+    }
+
     #[test]
     fn test_decode_dict_required_but_missing() {
-        // Build a frame that references dictionary_id=42
+        // Build a frame that references a non-reserved dictionary_id=40000.
+        // (1-byte and most 2-byte IDs fall in the reserved range
+        // [1, 32767] and are rejected earlier as InvalidData.)
         let mut frame = Vec::new();
         frame.extend_from_slice(&0xFD2FB528u32.to_le_bytes());
-        // Descriptor: FCS_flag=00, single_segment=1, dict_id_flag=01 (1-byte dict ID)
-        let descriptor = 0b0010_0001;
+        // Descriptor: FCS_flag=00, single_segment=1, dict_id_flag=10 (2-byte dict ID)
+        let descriptor = 0b0010_0010;
         frame.push(descriptor);
-        frame.push(42u8); // dict_id = 42
+        frame.extend_from_slice(&40000u16.to_le_bytes()); // dict_id = 40000
         frame.push(5); // FCS = 5 bytes
         // Raw block: last=1, type=Raw, size=5
         let bh = (5u32 << 3) | 0b001;
@@ -1631,6 +1821,115 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_reserved_dictionary_id_no_dict() {
+        // RFC 8878 §3.1.1.1.3: Dictionary_IDs 1..=32767 and >= 2^31 are
+        // reserved for registered dictionaries. Without a matching
+        // dictionary provided, frames referencing them are rejected.
+        let cases: [(u8, Vec<u8>); 4] = [
+            (0b01, vec![42u8]),                            // 1-byte id = 42
+            (0b10, 32767u16.to_le_bytes().to_vec()),       // 2-byte id = 32767
+            (0b11, 0x8000_0000u32.to_le_bytes().to_vec()), // 4-byte id = 2^31
+            (0b11, 0xFFFF_FFFFu32.to_le_bytes().to_vec()), // 4-byte id = 2^32-1
+        ];
+        for (flag, id_bytes) in cases {
+            let mut frame = Vec::new();
+            frame.extend_from_slice(&0xFD2FB528u32.to_le_bytes());
+            // single_segment=1, dict_id_flag=<flag>
+            frame.push(0b0010_0000 | flag);
+            frame.extend_from_slice(&id_bytes);
+            frame.push(5); // FCS = 5 bytes
+            let bh = (5u32 << 3) | 0b001; // raw block, last
+            frame.push(bh as u8);
+            frame.push((bh >> 8) as u8);
+            frame.push((bh >> 16) as u8);
+            frame.extend_from_slice(b"Hello");
+
+            let result = decode(&frame);
+            assert!(
+                matches!(
+                    result,
+                    Err(Error::InvalidData(
+                        "frame references a reserved Dictionary_ID"
+                    ))
+                ),
+                "expected reserved Dictionary_ID error for id {:?}, got {:?}",
+                id_bytes,
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn test_decode_nonreserved_dictionary_id_boundaries() {
+        // Just outside the reserved ranges: 32768 and 2^31-1 are normal
+        // (non-registered) Dictionary_IDs; without a dictionary the frame
+        // still fails, but with Unsupported rather than a reserved-ID error.
+        let cases: [(u8, Vec<u8>); 2] = [
+            (0b10, 32768u16.to_le_bytes().to_vec()), // 2-byte id = 32768
+            (0b11, 0x7FFF_FFFFu32.to_le_bytes().to_vec()), // 4-byte id = 2^31-1
+        ];
+        for (flag, id_bytes) in cases {
+            let mut frame = Vec::new();
+            frame.extend_from_slice(&0xFD2FB528u32.to_le_bytes());
+            frame.push(0b0010_0000 | flag);
+            frame.extend_from_slice(&id_bytes);
+            frame.push(5); // FCS
+            let bh = (5u32 << 3) | 0b001;
+            frame.push(bh as u8);
+            frame.push((bh >> 8) as u8);
+            frame.push((bh >> 16) as u8);
+            frame.extend_from_slice(b"Hello");
+
+            let result = decode(&frame);
+            assert!(
+                matches!(result, Err(Error::Unsupported(_))),
+                "expected Unsupported for non-reserved id {:?}, got {:?}",
+                id_bytes,
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn test_decode_reserved_dictionary_id_with_matching_dict() {
+        // A payload referencing a reserved Dictionary_ID "may or may not be
+        // decodable" (RFC 8878 §3.1.1.1.3): when the caller supplies a
+        // dictionary with the exact ID, decoding proceeds normally.
+        let dict = ZstdDict::from_content(0x8000_0001, b"reserved dict content").unwrap();
+        let payload = b"reserved dictionary payload payload";
+        let encoded = super::super::encode::encode_with_dict(payload, &dict);
+        let decoded = decode_with_dict(&encoded, &dict).unwrap();
+        assert_eq!(decoded, payload);
+    }
+
+    #[test]
+    fn test_decode_frame_huge_fcs_no_panic() {
+        // RFC 8878 §3.1.1.1.1.2 / §8: the decoder must bound memory driven by
+        // attacker-controlled Frame_Content_Size. A non-single-segment frame
+        // declaring FCS = u64::MAX must not panic via an unbounded
+        // Vec::reserve; decoding proceeds and fails the content-size check.
+        let mut frame = Vec::new();
+        frame.extend_from_slice(&0xFD2FB528u32.to_le_bytes());
+        // Descriptor: FCS_flag=3 (8-byte FCS), single_segment=0.
+        frame.push(0b1100_0000);
+        frame.push(0x00); // window descriptor => window_size = 1024
+        frame.extend_from_slice(&u64::MAX.to_le_bytes()); // FCS = u64::MAX
+        // Last raw block with 3 bytes of payload.
+        let bh: u32 = (3 << 3) | 0b001;
+        frame.push(bh as u8);
+        frame.push((bh >> 8) as u8);
+        frame.push((bh >> 16) as u8);
+        frame.extend_from_slice(b"abc");
+
+        let result = decode(&frame);
+        assert!(
+            matches!(result, Err(Error::SizeMismatch { .. })),
+            "expected SizeMismatch (no panic) for huge FCS, got {:?}",
+            result
+        );
+    }
+
+    #[test]
     fn test_execute_sequences_with_dict_content() {
         // Test that sequences can reference dictionary content
         let dict_content = b"ABCDEFGH";
@@ -1641,7 +1940,8 @@ mod tests {
             offset: 10, // 10 bytes back = into dict_content (pos 0 in virtual: dict[0..8] + output[0..2])
         }];
         let mut output = Vec::new();
-        sequences::execute_sequences_with_dict(literals, &seqs, &mut output, dict_content).unwrap();
+        sequences::execute_sequences_with_dict(literals, &seqs, &mut output, dict_content, 1024)
+            .unwrap();
         // Output: "XY" (literals) + "ABCD" (4 bytes from dict at offset 10 from end)
         // Virtual history: ABCDEFGHXY, offset=10 => start at 0 => "ABCD"
         assert_eq!(output, b"XYABCD");
@@ -1749,7 +2049,8 @@ mod tests {
             offset: 6, // 6 bytes back in "ABCDEF" => start at pos 0 => "ABCDE"
         }];
         let mut output = Vec::new();
-        sequences::execute_sequences_with_dict(literals, &seqs, &mut output, dict_content).unwrap();
+        sequences::execute_sequences_with_dict(literals, &seqs, &mut output, dict_content, 1024)
+            .unwrap();
         // Virtual: ABCDEF, offset=6 from end(6) = pos 0, copy 5 = ABCDE
         assert_eq!(output, b"EFABCDE");
     }
@@ -1872,6 +2173,7 @@ mod tests {
             &mut prev_of_table,
             &mut prev_ml_table,
             &[],
+            1024,
         );
 
         assert!(matches!(
@@ -1914,6 +2216,7 @@ mod tests {
             &mut prev_of_table,
             &mut prev_ml_table,
             &[],
+            1024,
         )
         .unwrap();
         assert_eq!(output, b"AAAA");
@@ -1929,6 +2232,7 @@ mod tests {
             &mut prev_of_table,
             &mut prev_ml_table,
             &[],
+            1024,
         )
         .unwrap();
         assert_eq!(output, b"AAAABBBB");

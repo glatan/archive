@@ -608,7 +608,7 @@ fn encode_bcj2_stream(
         },
         #[cfg(feature = "brotli")]
         SevenZMethod::Brotli => CoderDescription {
-            method_id: vec![0x04, 0xF7, 0x11, 0x01],
+            method_id: vec![0x04, 0xF7, 0x11, 0x02],
             properties: Vec::new(),
             num_in_streams: 1,
             num_out_streams: 1,
@@ -763,7 +763,7 @@ fn build_folder(
         #[cfg(feature = "brotli")]
         SevenZMethod::Brotli => {
             coders.push(CoderDescription {
-                method_id: vec![0x04, 0xF7, 0x11, 0x01],
+                method_id: vec![0x04, 0xF7, 0x11, 0x02],
                 properties: Vec::new(),
                 num_in_streams: 1,
                 num_out_streams: 1,

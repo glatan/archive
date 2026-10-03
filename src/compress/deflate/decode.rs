@@ -44,7 +44,28 @@ impl HuffmanTable {
         }
         bl_count[0] = 0;
 
-        // Step 2: Find the numerical value of the smallest code for each code length
+        // Step 2: Reject over-subscribed trees (RFC 1951 section 3.2.2).
+        // The remaining code space starts at 1, doubles for each bit
+        // depth, and shrinks by the number of codes assigned at that
+        // depth. A negative value means the lengths violate the Kraft
+        // inequality (sum of 2^-len > 1), i.e. the tree is over-subscribed
+        // and cannot be decoded unambiguously.
+        //
+        // Incomplete trees (positive code space left over) are
+        // intentionally still accepted here: a single-code or empty
+        // distance tree is legal per RFC 1951 section 3.2.7, and unused
+        // code space is reported as an "invalid Huffman code" error only
+        // if the stream actually references it.
+        let mut left: i32 = 1;
+        for bits in 1..=max_bits {
+            left <<= 1;
+            left -= bl_count[bits as usize] as i32;
+            if left < 0 {
+                return Err(Error::InvalidData("over-subscribed Huffman code"));
+            }
+        }
+
+        // Step 3: Find the numerical value of the smallest code for each code length
         let mut next_code = [0u32; (MAX_BITS + 1) as usize];
         let mut code = 0u32;
         for bits in 1..=max_bits {
@@ -52,7 +73,7 @@ impl HuffmanTable {
             next_code[bits as usize] = code;
         }
 
-        // Step 3: Assign numerical values to all codes, then build lookup table
+        // Step 4: Assign numerical values to all codes, then build lookup table
         let table_size = 1usize << max_bits;
         let mut entries = vec![(0u16, 0u8); table_size];
 
@@ -1091,6 +1112,173 @@ mod tests {
         assert!(
             matches!(result, Err(Error::InvalidData(msg)) if msg.contains("end-of-block")),
             "expected InvalidData about missing end-of-block, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_huffman_table_oversubscribed() {
+        // RFC 1951 section 3.2.2: code lengths whose Kraft sum exceeds 1
+        // (over-subscribed) must be rejected at table construction.
+        // Three 1-bit codes need 3/2 > 1 of the code space.
+        assert!(matches!(
+            HuffmanTable::from_lengths(&[1, 1, 1]),
+            Err(Error::InvalidData(_))
+        ));
+        // Five 2-bit codes need 5/4 > 1.
+        assert!(matches!(
+            HuffmanTable::from_lengths(&[2, 2, 2, 2, 2]),
+            Err(Error::InvalidData(_))
+        ));
+        // A single 3-bit code is incomplete but NOT over-subscribed:
+        // still accepted (a single-code distance tree is legal).
+        assert!(HuffmanTable::from_lengths(&[3]).is_ok());
+        // Two 1-bit codes form a complete tree.
+        assert!(HuffmanTable::from_lengths(&[1, 1]).is_ok());
+        // An all-zero (empty) table stays legal (empty distance tree).
+        assert!(HuffmanTable::from_lengths(&[0, 0, 0]).is_ok());
+    }
+
+    #[test]
+    fn test_oversubscribed_huffman_rejected() {
+        // Same dynamic-Huffman framing as test_dynamic_huffman_direct, but
+        // the lit/len alphabet assigns THREE symbols ('A', 'B', EOB) a
+        // 1-bit code each. The Kraft sum is 3/2 > 1, so the tree is
+        // over-subscribed and must be rejected (RFC 1951 section 3.2.2).
+        let mut w = TestBitWriter::new();
+
+        w.write_bits(1, 1); // BFINAL = 1
+        w.write_bits(0b10, 2); // BTYPE = 10 (dynamic Huffman)
+        w.write_bits(0, 5); // HLIT = 0 -> 257 lit/len codes
+        w.write_bits(0, 5); // HDIST = 0 -> 1 distance code
+        w.write_bits(14, 4); // HCLEN = 14 -> 18 code length codes
+
+        // Code length alphabet (same as test_dynamic_huffman_direct):
+        //   code 17 -> length 1 (MSB code "0")
+        //   code 18 -> length 2 (MSB code "11")
+        //   code  1 -> length 2 (MSB code "10")
+        let cl_code_lengths: [u8; 18] = [
+            0, // code 16
+            1, // code 17
+            2, // code 18
+            0, // code 0
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, // code 1
+        ];
+        for &len in &cl_code_lengths {
+            w.write_bits(len as u32, 3);
+        }
+
+        // Lit/len code lengths (257 symbols, 0..=256):
+        // symbols 0-64: 65 zeros via code 18
+        w.write_huffman(0b11, 2); // code 18
+        w.write_bits(54, 7); // extra: 65 - 11 = 54
+
+        // symbol 65 ('A'): code length 1
+        w.write_huffman(0b10, 2); // CL code for "1"
+        // symbol 66 ('B'): code length 1 (third 1-bit code overall)
+        w.write_huffman(0b10, 2); // CL code for "1"
+
+        // symbols 67-255: 189 zeros = 138 + 51
+        w.write_huffman(0b11, 2); // code 18
+        w.write_bits(127, 7); // extra: 138 - 11 = 127
+        w.write_huffman(0b11, 2); // code 18
+        w.write_bits(40, 7); // extra: 51 - 11 = 40
+
+        // symbol 256 (EOB): code length 1
+        w.write_huffman(0b10, 2); // CL code for "1"
+
+        // Distance code 0: code length 1
+        w.write_huffman(0b10, 2); // CL code for "1"
+
+        let data = w.finish();
+        let result = decode(&data);
+        assert!(
+            matches!(result, Err(Error::InvalidData(msg)) if msg.contains("over-subscribed")),
+            "expected InvalidData about over-subscribed Huffman code, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_oversubscribed_dist_tree_rejected() {
+        // Valid lit/len tree ('A' = 1 bit, EOB = 1 bit), but the distance
+        // alphabet assigns THREE distance codes a 1-bit code each
+        // (Kraft sum 3/2 > 1) -> over-subscribed, must be rejected.
+        let mut w = TestBitWriter::new();
+
+        w.write_bits(1, 1); // BFINAL = 1
+        w.write_bits(0b10, 2); // BTYPE = 10 (dynamic Huffman)
+        w.write_bits(0, 5); // HLIT = 0 -> 257 lit/len codes
+        w.write_bits(2, 5); // HDIST = 2 -> 3 distance codes
+        w.write_bits(14, 4); // HCLEN = 14 -> 18 code length codes
+
+        // Same code length alphabet as test_dynamic_huffman_direct.
+        let cl_code_lengths: [u8; 18] = [
+            0, // code 16
+            1, // code 17
+            2, // code 18
+            0, // code 0
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, // code 1
+        ];
+        for &len in &cl_code_lengths {
+            w.write_bits(len as u32, 3);
+        }
+
+        // Lit/len code lengths (257 symbols, 0..=256):
+        // symbols 0-64: 65 zeros via code 18
+        w.write_huffman(0b11, 2); // code 18
+        w.write_bits(54, 7); // extra: 65 - 11 = 54
+
+        // symbol 65 ('A'): code length 1
+        w.write_huffman(0b10, 2); // CL code for "1"
+
+        // symbols 66-255: 190 zeros = 138 + 52
+        w.write_huffman(0b11, 2); // code 18
+        w.write_bits(127, 7); // extra: 138 - 11 = 127
+        w.write_huffman(0b11, 2); // code 18
+        w.write_bits(41, 7); // extra: 52 - 11 = 41
+
+        // symbol 256 (EOB): code length 1
+        w.write_huffman(0b10, 2); // CL code for "1"
+
+        // Distance code lengths (3 codes): all length 1 -> over-subscribed
+        w.write_huffman(0b10, 2); // CL code for "1"
+        w.write_huffman(0b10, 2); // CL code for "1"
+        w.write_huffman(0b10, 2); // CL code for "1"
+
+        let data = w.finish();
+        let result = decode(&data);
+        assert!(
+            matches!(result, Err(Error::InvalidData(msg)) if msg.contains("over-subscribed")),
+            "expected InvalidData about over-subscribed Huffman code, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_oversubscribed_code_length_code_rejected() {
+        // The code-length alphabet itself is over-subscribed: three
+        // symbols get a 1-bit code each (Kraft sum 3/2 > 1). The stream
+        // must be rejected before any lit/len lengths are decoded.
+        let mut w = TestBitWriter::new();
+
+        w.write_bits(1, 1); // BFINAL = 1
+        w.write_bits(0b10, 2); // BTYPE = 10 (dynamic Huffman)
+        w.write_bits(0, 5); // HLIT = 0 -> 257 lit/len codes
+        w.write_bits(0, 5); // HDIST = 0 -> 1 distance code
+        w.write_bits(0, 4); // HCLEN = 0 -> 4 code length codes
+
+        // CODE_LENGTH_ORDER[0..4] = [16, 17, 18, 0]: three 1-bit codes.
+        w.write_bits(1, 3); // code 16: length 1
+        w.write_bits(1, 3); // code 17: length 1
+        w.write_bits(1, 3); // code 18: length 1
+        w.write_bits(0, 3); // code 0:  length 0
+
+        let data = w.finish();
+        let result = decode(&data);
+        assert!(
+            matches!(result, Err(Error::InvalidData(msg)) if msg.contains("over-subscribed")),
+            "expected InvalidData about over-subscribed Huffman code, got: {:?}",
             result
         );
     }

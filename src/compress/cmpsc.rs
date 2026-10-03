@@ -235,11 +235,11 @@ fn cmp_entry(cdict: &[u8], entries: usize, index: usize) -> Result<CmpEntry, Err
 
 /// Format-0 sibling descriptor (8 bytes inside the compression dict).
 struct Sibling {
-    /// Number of sibling characters (0-7); 7 also implies "more".
+    /// Number of sibling characters (1-7); an SCT of 0 is treated as 7.
     sct: usize,
     /// Sibling characters.
     scs: [u8; 7],
-    /// Another sibling descriptor follows these children.
+    /// Another sibling descriptor follows these children (SCT == 0).
     more: bool,
 }
 
@@ -249,11 +249,10 @@ fn sibling0(cdict: &[u8], entries: usize, index: usize) -> Result<Sibling, Error
     }
     let e = &cdict[index * ENTRY..index * ENTRY + ENTRY];
     let raw = (e[0] >> 5) as usize;
-    let (sct, more) = if raw == 0 || raw >= 7 {
-        (7, true)
-    } else {
-        (raw, false)
-    };
+    // POP: an SCT of 0 is treated as 7 and indicates that another
+    // sibling descriptor follows the children; SCT=7 carries exactly
+    // 7 siblings with no continuation.
+    let (sct, more) = if raw == 0 { (7, true) } else { (raw, false) };
     let mut scs = [0u8; 7];
     scs[..sct].copy_from_slice(&e[1..1 + sct]);
     Ok(Sibling { sct, scs, more })

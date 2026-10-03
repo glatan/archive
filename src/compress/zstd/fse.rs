@@ -43,11 +43,13 @@ impl FseTable {
             }
         }
 
-        // Check that at least one symbol has non-zero probability
-        let has_symbols = norm_probs.iter().any(|&p| p != 0);
-        if !has_symbols {
+        // RFC 8878 §4.1.1: an FSE table description must contain at least
+        // two symbols with non-zero probability ("less than 1" probabilities,
+        // encoded as -1, count as non-zero).
+        let nonzero_symbols = norm_probs.iter().filter(|&&p| p != 0).count();
+        if nonzero_symbols < 2 {
             return Err(Error::InvalidData(
-                "FSE table build: no symbols with non-zero probability",
+                "FSE table description needs at least two non-zero-probability symbols",
             ));
         }
 
@@ -364,6 +366,61 @@ mod tests {
             let expected_count = if prob == -1 { 1 } else { prob as u32 };
             assert_eq!(counts[sym], expected_count, "symbol {} count mismatch", sym);
         }
+    }
+
+    #[test]
+    fn test_from_probabilities_rejects_fewer_than_two_nonzero_symbols() {
+        // RFC 8878 §4.1.1: an FSE table description must have at least two
+        // symbols with non-zero probability.
+        let single = [0i16, 0, 0, 32, 0]; // one symbol fills the whole table (al=5)
+        let result = FseTable::from_probabilities(&single, 5);
+        assert!(
+            matches!(result, Err(Error::InvalidData(_))),
+            "expected InvalidData for single-symbol FSE table, got: {:?}",
+            result.map(|t| t.entries.len())
+        );
+
+        // A single "less than 1" probability symbol (-1) is also insufficient.
+        let rare = [0i16, -1, 0];
+        assert!(matches!(
+            FseTable::from_probabilities(&rare, 5),
+            Err(Error::InvalidData(_))
+        ));
+
+        // All-zero probabilities are rejected as well.
+        assert!(matches!(
+            FseTable::from_probabilities(&[0i16; 4], 5),
+            Err(Error::InvalidData(_))
+        ));
+    }
+
+    #[test]
+    fn test_from_bitstream_rejects_single_symbol_description() {
+        // Hand-crafted NCount table description: accuracy_log=5 (low nibble
+        // 0), then one symbol with probability 32 filling the whole table.
+        // RFC 8878 §4.1.1 requires >= 2 non-zero-probability symbols.
+        let data = [0xF0, 0x03];
+        let result = FseTable::from_bitstream(&data, 35, 9);
+        assert!(
+            matches!(result, Err(Error::InvalidData(_))),
+            "expected InvalidData for 1-symbol FSE description, got: {:?}",
+            result.map(|(t, _)| t.entries.len())
+        );
+    }
+
+    #[test]
+    fn test_from_bitstream_accepts_two_symbol_description() {
+        // accuracy_log=5, symbols 0 and 1 with probability 16 each.
+        let data = [0x10, 0x3F];
+        let (table, consumed) = FseTable::from_bitstream(&data, 35, 9).unwrap();
+        assert_eq!(consumed, 2);
+        assert_eq!(table.accuracy_log, 5);
+        assert_eq!(table.entries.len(), 32);
+        let mut counts = [0u32; 2];
+        for entry in &table.entries {
+            counts[entry.symbol as usize] += 1;
+        }
+        assert_eq!(counts, [16, 16]);
     }
 
     #[test]

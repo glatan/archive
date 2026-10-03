@@ -19,8 +19,9 @@ use crate::error::Error;
 use crate::util::crc32;
 
 use super::filters::{
-    FILTER_ARM, FILTER_ARM64, FILTER_ARMTHUMB, FILTER_DELTA, FILTER_IA64, FILTER_LZMA2,
-    FILTER_POWERPC, FILTER_RISCV, FILTER_SPARC, FILTER_X86, Filter, apply_decoder_filters,
+    FILTER_ARM, FILTER_ARM64, FILTER_ARMTHUMB, FILTER_DELTA, FILTER_IA64, FILTER_ID_RESERVED_START,
+    FILTER_LZMA2, FILTER_POWERPC, FILTER_RISCV, FILTER_SPARC, FILTER_X86, Filter,
+    apply_decoder_filters,
 };
 use super::registry::FilterRegistry;
 
@@ -445,6 +446,13 @@ enum ParsedFilter {
 }
 
 fn parse_filter(filter_id: u64, props: &[u8], is_last: bool) -> Result<ParsedFilter, Error> {
+    // xz-file-format.txt §3.1.5: Filter IDs >= 2^62 are reserved for
+    // implementation-dependent internal use and must never appear in a
+    // List of Filter Flags. Reject before the registry-backed unknown-ID
+    // path so a registered custom codec cannot resurrect them.
+    if filter_id >= FILTER_ID_RESERVED_START {
+        return Err(Error::InvalidData("xz: reserved filter ID (>= 2^62)"));
+    }
     match filter_id {
         FILTER_LZMA2 => {
             if !is_last {
@@ -1215,6 +1223,137 @@ mod tests {
         assert!(parse_filter(0x3F, &[], false).is_ok());
         // 0x80 is just above the reserved range: accepted as unknown custom filter
         assert!(parse_filter(0x80, &[], false).is_ok());
+    }
+
+    /// Helper: encode `value` as an xz VLI (7-bit little-endian chunks).
+    fn vli_bytes(mut value: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        loop {
+            let byte = (value & 0x7F) as u8;
+            value >>= 7;
+            if value == 0 {
+                out.push(byte);
+                break;
+            }
+            out.push(byte | 0x80);
+        }
+        out
+    }
+
+    /// Helper: build a minimal xz stream whose single block declares one
+    /// filter carrying `filter_id` with empty properties. Filter flag
+    /// parsing decides the outcome before block data, Index, or footer
+    /// are needed, so the stream ends right after the block header.
+    fn stream_with_single_filter_id(filter_id: u64) -> Vec<u8> {
+        let mut data = STREAM_MAGIC.to_vec();
+        let stream_flags = [0x00, CHECK_CRC32];
+        data.extend_from_slice(&stream_flags);
+        data.extend_from_slice(&crc32::crc32(&stream_flags).to_le_bytes());
+
+        let mut block_hdr = vec![0x00]; // Block Flags: one filter
+        block_hdr.extend_from_slice(&vli_bytes(filter_id));
+        block_hdr.push(0x00); // Size of Properties = 0
+
+        let before_crc = 1 + block_hdr.len();
+        block_hdr.resize(block_hdr.len() + (4 - (before_crc % 4)) % 4, 0x00);
+        let real_header_size = 1 + block_hdr.len() + 4;
+        let header_size_byte = ((real_header_size / 4) - 1) as u8;
+
+        let mut crc_input = Vec::with_capacity(1 + block_hdr.len());
+        crc_input.push(header_size_byte);
+        crc_input.extend_from_slice(&block_hdr);
+        data.push(header_size_byte);
+        data.extend_from_slice(&block_hdr);
+        data.extend_from_slice(&crc32::crc32(&crc_input).to_le_bytes());
+
+        // decode_stream requires at least 24 bytes of input.
+        data.resize(data.len().max(24), 0x00);
+        data
+    }
+
+    #[test]
+    fn test_reserved_high_filter_id_rejected() {
+        // xz-file-format.txt §3.1.5: Filter IDs >= 2^62 are reserved for
+        // implementation-dependent internal use and must never appear in
+        // a List of Filter Flags.
+        for id in [
+            0x4000_0000_0000_0000u64,
+            0x7FFF_FFFF_FFFF_FFFF, // largest encodable VLI (2^63 - 1)
+        ] {
+            for is_last in [false, true] {
+                let result = parse_filter(id, &[], is_last);
+                assert!(
+                    matches!(
+                        result,
+                        Err(Error::InvalidData("xz: reserved filter ID (>= 2^62)"))
+                    ),
+                    "expected reserved filter ID rejection for id=0x{id:X} \
+                     (is_last={is_last}), got {result:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_filter_id_below_reserved_range_parses_as_unknown() {
+        // 2^62 - 1 is the largest Filter ID usable in a List of Filter
+        // Flags. It is not a built-in ID, so it parses as an unknown
+        // custom filter like any other application-defined ID.
+        assert_eq!(
+            parse_filter(0x3FFF_FFFF_FFFF_FFFF, &[0xAA], false).unwrap(),
+            ParsedFilter::Transform(Filter::Unknown {
+                id: 0x3FFF_FFFF_FFFF_FFFF,
+                properties: vec![0xAA],
+            })
+        );
+    }
+
+    #[test]
+    fn test_block_header_reserved_high_filter_id_rejected() {
+        // A block header whose only filter carries Filter ID = 2^62 must
+        // be rejected as malformed.
+        let data = stream_with_single_filter_id(0x4000_0000_0000_0000);
+        assert!(matches!(
+            decode(&data),
+            Err(Error::InvalidData("xz: reserved filter ID (>= 2^62)"))
+        ));
+    }
+
+    #[test]
+    fn test_block_header_max_usable_filter_id_unsupported() {
+        // Filter ID = 2^62 - 1 survives the reserved-range check and hits
+        // the normal unknown-filter path ("final filter must be LZMA2").
+        let data = stream_with_single_filter_id(0x3FFF_FFFF_FFFF_FFFF);
+        assert!(matches!(
+            decode(&data),
+            Err(Error::Unsupported("xz: final filter must be LZMA2"))
+        ));
+    }
+
+    #[test]
+    fn test_reserved_high_filter_id_rejected_with_registry() {
+        // Even a registered codec cannot make a reserved Filter ID
+        // acceptable in a stream.
+        struct ReservedIdCodec;
+        impl crate::compress::xz::registry::FilterCodec for ReservedIdCodec {
+            fn filter_id(&self) -> u64 {
+                0x4000_0000_0000_0000
+            }
+            fn encode(&self, input: &[u8], _properties: &[u8]) -> Result<Vec<u8>, Error> {
+                Ok(input.to_vec())
+            }
+            fn decode(&self, input: &[u8], _properties: &[u8]) -> Result<Vec<u8>, Error> {
+                Ok(input.to_vec())
+            }
+        }
+
+        let mut registry = FilterRegistry::new();
+        registry.register(Box::new(ReservedIdCodec)).unwrap();
+        let data = stream_with_single_filter_id(0x4000_0000_0000_0000);
+        assert!(matches!(
+            decode_with_registry(&data, Some(&registry)),
+            Err(Error::InvalidData("xz: reserved filter ID (>= 2^62)"))
+        ));
     }
 
     #[test]

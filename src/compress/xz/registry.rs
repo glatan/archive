@@ -4,6 +4,8 @@ use alloc::vec::Vec;
 
 use crate::error::Error;
 
+use super::filters::FILTER_ID_RESERVED_START;
+
 /// Smallest filter ID reserved for application-defined xz filters.
 pub const MIN_CUSTOM_FILTER_ID: u64 = 0x0C;
 
@@ -59,7 +61,10 @@ impl FilterRegistry {
     /// without transforming the payload. Standard built-in filter IDs remain
     /// reserved for the crate's dedicated implementations.
     pub fn register_passthrough(&mut self, filter_id: u64) -> Result<(), Error> {
-        if filter_id < MIN_CUSTOM_FILTER_ID || filter_id == 0x21 {
+        if filter_id < MIN_CUSTOM_FILTER_ID
+            || filter_id == 0x21
+            || filter_id >= FILTER_ID_RESERVED_START
+        {
             return Err(Error::InvalidData(
                 "xz: passthrough registration requires an application-defined custom filter ID",
             ));
@@ -127,5 +132,22 @@ mod tests {
                 "xz: passthrough registration requires an application-defined custom filter ID"
             ))
         ));
+    }
+
+    #[test]
+    fn test_filter_registry_register_passthrough_rejects_reserved_high_ids() {
+        let mut registry = FilterRegistry::new();
+        assert!(matches!(
+            registry.register_passthrough(FILTER_ID_RESERVED_START),
+            Err(Error::InvalidData(
+                "xz: passthrough registration requires an application-defined custom filter ID"
+            ))
+        ));
+        // Boundary: 2^62 - 1 remains a valid application-defined custom ID.
+        assert!(
+            registry
+                .register_passthrough(FILTER_ID_RESERVED_START - 1)
+                .is_ok()
+        );
     }
 }
