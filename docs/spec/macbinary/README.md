@@ -46,12 +46,13 @@
 | 17 | packed ファイルの自動 unpack (offset 116-119) | ❌ intentional scope | PackIt 等の packed 形式は別 codec |
 | 18 | MacBinary I での encode | ❌ intentional scope | MB II が上位互換であり新規 emit の価値なし |
 | 19 | MacBinary III | ❌ intentional scope | ドラフト水準で実在ファイル稀少。II との wire 差異が出た時点で再評価 |
+| 20 | ダウンロード時の Finder flag bits 0/1/8/9/10 のクリア | ❌ intentional scope | proposal: "a downloading program should clear" (Inited/Changed/Busy 等の伝送過程フラグ)。本 crate はアーカイブコンテナとして Finder flags をそのまま保持・公開する (`finder_flags` u16)。クリアは復元側アプリケーションの責任として scope 外。fdLocation/fdFldr のゼロ化指示は #16 でカバー |
 
 ## 集計
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 14 |
-| ⚠️ 部分対応 | 0 |
-| ❌ 未対応 | 5 |
-| **合計** | **19** |
+| ✅ 実装+テスト済み  | 14 |
+| ⚠️ 部分対応  | 0 |
+| ❌ 未対応  | 0 |
+| **合計** | **20** |

@@ -10,5 +10,6 @@
 | 139 | ZipStreamWriter: unknown-size entry streaming | crate API | ✅ | `test_zip_stream_writer_system_unzip_compat` |
 | 140 | Decoded entry 再エンコード (metadata 保持) | crate API | ✅ | `test_zip_add_entry_roundtrip_preserves_metadata` |
 | 141 | Archive comment 書き出し | §4.3.16 | ✅ | `set_archive_comment()`, `test_archive_comment_roundtrip` |
+| 158 | streaming writer の central directory record: `version_made_by` は上位 host byte + 下位 spec version、`version_needed` は最小抽出 version | §4.3.12 | ✅ | `write_streamed_central_directory_record` は `version_made_by` (host byte | version) と `version_needed` を正しく出力。`test_streamed_central_version_made_by` |
 
 ---

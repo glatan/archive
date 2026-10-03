@@ -66,13 +66,16 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 51 | Max Huffman code length 15 bits。エンコーダは kraft_limit で over-subscription を修復し complete code (Σ2^-len = 1) のみを emit | RFC 1951 §3.2.2 | ✅ | `test_deflate_complete_dist_tree`, `test_build_code_lengths_over_subscribed_complete` |
-| 52 | Oversubscribed Huffman tree rejection | RFC 1951 §3.2.2 | ✅ | table build で検出 |
+| 52 | Oversubscribed Huffman tree rejection | RFC 1951 §3.2.2 | ✅ | `HuffmanTable::from_lengths` で Kraft 剰余追跡 (zlib inflate 方式) により over-subscribed 木を reject。incomplete (under-subscribed) 木・空 dist テーブル・1 シンボル dist は従来通り受理。`test_huffman_table_oversubscribed` `test_oversubscribed_huffman_rejected` `test_oversubscribed_dist_tree_rejected` `test_oversubscribed_code_length_code_rejected` |
 | 53 | Distance codes 30-31 は invalid | RFC 1951 §3.2.5 | ✅ | テーブル範囲外 |
 | 54 | HLIT range 257-286 validation | RFC 1951 §3.2.7 | ✅ | パーサーで検証 |
 | 55 | Byte alignment after BTYPE=00 block | RFC 1951 §3.2.4 | ✅ | decode_uncompressed() |
 | 56 | lit/len code 286-287 はデータ中に出現しない (invalid) | RFC 1951 §3.2.6 | ✅ | 固定ハフマンで 286-287 受信時はエラー。decode_huffman_block() の `_ =>` アームで reject |
 | 57 | 準拠デコンプレッサーは任意サイズのブロックを受け入れる | RFC 1951 §3.3 | ✅ | ブロックサイズ上限なし (65535 は非圧縮ブロックのみ) |
 | 58 | 距離コードの特別規則: 距離コード 0 個 (コード長全ゼロ) は all-literals ストリームとして受理。距離コード 1 個のみの場合は 0bit ではなく 1bit で符号化し、残りは未使用コード | RFC 1951 §3.2.7 | ✅ | `HuffmanTable::from_lengths` は全ゼロ距離長を空テーブルとして受理 (距離コード使用時のみ `empty Huffman table` で拒否)。`test_dynamic_huffman_all_literals_empty_dist_tree`, `test_dynamic_huffman_empty_dist_tree_rejects_match`, `test_encode_dynamic_all_literals_roundtrip`, `test_dynamic_huffman_direct` 系 |
+| 59 | コード長リピートコード (16/17/18) は HLIT+257 → HDIST+1 の境界をまたいで適用される。全コード長は HLIT+HDIST+258 要素の単一シーケンス | RFC 1951 §3.2.7 | ✅ | `decode_dynamic_huffman` は lit/dist を単一 `lengths` バッファとして処理 |
+| 60 | マルチバイト整数は LSB-first (little-endian) で格納される (LEN/NLEN 等) | RFC 1951 §3.1 | ✅ | `read_u16_le` 等 |
+| 61 | HDIST=31/32 の受理 (dist code 30/31 のコード長が 0 なら RFC 上は合法) | RFC 1951 §3.2.7 / §3.3 | ❌ | zlib の inflate と同様に `hdist > 30` を無条件 reject する intentional な厳格化 |
 
 ---
 
@@ -80,7 +83,8 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 58 |
-| ⚠️ 部分実装 | 0 |
-| **合計** | **58** |
+| ✅ 実装+テスト済み  | 60 |
+| ⚠️ 部分実装  | 0 |
+| ❌ 未実装  | 1 |
+| **合計** | **61** |
 

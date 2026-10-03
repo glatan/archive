@@ -128,6 +128,8 @@ LHA 系の「独自拡張」は出自が分散している。出典別に整理�
 
 一次資料の所在: header.tex (LHA for OS/2 2.08、平松聡)、LHAHED15.ZIP (立花恵理子)、header.txt (UNLHA32.DLL、Micco)、jLHA Notes・lzhformat.html (ともにスナップショット済み)。
 
+- 履歴バッファ (window) サイズは **de facto (lhasa / LHa for UNIX 系) の st1 パラメタに従う**: `-lh4-`/`-lh5-` = 16 KiB (hist_bits 14)、`-lh6-` = 64 KiB (16)、`-lh7-` = 128 KiB (17)。初期 LHA 時代の記述 (jLHA Notes 等) では `-lh5-`=8 KiB / `-lh6-`=32 KiB / `-lh7-`=64 KiB とする一次記述もあり正典値が一意でない。現行主流実装は 16/64/128 KiB 系であり、wire 上は offset_bits が大きいだけで後方互換に decode されるため、本 crate は lhasa 系を採用する (実装: `st1.rs` の `hist_bits` 表)。
+
 ### 実装メモ
 
 - level-0 エンコーダは MS-DOS 属性バイト `0x20` (archive、dir は `0x10`) を出力し、name field のパス区切りは raw `0xff`。タイムスタンプは generic MS-DOS datetime。

@@ -36,7 +36,7 @@
 | 12 | ブロック外のテキストは無視 | draft "yDecoder implementations must ignore any text outside the header/trailer blocks" | ✅ | `ignores_surrounding_text` |
 | 13 | データ中の `=y` キーワード行は不正 (`y` は valid なエスケープ結果ではない) | draft "'y' is not a valid encoded critical character" | ✅ | `decode` の keyword 検出 → InvalidData |
 | 14 | header `size=`・trailer `size=`・実デコード長の 3 値一致、不一致は破棄 | draft "compare the header size value with both the trailer size value and the actual size" | ✅ | `rejects_size_and_crc_mismatch` |
-| 15 | `crc32=` (hex) があれば照合 | draft §"Verifying Integrity" | ✅ | `rejects_size_and_crc_mismatch` |
+| 15 | `crc32=` (hex) があれば照合 | draft §"Verifying Integrity" | ✅ | `rejects_size_and_crc_mismatch`。両キー共存時は `crc32` 優先 (`decode.rs:306` の `or_else` 順序) |
 | 16 | 末尾に付加された SP/TAB を除去 (transport 損傷耐性) | de facto (1.2 trailing-space 注記の一般化) | ✅ | `strip_line` |
 
 ## マルチパート
@@ -63,7 +63,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 23 |
-| ⚠️ 部分対応 | 0 |
-| ❌ 未対応 | 3 |
+| ✅ 実装+テスト済み  | 23 |
+| ⚠️ 部分対応  | 0 |
+| ❌ 未対応  | 0 |
 | **合計** | **26** |

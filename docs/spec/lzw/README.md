@@ -29,6 +29,8 @@
 | 19 | Max dictionary size: 2^max_bits entries | ncompress dictionary growth | ✅ | `test_fuzz_regression_dict_full_wraparound` (辞書フル境界: next_code=65536), `test_roundtrip_dict_full_boundary_all_max_bits`, `test_roundtrip_non_block_dict_full`, `test_decode_chain_code_65535`, `test_decode_chain_prefix_65535` |
 | 20 | Code width increase タイミング: ncompress 互換 (early change) | ncompress code stream | ✅ | item 6 で部分記載 |
 | 21 | EOF trailing partial code group: 不完全な最終 code group は無視 | ncompress EOF handling | ✅ | デコーダーで暗黙的に処理 |
+| 22 | ヘッダ byte2 の予約ビット 0x20/0x40 | compress42.c:234-237 ("Masks 0x20 and 0x40 are free") | ✅ | ncompress は無視するが本実装は `RESERVED_FLAGS = 0x60` で拒否 (参照実装より厳格)。`test_lzw_decode_rejects_reserved_header_flags` |
+| 23 | エンコーダの ratio ベース CLEAR (CHECK_GAP=10000 毎に圧縮率低下で CLEAR 出力) | compress42.c:1418-1446 | ✅ | 実装済み — block_mode で CHECK_GAP=10000 バイトごとに `ratio = (bytes_in << 8) / bytes_out` を評価し悪化時に CLEAR emit (compress42.c 準拠)。`test_ratio_clear_on_worsening_input` `test_no_ratio_clear_when_ratio_improves` |
 
 ---
 
@@ -48,8 +50,9 @@ fuzz の `original-compress` / `original-decompress` パターンにおける誤
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 21 |
-| **合計** | **21** |
+| ✅ 実装+テスト済み  | 23 |
+| ❌ 未実装  | 0 |
+| **合計** | **23** |
 
 
 ---

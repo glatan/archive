@@ -85,7 +85,9 @@
 | 56 | PAX record: UTF-8 encoding 必須 | POSIX.1-2001 pax | ✅ | UTF-8 として処理 |
 | 57 | Numeric field overflow: binary encoding fallback (GNU) | GNU tar extensions | ✅ | item 18 |
 | 58 | GNU 'S' typeflag (sparse in-header, old style) | GNU tar extensions | ✅ | `FileType::GnuSparse`, `parse_gnu_sparse_entries()`, `test_gnu_sparse_in_header_decode` |
-| 59 | GNU binary mtime encoding (base-256、octal 範囲超の timestamp 用) | GNU tar extensions | ✅ | binary size encoding と同じ base-256 方式 |
+| 59 | GNU binary mtime encoding (base-256、octal 範囲超の timestamp 用) | GNU tar extensions | ✅ | decode は `parse_octal_u64` の base-256 経路で対応。encode 側は mtime を常に octal で書き GNU モードの負値は 0 にクランプ (base-256 フォールバックなし) |
+| 60 | PAX extended header: `<value>` がゼロ長の場合、同名の ustar ヘッダ値・先行 x レコード値・グローバル値を delete する | POSIX.1-2017 pax extended header | ✅ | `effective_pax_attrs` で空 value の属性を削除 (POSIX: ustar ヘッダ値へフォールバック)、後続レコードによる override も last-wins で正規化。`test_pax_empty_value_deletes_attribute` |
+| 61 | typeflag `'\0'` は regular file として認識。未認識 typeflag は `FileType::Other(u8)` として保持 | POSIX.1-2017 ustar | ✅ | `from_byte(0)` → Regular、`test_file_type` |
 
 ---
 
@@ -93,6 +95,6 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 59 |
-| ❌ 未対応 (intentional scope) | 0 |
-| **合計** | **59** |
+| ✅ 実装+テスト済み  | 61 |
+| ❌ 未対応 | 0 |
+| **合計** | **61** |

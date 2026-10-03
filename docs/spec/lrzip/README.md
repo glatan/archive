@@ -71,6 +71,10 @@
 | 36 | MD5 checksum flag (header byte 21): パース + 検証 + emit | lrzip header | ✅ | decode: `md5_flag != 0` 時にデコード結果の MD5 を検証 (`test_decode_md5_flag_valid`, `test_decode_md5_flag_mismatch`, `test_decode_md5_flag_truncated`)。encode: `encode_with_md5` で flag + 末尾 digest を出力 (`test_encode_with_md5_roundtrip`, `test_encode_with_md5_empty`, `test_encode_with_md5_backend_matrix`) |
 | 37 | Reserved byte 23: encode 時は 0 | lrzip header | ✅ | エンコーダーで 0 書き出し |
 | 38 | MD5 flag 付き crate 出力を system `lrzip -d` が decode (digest 検証通過) | system `lrzip` interoperability behavior | ✅ | `test_lrzip_encode_md5_system_decode_compat` |
+| 39 | v0.6 RCD 構造 (RCD0 幅 1-8、EOF flag、chunk decompressed size、stream header ctype/c_len/u_len/last_head) | magic.header.txt v0.6 RCD | ✅ | `decode.rs` RCD パース実装 |
+| 40 | v0.6 data blocks: stream0 末端の empty literal (type 0, len 0) + CRC32 | magic.header.txt v0.6 Data blocks | ✅ | `decode_chunk_streams` で `legacy_crc32` 検証、`test_crc32_verified` |
+| 41 | magic bytes 6-13 の Source File Size は unknown 時 0 (upstream 記載) | magic.header.txt | ✅ | 実装済み — `total_size == 0` は unknown として size 検査を skip (decode / streaming reader 双方)。`test_zero_total_size_is_unknown` |
+| 42 | v0.7 節 (byte 14 streaming flag、byte 23 last-block、LRZC、CryptoDesc、minor=0x07) | magic.header.txt v0.7 | ❌ | intentional scope — ターゲットは 0.6x。デコーダーは minor/bytes 14・23 を検査せず、v0.7 streaming-flagged ファイルを誤パースする可能性あり |
 
 ---
 
@@ -78,5 +82,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 38 |
-| **合計** | **38** |
+| ✅ 実装+テスト済み  | 41 |
+| ⚠️ 部分実装  | 0 |
+| ❌ 未実装 | 1 (intentional scope) |
+| **合計** | **42** |

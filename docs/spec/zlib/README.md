@@ -33,6 +33,7 @@
 | 17 | Adler-32 modulus 65521 | RFC 1950 §8 | ✅ | 実装済み |
 | 18 | 全 multi-byte 数値は MSB first (big-endian) で格納 | RFC 1950 §2.1 | ✅ | Adler-32 trailer を big-endian で読み書き |
 | 19 | FDICT=0 を期待するコンテキストで FDICT=1 を reject | RFC 1950 §2.3 | ✅ | decode() は FDICT=1 で Unsupported、decode_with_dict() で対応 |
+| 20 | ADLER32 以後のデータは zlib ストリームに含まれない (trailing data 許容) | RFC 1950 §2.2 | ❌ | 実装は trailer を末尾 4B 固定と仮定するため trailing data は reject (intentional な厳格化) |
 
 ---
 
@@ -40,6 +41,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 19 |
-| **合計** | **19** |
+| ✅ 実装+テスト済み  | 19 |
+| ❌ 未実装 | 1 (intentional scope) |
+| **合計** | **20** |
 

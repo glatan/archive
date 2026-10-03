@@ -15,7 +15,7 @@
 | 3 | version SHOULD 1。v1 以外は reject (libxar は読み込み時に version を無視するが、本実装は防御的に reject する設計判断) | 同上 ("current version is one" + "ignores the value when reading") | ✅ | `bad_version_rejected` |
 | 4 | `toc_length_compressed` / `toc_length_uncompressed` (各 64bit) で TOC 領域を決定 | 同上 | ✅ | `decode_real` |
 | 5 | cksum_alg: 0=none, 1=sha1, 2=md5 | 同上 | ✅ | `decode_real` (1), `decode_md5_checksums` (2), `decode_stored_no_checksum` (0) |
-| 6 | cksum_alg=3: 拡張ヘッダの NUL 終端 digest 名を読み、"sha1"/"md5" は受理、それ以外は reject。非 4 倍数・28 未満の拡張ヘッダは reject | 同上 | ✅ | cksum_alg 3 分岐 (実装済み、実物 fixture なし — libxar が生成するのは OpenSSL digest 名で固定 28B ではないため) |
+| 6 | cksum_alg=3: 拡張ヘッダの NUL 終端 digest 名を読み、"sha1"/"md5" は受理、それ以外は reject。非 4 倍数・28 未満の拡張ヘッダは reject | 同上 | ✅ | cksum_alg 3 分岐実装済み (decode.rs)。合成テストで "sha1" 受理・未知 digest 名 reject を検証。`test_cksum_alg3_named_digest` `test_cksum_alg3_unknown_digest_rejected` |
 
 ## Table of Contents (zlib 圧縮 XML)
 

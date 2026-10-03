@@ -26,7 +26,7 @@
 | 9 | `verified_contents` (field 4) → gzip 圧縮 JSON を生バイトで保持 | 同上 | ✅ | `decodes_header_and_zip` |
 | 10 | `signed_header_data` (field 10000) → `SignedData.crx_id` (16B) を抽出 | 同上 + SignedData message | ✅ | `decodes_header_and_zip` / oracle テスト |
 | 11 | `AsymmetricKeyProof` の `public_key` (1) / `signature` (2) を保持 | crx3.proto AsymmetricKeyProof | ✅ | 全テスト |
-| 12 | varint/LEN 以外の wire type・不正 varint・範囲外フィールドを拒否 | protobuf wire format | ✅ | `rejects_bad_inputs` |
+| 12 | wire type 0 (varint) / 1 (64-bit) / 5 (32-bit) の既知フィールドは値をスキップして継続、wire type 3/4/6/7 (SGROUP/EGROUP/reserved) ・不正 varint・範囲外フィールド番号・LEN 長超過を拒否 | protobuf wire format | ✅ | `for_each_len_field` (decode.rs:107-143)、`rejects_bad_inputs` |
 | 13 | 未知フィールドはスキップ (proto2 の前方互換) | proto2 仕様 | ✅ | for_each_len_field の既定分岐 |
 
 ## 意図的な scope 制約
@@ -42,7 +42,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 13 |
-| ⚠️ 部分対応 | 0 |
-| ❌ 未対応 | 4 |
+| ✅ 実装+テスト済み  | 13 |
+| ⚠️ 部分対応  | 0 |
+| ❌ 未対応  | 0 |
 | **合計** | **17** |

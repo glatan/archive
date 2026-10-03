@@ -25,14 +25,14 @@
 | 10 | ランダマイズドフラグ (1bit) — 旧バージョン互換 | `compress.c` / `decompress.c` block header and selector format | ✅ | `test_decode_randomized_block_fixture`, `test_randomization_helper_roundtrip` |
 | 11 | オリジナルポインタ (BWT ptr, 24bit) | `compress.c` / `decompress.c` block header and selector format | ✅ | デコーダで範囲検証 |
 | 12 | 二段シンボルビットマップ (16bit グループマスク + 16bit/グループ) | `compress.c` / `decompress.c` block header and selector format | ✅ | `test_parse_symbol_map`, `test_symbol_map_roundtrip` |
-| 13 | n_in_use = 0 のエラー | `compress.c` / `decompress.c` block header and selector format | ✅ | デコーダ line 129-131 |
+| 13 | n_in_use = 0 のエラー | `compress.c` / `decompress.c` block header and selector format | ✅ | デコーダ `decode.rs:193` |
 | 14 | ハフマンテーブル数 (3bit, 有効値 2-6) | `compress.c` / `decompress.c` block header and selector format | ✅ | デコーダで `2..=6` バリデーション |
 | 15 | セレクタ数 (15bit) | `compress.c` / `decompress.c` block header and selector format | ✅ | `test_invalid_selector_count` |
 | 16 | セレクタ上限 MAX_SELECTORS = 18002 (2 + 900000/50) | `compress.c` / `decompress.c` block header and selector format | ✅ | `test_invalid_selector_count` |
 | 17 | セレクタ: ユーナリ符号 → MTF デコード | `compress.c` / `decompress.c` block header and selector format | ✅ | `write_selectors` / `parse_selectors` ラウンドトリップ |
-| 18 | セレクタインデックス範囲検証 (< num_tables) | `compress.c` / `decompress.c` block header and selector format | ✅ | `parse_selectors` line 239-241 |
+| 18 | セレクタインデックス範囲検証 (< num_tables) | `compress.c` / `decompress.c` block header and selector format | ✅ | `parse_selectors` (decode.rs:311 付近) |
 | 19 | ブロックサイズ上限 (blockSize100k * 100000) | `compress.c` / `decompress.c` block header and selector format | ✅ | デコーダで `undo_mtf_rle2` 内の出力サイズ制限 |
-| 20 | ブロックサイズのRLE1出力基準 (-19バイトヘッドルーム) | `compress.c` / `decompress.c` block header and selector format | ✅ | `encode_with_level` line 80 |
+| 20 | ブロックサイズのRLE1出力基準 (-19バイトヘッドルーム) | `compress.c` / `decompress.c` block header and selector format | ✅ | `encode_with_level` (encode.rs:107-111) |
 
 ### RLE1 (Run-Length Encoding 第1段)
 
@@ -41,7 +41,7 @@
 | 21 | 4バイト同一 + カウントバイト (0-255) → 合計 4~259 バイトのラン | `compress.c` / `decompress.c` RLE1 stage | ✅ | `test_rle1_run_of_4/5`, `test_rle1_long_run` |
 | 22 | 3バイト以下の同一はそのまま通過 | `compress.c` / `decompress.c` RLE1 stage | ✅ | `test_rle1_run_of_3_no_encoding`, `test_rle1_no_runs` |
 | 23 | ラン長上限 259 (4 + 255) | `compress.c` / `decompress.c` RLE1 stage | ✅ | `test_rle1_long_run`, `test_roundtrip_max_rle1_run` |
-| 24 | デコーダ: カウントバイト欠損エラー | `compress.c` / `decompress.c` RLE1 stage | ✅ | デコーダ `undo_rle1` line 359-364 |
+| 24 | デコーダ: カウントバイト欠損エラー | `compress.c` / `decompress.c` RLE1 stage | ✅ | デコーダ `undo_rle1` (decode.rs:455-458) |
 | 25 | ブロック分割はRLE1出力サイズ基準 | `compress.c` / `decompress.c` RLE1 stage | ✅ | `test_roundtrip_multi_block_with_runs`, `test_apply_rle1_bounded` |
 
 ### BWT (Burrows-Wheeler 変換)
@@ -52,7 +52,7 @@
 | 27 | 逆 BWT: LF-mapping による復元 | `blocksort.c` / `decompress.c` BWT logic | ✅ | `test_roundtrip_banana/hello/all_bytes` (bwt) |
 | 28 | 空入力 | `blocksort.c` / `decompress.c` BWT logic | ✅ | `test_roundtrip_empty` (bwt) |
 | 29 | 全バイト同一入力 | `blocksort.c` / `decompress.c` BWT logic | ✅ | `test_roundtrip_all_same` (bwt) |
-| 30 | original_ptr 範囲検証 | `blocksort.c` / `decompress.c` BWT logic | ✅ | デコーダ line 182-184 |
+| 30 | original_ptr 範囲検証 | `blocksort.c` / `decompress.c` BWT logic | ✅ | デコーダ (decode.rs:239、`orig_ptr >= bwt_data.len()` を検証) |
 
 ### MTF + RLE2 (Move-To-Front + 零ラン符号化)
 
@@ -121,6 +121,8 @@
 | 66 | Concatenated .bz2 streams (stream-after-stream) | bzip2 reference behavior | ✅ | `test_decode_concatenated_streams`, `test_decode_concatenated_three_streams` |
 | 67 | Padding bits after stream trailer (最大 7 bits) の無視 | bzip2 reference behavior | ✅ | BitReader で処理 |
 | 68 | original_ptr >= block_data_length rejection | bzip2 reference: BWT | ✅ | デコーダーで range 検証 |
+| 69 | NumSels: セレクタ枯渇時は decoder がエラー | bzip2-format §2.2.3.2 | ✅ | `decode.rs:346-347` "ran out of selectors" |
+| 70 | 非完全 (over/under-subscribed) Huffman 木の扱い | bzip2-format §2.2.3.2.3 + Appendix B | ✅ | canonical decode で `len > max_len` 時に `invalid bzip2 Huffman code` を返す (under-subscribed はエラー)。C 実装互換 decoder は無効シンボル使用時にのみエラーという記述に対し、本実装は厳格側 |
 
 ---
 
@@ -128,6 +130,6 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 68 |
-| **合計** | **68** |
+| ✅ 実装+テスト済み  | 70 |
+| **合計** | **70** |
 

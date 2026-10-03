@@ -35,6 +35,8 @@
 | 10 | 文字列 tag は NUL 終端、STRING_ARRAY は NUL 区切り列 | [format_header.html](https://rpm-software-management.github.io/rpm/manual/format_header.html) | ✅ | `get_string`/`get_strings` |
 | 11 | 整数型は要素サイズで整列 | [format_header.html](https://rpm-software-management.github.io/rpm/manual/format_header.html) | ✅ | `entry_bytes` の offset 計算 |
 | 12 | index/データ範囲の bounds 検査 (truncated → `UnexpectedEof`) | crate エラー規約 | ✅ | `rejects_*` 系 |
+| 12a | index entry は tag 昇順ソート・重複 tag なし | format_header.html ("entries are sorted by tag number") | ⚠️ | decoder は file order のまま保持しソート/重複検証をしない (lenient)。encode 側 (#26) は昇順 emit |
+| 12b | データ store の整列パディングはゼロ | format_header.html | ⚠️ | decoder は pad 内容を検証しない (lenient)。encode はゼロパッド emit |
 
 ### payload
 

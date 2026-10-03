@@ -54,6 +54,8 @@
 |---|------|----------|-----------|----------------|
 | 24 | system `xz --format=lzma` 生成物のデコード | lzma-file-format.txt / system xz | ✅ | `test_lzma_alone_decode_system_compressed` (統合) |
 | 25 | crate 生成物の system `xz --format=lzma -d` によるデコード | lzma-file-format.txt / system xz | ✅ | `test_lzma_alone_encode_decoded_by_system` (統合) |
+| 26 | 既知サイズが 256 GiB 以上を指定するファイルの拒否 (XZ Utils の policy) | lzma-file-format.txt §1.1.3 | ✅ | 実装済み — `parse_header` で既知 unpacked_size >= 256 GiB を reject (XZ Utils policy)。`test_decode_rejects_oversized_known_size` |
+| 27 | 辞書サイズの portability 推奨 (2^n または 2^n+2^(n-1)。XZ Utils はこの形式のみ生成・解凍) | lzma-file-format.txt §1.1.2 | ❌ | 未実装 — 実装は任意の非 0 値を受理する寛容側 (情報レベルの推奨) |
 
 ---
 
@@ -61,8 +63,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 25 |
-| **合計** | **25** |
+| ✅ 実装+テスト済み  | 26 |
+| ❌ 未実装  | 1 |
+| **合計** | **27** |
 
 ---
 

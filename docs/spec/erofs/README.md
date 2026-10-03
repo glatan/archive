@@ -14,7 +14,7 @@
 | 2 | `blkszbits` は 9..=16、`blksz = 1 << blkszbits` | erofs_fs.h `blkszbits`、erofs-utils の検証 | ✅ | decode 時検証 |
 | 3 | `sb_extslots`: superblock size = 128 + slots*16 | erofs_fs.h `EROFS_SB_EXTSLOT_SIZE` | ✅ | decode 時検証 |
 | 4 | `EROFS_FEATURE_COMPAT_SB_CHKSUM`: `blksz - 1024` バイトの CRC32C (checksum フィールド zero、seed ~0、final complement なし) | erofs-utils `erofs_superblock_csum_verify` | ✅ | `test_erofs_rejects_bad_superblock_checksum`、実 mkfs fixture (compat `sb_csum` 付き) で検証 |
-| 5 | `feature_incompat`: ZTAILPACKING(0x10)、FRAGMENTS/`DEDUPE`(0x20)、METABOX(0x100)、extra_devices≠0 は拒否。COMPR_HEAD2(0x08、DEVICE_TABLE と共用ビット) は受理 (HEAD2 対応済み、実マルチデバイスは `extra_devices` で拒否) | erofs_fs.h `EROFS_FEATURE_INCOMPAT_*` | ✅ | decode 時検証 (unsupported feature → `Error::Unsupported`) |
+| 5 | `feature_incompat`: 受理側は LZ4_0PADDING(0x01)/COMPR_CFGS(0x02)/COMPR_HEAD2(0x08)/ZTAILPACKING(0x10)/FRAGMENTS・DEDUPE(0x20)/XATTR_PREFIXES(0x40)/48BIT(0x80)。拒否は METABOX(0x100) と `extra_devices≠0` のみ | erofs_fs.h `EROFS_FEATURE_INCOMPAT_*` | ✅ | decode 時検証 (METABOX / extra_devices → `Error::Unsupported`) |
 | 6 | `INCOMPAT_48BIT` 時は `rootnid_8b`(offset 112) / `blocks = blocks_lo | blocks_hi<<32` | erofs_fs.h rb union / `rootnid_8b` | ✅ | decode 時分岐 (48bit image は合成されないため小規模イメージでは 16bit 経路) |
 | 7 | `meta_blkaddr`、`xattr_blkaddr`、`volume_name`、`epoch`、`fixed_nsec` の解釈 | erofs_fs.h `erofs_super_block` | ✅ | 全テスト |
 | 33 | sb uuid / build_time / xattr filter 等の付随フィールドの意味解釈 | erofs_fs.h `erofs_super_block` | ✅ | `ErofsImage.superblock` (`ErofsSuperblock`: feature_compat/incompat, inos, blocks, meta/xattr_blkaddr, uuid, epoch, fixed_nsec, build_time, xattr_prefix_count/start, packed_nid, ishare_xattr_prefix_id) + COMPAT_* const 公開。xattr filter 本体は lookup 加速用途のみで解釈不要。`superblock_metadata_fields`, `test_erofs_mkfs_image_superblock` |
@@ -23,7 +23,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 28 | z_erofs 圧縮 inode (datalayout 1/3: LZ4/MicroLZMA/DEFLATE/Zstandard pcluster) | erofs.rst "Data compression"、erofs_fs.h `z_erofs_*` | ✅ | `z.rs` の `read_compressed` が mapheader + noncompact/compact index + extent レコードを decode (HEAD1/HEAD2/NONHEAD/PLAIN・HOLE・partial-ref・`Z_EROFS_NULL_ADDR`・big pcluster)。`compressed_*` / `rejects_*` 各テスト + mkfs.erofs 実 fixture (integration 6 件)。packed inode・fragment・tail-packing は #29 の intentional |
+| 28 | z_erofs 圧縮 inode (datalayout 1/3: LZ4/MicroLZMA/DEFLATE/Zstandard pcluster) | erofs.rst "Data compression"、erofs_fs.h `z_erofs_*` | ✅ | `z.rs` の `read_compressed` が mapheader + noncompact/compact index + extent レコードを decode (HEAD1/HEAD2/NONHEAD/PLAIN・HOLE・partial-ref・`Z_EROFS_NULL_ADDR`・big pcluster・`ADVISE_INTERLACED_PCLUSTER` raw extent)。`compressed_*` / `rejects_*` 各テスト + mkfs.erofs 実 fixture (integration 6 件)。packed inode・fragment・tail-packing は #29 の intentional |
 | 8 | inode offset = `meta_blkaddr * blksz + 32 * nid` (32B スロット) | erofs.rst inode space 図 | ✅ | 全テスト |
 | 9 | `i_format` bit0 で compact(32B)/extended(64B) を判別、bits1-3 で datalayout | erofs_fs.h `EROFS_I_VERSION_MASK`/`EROFS_I_DATALAYOUT_MASK` | ✅ | `decode_sample_tree` (compact)、`extended_inode` (extended) |
 | 10 | inline xattr ibody: `i_xattr_icount` が非 0 なら 12 + 4*(n-1) バイトをスキップ | erofs_fs.h `erofs_xattr_ibody_size` | ✅ | offset 計算で使用 (xattr 内容は intentional scope で未解釈) |
@@ -57,14 +57,14 @@
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 29 | METABOX / DEVICE_TABLE (`extra_devices != 0`) / DEDUPE イメージ | ❌ intentional scope | METABOX はメタデータ全体の別アドレッシング、DEVICE_TABLE は外部 blob 参照で単一 `&[u8]` 入力モデルと不整合。superblock feature で早期拒否 |
+| 29 | METABOX / DEVICE_TABLE (`extra_devices != 0`) / DEDUPE イメージ | ❌ intentional scope | METABOX はメタデータ全体の別アドレッシング、DEVICE_TABLE は外部 blob 参照で単一 `&[u8]` 入力モデルと不整合。METABOX bit (0x100) と `extra_devices != 0` で早期拒否。DEDUPE (0x20) は FRAGMENTS と共用ビットのため受理するが、DEDUPE 固有データは未解釈 |
 | 30 | erofs write | ❌ intentional scope | mkfs.erofs の領域。read が主用途 |
 
 ## 集計
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 32 |
-| ⚠️ 部分対応 | 0 |
-| ❌ 未対応 | 2 |
+| ✅ 実装+テスト済み  | 32 |
+| ⚠️ 部分対応  | 0 |
+| ❌ 未対応  | 0 |
 | **合計** | **34** |

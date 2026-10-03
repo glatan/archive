@@ -142,9 +142,9 @@
    "id": "lzip-manual",
    "format": "lzip",
    "title": "Lzip Manual",
-   "version": "1.24.1",
+   "version": "1.26 (19 July 2026)",
    "url": "https://www.nongnu.org/lzip/manual/lzip_manual.html",
-   "filename": "lzip_manual_1.24.1.html"
+   "filename": "lzip_manual_1.26.html"
   },
   {
    "id": "rfc1321",

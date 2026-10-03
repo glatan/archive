@@ -52,8 +52,9 @@
 |---|------|----------|-----------|----------------|
 | 37 | FNAME/FCOMMENT は ISO 8859-1 (Latin-1) | RFC 1952 §2.3.1 | ✅ | ISO 8859-1 は全 0x00-0xFF をカバー。raw bytes 保存で仕様準拠 |
 | 38 | FEXTRA sub-field 構造: SI1(1B) + SI2(1B) + LEN(2B) + data | RFC 1952 §2.3.1.1 | ✅ | `test_fextra_valid_multiple_subfields`。SI2=0 は将来使用のため予約 (RFC 1952 §2.3.1.1) |
-| 39 | Trailing data after last member の処理 | RFC 1952 §2.2 | ✅ | 無視 (RFC は reject を要求しない。正しい動作) |
+| 39 | Trailing data after last member の処理 | RFC 1952 §2.2 | ✅ | `decode()` は残余バイトを次メンバーとして `GzipHeader::parse` するため、有効メンバーでない trailing data は `InvalidData` で reject (RFC の厳格解釈) |
 | 40 | エンコーダーは reserved FLG bits を全てゼロに設定 | RFC 1952 §2.3.1.2 | ✅ | encode() で flags=0x00 固定。encode_with_options() は定義済み bit 定数 (FTEXT/FHCRC/FEXTRA/FNAME/FCOMMENT) のみ OR 合成し、bits 5-7 は常に 0 |
+| 41 | FNAME は「ディレクトリ要素を除去し小文字化した原本ファイル名」(encoder 側 SHOULD、FS 依存) | RFC 1952 §2.3.1 | ❌ | エンコーダは fname をそのまま格納する intentional scope |
 
 ---
 
@@ -61,6 +62,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 40 |
-| **合計** | **40** |
+| ✅ 実装+テスト済み  | 40 |
+| ❌ 未実装 | 1 (intentional scope) |
+| **合計** | **41** |
 

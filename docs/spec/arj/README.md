@@ -22,7 +22,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 1 | signature `0x60 0xEA` + `u16le hsize`、hsize=0 で終端 | ARJ tech note §header | ✅ | `roundtrip` |
-| 2 | 基本 header 30B: first_hdr_size / version / min_ver / host_os / arj_flags / method / file_type / reserved / dos_time u32 / crc32 u32 / packed u32 / orig u32 / name_pos u32 / host_data u16 | ARJ tech note | ✅ | `roundtrip` |
+| 2 | 基本 header 30B: first_hdr_size(1) / version(1) / min_ver(1) / host_os(1) / arj_flags(1) / method(1) / file_type(1) / reserved=garble_modifier(1) / dos_time u32 / packed u32 / orig u32 / crc32 u32 / filespec_pos u16 / access_mode u16 / host_data u16 | ARJ tech note | ✅ | `roundtrip` (decode.rs:17-20 のフィールド順に準拠) |
 | 3 | filename + comment は NUL 終端文字列 (first_hdr_size の後) | ARJ tech note | ✅ | `read_cstr` |
 | 4 | header CRC-32 は hsize バイト本体に対して、header 直後に u32le 格納、不一致は reject | ARJ tech note | ✅ | `rejects_bad_header_crc` |
 | 5 | extended header: CRC 直後の u16 size (0 = なし) + data + u32 CRC を skip | ARJ tech note | ✅ | ext サイズ処理 |

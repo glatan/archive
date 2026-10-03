@@ -75,6 +75,9 @@
 | 37 | lzop header: optional name field (name_length + name bytes) | lzop source | ✅ | ヘッダーでパース |
 | 38 | F_CRC32_D / F_CRC32_C と F_ADLER32_D / F_ADLER32_C は排他 | lzop source | ✅ | デコーダーで対応 |
 | 39 | Decompressed output size 検証 (uncompressed_len と一致) | lzop block structure | ✅ | デコーダーで検証 |
+| 40 | 命令形式 `0 0 0 0 D D S S` の state==4 形式 (offset 2049-3072, len 3) | Linux kernel lzo.rst: Instruction encoding | ✅ | `decode.rs:384-402` で実装 |
+| 41 | lzop `version < 0x0940` の拒否 | lzop source | ✅ | `decode.rs:77`、`test_old_version_rejected` |
+| 42 | bitstream version byte 17 (v1 / LZO-RLE) と v1 専用ゼロラン命令 | Linux kernel lzo.rst | ❌ | intentional scope — v0 decoder のみ (kernel 文書: "v0 cannot read v1 data") |
 
 
 ---
@@ -83,5 +86,6 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 39 |
-| **合計** | **39** |
+| ✅ 実装+テスト済み  | 41 |
+| ❌ 未実装 | 1 (intentional scope) |
+| **合計** | **42** |
