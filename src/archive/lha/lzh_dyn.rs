@@ -20,6 +20,18 @@
 //! UNIX `dhuf.c` (`decode_c_dyn`/`decode_p_dyn`, `reconst`,
 //! `swap_inc`, `make_new_node`) and the XADMaster port in
 //! `XADLZHOldHandles.m` (`LhA_Decrunch` for `-lh2-`).
+//!
+//! Upstream copyright/attribution notice retained per the LHa for UNIX
+//! free-use terms (verbatim from `dhuf.c`):
+//!
+//! ```text
+//! LHa for UNIX
+//!             dhuf.c -- Dynamic Hufffman routine
+//!
+//!     Modified                H.Yoshizaki
+//!
+//! Ver. 1.14   Source All chagned              1995.01.14  N.Watazaki
+//! ```
 
 use alloc::vec;
 use alloc::vec::Vec;

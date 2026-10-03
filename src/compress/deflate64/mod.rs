@@ -1,4 +1,4 @@
-//! Deflate64 (Enhanced Deflating) decompression.
+//! Deflate64 (Enhanced Deflating) compression and decompression.
 //!
 //! Deflate64 extends DEFLATE with a 64KB sliding window, distance codes 30-31,
 //! and a longer maximum match length (65538 vs 258).

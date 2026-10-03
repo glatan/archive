@@ -13,6 +13,8 @@
 //! attributes (`<ea>`), signatures, and encoding styles beyond
 //! none/gzip/bzip2/xz/lzma are out of scope.
 
+use alloc::vec::Vec;
+
 mod xml;
 
 pub mod decode;

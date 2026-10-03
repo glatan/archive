@@ -1,7 +1,7 @@
 //! Quantum (tcompTYPE_QUANTUM) decompression for cabinet folders.
 //!
 //! Quantum is an adaptive arithmetic coder over an LZ match scheme
-//! designed by David Stafford (Stac Electronics). The bit stream is
+//! designed by David Stafford. The bit stream is
 //! MSB-first, injected two bytes at a time. Output advances in 32 KiB
 //! frames; after each frame the bit position is realigned to a byte
 //! boundary and a trailer of `0x00`*`0xFF` is consumed.
@@ -18,6 +18,11 @@
 //! Ported/adapted from libmspack
 //! `qtmd.c` (decoder-only upstream), Matthew Russotto's Quantum notes,
 //! and the compcol port.
+//!
+//! Licensing: libmspack `qtmd.c` is LGPL-2.1 (Stuart Caie); this port is
+//! incorporated under LGPL-2.1 section 3 (GPL-2.0-or-later) and combined
+//! with this AGPL-3.0 work via AGPL-3.0 section 13. The compcol
+//! intermediate reference is MIT-licensed.
 
 use alloc::vec;
 use alloc::vec::Vec;

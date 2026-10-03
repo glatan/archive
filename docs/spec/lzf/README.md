@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 形式概要 | Marc Lehmann の liblzf が使用する raw LZ77 ストリーム。コンテナヘッダ・magic・チェックサムを持たない制御バイト列 |
-| 基準仕様 | [liblzf](http://cvs.schmorp.de/liblzf/) ソース内フォーマット記述 ([`lzf_c.c`](https://github.com/nemequ/liblzf/blob/master/lzf_c.c) 冒頭コメント / `lzfP.h`、Marc Alexander Lehmann、BSD license、GitHub mirror: [nemequ/liblzf](https://github.com/nemequ/liblzf)) + [ning/compress](https://github.com/ning/compress) `LZFFormat` ドキュメント。ローカルスナップショット: `docs/spec/sources/liblzf_lzf_c.c` |
+| 基準仕様 | [liblzf](http://cvs.schmorp.de/liblzf/) ソース内フォーマット記述 ([`lzf_c.c`](https://github.com/nemequ/liblzf/blob/master/lzf_c.c) 冒頭コメント / `lzfP.h`、Marc Alexander Lehmann、BSD-2-Clause OR GPL-2.0-or-later、GitHub mirror: [nemequ/liblzf](https://github.com/nemequ/liblzf)) + [ning/compress](https://github.com/ning/compress) `LZFFormat` ドキュメント。ローカルスナップショット: `docs/spec/sources/liblzf_lzf_c.c` |
 | 実装 | `archive::compress::lzf` (decode / decode_bounded / encode)。仕様記述からの pure-Rust 実装 |
 
 ## ストリーム構造
@@ -48,5 +48,5 @@
 
 ## 出典 / 検証メモ
 
-- 参照実装 liblzf は BSD ライセンス。本実装はフォーマット記述 (lzfP.h コメント、LZFFormat wiki) から書かれた独立実装であり、コードの移植は行っていない。
+- 参照実装 liblzf は BSD-2-Clause OR GPL-2.0-or-later デュアルライセンス。本実装はフォーマット記述 (lzfP.h コメント、LZFFormat wiki) から書かれた独立実装であり、コードの移植は行っていない。
 - LZF ストリームは HDF5 `lzf` フィルタ等で chunk 単位で使われる raw codec であり、コンテナ連携は本モジュールの範囲外。

@@ -15,8 +15,9 @@
 //! `freq[]` is kept sorted ascending; `update` swaps a node with the
 //! last position of the smaller-frequency block when order breaks.
 //!
-//! Ported from Okumura's
-//! public-domain lzhuf.c and the deark `lzhuf.h` port.
+//! Ported from the original `lzhuf.c` (written by Haruyasu Yoshizaki
+//! 1988, comments translated by Okumura; distributed without an
+//! explicit license grant) and the deark `foreign/lzhuf.h` port.
 
 use alloc::vec;
 use alloc::vec::Vec;

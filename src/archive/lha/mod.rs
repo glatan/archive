@@ -1,4 +1,4 @@
-//! LHA / LZH archive read and store-method write support.
+//! LHA / LZH archive read/write support.
 //!
 //! Reference: lha header documentation ("apphead"/lzh_note) as used by
 //! the original LHA and GNU `lha`. Supported scope:
@@ -13,9 +13,10 @@
 //!   variants. Every other method (`-lhx-`, ...) is rejected with
 //!   [Error::Unsupported];
 //! - writing emits `-lh0-`/`-lhd-` entries at header level 0, 1, 2, or 3
-//!   (`LhaEncoder::with_level`), or static-Huffman `-lh4-`/`-lh5-`/
-//!   `-lh6-`/`-lh7-` file entries via `LhaEncoder::with_method`
-//!   (falling back to `-lh0-` when compression does not shrink the
+//!   (`LhaEncoder::with_level`), or `-lz4-`/`-pm0-` stored-alias and
+//!   static-Huffman `-lh4-`/`-lh5-`/`-lh6-`/`-lh7-` file entries via
+//!   `LhaEncoder::with_method` (falling back to `-lh0-` when
+//!   compression does not shrink the
 //!   input). Level 0 requires the whole filename to fit in one byte
 //!   (at most 255 bytes); levels 1/2/3 carry the name through
 //!   extended headers.
@@ -38,7 +39,7 @@ use crate::error::Error;
 
 /// LHA archive decoding.
 pub mod decode;
-/// LHA store-method encoding.
+/// LHA archive encoding.
 pub mod encode;
 mod larc;
 mod lzh_dyn;

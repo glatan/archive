@@ -16,9 +16,10 @@
 //! windows, 5 at 15 and above).
 //!
 //! De-facto format reference (behaviour-matched/adapted from):
-//! Okumura's public-domain `shuf.c`/`maketbl` code, lhasa
-//! `lh_new_decoder.c` (ISC), and the XADMaster `XADLZHStaticHandle`
-//! port.
+//! LHa for UNIX `huf.c`/`maketbl.c` (Yoshizaki, free-use license;
+//! the st1 functions live in `huf.c`, `shuf.c` is the st0 decoder),
+//! lhasa `lh_new_decoder.c` (ISC), and the XADMaster
+//! `XADLZHStaticHandle` port.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -40,7 +41,7 @@ const CODE_BITS: u32 = 9;
 /// Position in the temp table where the 2-bit zero-run insert lives.
 const TEMP_SPECIAL: usize = 3;
 
-/// Decode an st1 payload to  bytes.
+/// Decode an st1 payload to `expected` bytes.
 pub(crate) fn decode(
     hist_bits: u32,
     offset_bits: u32,

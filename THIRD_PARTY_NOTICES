@@ -16,10 +16,15 @@ file. It is intended to make maintenance and downstream auditing easier.
 The following implementations are intended to follow published format
 specifications or standards documents:
 
-- DEFLATE: RFC 1951
+- DEFLATE: RFC 1951. The encoder's bit-length repair
+  (`src/compress/deflate/encode.rs`) consults the behavior of zlib's
+  `gen_bitlen`/`inflate_table` (zlib license) as a reference oracle;
+  no code was copied
 - gzip: RFC 1952
 - zlib: RFC 1950
-- zstd: RFC 8878
+- zstd: RFC 8878. The upstream reference implementation is dual
+  BSD-3-Clause OR GPLv2 licensed; Meta's earlier BSD+PATENTS grant was
+  removed by that 2017 relicensing
 - Brotli stream format: RFC 7932
   - The encoder and decoder are spec-informed implementations written
     against RFC 7932; no code was copied from the reference Brotli
@@ -94,6 +99,11 @@ specifications or standards documents:
   streams from the same FreeRDP test source (flags and
   CompressionTypeMask nibble supplied as the external RDP header).
   No code was copied.
+  The implementation additionally follows the RDP4/RDP5 packet modes
+  described in [MS-RDPBCGR] section 3.1.8.4 (Microsoft Open
+  Specifications); that document is under the general Microsoft Open
+  Specifications IPR notice, and its OSP/MIP coverage has not been
+  verified for this entry.
   Licensing statement note (not a patent): RFC 2118 section 1.1
   contains an explicit field-of-use statement: "MPPC can only be used
   in products that implement the Point to Point Protocol AND for the
@@ -127,7 +137,7 @@ specifications or standards documents:
   5,016,009; 5,126,739; 5,146,221; 5,463,390 and related continuations,
   filed 1985-1993) has expired (each patent's status was individually
   confirmed via Google Patents): the family's anticipated-expiry window
-  spans approximately 2009-2012 (US 5,126,739, for example, shows
+  spans 2009-2012 (US 5,126,739, for example, shows
   "Expired - Fee Related" with anticipated expiration 2009-06-30), and
   the Hi/fn LZS patents are reported to have lapsed for non-payment of
   maintenance fees with a failed 2007 reinstatement attempt (Wikipedia
@@ -194,12 +204,14 @@ specifications or standards documents:
   (QPL) was consulted only to confirm interpretation of the public
   specification; no code was copied.
   Patent note: the CMPSC facility and its base dictionary scheme date
-  to 1990s ESA/390-era IBM technology; any original patents are
-  presumed expired, but no formal patent search was performed.
+  to 1990s ESA/390-era IBM technology. No specific patent covering
+  CMPSC has been identified in this audit, and no formal patent search
+  was performed.
   The PKWARE APPNOTE method-16 "IBM z/OS CMPSC Entropy Encoding"
   variant is excluded from scope (patent status unverified).
 - LZF: format description in the `lzfP.h` header comments
-  (Marc Alexander Lehmann, BSD-2-Clause) and the LZFFormat description
+  (Marc Alexander Lehmann, BSD-2-Clause OR GPL-2.0-or-later) and the
+  LZFFormat description
   (ning/compress wiki). `lzf_c.c` was consulted for behavior
   confirmation only; no code was copied.
 - Snappy: Google snappy `format_description.txt` (raw block format) and
@@ -220,7 +232,10 @@ specifications or standards documents:
   `bin` test fixtures are produced by GNU cpio (GPL-3.0-or-later),
   invoked only as a local test-time fixture generator; it is not
   linked or distributed
-- ar: IEEE Std 1003.1 (POSIX) ar format / GNU ar extensions / BSD ar extensions
+- ar: IEEE Std 1003.1 (POSIX) ar format / GNU ar extensions / BSD ar
+  extensions. The checked-in fixture `tests/fixtures/ar/thin_gnu.a` was
+  produced by GNU binutils `ar rcT` (GPL-3.0-or-later), invoked only as
+  a local fixture generator; it is not linked or distributed
 - deb: `deb(5)` Debian binary package format (dpkg manual page,
   https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html)
   Integration tests invoke `tar`/`ar`/`bsdtar` only as local
@@ -260,7 +275,10 @@ specifications or standards documents:
   core with LZX DELTA) from Microsoft's "LZX Compressed Data Format"
   documentation, with the errata semantics documented in
   cabextract/libmspack `lzx.c` (LGPL 2.1, Stuart Caie) consulted for
-  behavioral confirmation only; no code was copied.
+  behavioral confirmation only; no code was copied. The per-MS-CAB
+  checksum's trailing-byte packing in `src/archive/mscab/decode.rs`
+  likewise follows libmspack's case-3/2/1 fallthrough as a behavioral
+  reference.
   Quantum folder decompression (`src/archive/mscab/quantum.rs`) is a
   port/adaptation of libmspack `qtmd.c` (LGPL-2.1, Stuart Caie), with
   compcol's MIT-licensed port consulted as an intermediate reference.
@@ -268,10 +286,19 @@ specifications or standards documents:
   GPL-2.0-or-later -> GPL-3.0, combined with this AGPL-3.0 work under
   AGPL-3.0 section 13.
   Test fixtures `tests/fixtures/mscab/lzx_mixed.cab`,
-  `lzx_large.cab`, and `quantum_flush.cab` are the LZX/Quantum folders
-  of cabextract's test files (libmspack repository
-  cabextract/test/cabs/, LGPL 2.1); they are checked in unmodified as
-  known-answer decode inputs and are not linked.
+  `lzx_large.cab`, and `quantum_flush.cab` are derived from the
+  LZX/Quantum folders of cabextract's test files (libmspack repository
+  cabextract/test/cabs/, LGPL 2.1); for `lzx_mixed.cab` the folder
+  stream is byte-identical to `mixed.cab`'s folder data inside a
+  reassembled cabinet wrapper. They are checked in as known-answer
+  decode inputs and are not linked. The raw `mixed_lzx.lzx` folder
+  stream and its `mixed_lzx.txt` expected plaintext, extracted from
+  the same corpus's `mixed.cab`, are used by the shared
+  `compress::lzx` decoder tests on the same terms.
+  `src/archive/mscab/quantum.rs` additionally embeds two byte-constant
+  test vectors taken from the same libmspack test corpus: `QTM_TXT`
+  (the `qtm.txt` fixture stream) and `CVE_2010_2801` (the
+  `cve-2010-2801-qtm-flush.cab` payload).
   Patent note: [MS-CAB] is published under the general Microsoft Open
   Specifications IPR notice. It is NOT listed on the Open Specification
   Promise (OSP) covered-specification list ([MS-DEVCENTLP], revised
@@ -320,15 +347,25 @@ specifications or standards documents:
   with GNU lha and documented at
   https://github.com/jca02266/lha/blob/master/apphead.txt.jp;
   header field facts only, no document text was copied.
-  Decoder provenance: `lzh_dyn.rs` (lh2/-lhd- dynamic Huffman) is a
+  Decoder provenance: `lzh_dyn.rs` (`-lh2-` dynamic Huffman) is a
   transliteration of LHa for UNIX `dhuf.c` (LHa free-use license:
   copyright retention + modification marking; this notice records the
-  attribution and the port status). `lzhuf.rs` ports Okumura's
-  public-domain `lzhuf.c`. `pmarc.rs` ports lhasa's
-  `HistoryLinkedList`/`tree_decode.c` (ISC; lhasa by Simon Howard -
-  copyright/permission notice required in all copies, satisfied here).
+  attribution and the port status). `lzhuf.rs` ports the original
+  `lzhuf.c` (written by Haruyasu Yoshizaki 1988, comments translated
+  by Okumura; distributed without an explicit license grant) together
+  with the deark `foreign/lzhuf.h` port (deark by Jason Summers,
+  MIT-style license; deark's modifications are alternatively public
+  domain at the user's option). `pmarc.rs` ports lhasa's `pm1_decoder.c`,
+  `pm2_decoder.c`, and `pma_common.c` (ISC; lhasa by Simon Howard -
+  copyright/permission notice required in all copies, satisfied
+  here).
   `larc.rs`, `lzh_st0.rs`, `compress::lzh::{bits,huf,st1}` are
-  behavior-matched/adapted against lhasa and LHa sources. jLHA Notes
+  behavior-matched/adapted against lhasa, LHa, and the XADMaster ports
+  `XADLZHOldHandles.m`/`XADLZHStaticHandle` (The Unarchiver,
+  LGPL-2.1-or-later; see section 4a). `compress::lzh::st1_enc` is a
+  crate-original encoder counterpart and carries no upstream
+  attribution. `lzh_dyn.rs` is additionally transliterated from
+  `XADLZHOldHandles.m`'s `LhA_Decrunch` for `-lh2-`. jLHA Notes
   (Michel Ishizuka) is used as the level-3 header wire layout source.
   Test fixtures in `tests/fixtures/lha/`: most are the lhasa test
   corpus archives (program outputs of LHA 1.14i, LHA OS/2 2.08, LHarc
@@ -451,9 +488,15 @@ specifications or standards documents:
 - zip: PKWARE APPNOTE.TXT 6.3.10. The container layer, encryption,
   and methods 0/8/10/12/14/93/95/98 are spec-informed; methods 1-6
   are ported from the public-domain hwzip reference (see section 2)
-- 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00)
+- 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00).
+  The writer's 7z UINT64 variable-length integer encoding was
+  cross-checked against the LZMA SDK `7zIn.c` decoder (public domain);
+  behavior reference only, no code was copied
 - LZMA codec: LZMA algorithm specification (`lzma-specification.txt`)
   from the LZMA SDK documentation
+- LZMA2 (`src/compress/lzma2/`): LZMA2 chunk format as documented in
+  `xz-file-format.txt` (Tukaani, public domain); shared core used by
+  both the xz container and the 7z LZMA2 method
 - The system `7z` binary is invoked only as a local test-time
   interoperability oracle (method round-trip vectors); it is not
   linked or distributed.
@@ -480,6 +523,9 @@ against de facto reference behavior:
     encoder restricted to the DEFLATE-compatible subset (match lengths
     <= 257, 32 KiB window), which emits valid Deflate64 streams without
     exercising the extended distance/length codes
+  - Patent note: Deflate64 is a circa-2001 PKWARE extension. No specific
+    patent covering it has been identified in this audit, and no formal
+    patent search was performed.
 
 - ZIP legacy methods 1-6 (Shrinking, Reducing, Imploding)
   (`src/archive/zip/{unshrink,expand,implode,lzmatch}.rs`)
@@ -555,17 +601,38 @@ against de facto reference behavior:
   - LZRW4 and LZRW5 were evaluated and intentionally excluded: LZRW4
     has no production wire format (experimental sketch only) and
     LZRW5's reference is an incomplete draft; see docs/spec/README.md
+  - Patent note (expired): the LZRW family historically intersects
+    several patents, each individually confirmed via Google Patents:
+    LZRW1 relates to Waterworth US 4,701,745 (the Stac/Hi/fn patent
+    also discussed under Stac LZS above; anticipated expiration
+    2006-03-03, status "Expired - Lifetime") and to Gibson/Graybill
+    US 5,049,881 (anticipated expiration 2010-06-18, status
+    "Expired - Fee Related"), and LZRW3-A relates to Jung US 5,140,321
+    (anticipated expiration 2011-09-04, status "Expired - Lifetime").
+    The ross.net LZRW notes additionally list Katz US 5,051,745
+    (PKWare; anticipated expiration 2010-08-21, status
+    "Expired - Lifetime") as a related patent.
+    Williams released the reference implementations into the public
+    domain. No formal freedom-to-operate opinion or exhaustive patent
+    family search was performed.
 
 - bzip2
   - Reference: bzip2 1.0.x reference implementation by Julian Seward
     (BSD-style "bzip2 and libbzip2 License")
   - Repository scope: Rust reimplementation of the format and algorithm
-    behavior; no upstream bzip2 source files are bundled in this repository
+    behavior; no upstream bzip2 source files are bundled in this
+    repository. The `BZ2_RNUMS` randomized-RLE table in the codec
+    carries the reference implementation's constant data (the
+    BSD-licensed `randtable.c` values), which are part of the de facto
+    format definition
 
 - LZW / Unix compress `.Z`
   - Reference: `ncompress` / `compress42.c`
   - Repository scope: Rust implementation of the historical Unix `compress`
     format behavior
+  - Patent note (expired): LZW was historically covered by Welch's
+    Unisys US 4,558,302 (expired 2003-06-20 in the US; foreign
+    counterparts expired in 2004)
 
 - LZO / lzop
   - Reference: Linux kernel `Documentation/lzo.txt` (LZO1X bytecodes,
@@ -574,6 +641,9 @@ against de facto reference behavior:
     for the lzop file format
   - Repository scope: Rust implementation of LZO1X-1 block compression and
     the lzop framing format; format facts only, no code was copied
+  - Patent note: LZO dates to 1994-era work by Markus Oberhumer. No
+    specific patent covering LZO has been identified in this audit, and
+    no formal patent search was performed.
 
 - rzip
   - Reference: upstream `rzip.samba.org` `.rz` container and chunk semantics
@@ -632,14 +702,16 @@ against de facto reference behavior:
 3. Public-domain or permissively licensed upstream material
 -----------------------------------------------------------
 
-- PPMd7 / PPMdH shared codec (`src/compress/ppmd/**`)
+- PPMd7 / PPMdH shared codec (`src/compress/ppmd.rs` and
+  `src/compress/ppmd/**`)
   - Original reference: the PPMd implementation shipped within the 7-Zip
     project, as documented in files such as `Ppmd.h`, `Ppmd7.c`,
     `Ppmd7Dec.c`, and `Ppmd7Enc.c`
   - Rust-side basis: `ppmd-rust` crate (https://crates.io/crates/ppmd-rust)
   - Upstream port license: CC0-1.0 OR MIT-0
-  - Repository scope: adaptation of that upstream PPMd7 model to this crate's
-    `no_std + alloc` style and 7z method integration
+  - Repository scope: port of that upstream PPMd7 model (structure and
+    constants carried over), adapted to this crate's `no_std + alloc`
+    style and 7z method integration
 
 - ZPAQ (`src/compress/zpaq/**`, `src/archive/zpaq/**`)
   - Reference: Matt Mahoney's ZPAQ format, context-mixing model, and ZPAQL
@@ -689,12 +761,19 @@ against de facto reference behavior:
     includes CBC mode for ZIP Strong Encryption
   - RC4 (`rc4.rs`): clean-room Rust implementation;
     stream cipher for ZIP Strong Encryption
+  - Base64 (`base64.rs`): clean-room Rust implementation of RFC 4648
+    section 4 (canonical decoding); used by uuencode's Base64 mode
   - Adler-32 (`adler32.rs`): clean-room Rust
-  - XXH32/XXH64 (`xxhash.rs`): clean-room Rust implementation of xxHash
+  - XXH32/XXH64 (`xxhash.rs`): Rust implementation of the xxHash
+    algorithm; the BSD-2-Clause reference implementation by Yann
+    Collet serves as the de facto specification
   - BitReader (`bitreader.rs`): clean-room Rust LSB-first bit reader
-  - Range coder (`range_coder.rs`): clean-room Rust range coder used by
-    LZMA; the PPMd7 codec uses its own dedicated range coder under
-    `src/compress/ppmd/` (see section 3)
+  - Range coder (`range_coder.rs`): Rust range coder used by LZMA,
+    adapted to the public-domain carry-less design used by the LZMA SDK
+    (the Subbotin carry-less scheme as implemented by Igor Pavlov);
+    constants and the cache/cache_size shift-low structure follow that
+    public-domain reference. The PPMd7 codec uses its own dedicated
+    range coder under `src/compress/ppmd/` (see section 3)
   - Bounded output helper (`bounded.rs`): clean-room Rust
     decompression-bomb size-limit check; no upstream reference
   - Scope: all are self-contained implementations with no upstream C/C++ source
@@ -711,10 +790,12 @@ against de facto reference behavior:
 
 The following third-party sources were identified during the specification
 re-investigation as de facto references or interoperability oracles. They
-are catalogued in `docs/spec/sources/manifest.json` (`no_url_available`).
-Each entry records its current usage: entries marked "port source" have
-code transliterated into this repository (with the licensing path noted);
-entries marked "reference/oracle only" have no incorporated code. As with
+are catalogued in `docs/spec/sources/manifest.json`
+(`no_url_available`) where a stable upstream reference exists, and in
+the bullets below. Each bullet records its current usage: entries marked
+"port source" have code transliterated into this repository (with the
+licensing path noted); entries marked "reference/oracle only" have no
+incorporated code. As with
 the GPL-covered references in section 1 (e.g. rdesktop), GPL sources here
 are used only as local oracle/behavior references — no GPL code
 incorporation:
@@ -728,8 +809,17 @@ incorporation:
 - newtua_dos (new-the-unarchiver, LGPL-3.0-or-later): port source —
   `src/archive/arc/{crunch,crush,distill}.rs` (ARC methods 5-7/0xa/0xb)
   and `src/archive/arj/method4.rs` are transliterations of its faithful
-  ports of The Unarchiver's XADMaster parsers. Incorporated under
-  LGPL-3.0 section 2 -> GPL-3.0, combined under AGPL-3.0 section 13.
+  ports of The Unarchiver's XADMaster parsers. The `encode` paths in
+  those files are crate-original (upstream provides decoders only).
+  Incorporated under LGPL-3.0 section 2 -> GPL-3.0, combined under
+  AGPL-3.0 section 13.
+- XADMaster (The Unarchiver, LGPL-2.1-or-later): port source —
+  `lha/lzh_dyn.rs` transliterates the `LhA_Decrunch` (`-lh2-`) path of
+  `XADLZHOldHandles.m`, and `lha/lzh_st0.rs` / `compress::lzh/st1.rs`
+  are adapted against `XADLZHOldHandles.m` / `XADLZHStaticHandle`.
+  (The newtua_dos transliterations above also ultimately derive from
+  XADMaster handlers.) Incorporated under LGPL-2.1 section 3 ->
+  GPL-2.0-or-later -> GPL-3.0, combined under AGPL-3.0 section 13.
 - ARC 5.21 for Unix (hyc/arc, SEA 1985-87 copyright, "under the terms of
   the General Public License" with version unstated — Debian copyright
   records GPL-2, some files GPL-2+; packaged as Debian `arc` 5.21q):
@@ -739,15 +829,39 @@ incorporation:
   fixtures (program output); `arc`/`nomarch`/`unar` are used as interop
   oracles. No GPL code copied.
 - lhasa (fragglet, ISC): port source + fixtures — `lha/pmarc.rs` ports
-  its `HistoryLinkedList`/`tree_decode.c`; `lha/larc.rs`,
-  `lha/lzh_st0.rs`, and `compress::lzh/*` are behavior-matched against
+  its `pm1_decoder.c`/`pm2_decoder.c`/`pma_common.c` (the latter
+  originally reverse-engineered from PMarc/UNPMA10); `lha/larc.rs`,
+  `lha/lzh_st0.rs`, and `compress::lzh::{bits,huf,st1}` are
+  behavior-matched against
   it. Most of `tests/fixtures/lha/` is the lhasa test corpus vendored
   unmodified (ISC-licensed program outputs; ISC notice satisfied here).
   Debian main's `lhasa` is usable as a decode oracle.
+
+  lhasa's ISC license text, reproduced verbatim to satisfy its notice
+  requirement for the ported decoder files:
+
+      ISC License
+
+      Copyright (c) 2011-2012, Simon Howard
+
+      Permission to use, copy, modify, and/or distribute this software
+      for any purpose with or without fee is hereby granted, provided
+      that the above copyright notice and this permission notice appear
+      in all copies.
+
+      THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL
+      WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED
+      WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE
+      AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR
+      CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+      LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,
+      NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+      CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 - LHA 2.11 source files (Haruyasu Yoshizaki, Vector fh002420
   `lha211_s.lzh`) and LHa for UNIX 1.14i (jca02266/lha): port source —
-  `lha/lzh_dyn.rs` transliterates `dhuf.c`; `lzh_st0.rs`/
-  `compress::lzh` are behavior-matched against `shuf.c`/`maketbl.c`.
+  `lha/lzh_dyn.rs` transliterates `dhuf.c`; `lzh_st0.rs` is
+  behavior-matched against `shuf.c`, and `compress::lzh` (st1) against
+  `huf.c`/`maketbl.c`.
   LHA's own free-software terms: use/copy/redistribution free,
   commercial use free with minor obligations; README.DOC states that
   incorporating parts of the source into other programs is not
@@ -785,6 +899,35 @@ incorporation:
   statements. Published specs exist, but the feature remains intentional
   scope because it requires block-cipher + AEAD implementations.
 
+Pinned upstream sources in `docs/spec/sources/`:
+  Besides specification documents, that directory pins verbatim
+  snapshots of a small number of upstream source files used as de facto
+  format references: `fastlz.c` (MIT, Ariya Hidayat),
+  `liblzf_lzf_c.c` (BSD-2-Clause OR GPL-2.0-or-later, Marc Alexander
+  Lehmann), `lzrw*.c` / `lzrw_headers.h` (Ross Williams; public-domain
+  declarations in-file), `ncompress_4.2.4_compress42.c` (ncompress
+  4.2.4; upstream is dedicated to the public domain, although the
+  pinned file itself carries no license header), and `pea.pas` /
+  `pea_utils.pas` (PeaZip, LGPL-3.0; license headers retained). These
+  snapshots are reference material only: they are not compiled into
+  the crate and no code was copied from them into `src/`. Statements
+  elsewhere in this file that no upstream source is bundled refer to
+  `src/` and the shipped library.
+  Most pinned files are fetched on demand via
+  `docs/spec/sources/fetch.py` and exist only as git-ignored local
+  copies; `pea.pas`, `pea_utils.pas`, and `crx3.proto` are checked in.
+  `docs/spec/sources/manifest.json` is the canonical catalogue of
+  these references for downstream audits.
+
+Test-fixture provenance:
+  Fixture provenance is recorded per file in
+  `tests/fixtures/README.md`, and in the per-format entries above where
+  a fixture derives from a third-party test corpus. Tools used
+  only to produce fixtures — e.g. GNU binutils `ar`, GNU cpio, GNU
+  tar, Unix `compress`, `lzop`, `lrzip`, `genromfs`, `mkfs.erofs`,
+  `mksquashfs`, and `git` — are invoked locally and are never linked
+  or distributed.
+
 
 5. Current non-goals and exclusions
 -----------------------------------
@@ -805,3 +948,9 @@ When adding or substantially rewriting a format implementation:
    this file in the same change.
 3. Keep `docs/spec/` focused on conformance and tests, and keep this file
    focused on provenance and third-party notices.
+4. Use the provenance labels consistently: "ported" for transliterations
+   that carry upstream structure/constants, "adapted" for design-level
+   borrowings, "spec-informed" for implementations written against a
+   written specification (reference-implementation behavior checks
+   allowed), and "clean-room" for implementations with no upstream
+   reference.

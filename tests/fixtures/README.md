@@ -115,6 +115,12 @@
   - LHa for UNIX 1.14i (jca02266/lha, `lha a -o1` / `-o2`) が生成した `-lh0-` (stored) アーカイブ
   - `level1`/`level2` は `f1.txt` (`hello level one`+改行) と `f2.txt` (`payload2`+改行) の 2 エントリ
   - `*_nested` は `dir/sub/deep.txt` (`nested content`+改行) を先頭に持ち、拡張ヘッダ `0x02` の生 `0xff` 区切りディレクトリを含む
+- `lh2.lzh`, `lh3.lzh`
+  - ローカルで合成した `-lh2-`/`-lh3-` アーカイブ (参照ツールとの byte-for-byte 照合済み、lhasa コーパスには非収録)
+- その他の 28 ファイル (`lh*.lzh`, `lz*.lzh`/`lz*.lzs`, `pm*.lzh`/`pm*.pma`, `h2_*`, `h3_*`, `long.*`, `lzs.lzh`, `mtcd.pma` 等)
+  - lhasa (fragglet, ISC) のテストコーパスを無改変で vendor したもの
+  - LHA 1.14i / LHA OS/2 2.08 / LHarc 1.13 / LArc 3.33 / PMarc / lhmelt / lha_amiga 等が生成したプログラム出力 (ISC ライセンス配布物)
+  - known-answer decode 入力。provenance は `THIRD_PARTY_NOTICES` の lha 項と §4a lhasa 項を参照
 
 ### `lzw/`
 
@@ -140,6 +146,88 @@
   - 小さい `.lrz` sample archive
   - crate-local な lrzip container layout を目視確認・手元デバッグするときのサンプルとして保持している
   - system `lrzip` 完全互換を保証するための fixture ではない
+
+### `ar/`
+
+- `thin_gnu.a`
+  - GNU binutils の `ar rcT` (GPL-3.0-or-later) で生成した thin archive (`!<thin>`) fixture
+  - `//` メンバが文字列テーブルペイロードを保持し、通常メンバはヘッダのみの構成
+
+### `arc/`
+
+- `fix8.arc` / `fix9.arc`
+  - Debian `arc` 5.21q (GPL-2 系) が生成したプログラム出力 fixture
+  - `fix8.arc` は `rnd.bin` = stored (method 2)、`text.txt` = crunched (method 8)
+  - `fix9.arc` は `text.txt` = squashed (method 9)
+- `rnd.bin` / `text.txt`
+  - 上記アーカイブに格納されたメンバの期待内容データ
+
+### `erofs/`
+
+- `mkfs.*.img`
+  - `mkfs.erofs` (erofs-utils, GPL-2.0+) で生成したイメージ群
+  - uncompressed のほか、lz4/lz4hc/microlzma codec、big pcluster、extents/full-index、ztailpacking、fragments 等の `-E` オプション別バリエーション
+
+### `git-pack/`
+
+- `real.pack` / `real.idx` / `ref.pack`
+  - git 2.55 `git repack` (GPL-2.0) が生成した pack/idx fixture
+  - decode 回帰と writer 出力の `git index-pack` 相互運用確認に使用
+
+### `iso9660/`
+
+- `bsdtar-plain.iso` / `bsdtar-rockridge.iso` / `bsdtar-joliet.iso` / `bsdtar-eltorito.iso`
+  - `bsdtar` (libarchive, BSD-2-Clause) が生成した ISO 9660 イメージ
+  - 素の ISO、Rock Ridge、Joliet、El Torito 各バリアントの decode 回帰用
+
+### `lzs/`
+
+- `*.lzs` / `*.expected`
+  - この crate 自身のエンコーダで生成した Stac LZS (RFC 2395) ストリームと期待展開データ
+  - compcol LZS codec (MIT, KarpelesLab) で相互検証済み (THIRD_PARTY_NOTICES の lzs 項目参照)
+
+### `mppc/`
+
+- `*.pkt` / `*.expected` (`multi.pkts`, `rdp5_stream.pkts`, `wrap_front.pkts` を含む)
+  - この crate 自身のエンコーダで生成した MPPC (RFC 2118 / [MS-RDPBCGR] §3.1.8.4) パケットと期待展開データ
+  - rdesktop の MPPC デコーダ (GPL-3.0) で相互検証済み
+- `external_freerdp_*.pkt` / `*.expected`
+  - FreeRDP `TestFreeRDPCodecMppc.c` (Apache-2.0) の圧縮ストリーム定数を埋め込んだ外部エンコーダ由来ベクター (RDP4/RDP5)
+  - 詳細は THIRD_PARTY_NOTICES の MPPC 項目を参照
+
+### `mscab/`
+
+- `lzx_mixed.cab` / `lzx_large.cab` / `quantum_flush.cab`
+  - cabextract のテスト cabinet 群 (libmspack リポジトリ `cabextract/test/cabs/`, LGPL 2.1) の LZX/Quantum フォルダ由来
+  - `lzx_mixed.cab` は `mixed.cab` のフォルダストリームを byte-identical に保った再梱包コンテナ
+- `mixed_lzx.lzx` / `mixed_lzx.txt`
+  - 同コーパスの `mixed.cab` から取り出した生 LZX フォルダストリームと期待平文
+  - `compress::lzx` の decode テストで使用
+
+### `romfs/`
+
+- `genromfs.romfs`
+  - `genromfs` 0.5.2 (GPL-2.0+) で生成した romfs イメージ
+
+### `vcdiff/`
+
+- `*_xdelta3.vcd`
+  - 参照エンコーダ xdelta3 3.2.0 (Apache-2.0) が生成した VCDIFF (RFC 3284) ストリーム
+- `*_src.bin` / `*_tgt.bin`
+  - 対応する source/target 入力データ
+
+### `xar/`
+
+- `none.xar` / `md5.xar` / `bzip2.xar` / `real.xar`
+  - 参照ツール `xar` 1.6.1 (mackyle/xar, BSD-3-Clause) が生成した fixture 群
+  - 詳細は THIRD_PARTY_NOTICES の xar 項目を参照
+
+### `zip/`
+
+- `hw_shrink.zip` / `hw_reduce.zip` / `hw_implode.zip`
+  - hwzip 2.4 (Hans Wennborg, public domain) が `payload.bin` を shrink/reduce/implode 各 method で圧縮した fixture
+- `payload.bin`
+  - 上記 fixture の入力データ (crate 提供)
 
 ### `fuzz/`
 

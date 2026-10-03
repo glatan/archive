@@ -1,7 +1,10 @@
 //! Shared range coder (arithmetic coding).
 //!
-//! Shared range coder used by LZMA / PPMd style entropy coding. It encodes/decodes
+//! Shared range coder used by LZMA-style entropy coding. It encodes/decodes
 //! binary decisions with adaptive probability models (11-bit precision).
+//! The carry-less design (constants and the `cache`/`cache_size`
+//! `shift_low` structure) follows the public-domain LZMA SDK range
+//! coder (Subbotin scheme); see `THIRD_PARTY_NOTICES`.
 
 use alloc::vec::Vec;
 

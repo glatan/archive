@@ -22,6 +22,6 @@ pub mod macbinary;
 #[cfg(feature = "binhex")]
 pub mod binhex;
 
-/// Ascii85 (Adobe  and RFC 1924 Base-85).
+/// Ascii85 (Adobe and RFC 1924 Base-85).
 #[cfg(feature = "ascii85")]
 pub mod ascii85;
