@@ -9,7 +9,8 @@
 //! references. Namespace prefixes are treated as part of names.
 //! This is intentionally not a general-purpose XML library.
 
-use alloc::string::String;
+use alloc::borrow::ToOwned;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use crate::error::Error;

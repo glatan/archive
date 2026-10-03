@@ -1,4 +1,10 @@
 //! Minimal AES helpers for archive formats that need in-crate crypto.
+//!
+//! This implementation is not constant-time: the inverse S-box uses a
+//! data-dependent exhaustive search and the GF(2^8) helpers loop on
+//! data-dependent conditions. It exists for legacy format
+//! interoperability (ZIP strong/WinZip AES encryption, 7z AES) and is
+//! not suitable where timing side channels are a concern.
 
 use alloc::vec::Vec;
 

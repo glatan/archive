@@ -10,7 +10,7 @@
 | RFC 1321 (MD5) | [rfc1321.txt](https://www.rfc-editor.org/rfc/rfc1321.txt) (ローカルスナップショット: `docs/spec/sources/rfc1321.txt`) |
 | RFC 2268 (RC2) | [rfc2268.txt](https://www.rfc-editor.org/rfc/rfc2268.txt) |
 | RFC 2315 (PKCS#7) | [rfc2315.txt](https://www.rfc-editor.org/rfc/rfc2315.txt) |
-| FIPS 180-3 / 180-4 (SHA-1 / SHA-256) | [NIST.FIPS.180-4.pdf](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf) (180-3 は 180-4 に統合・廃止) |
+| FIPS 180-4 (SHA-1 / SHA-256) | [NIST.FIPS.180-4.pdf](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf) (前身の 180-3 は統合・廃止) |
 | FIPS 197 (AES) | [NIST.FIPS.197-upd1.pdf](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf) |
 | FIPS 46-3 (DES/3DES) | [fips46-3.pdf](https://csrc.nist.gov/files/pubs/fips/46-3/final/docs/fips46-3.pdf) (withdrawn) |
 | RC4 | de facto standard。参考: [RFC 4345](https://www.rfc-editor.org/rfc/rfc4345.txt) (SSH arcfour 記述) |
@@ -96,10 +96,10 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 38 | SHA-1 (FIPS 180-3) | FIPS 180-3 | ✅ | `util::sha1` 実装、ZIP AES PBKDF2 鍵導出で使用 |
-| 39 | Known vector: empty → da39a3ee... | FIPS 180-3 | ✅ | `test_sha1_empty` |
-| 40 | Known vector: "abc" → a9993e36... | FIPS 180-3 | ✅ | `test_sha1_abc` |
-| 41 | Incremental update | FIPS 180-3 | ✅ | `test_sha1_incremental` |
+| 38 | SHA-1 (FIPS 180-4) | FIPS 180-4 | ✅ | `util::sha1` 実装、ZIP AES PBKDF2 鍵導出で使用 |
+| 39 | Known vector: empty → da39a3ee... | FIPS 180-4 | ✅ | `test_sha1_empty` |
+| 40 | Known vector: "abc" → a9993e36... | FIPS 180-4 | ✅ | `test_sha1_abc` |
+| 41 | Incremental update | FIPS 180-4 | ✅ | `test_sha1_incremental` |
 
 ### CRC-64/XZ
 
@@ -125,6 +125,8 @@
 | 49 | AES-128 / AES-192 / AES-256 (FIPS 197) | FIPS 197 | ✅ | `util::aes256` 実装、7z/ZIP 暗号化で使用 |
 | 50 | AES-CTR mode (ZIP-compatible) | WinZip AES spec | ✅ | `apply_ctr_zip_compatible()` |
 | 51 | AES-CBC mode (7zAES) | 7z Methods.txt | ✅ | `decrypt_cbc_truncated()` / `encrypt_cbc_zero_padded()` |
+
+> 注: `util::aes256` は constant-time 実装ではない (逆 S-box がデータ依存の全探索、GF(2^8) ヘルパがデータ依存ループ)。用途はレガシーフォーマット相互運用 (ZIP Strong/WinZip AES, 7z AES) に限定され、タイミングサイドチャネルが問題になる用途には使わないこと。同様に DES/RC2/RC4/MD5/SHA-1 は暗号学的に弱い・破られているが、レガシー相互運用目的の実装である。
 
 ### MD5
 

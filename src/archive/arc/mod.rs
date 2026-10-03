@@ -3,8 +3,11 @@
 //! Reference: the ARC file format description published by System
 //! Enhancement Associates (arc specification / wotsit "arc" entry).
 //! Compression method internals follow the de-facto reference
-//! implementations (nomarch, XADMaster, compcol; used for behaviour
-//! observation only).
+//! implementations: methods 5-7/0xa/0xb (`crunch`, `crush`, `distill`)
+//! are ported from the newtua_dos transliterations of XADMaster
+//! handlers, `squeeze` is adapted from compcol, and nomarch /
+//! XADMaster / hyc-arc sources were otherwise consulted for behaviour
+//! confirmation only.
 //! Supported scope:
 //!
 //! - reading: method 1 (obsolete unpacked), method 2

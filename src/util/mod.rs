@@ -19,7 +19,7 @@ pub(crate) mod crc32c;
 #[cfg(any(feature = "deflate", feature = "zstd"))]
 pub(crate) mod bitreader;
 
-/// Shared range coder for LZMA / PPMd style entropy coding.
+/// Shared range coder for LZMA-style entropy coding.
 #[cfg(any(
     feature = "lzip",
     feature = "lrzip",
@@ -40,8 +40,8 @@ pub(crate) mod adler32;
 #[cfg(feature = "xz")]
 pub(crate) mod crc64;
 
-/// SHA-256 for xz SHA-256 integrity checks.
-#[cfg(any(feature = "xz", feature = "sevenz"))]
+/// SHA-256 for xz SHA-256 integrity checks and SHA-256 git pack object IDs.
+#[cfg(any(feature = "xz", feature = "sevenz", feature = "git-pack"))]
 pub(crate) mod sha256;
 
 /// SHA-1 for ZIP AES key derivation, git pack object IDs/checksums, and

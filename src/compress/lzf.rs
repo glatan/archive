@@ -12,7 +12,7 @@
 //!     (1..=8192).
 //!
 //! The stream ends when the input is exhausted. This format is documented
-//! in the liblzf sources (`lzfP.h`, BSD license) and the LZFFormat
+//! in the liblzf sources (`lzfP.h`, BSD/GPL dual license) and the LZFFormat
 //! description used by the Java LZF implementation.
 
 use alloc::vec::Vec;

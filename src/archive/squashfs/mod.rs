@@ -1,4 +1,4 @@
-//! SquashFS (`.sqfs` / `.squashfs`) read support.
+//! SquashFS (`.sqfs` / `.squashfs`) read/write support.
 //!
 //! SquashFS 4.0 is a compressed read-only filesystem image: a 96-byte
 //! superblock, compressed metadata block runs (inode and directory tables),

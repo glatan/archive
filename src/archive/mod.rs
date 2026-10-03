@@ -8,7 +8,7 @@
 #[cfg(feature = "tar")]
 pub mod tar;
 
-/// cpio archive format (`odc`, SVR4 `newc`, and `newcrc`).
+/// cpio archive format (`bin`, `odc`, SVR4 `newc`, and `newcrc`).
 #[cfg(feature = "cpio")]
 pub mod cpio;
 
@@ -28,15 +28,15 @@ pub mod zip;
 #[cfg(feature = "sevenz")]
 pub mod sevenz;
 
-/// Debian binary package (`.deb`) read support.
+/// Debian binary package (`.deb`) read/write support.
 #[cfg(feature = "deb")]
 pub mod deb;
 
-/// RPM package (`.rpm`) read support.
+/// RPM package (`.rpm`) read/write support.
 #[cfg(feature = "rpm")]
 pub mod rpm;
 
-/// SquashFS (`.squashfs`) image read support.
+/// SquashFS (`.squashfs`) image read/write support.
 #[cfg(feature = "squashfs")]
 pub mod squashfs;
 
@@ -58,26 +58,26 @@ pub mod erofs;
 #[cfg(feature = "iso9660")]
 pub mod iso9660;
 
-/// Microsoft Cabinet (`.cab`) archive read support.
+/// Microsoft Cabinet (`.cab`) archive read/write support.
 #[cfg(feature = "mscab")]
 pub mod mscab;
 
 #[cfg(feature = "mscfb")]
 pub mod mscfb;
 
-/// ZIM (`.zim`) archive read support.
+/// ZIM (`.zim`) archive read/write support.
 #[cfg(feature = "zim")]
 pub mod zim;
 
-/// mtree(5) manifest read support.
+/// mtree(5) manifest read/write support.
 #[cfg(feature = "mtree")]
 pub mod mtree;
 
-/// WARC (Web ARChive, `.warc`) record read support.
+/// WARC (Web ARChive, `.warc`) record read/write support.
 #[cfg(feature = "warc")]
 pub mod warc;
 
-/// LHA/LZH archive support (header levels 0-3; lh0-lh7/LArc/PMarc decode, lh0/lh4-lh7 write).
+/// LHA/LZH archive support (header levels 0-3; lh0-lh7/LArc/PMarc decode, lh0/lz4/pm0/lh4-lh7 write).
 #[cfg(feature = "lha")]
 pub mod lha;
 
@@ -85,7 +85,7 @@ pub mod lha;
 #[cfg(feature = "arj")]
 pub mod arj;
 
-/// SEA ARC archive support (method 1-9/0xa/0xb read; method 1/2/3/4/8/9 write).
+/// SEA ARC archive support (method 1-9/0xa/0xb read; method 1-0x0b write).
 #[cfg(feature = "arc")]
 pub mod arc;
 

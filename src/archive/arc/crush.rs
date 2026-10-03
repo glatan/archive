@@ -17,6 +17,9 @@
 //!
 //! Ported from the newtua_dos transliteration of XADMaster `XADARCCrushHandle` (LGPL-3.0-or-later). nomarch `readlzw.c` (GPL-2) was consulted for
 //! behaviour confirmation only.
+//!
+//! Licensing: incorporated under LGPL-3.0 section 2 (GPL-3.0) and
+//! combined with this AGPL-3.0 work via AGPL-3.0 section 13.
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;

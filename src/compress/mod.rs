@@ -32,7 +32,8 @@ pub mod zstd;
 #[cfg(feature = "bzip2")]
 pub mod bzip2;
 
-/// Shared LZMA1 codec used by lzip/xz/lrzip/7z-style formats and `.lzma`.
+/// Shared LZMA1 codec used by lzip/xz/lrzip/7z-style formats, `.lzma`,
+/// ZIP method 14, and EROFS microlzma.
 #[cfg(any(
     feature = "lzip",
     feature = "xz",
@@ -61,7 +62,8 @@ pub mod lzip;
 pub mod lzma_alone;
 
 /// LZH compression family shared by the LHA and ARJ formats
-/// (MSB bit stream + static-Huffman "st1" block decoder).
+/// (MSB bit stream + static-Huffman "st1" block decoder and
+/// its `st1_enc` encoder counterpart).
 #[cfg(any(feature = "lha", feature = "arj"))]
 pub(crate) mod lzh;
 
@@ -189,19 +191,20 @@ pub mod zx2;
 #[cfg(feature = "zx5")]
 pub mod zx5;
 
-/// VCDIFF delta compression/decompression (RFC 3284).
-#[cfg(feature = "vcdiff")]
-pub mod vcdiff;
-
+/// IBM CMPSC "Compression Call" basic method (LZ78 family), per
+/// SA22-7832 Appendix D / SA22-7208.
+#[cfg(feature = "cmpsc")]
+pub mod cmpsc;
+/// Stac LZS compression/decompression (RFC 2395 section 2.2).
 #[cfg(feature = "lzs")]
 pub mod lzs;
 /// MPPC compression/decompression (RFC 2118): packet-oriented LZ77 with an
 /// 8192-byte history, packet flags, and a 12-bit coherency count.
 #[cfg(feature = "mppc")]
 pub mod mppc;
-
-#[cfg(feature = "cmpsc")]
-pub mod cmpsc;
+/// VCDIFF delta compression/decompression (RFC 3284).
+#[cfg(feature = "vcdiff")]
+pub mod vcdiff;
 
 /// LZX DELTA decompression ([MS-PATCH]): delta-compressed streams with
 /// caller-supplied reference data, used by Exchange Offline Address Book
@@ -232,19 +235,21 @@ pub mod snappy;
 
 /// Brotli compression and decompression.
 ///
-/// Decoder support is broader than the current encoder; the public encoder
-/// currently emits a bounded baseline uncompressed-metablock stream.
+/// The encoder emits LZ77-compressed metablocks using hash-table matching
+/// with literal-only, context-modeling, multi-block-type, and single-block
+/// strategies, falling back to uncompressed metablocks when smaller.
 #[cfg(feature = "brotli")]
 pub mod brotli;
 
-/// Deflate64 (Enhanced Deflating) decompression.
+/// Deflate64 (Enhanced Deflating) compression and decompression.
 ///
 /// Extends DEFLATE with a 64KB window, two additional distance codes,
-/// and a longer maximum match length. Used as ZIP method 9 and 7z
-/// method `04 01 09`.
+/// and a longer maximum match length. The encoder reuses the DEFLATE
+/// encoder restricted to the compatible subset. Used as ZIP method 9
+/// and 7z method `04 01 09`.
 #[cfg(any(feature = "zip", feature = "sevenz"))]
 pub(crate) mod deflate64;
 
-/// Shared PPMd (PPMd var.H / PPMdH) codec, currently used by 7z.
+/// Shared PPMd (PPMd var.H / PPMdH) codec, used by 7z and ZIP method 98.
 #[cfg(feature = "sevenz")]
 pub(crate) mod ppmd;

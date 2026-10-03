@@ -44,7 +44,7 @@
 | method | アルゴリズム | 履歴バッファ | 状態 | テスト/fixture |
 |---|---|---|---|---|
 | `-lh0-` | stored (無圧縮) | - | ✅ | `level0_roundtrip` |
-| `-lh1-` | 適応 Huffman + LZ77 (Okumura lzhuf) | 4 KiB | ✅ | `lh1.lzh, lh1_lharc.lzh` |
+| `-lh1-` | 適応 Huffman + LZ77 (Yoshizaki lzhuf, Okumura 訳注) | 4 KiB | ✅ | `lh1.lzh, lh1_lharc.lzh` |
 | `-lh2-` | 動的 Huffman + LZ77 (LHa dhuf) | 8 KiB | ✅ | `lh2.lzh` |
 | `-lh3-` | 静的 Huffman st0 + LZ77 (LHa shuf) | 8 KiB | ✅ | `lh3.lzh` |
 | `-lh4-` | 静的 Huffman st1 + LZ77 | 16 KiB | ✅ | `lh4.lzh` |
@@ -60,7 +60,7 @@
 | `-lhd-` | directory marker (payload なし) | - | ✅ | `dir_entry` |
 
 fixture は全て `tests/fixtures/lha/` 配下。統合テスト: `test_lha_compressed_method_fixtures`, `test_lha_level3_fixtures`, `test_lha_fixture_oracle_extract`。
-decode 参照は lhasa (ISC) / XADMaster + LHa 1.14i 一次ソース (dhuf.c, shuf.c, lzhuf.c)。
+decode 参照は lhasa (ISC) / XADMaster + LHa 1.14i 一次ソース (dhuf.c, shuf.c, huf.c, maketbl.c, lzhuf.c)。
 
 ### encode
 

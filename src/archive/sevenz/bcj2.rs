@@ -1,3 +1,13 @@
+//! BCJ2 filter for 7z x86 executables.
+//!
+//! The filter splits an x86 byte stream into a control stream plus
+//! three data streams (`main`, `call`, `jump`); the control stream is
+//! range-coded, and the relative targets of E8/E9 call/jump (and 0F 8x
+//! jcc) instructions are converted so that they compress better.
+//!
+//! Ported from the public-domain LZMA SDK `Bcj2.c` (Igor Pavlov); see
+//! `THIRD_PARTY_NOTICES` for provenance.
+
 use alloc::vec;
 use alloc::vec::Vec;
 

@@ -1,8 +1,9 @@
 //! Shared PPMd var.H / PPMd7 codec.
 //!
-//! Adapted from the `ppmd-rust` crate (CC0-1.0 OR MIT-0), itself derived
+//! Ported from the `ppmd-rust` crate (CC0-1.0 OR MIT-0), itself derived
 //! from 7-Zip's public-domain PPMd implementation (`Ppmd.h`, `Ppmd7.c`,
-//! `Ppmd7Dec.c`, `Ppmd7Enc.c`). See `THIRD_PARTY_NOTICES` section 3.
+//! `Ppmd7Dec.c`, `Ppmd7Enc.c`), and adapted to this crate's
+//! `no_std + alloc` style. See `THIRD_PARTY_NOTICES` section 3.
 
 use alloc::vec::Vec;
 

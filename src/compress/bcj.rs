@@ -3,6 +3,9 @@
 //! The current shared implementation exposes x86, PowerPC, IA64, SPARC, ARM,
 //! ARM-Thumb, ARM64, and RISC-V BCJ filters that are used by XZ / 7z style
 //! filter chains.
+//!
+//! Ported from the public-domain liblzma `simple/` filters. See
+//! `THIRD_PARTY_NOTICES` section 2.
 
 use alloc::vec::Vec;
 
