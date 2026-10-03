@@ -45,6 +45,15 @@ const MSZIP_WINDOW: usize = 32 * 1024;
 pub struct MscabEntry {
     /// Entry file name.
     pub name: String,
+    /// CFFILE `date` field as stored (MS-CAB §2.3): MS-DOS packed
+    /// date `(year - 1980) << 9 | month << 5 | day`.
+    pub date: u16,
+    /// CFFILE `time` field as stored (MS-CAB §2.3): MS-DOS packed
+    /// time `hour << 11 | minute << 5 | second / 2`.
+    pub time: u16,
+    /// CFFILE `attribs` field as stored (MS-CAB §2.3): `_A_*` file
+    /// attribute bits; the high bit marks a UTF-8 `szName`.
+    pub attribs: u16,
     /// Uncompressed file contents.
     pub data: Vec<u8>,
 }
@@ -69,6 +78,9 @@ struct FileRec {
     cb_file: usize,
     uoff_folder_start: usize,
     i_folder: usize,
+    date: u16,
+    time: u16,
+    attribs: u16,
     name: String,
 }
 
@@ -390,7 +402,9 @@ fn parse_cabinet(input: &[u8]) -> Result<ParsedCab<'_>, Error> {
         let cb_file = le_u32(input, foff)? as usize;
         let uoff_folder_start = le_u32(input, foff + 4)? as usize;
         let i_folder = le_u16(input, foff + 8)? as usize;
-        let _attribs = le_u16(input, foff + 14)?;
+        let date = le_u16(input, foff + 10)?;
+        let time = le_u16(input, foff + 12)?;
+        let attribs = le_u16(input, foff + 14)?;
         let (name, next) = read_asciiz(input, foff + 16)?;
         if i_folder < 0xfffd && i_folder >= c_folders && cb_file > 0 {
             return Err(Error::InvalidData("mscab: folder index out of range"));
@@ -399,6 +413,9 @@ fn parse_cabinet(input: &[u8]) -> Result<ParsedCab<'_>, Error> {
             cb_file,
             uoff_folder_start,
             i_folder,
+            date,
+            time,
+            attribs,
             name,
         });
         foff = next;
@@ -509,6 +526,9 @@ fn extract_cabs(cabs: &[&ParsedCab<'_>]) -> Result<Vec<MscabEntry>, Error> {
                     if f.cb_file == 0 {
                         entries.push(MscabEntry {
                             name: f.name.clone(),
+                            date: f.date,
+                            time: f.time,
+                            attribs: f.attribs,
                             data: Vec::new(),
                         });
                         seen.push((f.name.clone(), 0));
@@ -524,6 +544,9 @@ fn extract_cabs(cabs: &[&ParsedCab<'_>]) -> Result<Vec<MscabEntry>, Error> {
                     }
                     entries.push(MscabEntry {
                         name: f.name.clone(),
+                        date: f.date,
+                        time: f.time,
+                        attribs: f.attribs,
                         data: stream[pos..end].to_vec(),
                     });
                     seen.push((f.name.clone(), f.cb_file));
@@ -714,6 +737,31 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name(), "hello.txt");
         assert_eq!(entries[0].data(), b"hello cabinet");
+    }
+
+    #[test]
+    fn exposes_cffile_date_time_attribs() {
+        let mut b = CabBuilder::new();
+        b.folders.push((COMPRESS_NONE, vec![b"payload".to_vec()]));
+        b.files.push((7, 0, 0, "stamp.bin".into()));
+        let mut cab = b.build();
+        // Patch the CFFILE record (coffFiles is at header offset 16):
+        // MS-DOS date 2023-07-15, time 10:30:44, attribs
+        // _A_RDONLY | _A_ARCH (MS-CAB §2.3).
+        let foff = le_u32(&cab, 16).unwrap() as usize;
+        let date: u16 = ((2023 - 1980) << 9) | (7 << 5) | 15;
+        let time: u16 = (10 << 11) | (30 << 5) | (44 / 2);
+        cab[foff + 10..foff + 12].copy_from_slice(&date.to_le_bytes());
+        cab[foff + 12..foff + 14].copy_from_slice(&time.to_le_bytes());
+        cab[foff + 14..foff + 16].copy_from_slice(&0x21u16.to_le_bytes());
+
+        let entries = decode(&cab).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name(), "stamp.bin");
+        assert_eq!(entries[0].date, date);
+        assert_eq!(entries[0].time, time);
+        assert_eq!(entries[0].attribs, 0x21);
+        assert_eq!(entries[0].data(), b"payload");
     }
 
     #[test]

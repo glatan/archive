@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | 512/4096 バイトセクター + FAT/DIFAT/mini FAT/ディレクトリエントリによるファイル内ファイルシステム。旧 Office (.doc/.xls/.ppt)、MSI、OLE2 構造化ストレージのコンテナ |
 | 基準仕様 | [[MS-CFB] v20210625](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-cfb/53989ce4-7b05-4f8d-829b-d08d6148375b) (スナップショット: `docs/spec/sources/MS-CFB.pdf`) |
+| 参照実装 | 独自 Python 参照ジェネレータ ([MS-CFB] §2 準拠、テスト時 oracle)。write 側参照実装 (cfb crate MIT / Apache POI Apache-2.0 / libgsf LGPL-2.1) は manifest `mscfb-write-refs` 参照。詳細: THIRD_PARTY_NOTICES mscfb 項 |
 | 実装 | `archive::archive::mscfb::decode` (read のみ)。`mscfb` feature 配下 |
 
 ## ヘッダ・セクター層
@@ -47,7 +48,7 @@
 | 19 | compound file write | ❌ intentional scope | red-black 木の構築・FAT 確保・トランザクションは別仕事。read が本フォーマットの主用途。write 参照実装は manifest `no_url_available` の `mscfb-write-refs` (cfb crate / Apache POI / libgsf) |
 | 20 | Range Lock sector (offset 0x7FFFFFFF) / トランザクション signature | ❌ intentional scope | 並行アクセス制御はコンテナ展開に不要。signature は読み飛ばし |
 | 22 | 大文字 mapping / red-black 挿入順序 | ⚠️ 列挙は DFS で網羅、名前順序保証なし | 検索用ソート規則は write 時にのみ意味を持つ |
-| 24 | red-black color ビット (byte 67) の検証・sibling/child ID の NOSTREAM 規約・同一 storage 内の名前重複なし要件 | ❌ lenient (規格準拠でないファイルを受理する可能性) | decode は木を DFS で網羅するが color・重複名は未検証。visited セットで循環は拒否済み (#13) |
+| 24 | red-black color ビット (byte 67) の検証・sibling/child ID の NOSTREAM 規約・同一 storage 内の名前重複なし要件 | ⚠️ opt-in | `decode_strict` で color バイト、NOSTREAM 規約、および同一 storage 内の重複名を検証する (`rejects_invalid_color_byte`, `rejects_stream_with_child`, `rejects_duplicate_sibling_names`)。既定の `decode` は後方互換性のため寛容な処理 (lenient) を維持する |
 | 23 | version 3 で上位 32bit が非ゼロな stream size の寛容読み | ❌ intentional scope | spec は「parser は上位を無視すべき」と推奨。本実装は規格上限超過を厳格拒否 |
 
 ## 集計
@@ -55,6 +56,6 @@
 | 状態 | 件数 |
 |------|------|
 | ✅ 実装+テスト済み  | 19 |
-| ⚠️ 部分対応  | 0 |
-| ❌ 未対応  | 0 |
+| ⚠️ 部分対応  | 2 |
+| ❌ 未対応  | 3 (intentional scope) |
 | **合計** | **24** |

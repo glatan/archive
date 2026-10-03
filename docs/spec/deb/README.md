@@ -3,6 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [deb(5)](https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html) — dpkg パッケージフォーマット (Debian マニュアルページ、ローカルスナップショット: `docs/spec/sources/deb_5_unstable.html`) |
+| 参照実装 | GNU `ar` / GNU `tar` / `bsdtar` (interop oracle)。詳細: THIRD_PARTY_NOTICES deb 項 |
 | 形式概要 | `ar` アーカイブ + 固定 member レイアウト: `debian-binary` / `control.tar.*` / `data.tar.*` |
 | 実装範囲 | read/write 両対応 (固定 member レイアウトの組み立て + member 圧縮) |
 
@@ -31,7 +32,7 @@
 | 9 | `control.tar*` / `data.tar*` member の重複を reject | deb(5): single required member | ✅ | `rejects_duplicate_data_member` |
 | 10 | member 名は厳密一致 (`control.tar` or `control.tar.<ext>`、`control.tarball` 等は非該当) | deb(5): member naming | ✅ | `rejects_name_prefix_lookalikes` |
 | 11 | `debian-binary` / `control.tar*` / `data.tar*` 以外の member (署名 member 等) は `Other` として保持 | deb(5): "Programs may assume... additional members" | ✅ | `keeps_extra_members` |
-| 11a | member 順序 `debian-binary` → `control.tar*` → `data.tar*` (deb(5) canonical layout) | deb(5): "The second ... control.tar" / "The third ... data.tar" | ⚠️ | decode は `debian-binary` 先頭のみ強制し、control/data の位置は名前検索 (lenient)。encode 側 (#17) は canonical 順 emit |
+| 11a | member 順序 `debian-binary` → `control.tar*` → `data.tar*` (deb(5) canonical layout) | deb(5): "The second ... control.tar" / "The third ... data.tar" | ✅ | decode 側は出現順を検証する (`rejects_data_before_control`, `rejects_member_between_required`)。`_` で始まるメンバーは deb(5) の規定に従い介在を許容する (`keeps_ignorable_member_between_required`)。encode 側 (#17) は正規の順序で出力する |
 
 ### tar member の圧縮
 

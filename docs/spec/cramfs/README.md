@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | Linux 向け小容量 read-only 圧縮ファイルシステム。64B スーパーブロック + 12B inode 配列 (width-first) + ページ単位 zlib 圧縮データブロック |
 | 基準仕様 | Linux kernel `Documentation/filesystems/cramfs.rst`、`fs/cramfs/README` (レイアウト)、`include/uapi/linux/cramfs_fs.h` (構造体定義) — いずれも `docs/spec/sources/` にスナップショット |
+| 参照実装 | util-linux `mkfs.cramfs`/`fsck.cramfs` (GPL-2.0+、interop oracle)。詳細: THIRD_PARTY_NOTICES cramfs 項 |
 | 実装 | `archive::archive::cramfs::decode` (read のみ)。`cramfs` feature 配下 |
 
 ## スーパーブロック層

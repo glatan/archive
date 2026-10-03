@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | Microsoft LZX DELTA (LZXD)。差分パッチ圧縮用の LZX バリアントで、呼び出し側が与える reference データを subject データの前方に論理前置し、マッチオフセットが reference 側へも遡及できる |
 | 基準仕様 | [[MS-PATCH]](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-patch/) LZX DELTA Compression and Decompression (Microsoft Open Specifications、2025-08-19 rev 14.1 版、[版固定 PDF](https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-PATCH/%5bMS-PATCH%5d-250819.pdf)、ローカルスナップショット: `docs/spec/sources/ms-patch_14.1_250819.pdf`) |
+| 参照実装 | libmspack LZXD デコーダ (LGPL-2.1、テスト時 oracle — 自作ストリームの相互検証のみ、コード取り込みなし)。詳細: THIRD_PARTY_NOTICES lzxd 項 |
 | 実装 | `archive::compress::lzxd` (decode / decode_all / encode)。pure-Rust 実装 |
 
 ## ストリーム構造

@@ -3,6 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | xar プロジェクト wiki の `xarformat` 文書 (mackyle/xar、ローカルスナップショット: `docs/spec/sources/xarformat.wiki`) |
+| 参照実装 | 参照 `xar` 1.6.1 ツール (mackyle/xar、BSD-3-Clause、fixture 生成・encode 方向の interop oracle)、`unar` (decode oracle)。詳細: THIRD_PARTY_NOTICES XAR 項 |
 | 形式概要 | 3 領域構成: (1) `xar!` magic + header size + version + TOC 長 (圧縮/非圧縮) + checksum アルゴリズムの固定ヘッダ (network byte order)。(2) zlib 圧縮された XML Table of Contents。(3) heap: TOC チェックサム (heap offset 0) + 各ファイルの data run。heap offset は TOC の `<offset>` 値で参照される |
 | 実装範囲 | read + write (write は sha1 チェックサム + gzip エンコード固定)。`<ea>` 拡張属性・署名・bzip2/lzma/xz エンコードの data も decode 対応 |
 
@@ -69,6 +70,6 @@
 |---|------|------|
 | 33 | `<ea>` 拡張属性データの抽出 | — | ❌ intentional scope | macOS 固有 (ResourceFork/quarantine 等)。heap 内データの存在は許容するがエントリ化しない |
 | 34 | `<signature>` / xar 署名検証 | — | ❌ intentional scope | OpenSSL/CMS 署名で crate スコープ外 |
-| 36 | cksum_alg=3 の "sha1"/"md5" 以外の digest 名 | — | ❌ intentional scope | OpenSSL digest 名依存 (sha256 等)。sha1/md5 は受理 |
+| 36 | cksum_alg=3 の "sha1"/"md5" 以外の digest 名 | — | ⚠️ | `"sha256"` を `digest()` および archived/extracted-checksum のガードに追加 (`test_cksum_alg3_sha256`, `test_cksum_alg3_sha256_mismatch`)。sha512 など他の OpenSSL ダイジェスト名はハッシュ計算機構を crate 内に持たないため、引き続き `Error::Unsupported` とする |
 | 37 | hardlink/character/block special の実データ展開 | — | ❌ intentional scope | TOC メタデータは保持するが特殊ファイル生成は対象外 |
 | 38 | heap 内エントリのストリーミング順序要件 (ea を data より先に置き per-file でグループ化する推奨) | — | ❌ intentional scope | 本実装は heap 全体をランダムアクセスで読むため順序制約は不要 |

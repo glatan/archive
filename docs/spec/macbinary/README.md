@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | 128 バイトヘッダ (Finder メタデータ + fork 長) の後に Data Fork・Resource Fork をそれぞれ 128 バイト境界でゼロパディングして並べる、古典 Macintosh 転送コンテナ。MacBinary II は offset 101 (Finder flags 下位)/120-121 (secondary header 長)/122-123 (version)/124-125 (CRC-16) を追加 |
 | 基準仕様 | [MacBinary II Standard Proposal (24-Jul-1987)](https://files.stairways.com/other/macbinaryii-standard-info.txt) (ローカルスナップショット: `docs/spec/sources/macbinaryii-standard-info.txt`)。元文書: "the new changes to the MacBinary Standard, as generally agreed upon in the MacBinary II Conference 6/21/87 ... Revised 7/24/87" |
+| 参照実装 | 独自 Python 参照実装 (仕様書から独立作成、統合テストの oracle)。詳細: THIRD_PARTY_NOTICES macbinary 項 |
 | 実装 | `archive::encoding::macbinary` (encode / decode)。`macbinary` feature 配下 |
 
 ## 対応バリアント

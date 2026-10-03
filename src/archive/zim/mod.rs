@@ -10,7 +10,9 @@
 //! with an MD5 checksum trailer; major version 6, extended
 //! clusters, and redirect/deprecated dirents can be emitted.
 //! Entries expose MIME type and title metadata, and
-//! `decode_title_order` lists entries in title-pointer order;
+//! `decode_title_order` lists entries in title order via the
+//! `X/listing/titleordered/v0` listing entry, falling back to the
+//! title pointer list;
 //! fulltext index search is intentionally out of scope.
 
 use alloc::vec::Vec;

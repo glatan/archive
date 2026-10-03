@@ -9,6 +9,8 @@ use super::decode::{BASIC_HDR_SIZE, SIG};
 
 /// Flag base on every member header: path separators translated.
 const FLAGS_BASE: u8 = 0x10;
+/// Member flag: the packed stream is garbled (password XOR).
+const FLAG_GARBLED: u8 = 0x01;
 /// Member flag: the file's packed stream continues in the next volume.
 const FLAG_CONTINUED: u8 = 0x04;
 /// Archive terminator size: signature plus a zero u16 header size.
@@ -28,8 +30,11 @@ struct PendingEntry {
     /// CRC-32 of the uncompressed data.
     crc: u32,
     /// Packed stream (stored bytes, an st1 block stream, or the
-    /// method-4 bit stream).
+    /// method-4 bit stream), already garbled when `pmod` is set.
     packed: Vec<u8>,
+    /// Garble modifier byte written to the header; `Some` marks the
+    /// member garbled (flag 0x01). File entries only.
+    pmod: Option<u8>,
 }
 
 /// Serialize one header block: signature, u16le size, body (fixed
@@ -60,9 +65,12 @@ fn member_fixed(e: &PendingEntry, packed: u32, continued: bool) -> [u8; BASIC_HD
     fixed[1] = 10; // archiver version (ARJ 2.x)
     fixed[2] = 1; // min version to extract
     fixed[3] = 2; // host OS: unix
-    fixed[4] = FLAGS_BASE | if continued { FLAG_CONTINUED } else { 0 };
+    fixed[4] = FLAGS_BASE
+        | if continued { FLAG_CONTINUED } else { 0 }
+        | if e.pmod.is_some() { FLAG_GARBLED } else { 0 };
     fixed[5] = e.method;
     fixed[6] = e.file_type;
+    fixed[7] = e.pmod.unwrap_or(0); // garble modifier
     fixed[8..12].copy_from_slice(&e.mtime.to_le_bytes());
     fixed[12..16].copy_from_slice(&packed.to_le_bytes());
     fixed[16..20].copy_from_slice(&e.orig.to_le_bytes());
@@ -90,10 +98,16 @@ fn member_header_len(name_len: usize) -> usize {
 
 /// Encoder for ARJ archives: stored (method 0) entries by default,
 /// or methods 1-3 (LZH "st1" static Huffman) and method 4
-/// ("fastest" LZSS) via ArjEncoder::with_method.
+/// ("fastest" LZSS) via ArjEncoder::with_method, optionally garbled
+/// (password XOR, flag 0x01) via ArjEncoder::with_password.
 pub struct ArjEncoder {
     entries: Vec<PendingEntry>,
     method: u8,
+    /// Garbling password; file entries added while set carry flag
+    /// 0x01 and have their packed streams XORed with it.
+    password: Option<Vec<u8>>,
+    /// Garble modifier byte written to garbled member headers.
+    pmod: u8,
 }
 
 impl ArjEncoder {
@@ -102,6 +116,8 @@ impl ArjEncoder {
         ArjEncoder {
             entries: Vec::new(),
             method: 0,
+            password: None,
+            pmod: 0,
         }
     }
 
@@ -120,7 +136,29 @@ impl ArjEncoder {
         Ok(ArjEncoder {
             entries: Vec::new(),
             method,
+            password: None,
+            pmod: 0,
         })
+    }
+
+    /// Enable garbled (password) output: subsequently added file
+    /// entries carry flag 0x01 and have their packed stream XORed
+    /// with `password[i % len] + pmod` (wrapping), readable via
+    /// `decode::decode_with_password{,_bytes}` or
+    /// `decode::decode_parts_with_password_bytes`. `pmod` is stored
+    /// verbatim as the header's garble-modifier byte. Directory
+    /// entries are never garbled. Returns `Error::InvalidData` for
+    /// an empty password.
+    ///
+    /// Chains after `new` or `with_method`:
+    /// `ArjEncoder::with_method(2)?.with_password(b"pw", 0x5A)?`.
+    pub fn with_password(mut self, password: &[u8], pmod: u8) -> Result<Self, Error> {
+        if password.is_empty() {
+            return Err(Error::InvalidData("arj: empty password"));
+        }
+        self.password = Some(password.to_vec());
+        self.pmod = pmod;
+        Ok(self)
     }
 
     /// Add a file entry. mtime is written verbatim as the
@@ -134,7 +172,7 @@ impl ArjEncoder {
         {
             return Err(Error::InvalidData("arj: bad filename"));
         }
-        let (method, packed) = match self.method {
+        let (method, mut packed) = match self.method {
             // Methods 1-3 share the st1 wire format (15-bit window,
             // 5-bit offset count); the method byte only records the
             // requested effort level.
@@ -156,6 +194,15 @@ impl ArjEncoder {
             }
             _ => (0, data.to_vec()),
         };
+        // Garbling XORs the whole packed stream before any
+        // multi-volume fragmentation: decode_parts ungarbles the
+        // reassembled blob with the index restarting at 0.
+        let pmod = if let Some(pw) = &self.password {
+            super::decode::ungarble(&mut packed, pw, self.pmod);
+            Some(self.pmod)
+        } else {
+            None
+        };
         self.entries.push(PendingEntry {
             name: name.into(),
             method,
@@ -164,6 +211,7 @@ impl ArjEncoder {
             orig: data.len() as u32,
             crc: crate::util::crc32::crc32(data),
             packed,
+            pmod,
         });
         Ok(())
     }
@@ -184,6 +232,7 @@ impl ArjEncoder {
             orig: 0,
             crc: 0,
             packed: Vec::new(),
+            pmod: None, // directories are never garbled
         });
         Ok(())
     }

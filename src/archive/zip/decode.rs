@@ -218,11 +218,25 @@ fn decode_impl(
         }
     }
 
+    // Self-extracting archive (SFX) support (APPNOTE foreword /
+    // de facto): the offsets recorded in the EOCD, ZIP64 structures and
+    // central directory are relative to the start of the archive proper,
+    // so a prepended executable stub shifts every absolute position by
+    // the stub length. For single-disk archives the stub length equals
+    // the gap between the recorded end of the central directory and the
+    // actual position of the structure that follows it.
+    let sfx_prefix = if disk_map.is_none() {
+        detect_sfx_prefix(input, eocd_offset, &eocd)?
+    } else {
+        0
+    };
+
     let zip64 = if eocd.requires_zip64() {
         Some(parse_zip64_locator_and_record(
             input,
             eocd_offset,
             disk_map,
+            sfx_prefix,
         )?)
     } else {
         None
@@ -240,11 +254,17 @@ fn decode_impl(
         .map_or(eocd.total_entries as u64, |z| z.total_entries);
 
     // APPNOTE §4.4.15: the CD offset is relative to the start of the
-    // disk on which the central directory begins.
+    // disk on which the central directory begins. For a single-disk
+    // archive carrying an SFX stub, the stub length shifts it to an
+    // absolute position in the input.
     let cd_offset = match disk_map {
         Some(m) => m.resolve(cd_disk, cd_offset)?,
-        None => usize::try_from(cd_offset)
-            .map_err(|_| Error::Unsupported("zip: central directory offset too large"))?,
+        None => usize::try_from(
+            cd_offset
+                .checked_add(sfx_prefix)
+                .ok_or(Error::InvalidData("zip: central directory offset overflow"))?,
+        )
+        .map_err(|_| Error::Unsupported("zip: central directory offset too large"))?,
     };
     if cd_offset > input.len() {
         return Err(Error::UnexpectedEof);
@@ -263,7 +283,7 @@ fn decode_impl(
     let (cd_data, cd_is_encrypted) =
         detect_and_decrypt_cd(input, cd_offset, eocd_offset, password)?;
 
-    let (records, effective_cd_offset) = if cd_is_encrypted {
+    let (mut records, effective_cd_offset) = if cd_is_encrypted {
         // Parse CD entries from the decrypted buffer
         let mut cursor = Cursor::new(&cd_data);
         let mut records = Vec::new();
@@ -295,6 +315,19 @@ fn decode_impl(
         }
         (records, cd_offset)
     };
+
+    // Shift each entry's local header offset (recorded relative to the
+    // archive start, APPNOTE §4.4.16) by the SFX stub length.
+    if sfx_prefix != 0 {
+        let prefix = usize::try_from(sfx_prefix)
+            .map_err(|_| Error::Unsupported("zip: SFX prefix too large"))?;
+        for record in &mut records {
+            record.local_header_offset = record
+                .local_header_offset
+                .checked_add(prefix)
+                .ok_or(Error::InvalidData("zip: local header offset overflow"))?;
+        }
+    }
 
     let next_offsets: Vec<usize> = records
         .iter()
@@ -433,6 +466,7 @@ struct EocdRecord {
     disk_number: u16,
     cd_disk_number: u16,
     total_entries: u16,
+    central_directory_size: u32,
     central_directory_offset: u32,
 }
 
@@ -496,6 +530,97 @@ fn find_eocd(input: &[u8]) -> Result<usize, Error> {
     ))
 }
 
+/// Detect an executable stub prepended to a single-disk archive
+/// (self-extracting archive, APPNOTE foreword / de facto).
+///
+/// The offsets recorded in the EOCD and central directory are relative
+/// to the start of the archive proper (APPNOTE §4.4.15/§4.4.16), so a
+/// prepended stub shifts every absolute position by the stub length.
+/// That length equals the gap between the recorded end of the central
+/// directory and the actual position of the record that follows it —
+/// the same heuristic Python's `zipfile` uses. Returns the detected
+/// prefix length in bytes (0 when the archive starts at offset 0).
+fn detect_sfx_prefix(input: &[u8], eocd_offset: usize, eocd: &EocdRecord) -> Result<u64, Error> {
+    if eocd.requires_zip64() {
+        return detect_sfx_prefix_zip64(input, eocd_offset);
+    }
+    // The recorded CD offset may point at an Archive Extra Data Record
+    // (APPNOTE §4.3.11) that precedes the actual central directory.
+    let recorded_cd_start = usize::try_from(eocd.central_directory_offset)
+        .map_err(|_| Error::Unsupported("zip: central directory offset too large"))?;
+    let cd_start = if read_u32_at(input, recorded_cd_start)
+        .is_ok_and(|sig| sig == ARCHIVE_EXTRA_DATA_RECORD_SIGNATURE)
+    {
+        skip_archive_extra_data_record(input, recorded_cd_start)?
+    } else {
+        recorded_cd_start
+    };
+    let recorded_cd_end = cd_start as u64 + eocd.central_directory_size as u64;
+    let eocd_pos = eocd_offset as u64;
+    if recorded_cd_end > eocd_pos {
+        return Err(Error::InvalidData(
+            "zip: central directory extends past EOCD",
+        ));
+    }
+    let prefix = eocd_pos - recorded_cd_end;
+    if prefix == 0 {
+        return Ok(0);
+    }
+    // A gap between the recorded CD end and the EOCD can also be
+    // trailing metadata that is not counted in the recorded CD size
+    // (e.g. a digital signature record, APPNOTE §4.3.13). Only treat it
+    // as an SFX stub when the shifted position actually points at the
+    // start of the central directory.
+    let adjusted = eocd.central_directory_offset as u64 + prefix;
+    let plausible = usize::try_from(adjusted).ok().is_some_and(|pos| {
+        pos == eocd_offset
+            || read_u32_at(input, pos).is_ok_and(|sig| {
+                sig == CENTRAL_DIRECTORY_HEADER_SIGNATURE
+                    || sig == ARCHIVE_EXTRA_DATA_RECORD_SIGNATURE
+            })
+    });
+    Ok(if plausible { prefix } else { 0 })
+}
+
+/// SFX prefix detection for ZIP64 archives. The regular EOCD carries
+/// saturated (`0xFFFF`/`0xFFFFFFFF`) fields, so the ZIP64 EOCD record
+/// serves as the reference point instead: its recorded offset is stored
+/// in the locator immediately before the EOCD (APPNOTE §4.3.15), while
+/// its actual position is the last ZIP64 EOCD signature before that
+/// locator.
+fn detect_sfx_prefix_zip64(input: &[u8], eocd_offset: usize) -> Result<u64, Error> {
+    if eocd_offset < 20 {
+        // No room for the locator; the normal path reports the error.
+        return Ok(0);
+    }
+    let locator_offset = eocd_offset - 20;
+    if read_u32_at(input, locator_offset)? != ZIP64_EOCD_LOCATOR_SIGNATURE {
+        return Ok(0);
+    }
+    let recorded = read_u64_at(input, locator_offset + 8)?;
+    if usize::try_from(recorded)
+        .ok()
+        .is_some_and(|pos| read_u32_at(input, pos).is_ok_and(|sig| sig == ZIP64_EOCD_SIGNATURE))
+    {
+        return Ok(0);
+    }
+    // The record is not at its recorded offset: a stub may have shifted
+    // it. Scan backwards from the locator for its actual position.
+    for pos in (0..locator_offset).rev() {
+        if read_u32_at(input, pos)? == ZIP64_EOCD_SIGNATURE {
+            let actual = pos as u64;
+            if actual < recorded {
+                return Err(Error::InvalidData(
+                    "zip: ZIP64 EOCD record precedes its recorded offset",
+                ));
+            }
+            return Ok(actual - recorded);
+        }
+    }
+    // Not found; the normal path reports the error.
+    Ok(0)
+}
+
 fn parse_eocd(cursor: &mut Cursor<'_>) -> Result<EocdRecord, Error> {
     let signature = cursor.read_u32()?;
     if signature != EOCD_SIGNATURE {
@@ -505,7 +630,7 @@ fn parse_eocd(cursor: &mut Cursor<'_>) -> Result<EocdRecord, Error> {
     let cd_disk_number = cursor.read_u16()?;
     let _disk_entries = cursor.read_u16()?;
     let total_entries = cursor.read_u16()?;
-    let _cd_size = cursor.read_u32()?;
+    let cd_size = cursor.read_u32()?;
     let cd_offset = cursor.read_u32()?;
     let comment_len = cursor.read_u16()? as usize;
     cursor.skip(comment_len)?;
@@ -513,6 +638,7 @@ fn parse_eocd(cursor: &mut Cursor<'_>) -> Result<EocdRecord, Error> {
         disk_number,
         cd_disk_number,
         total_entries,
+        central_directory_size: cd_size,
         central_directory_offset: cd_offset,
     })
 }
@@ -521,6 +647,7 @@ fn parse_zip64_locator_and_record(
     input: &[u8],
     eocd_offset: usize,
     disk_map: Option<&DiskMap>,
+    sfx_prefix: u64,
 ) -> Result<Zip64Record, Error> {
     if eocd_offset < 20 {
         return Err(Error::InvalidData("zip: missing ZIP64 locator"));
@@ -547,11 +674,17 @@ fn parse_zip64_locator_and_record(
     }
 
     // APPNOTE §4.3.15: the record offset is relative to the start of
-    // the disk carrying the ZIP64 EOCD record.
+    // the disk carrying the ZIP64 EOCD record. For a single-disk archive
+    // carrying an SFX stub, the stub length shifts it to an absolute
+    // position in the input.
     let record_offset = match disk_map {
         Some(m) => m.resolve(disk_with_record as u64, zip64_record_offset)?,
-        None => usize::try_from(zip64_record_offset)
-            .map_err(|_| Error::Unsupported("zip: ZIP64 record offset too large"))?,
+        None => usize::try_from(
+            zip64_record_offset
+                .checked_add(sfx_prefix)
+                .ok_or(Error::InvalidData("zip: ZIP64 record offset overflow"))?,
+        )
+        .map_err(|_| Error::Unsupported("zip: ZIP64 record offset too large"))?,
     };
     if read_u32_at(input, record_offset)? != ZIP64_EOCD_SIGNATURE {
         return Err(Error::InvalidData("zip: invalid ZIP64 EOCD signature"));
@@ -1693,6 +1826,32 @@ mod tests {
         let entries = decode(&archive).unwrap();
         assert_eq!(entries[0].name, "zip64.txt");
         assert_eq!(entries[0].data, b"zip64");
+    }
+
+    #[test]
+    fn decodes_sfx_prefixed_archive() {
+        // Self-extracting archive: an executable stub is prepended to the
+        // ZIP payload, shifting every recorded offset by the stub length.
+        let archive = build_test_zip("sfx.txt", b"self extracting", 8, false, false, true);
+        let mut sfx = b"#!/bin/sh\necho stub\n".to_vec();
+        sfx.extend_from_slice(&archive);
+        let entries = decode(&sfx).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "sfx.txt");
+        assert_eq!(entries[0].data, b"self extracting");
+    }
+
+    #[test]
+    fn sfx_prefix_via_zip64() {
+        // Same stub detection through the ZIP64 EOCD locator/record:
+        // the record is located by scanning back from the locator.
+        let archive = build_test_zip("sfx64.txt", b"zip64 sfx", 0, false, true, true);
+        let mut sfx = vec![0xAA; 512];
+        sfx.extend_from_slice(&archive);
+        let entries = decode(&sfx).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "sfx64.txt");
+        assert_eq!(entries[0].data, b"zip64 sfx");
     }
 
     #[test]

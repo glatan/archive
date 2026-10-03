@@ -14,12 +14,12 @@ use crate::compress::zlib;
 use crate::error::Error;
 use crate::util;
 
-const MAGIC: u8 = 0xEA;
-const VER: u8 = 1;
-const REV: u8 = 6;
+pub(crate) const MAGIC: u8 = 0xEA;
+pub(crate) const VER: u8 = 1;
+pub(crate) const REV: u8 = 6;
 /// Compression block buffer in the reference implementation.
-const WBUFSIZE: usize = 1048576;
-const FA_DIRECTORY: u32 = 0x10;
+pub(crate) const WBUFSIZE: usize = 1048576;
+pub(crate) const FA_DIRECTORY: u32 = 0x10;
 
 /// Control/integrity algorithm of a PEA stream, object, or volume.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,8 +78,29 @@ impl PeaAlgo {
         })
     }
 
+    /// Control-algorithm code byte (inverse of `from_code`).
+    pub(crate) fn code(self) -> u8 {
+        match self {
+            PeaAlgo::None => 0,
+            PeaAlgo::Adler32 => 1,
+            PeaAlgo::Crc32 => 2,
+            PeaAlgo::Crc64 => 3,
+            PeaAlgo::Md5 => 16,
+            PeaAlgo::Ripemd160 => 17,
+            PeaAlgo::Sha1 => 18,
+            PeaAlgo::Sha256 => 19,
+            PeaAlgo::Sha512 => 20,
+            PeaAlgo::Whirlpool => 21,
+            PeaAlgo::Sha3_256 => 22,
+            PeaAlgo::Sha3_512 => 23,
+            PeaAlgo::Blake2s => 24,
+            PeaAlgo::Blake2b => 25,
+            PeaAlgo::Encrypted(c) => c,
+        }
+    }
+
     /// Tag size in bytes.
-    fn tag_size(self) -> usize {
+    pub(crate) fn tag_size(self) -> usize {
         match self {
             PeaAlgo::None => 0,
             PeaAlgo::Adler32 | PeaAlgo::Crc32 => 4,
@@ -94,7 +115,7 @@ impl PeaAlgo {
 
     /// Compute the tag over `data` when this crate implements the
     /// algorithm; `None` for algorithms we parse but cannot verify.
-    fn compute(self, data: &[u8]) -> Option<Vec<u8>> {
+    pub(crate) fn compute(self, data: &[u8]) -> Option<Vec<u8>> {
         match self {
             PeaAlgo::Adler32 => Some(util::adler32::adler32(data).to_le_bytes().to_vec()),
             PeaAlgo::Crc32 => Some(util::crc32::crc32(data).to_le_bytes().to_vec()),

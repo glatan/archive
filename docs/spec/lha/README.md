@@ -3,8 +3,9 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | lha header documentation (apphead / lzh_note、GNU lha 系資料)。実参照: [LHa for UNIX `header.doc.md`](https://github.com/jca02266/lha/blob/master/header.doc.md) ([jca02266/lha](https://github.com/jca02266/lha)) + jLHA Notes (Michel Ishizuka、[Wayback index](https://web.archive.org/web/20080724142842/http://homepage1.nifty.com/dangan/en/Content/Program/Java/jLHA/Notes/Notes.html)) + Joe Jared `lzhformat.html` + [Just Solve Wiki: LHarc](http://justsolve.archiveteam.org/wiki/LHarc)。ローカルスナップショット: `docs/spec/sources/lha_header.doc.md`, `jlha_notes_*.html`, `lzhformat.html`。一次実装: [LHA 2.11 ソース (Vector fh002420)](https://www.vector.co.jp/download/file/dos/util/fh002420.html) |
+| 参照実装 | lhasa (ISC、移植元 + fixture vendor + oracle)、LHA 2.11 / LHa for UNIX 1.14i (LHa free-use license、移植元 / fixture 生成)、XADMaster (LGPL-2.1-or-later、移植元 / 動作参照)、deark (MIT-style、移植元)。system `lhasa` / `unar` / `lha` / `7z` / `bsdtar` は interop oracle。詳細: THIRD_PARTY_NOTICES lha 項・§4a |
 | 形式概要 | `[u8/u16 header size][checksum?][method 5B][packed u32][orig u32][time u32][attr u8][level u8](level 別フィールド)[ext headers][data]` のエントリ列。終端は header size = 0 |
-| 実装範囲 | level 0-3 read、`-lh0-` (stored) / `-lhd-` (dir) / `-lh1-`-`-lh7-` / LArc `-lzs-`/`-lz4-`/`-lz5-` / PMarc `-pm0-`-`-pm2-` の decode。write は header level 0-3 (`with_level`) + method `-lh0-`/`-lhd-`/`-lh4-`-`-lh7-` と stored alias `-lz4-`/`-pm0-` (`with_method`) |
+| 実装範囲 | header level 0-3 の読み込み、`-lh0-` (stored) / `-lhd-` (dir) / `-lh1-`〜`-lh7-` / LArc `-lzs-`/`-lz4-`/`-lz5-` / PMarc `-pm0-`〜`-pm2-` のデコードに対応する。書き込みは header level 0-3 (`with_level`) と、圧縮メソッド `-lh0-`/`-lhd-`/`-lh4-`〜`-lh7-`、LArc `-lzs-`/`-lz5-`、および無圧縮エイリアス `-lz4-`/`-pm0-` (`with_method`) に対応する |
 
 ## 対応バリアント・仕様版
 
@@ -14,7 +15,7 @@
 | header level 1 / 2 | lha header documentation + LHa for UNIX header.c 実測 | ✅ | ✅ | ext header (0x01 filename / 0x02 dir、raw 0xff 区切り) |
 | header level 3 | jLHA Notes Level3Header (`sources/jlha_notes_level3_header.html`) + lhasa (ISC) | ✅ | ✅ | `with_level(3)` で write 対応 (`emit_level3`)。32 バイト基本ヘッダ + u32 サイズ + u32 ext チェーン |
 | method `-lh0-` (stored) / `-lhd-` (dir) | lha header documentation | ✅ | `-lh0-` のみ ✅ | |
-| LZH 圧縮メソッド (`-lh1-`〜`-lh7-`, `-lzs-`/`-lz4-`/`-lz5-`, `-pm0-`-`-pm2-`) | jLHA Notes CompressMethod + 一次実装 LHA 2.11/LHa 1.14i ソース + lhasa (ISC) が de facto decode 参照 | ✅ | ⚠️ | encode は st1 系 `-lh4-`〜`-lh7-` (`with_method` → `compress::lzh::st1_enc`) と stored alias `-lz4-`/`-pm0-` のみ。`-lh1-`〜`-lh3-`/`-lzs-`/`-lz5-`/`-pm1-`/`-pm2-` の圧縮 write は未対応。`-lhx-` (UNLHA32 独自) 等の未対応メソッドは decode 側でも `Error::Unsupported` |
+| LZH 圧縮メソッド (`-lh1-`〜`-lh7-`, `-lzs-`/`-lz4-`/`-lz5-`, `-pm0-`〜`-pm2-`) | jLHA Notes CompressMethod + 一次実装 LHA 2.11/LHa 1.14i ソース + lhasa (ISC) が de facto decode 参照 | ✅ | ⚠️ | encode は st1 系 `-lh4-`〜`-lh7-` (`with_method` 経由で `compress::lzh::st1_enc`)、LArc `-lzs-`/`-lz5-` (`larc_enc::{encode_lzs,encode_lz5}`)、および無圧縮エイリアス `-lz4-`/`-pm0-` に対応する (`lzs_encode_roundtrip`, `lz5_encode_roundtrip`, `test_lha_lzs_lz5_bsdtar_interop`)。`-lh1-`〜`-lh3-` および `-pm1-`/`-pm2-` の圧縮 write は未対応。`-lhx-` (UNLHA32 独自) などの未実装メソッドは decode 側でも `Error::Unsupported` を返す |
 
 ### ヘッダ構造
 
@@ -90,7 +91,7 @@ decode 参照は lhasa (ISC) / XADMaster + LHa 1.14i 一次ソース (dhuf.c, sh
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 19 | 圧縮メソッドの write は st1 系のみ対応 | ⚠️ | `with_method` は `-lh4-`〜`-lh7-` + stored alias `-lz4-`/`-pm0-` を受理。`-lh1-`〜`-lh3-`/`-lzs-`/`-lz5-`/`-pm1-`/`-pm2-` の圧縮 write は未対応。`-lhx-` 等の未実装メソッドの decode は `Error::Unsupported` |
+| 19 | 圧縮メソッドの write は st1 系および LArc `-lzs-`/`-lz5-` のみ対応 | ⚠️ | `with_method` は `-lh4-`〜`-lh7-`、`-lzs-`/`-lz5-`、および無圧縮エイリアス `-lz4-`/`-pm0-` を受理する (`larc_enc`)。`-lh1-`〜`-lh3-` および `-pm1-`/`-pm2-` の圧縮 write は未対応。`-lhx-` などの未実装メソッドの decode は `Error::Unsupported` を返す |
 | 20 | write の mtime は level 0/1 で DOS time、level 2 で UNIX time をそのまま格納。UNIX ext 0x50/0x51/0x54 は発行しない | ✅ | `level1_roundtrip`, `level2_roundtrip`, `level2_long_path`, `level_rejects_bad_level` |
 | 21 | マルチボリューム/リンク属性/OS 別属性の解釈は非対応 | ❌ | header level 3 は read/write 対応済み (`with_level(3)`)。multi-disk/spanning (ext header 0x39・SPAN mode) は `sources/lzhformat.html` が記述 |
 

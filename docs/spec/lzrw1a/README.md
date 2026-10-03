@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | Ross N. Williams の LZRW1-A (1991) が使用する圧縮ストリーム。4 バイトの copy flag + グループ列。magic・チェックサムは持たない |
 | 基準仕様 | 参照実装 [`lzrw1-a.c`](https://ftp.funet.fi/pub/misc/compression/lzrw1-a.c) (Ross N. Williams, public domain、[ross.net/compression](http://www.ross.net/compression/lzrw1a.html) / funet ミラー) の "DEFINITION OF COMPRESSED FILE FORMAT" 節 (ローカルスナップショット: `docs/spec/sources/lzrw1-a.c` / `lzrw1-a.txt`) |
+| 参照実装 | `lzrw1-a.c` (Ross N. Williams、public domain、de facto 仕様 + 動作参照 + fixture 生成: `tests/integration/lzrw1a.rs` の known-answer ベクター)。詳細: THIRD_PARTY_NOTICES LZRW1-A 項 |
 | 実装 | `archive::compress::lzrw1a` (decode / decode_bounded / encode)。pure-Rust 実装 |
 
 ## ストリーム構造

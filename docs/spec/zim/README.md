@@ -3,6 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | openZIM Wiki "[ZIM file format](https://wiki.openzim.org/wiki/ZIM_file_format)" (ローカルスナップショット: `docs/spec/sources/zim_file_format.html`) |
+| 参照実装 | なし (書面仕様のみに基づいて実装。openzim zim-testing-suite の `small.zim` で手動デコード検証を行っているが、外部 ZIM ツールによる oracle 利用はない) |
 | 形式概要 | 80B header + MIME list + path/title pointer list + dirent + cluster pointer list + blob cluster |
 | 実装範囲 | read/write (write は v5/v6、compression none/xz/zstd、redirect/deprecated entry も emit 可)。fulltext index 検索 API は intentional scope 外 |
 
@@ -63,10 +64,10 @@
 | 21d | cluster compression id 0 (素データの別表現として一部の writer が使用) は受理せず `Unsupported` | Clusters | ✅ | `rejects_unknown_cluster_compression` (id 0 は `CLUSTER_NONE`(1) のみ受理経路外 → `_` arm で reject) |
 | 21e | dirent path の `.` / `..` セグメント・絶対パス禁止 | Directory Entries | ⚠️ | decoder は path を `N/path` としてそのまま公開し、dot セグメント検証を行わない。抽出側でのサニタイズを想定 (crate ポリシー) |
 | 25 | v6 write / extended cluster の出力、redirect・deprecated entry の出力 | Directory Entries, Clusters | ✅ | `ZimVersion::{V5,V6}` + `with_extended_cluster` + `add_redirect` + `add_deprecated`。`v6_extended_cluster_roundtrip`, `v6_plain_cluster_roundtrip`, `extended_cluster_requires_v6`, `redirect_roundtrip`, `redirect_missing_target_rejected`, `redirect_to_non_content_rejected`, `deprecated_entries_skipped_on_decode`, `v6_extended_with_redirect_and_deprecated`, `test_zim_encoder_v6_extended_with_redirect` |
+| 26 | `X/listing/titleordered/v0` title index | Title Pointer List (titlePtrPos は obsolete 注記あり) | ✅ | `decode_title_order` は `titlePtrPos` より `v0` リスティングを優先して参照し、形式不正時は `titlePtrPos` にフォールバックする (`title_order_uses_x_listing_v0`, `title_order_prefers_listing_over_titleptrpos`, `title_order_falls_back_when_listing_malformed`) |
 
 ### Intentional scope (実装対象外)
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
 | 22 | fulltext index 検索 API | openzim wiki (format doc 外) | ❌ | title pointer list 順の列挙は `decode_title_order` で提供 (21b)。fulltext index そのものの検索は対象外 |
-| 26 | `X/listing/titleordered/v0` title index | Title Pointer List (titlePtrPos は obsolete 注記あり) | ❌ | titlePtrPos ベースの `decode_title_order` のみ対応。仮想 dirent 経由の title index は対象外 |

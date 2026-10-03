@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | Linux 向け read-only ファイルシステムイメージ。`-rom1fs-` スーパーブロック + 16B アラインのファイルヘッダチェーン。圧縮なし |
 | 基準仕様 | Linux kernel `Documentation/filesystems/romfs.rst` (`docs/spec/sources/romfs.rst` にスナップショット)、`fs/romfs/` の参照実装の動作 (checksum 規則・exec ビット) |
+| 参照実装 | Linux kernel `fs/romfs/` (GPL-2.0、checksum 規則・exec ビットの動作参照)、genromfs 0.5.2 (GPL-2.0+、fixture `tests/fixtures/romfs/genromfs.romfs` 生成)。詳細: THIRD_PARTY_NOTICES romfs 項 |
 | 実装 | `archive::archive::romfs::decode` (read のみ)。`romfs` feature 配下 |
 
 ## スーパーブロック層
@@ -40,20 +41,20 @@
 | 18 | イメージ範囲外のヘッダポインタを拒否 | 防御的検証 | ✅ | `rejects_header_cycle_and_oob` |
 | 19 | 非アラインヘッダ・イメージサイズ未満の入力を拒否 | 防御的検証 | ✅ | `parse_hdr` / decode 冒頭 |
 | 20 | ディレクトリ深さ制限 (128) | 防御的検証 | ✅ | walk 深度ガード |
+| 22 | block/char のデバイス番号解釈 | romfs.rst (spec.info) | ✅ | `RomfsEntry::dev: Option<(u16, u16)>` で major/minor を公開する (socket/fifo は None)。`exposes_device_major_minor`, `socket_fifo_have_no_device` |
 
 ## 意図的な scope 制約
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
 | 21 | romfs write | ❌ intentional scope | genromfs が参照プロデューサー。read が主用途 |
-| 22 | block/char/socket/fifo のデバイス番号解釈 | ❌ intentional scope | `spec.info` の major/minor はファイル抽出に不要。`RomfsKind::Other` として型だけ保持 |
 | 23 | owner/permission/timestamp | ❌ n/a | フォーマットにフィールドが存在しない (exec ビットのみ mode に反映) |
 
 ## 集計
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 20 |
+| ✅ 実装+テスト済み  | 21 |
 | ⚠️ 部分対応  | 0 |
-| ❌ 未対応  | 0 |
+| ❌ 未対応  | 2 (intentional scope / n/a) |
 | **合計** | **23** |

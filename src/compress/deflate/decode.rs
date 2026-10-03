@@ -234,8 +234,10 @@ fn decode_dynamic_huffman(reader: &mut BitReader, output: &mut Vec<u8>) -> Resul
     if hlit > 286 {
         return Err(Error::InvalidData("HLIT exceeds maximum (286)"));
     }
-    if hdist > 30 {
-        return Err(Error::InvalidData("HDIST exceeds maximum (30)"));
+    // RFC 1951 §3.2.7 defines 32 distance codes; codes 30-31 never appear in
+    // compressed data, but HDIST=31/32 is legal when the extra lengths are 0.
+    if hdist > 32 {
+        return Err(Error::InvalidData("HDIST exceeds maximum (32)"));
     }
 
     // Read code length alphabet code lengths
@@ -297,6 +299,14 @@ fn decode_dynamic_huffman(reader: &mut BitReader, output: &mut Vec<u8>) -> Resul
     if lengths[256] == 0 {
         return Err(Error::InvalidData(
             "dynamic Huffman: missing end-of-block symbol (256)",
+        ));
+    }
+    // Distance codes 30/31 are reserved: HDIST may cover them, but only with
+    // zero code lengths (RFC 1951 §3.2.7 "distance codes 30-31 will never
+    // actually occur in the compressed data").
+    if hdist > 30 && lengths[hlit + 30..].iter().any(|&l| l != 0) {
+        return Err(Error::InvalidData(
+            "dynamic Huffman: non-zero length for reserved distance code 30/31",
         ));
     }
 
@@ -886,6 +896,84 @@ mod tests {
         assert_eq!(result, b"A");
     }
 
+    /// Build a dynamic-Huffman stream identical to
+    /// test_dynamic_huffman_all_literals_empty_dist_tree, but with `hdist`
+    /// distance codes whose lengths are all emitted as zero.
+    fn build_all_literals_stream(hdist: usize, dist_len_code_30: u8) -> Vec<u8> {
+        let mut w = TestBitWriter::new();
+        w.write_bits(1, 1); // BFINAL = 1
+        w.write_bits(0b10, 2); // BTYPE = 10 (dynamic Huffman)
+        w.write_bits(0, 5); // HLIT = 0 -> 257 lit/len codes
+        w.write_bits((hdist - 1) as u32, 5); // HDIST
+        w.write_bits(14, 4); // HCLEN = 14 -> 18 code length codes
+
+        // CL alphabet: code 17 len 1 ("0"), code 18 len 2 ("11"), code 1 len 2 ("10")
+        let cl_code_lengths: [u8; 18] = [
+            0, // code 16
+            1, // code 17
+            2, // code 18
+            0, // code 0
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // indices 4..16
+            2, // code 1
+        ];
+        for &len in &cl_code_lengths {
+            w.write_bits(len as u32, 3);
+        }
+
+        // Lit/len lengths: 65 zeros, 'A' len 1, 190 zeros, EOB len 1
+        w.write_huffman(0b11, 2); // code 18, count 65
+        w.write_bits(54, 7);
+        w.write_huffman(0b10, 2); // CL code for "1"
+        w.write_huffman(0b11, 2); // code 18, count 138
+        w.write_bits(127, 7);
+        w.write_huffman(0b11, 2); // code 18, count 52
+        w.write_bits(41, 7);
+        w.write_huffman(0b10, 2); // CL code for "1"
+
+        // Distance code lengths: zeros via a code 18 run (11..=138), then
+        // `dist_len_code_30` for the final reserved code if nonzero.
+        // Callers pass hdist in 31..=32 so a single run always suffices.
+        let zero_run = if dist_len_code_30 == 0 {
+            hdist
+        } else {
+            hdist - 1
+        };
+        assert!((11..=138).contains(&zero_run));
+        w.write_huffman(0b11, 2); // code 18
+        w.write_bits((zero_run - 11) as u32, 7);
+        if dist_len_code_30 != 0 {
+            w.write_huffman(0b10, 2); // CL code for the literal length value
+        }
+
+        w.write_huffman(0b0, 1); // 'A'
+        w.write_huffman(0b1, 1); // EOB
+        w.finish()
+    }
+
+    #[test]
+    fn test_dynamic_huffman_hdist_31_zero_lengths_accepted() {
+        // RFC 1951 §3.2.7: HDIST may declare distance codes 30/31 as long as
+        // their code lengths are zero.
+        let stream = build_all_literals_stream(31, 0);
+        let result = decode(&stream).unwrap();
+        assert_eq!(result, b"A");
+    }
+
+    #[test]
+    fn test_dynamic_huffman_hdist_32_zero_lengths_accepted() {
+        let stream = build_all_literals_stream(32, 0);
+        let result = decode(&stream).unwrap();
+        assert_eq!(result, b"A");
+    }
+
+    #[test]
+    fn test_dynamic_huffman_hdist_31_nonzero_reserved_length_rejected() {
+        // Reserved distance code 30 given a real code length must be rejected.
+        let stream = build_all_literals_stream(31, 1);
+        let result = decode(&stream);
+        assert!(matches!(result, Err(Error::InvalidData(_))));
+    }
+
     #[test]
     fn test_dynamic_huffman_empty_dist_tree_rejects_match() {
         // Companion to test_dynamic_huffman_all_literals_empty_dist_tree:
@@ -1044,12 +1132,14 @@ mod tests {
 
     #[test]
     fn test_hdist_exceeds_max() {
-        // Construct BTYPE=10 block with HDIST=31 (5-bit field) → 31+1=32 > 30
+        // Construct BTYPE=10 block with HDIST=32 (5-bit field 31 → 32 distance
+        // codes), but a truncated code-length section: the stream must still
+        // be rejected even though HDIST=32 itself is legal per RFC 1951.
         let mut w = TestBitWriter::new();
         w.write_bits(1, 1); // BFINAL = 1
         w.write_bits(0b10, 2); // BTYPE = 10 (dynamic Huffman)
         w.write_bits(0, 5); // HLIT = 0 (valid)
-        w.write_bits(31, 5); // HDIST = 31 → 32 distance codes (exceeds 30)
+        w.write_bits(31, 5); // HDIST = 31 → 32 distance codes
         w.write_bits(0, 4); // HCLEN = 0
         w.write_bits(0, 8);
         let data = w.finish();

@@ -8,8 +8,11 @@
 //!
 //! Signature proofs are parsed and exposed (public key + signature +
 //! algorithm) but not verified — verification requires RSA-PSS /
-//! ECDSA P-256, which is intentionally out of scope. Writing CRX
-//! files is also out of scope.
+//! ECDSA P-256, which is intentionally out of scope. The cheaper
+//! `crx_id` consistency check (first 16 bytes of
+//! `SHA-256(rsa_public_key)`) is exposed as
+//! `decode::Crx3Image::verify_crx_id`. Writing CRX files is
+//! also out of scope.
 
 use crate::error::Error;
 

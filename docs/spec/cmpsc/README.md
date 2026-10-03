@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | IBM CMPSC (Compression Call) 命令の基本方式。静的辞書を使う LZ78 系で、圧縮出力は固定長 index symbol (9-13bit、辞書エントリ数 512/1K/2K/4K/8K に対応) の MSB-first 連結 |
 | 基準仕様 | [z/Architecture Principles of Operation (SA22-7832-12)](https://publibfp.boulder.ibm.com/epubs/pdf/a227832c.pdf) Chapter 7 COMPRESSION CALL + Appendix D "Compression Call Facility"。辞書フォーマット自体は IBM [ESA/390 Data Compression (SA22-7208)](https://www.ibm.com/resources/publications/OutputPubsDetails?PubID=SA22720801) (BKMGR softcopy) が正本。コンテナは PKWARE [APPNOTE.TXT](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) §5.17 (method 16)。補助解説: [Hercules README.CMPSC.md](https://github.com/SDL-Hercules-390/hyperion/blob/master/readme/README.CMPSC.md)。ローカルスナップショット: `docs/spec/sources/sa22-7832-12.pdf` |
+| 参照実装 | SDL-Hercules-390/hyperion (QPL、動作参照のみ。コード取り込みなし)。詳細: THIRD_PARTY_NOTICES cmpsc 項 |
 | 実装 | `archive::compress::cmpsc` (expand / compress / decode / encode)。pure-Rust 実装 |
 
 ## スコープ

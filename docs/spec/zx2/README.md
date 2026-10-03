@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | Einar Saukas の ZX2 が使用する raw LZ77 ストリーム。ZX1 の minimalist 版で、new-offset フィールドが 1 バイト固定 (最大 offset 255)。制御ビット列とデータバイトがインターリーブする。magic・コンテナヘッダ・チェックサムは持たない |
 | 基準仕様 | [ZX2 README](https://github.com/einar-saukas/ZX2) "File Format" (ローカルスナップショット: `docs/spec/sources/zx2_README_v1.1.md`) + 参照実装 `dzx2.c` / `compress.c` (Einar Saukas, BSD 3-Clause) |
+| 参照実装 | ZX2 参照実装 `dzx2.c`/`compress.c` (Einar Saukas、BSD 3-Clause。動作参照、既知解答ベクタは参照コンプレッサ ZX2 v1.1 で生成)。詳細: THIRD_PARTY_NOTICES ZX2 項 |
 | 実装 | `archive::compress::zx2` (decode / decode_bounded / decode_variant / decode_with_prefix / decode_backwards / decode_backwards_bounded / decode_backwards_with_suffix / decode_backwards_variant / encode / encode_no_default_offset / encode_no_length_increment / encode_max_len / encode_with_prefix / encode_backwards / encode_backwards_with_suffix / encode_backwards_variant)。pure-Rust 実装 |
 
 ## 対応バリアント・仕様版

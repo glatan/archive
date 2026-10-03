@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | 入力を複数の独立 zstd フレームに分割し、末尾に seek table を zstd skippable frame (magic `0x184D2A5E`) として付加する形式。任意の zstd デコーダで通常の multi-frame zstd として復号できる一方、seek table を解釈するデコーダは範囲伸張が可能 |
 | 基準仕様 | [Zstandard Seekable Format](https://github.com/facebook/zstd/tree/dev/contrib/seekable_format) v0.1.0 (ローカルスナップショット: `docs/spec/sources/zstd_seekable_compression_format.md`) |
+| 参照実装 | 参照ツール `seekable_compression`/`seekable_decompression_mem` (zstd contrib/seekable_format、BSD-3-Clause OR GPLv2。既知解答ベクタ生成・range decode interop oracle)。詳細: THIRD_PARTY_NOTICES Zstandard Seekable Format 項 |
 | 実装 | `archive::compress::zstd::seekable` (encode / decode / decode_range / seek_table / has_seek_table)。`zstd` feature 配下 |
 
 ## 対応バリアント・仕様版

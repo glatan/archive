@@ -23,6 +23,11 @@
 //! recognised: the boot catalog validation entry and all
 //! initial/section entries are parsed, and the referenced boot
 //! image is extracted into `ElToritoEntry::image` (`IsoImage::el_torito`).
+//! Descriptor metadata — system/volume-set/publisher/preparer/
+//! application and copyright/abstract/bibliographic identifiers
+//! plus the four 17-byte volume timestamps (ECMA-119 §8.4.5,
+//! §8.4.19-8.4.29) — is exposed via `IsoImage::meta` (primary) and
+//! `IsoImage::joliet_meta` (supplementary).
 //!
 //! Extended attribute record content, non-`pz` `ZF` compression
 //! algorithms, and writing ISO images are intentionally out of

@@ -4,6 +4,7 @@
 |------|------|
 | LZO1X 基準仕様 | [Linux kernel `Documentation/staging/lzo.rst`](https://docs.kernel.org/staging/lzo.html) (ローカルスナップショット: `docs/spec/sources/linux_lzo.rst`) |
 | lzop 基準仕様 | [lzop](https://www.lzop.org/) ソースコード (`lzop.h` / `p_lzo.c`) をデファクト仕様として扱う |
+| 参照実装 | lzop (Markus Oberhumer、GPL-2.0-or-later、動作参照 + fixture 生成: `tests/fixtures/lzo/hello.lzo` + oracle)。詳細: THIRD_PARTY_NOTICES LZO / lzop 項 |
 
 ## 対応バリアント・仕様版
 
@@ -77,7 +78,7 @@
 | 39 | Decompressed output size 検証 (uncompressed_len と一致) | lzop block structure | ✅ | デコーダーで検証 |
 | 40 | 命令形式 `0 0 0 0 D D S S` の state==4 形式 (offset 2049-3072, len 3) | Linux kernel lzo.rst: Instruction encoding | ✅ | `decode.rs:384-402` で実装 |
 | 41 | lzop `version < 0x0940` の拒否 | lzop source | ✅ | `decode.rs:77`、`test_old_version_rejected` |
-| 42 | bitstream version byte 17 (v1 / LZO-RLE) と v1 専用ゼロラン命令 | Linux kernel lzo.rst | ❌ | intentional scope — v0 decoder のみ (kernel 文書: "v0 cannot read v1 data") |
+| 42 | bitstream version byte 17 (v1 / LZO-RLE) と v1 専用ゼロラン命令 | Linux kernel lzo.rst | ❌ | intentional scope。v0 デコーダーのみを対象とする (カーネル文書: "v0 cannot read v1 data")。先頭バイト 17 (v1) は `Error::Unsupported` として明示的に拒絶する (`test_v1_bitstream_first_byte_rejected`) |
 
 
 ---

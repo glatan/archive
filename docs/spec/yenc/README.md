@@ -4,14 +4,15 @@
 |------|------|
 | 形式概要 | バイトを +42 (mod 256) で回転し、critical 文字のみ `=` エスケープ対にする Usenet 向けバイナリエンコード。`=ybegin`/`=yend` キーワード行でフレームし、単一/マルチパートを持つ |
 | 基準仕様 | [yEncode - A quick and dirty encoding for binaries (revised draft 1.3)](http://www.yenc.org/yenc-draft.1.3.txt) (ローカルスナップショット: `docs/spec/sources/yenc-draft_1.3.txt`) |
-| 実装 | `archive::encoding::yenc` (encode / encode_part / decode)。`yenc` feature 配下 |
+| 参照実装 | 仕様書から自作した Python 参照実装 (テスト時 interop oracle のみ・非配布)。詳細: THIRD_PARTY_NOTICES yenc 項 |
+| 実装 | `archive::encoding::yenc` (encode / encode_part / decode / join_parts)。`yenc` feature 配下 |
 
 ## 対応バリアント
 
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
 | 単一パート文書 | draft §"Headers and Trailers" | ✅ | ✅ | `encode` / `decode` |
-| マルチパート (個別 part) | draft §"Multi-part Encoded Binaries" | ✅ | ✅ | `encode_part` / `decode`。part 結合は呼び出し側 |
+| マルチパート (個別 part) | draft §"Multi-part Encoded Binaries" | ✅ | ✅ | `encode_part` / `decode`。パートの結合は `join_parts` で対応 |
 
 ## 内部エンコード
 
@@ -49,13 +50,13 @@
 | 20 | part の期待サイズは `end-begin+1`、trailer `size=` と実データ長と照合 | draft "recompute the expected part size from the begin and end keyword values" | ✅ | `multipart_roundtrip` |
 | 21 | `pcrc32=` があれば照合 | draft §multipart | ✅ | `encode_part` が emit + decode 検証 |
 | 22 | `=ypart` range が全体サイズを超える場合は拒否 | バリデーション | ✅ | `decode` 内 range チェック |
-| 25 | `total=` の部分検証: `part > total` を reject、`part == total` なら `=ypart end` == `=ybegin size` を照合 (不在は受理) | draft "(1.2) should be also added" 推奨項目 | ✅ | `multipart_total_validation`。全 part の集計照合は結合が必要なため対象外 (項目 23) |
+| 25 | `total=` の部分検証: `part > total` を reject、`part == total` なら `=ypart end` == `=ybegin size` を照合 (不在は受理) | draft "(1.2) should be also added" 推奨項目 | ✅ | `multipart_total_validation`。全パートを対象とした集計照合は `join_parts` (要件 23) で実施する |
+| 23 | part の結合・順序付け・missing part 検出 | draft §multipart | ✅ | `join_parts` でパート番号順に結合し、欠落したパートは `Error::InvalidData` として拒絶する (`join_parts_roundtrip`, `join_parts_detects_missing_part`, `join_parts_reorders`, `join_parts_rejects_name_mismatch`) |
 
 ## 意図的な scope 制約
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 23 | part の結合・順序付け・missing part 検出 | ❌ intentional scope | 呼び出し側が `YEncEntry::part`/`range` から行う |
 | 24 | Subject 行規約 (`"file" 12345 yEnc bytes`) | ❌ intentional scope | transport (NNTP) 層の規約で、文書本体の外 |
 | 26 | MIME/メッセージコンテナ内埋め込み | ❌ intentional scope | yenc.org develop.htm の埋め込みガイドは transport 層 |
 
@@ -63,7 +64,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 23 |
+| ✅ 実装+テスト済み  | 24 |
 | ⚠️ 部分対応  | 0 |
-| ❌ 未対応  | 0 |
+| ❌ 未対応  | 2 (intentional scope) |
 | **合計** | **26** |

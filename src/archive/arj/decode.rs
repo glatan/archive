@@ -1,6 +1,7 @@
 //! ARJ archive reading: stored, LZH-static (methods 1-3), and
 //! "fastest" (method 4) members, garbled (password) entries, and
-//! multi-volume archives via [`decode_parts`].
+//! multi-volume archives via [`decode_parts`] (with `std`,
+//! `volume_paths` discovers the `.arj`/`.aNN` sibling volumes).
 //!
 //! Reference: ARJ technical note (ARJ 2.x file format description).
 //!
@@ -197,8 +198,9 @@ fn parse_volume(input: &[u8]) -> Result<Vec<Frag>, Error> {
 }
 
 /// De-garble a packed stream: byte `i` is XORed with
-/// `password[i % len].wrapping_add(modifier)`.
-fn ungarble(data: &mut [u8], password: &[u8], pmod: u8) {
+/// `password[i % len].wrapping_add(modifier)`. The transform is
+/// symmetric, so the encoder reuses it to garble output.
+pub(crate) fn ungarble(data: &mut [u8], password: &[u8], pmod: u8) {
     for (i, b) in data.iter_mut().enumerate() {
         *b ^= password[i % password.len()].wrapping_add(pmod);
     }
@@ -311,7 +313,8 @@ pub fn decode_with_password_bytes(input: &[u8], password: &[u8]) -> Result<Vec<A
 }
 
 /// Decode a multi-volume ARJ archive from its volume buffers, in
-/// order.
+/// order. With `std`, `volume_paths` discovers the `.arj`/`.aNN`
+/// sibling files for this call.
 pub fn decode_parts(parts: &[&[u8]]) -> Result<Vec<ArjEntry>, Error> {
     decode_parts_impl(parts, None)
 }
@@ -322,6 +325,36 @@ pub fn decode_parts_with_password_bytes(
     password: &[u8],
 ) -> Result<Vec<ArjEntry>, Error> {
     decode_parts_impl(parts, Some(password))
+}
+
+/// Enumerate the volume paths of a multi-volume archive whose first
+/// volume is `first` (conventionally `name.arj`).
+///
+/// The result always starts with `first` itself; then same-stem
+/// siblings `name.a01`, `name.a02`, … `name.a99` are appended in
+/// order while the files exist, stopping at the first missing
+/// number. Reading the returned paths and feeding their contents to
+/// [`decode_parts`] or [`decode_parts_with_password_bytes`]
+/// reassembles the archive without the caller tracking volumes.
+///
+/// ```text
+/// let paths = decode::volume_paths(first);
+/// let bufs: Vec<Vec<u8>> = paths.iter()
+///     .map(std::fs::read).collect::<std::io::Result<_>>()?;
+/// let parts: Vec<&[u8]> = bufs.iter().map(Vec::as_slice).collect();
+/// let entries = decode::decode_parts(&parts)?;
+/// ```
+#[cfg(feature = "std")]
+pub fn volume_paths(first: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = alloc::vec![first.to_path_buf()];
+    for n in 1..=99u32 {
+        let next = first.with_extension(format!("a{n:02}"));
+        if !next.is_file() {
+            break;
+        }
+        out.push(next);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -441,5 +474,81 @@ mod tests {
         let crc = crate::util::crc32::crc32(&a[second + 4..second + 4 + bsize]);
         a[second + 4 + bsize..second + 8 + bsize].copy_from_slice(&crc.to_le_bytes());
         assert!(matches!(decode(&a), Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn garbled_roundtrip() {
+        // Stored and compressed members written garbled decode with
+        // the matching password; the wire carries flag 0x01 + pmod.
+        let payload = b"garbled payload payload payload".repeat(20);
+        for method in [0u8, 2] {
+            let mut enc = crate::archive::arj::encode::ArjEncoder::with_method(method)
+                .unwrap()
+                .with_password(b"secret", 0x5A)
+                .unwrap();
+            enc.add_file("g.bin", &payload, 0).unwrap();
+            let a = enc.finish();
+            let second = second_header_off(&a);
+            assert_eq!(a[second + 4 + 4] & 0x01, 0x01); // garbled flag
+            assert_eq!(a[second + 4 + 7], 0x5A); // pmod byte
+            let e = decode_with_password_bytes(&a, b"secret").unwrap();
+            assert_eq!(e[0].name, "g.bin");
+            assert_eq!(e[0].data, payload);
+        }
+    }
+
+    #[test]
+    fn garbled_write_requires_password_decode() {
+        let mut enc = crate::archive::arj::encode::ArjEncoder::new()
+            .with_password(b"secret", 0x11)
+            .unwrap();
+        enc.add_file("g.bin", b"hidden data", 0).unwrap();
+        let a = enc.finish();
+        // No password: Unsupported, as for foreign garbled archives.
+        assert!(matches!(decode(&a), Err(Error::Unsupported(_))));
+        // Wrong password de-garbles to garbage: data CRC mismatch.
+        assert!(decode_with_password_bytes(&a, b"wrong").is_err());
+        // An empty password is rejected by the encoder.
+        assert!(
+            crate::archive::arj::encode::ArjEncoder::new()
+                .with_password(b"", 0)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn garbled_multi_volume_roundtrip() {
+        // Garbling applies to the whole packed stream before
+        // fragmentation, so split members reassemble correctly.
+        let mut enc = crate::archive::arj::encode::ArjEncoder::new()
+            .with_password(b"pw", 0x00)
+            .unwrap();
+        let data: Vec<u8> = (0u8..200).map(|i| i.wrapping_mul(29)).collect();
+        enc.add_file("s.bin", &data, 0).unwrap();
+        let parts = enc.finish_parts(120).unwrap();
+        assert!(parts.len() > 1);
+        let refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+        let e = decode_parts_with_password_bytes(&refs, b"pw").unwrap();
+        assert_eq!(e[0].data, data);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn volume_paths_discovers_siblings() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let uniq = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("archive_arj_vol_{uniq}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = dir.join("x.arj");
+        std::fs::write(&first, b"v1").unwrap();
+        std::fs::write(dir.join("x.a01"), b"v2").unwrap();
+        // A gap at .a02 stops discovery: .a03 must not be returned.
+        std::fs::write(dir.join("x.a03"), b"v4").unwrap();
+        let paths = volume_paths(&first);
+        assert_eq!(paths, [first, dir.join("x.a01")]);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

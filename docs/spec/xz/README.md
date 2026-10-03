@@ -3,6 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [xz ファイルフォーマット仕様 1.2.1](https://tukaani.org/xz/xz-file-format-1.2.1.txt) (2024-04-08 版、ローカルスナップショット: `docs/spec/sources/xz-file-format-1.2.1.txt`)。1.2.0 で RISC-V BCJ filter (0x0B) が追加 — 実装は `bcj::riscv_*` で対応済み |
+| 参照実装 | liblzma (public domain、BCJ/Delta filter core の移植元)、system `xz` バイナリ (テスト時 interop oracle)。詳細: THIRD_PARTY_NOTICES xz / BCJ filters 項 |
 
 ## 対応バリアント・仕様版
 

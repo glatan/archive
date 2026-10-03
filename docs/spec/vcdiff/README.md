@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | RFC 3284 "The VCDIFF Generic Differencing and Compression Data Format"。ターゲットを一連のウィンドウとして記述するデルタ形式。各ウィンドウは ADD / RUN / COPY 命令列で構成され、COPY アドレスは source セグメントと生成済みターゲットを連結した仮想アドレス空間を指す。アドレス符号化は VCD_SELF / VCD_HERE / near キャッシュ / same キャッシュの 9 モード |
 | 基準仕様 | [RFC 3284](https://www.rfc-editor.org/rfc/rfc3284) (ローカルスナップショット: `docs/spec/sources/rfc3284.txt`) |
+| 参照実装 | xdelta3 3.2.0 (Apache-2.0、既知解答ベクタ生成および双方向 decode 検証の fixture/oracle。コード移植なし)。詳細: THIRD_PARTY_NOTICES VCDIFF 項 |
 | 実装 | `archive::compress::vcdiff` (decode / decode_with_source / decode_bounded / encode / encode_with_source / encode_with_windows)。pure-Rust 実装 |
 
 ## 対応バリアント・仕様版

@@ -23,7 +23,10 @@ specifications or standards documents:
   rejection (`HuffmanTable::from_lengths`) uses a Kraft-sum
   left-tracking counter arithmetically equivalent to zlib
   `inflate_table`'s `left` accounting; the check is the standard
-  Kraft-inequality validation per RFC 1951 §3.2.2
+  Kraft-inequality validation per RFC 1951 §3.2.2. HDIST values of
+  31/32 are accepted when the reserved distance-code lengths are
+  zero, per the RFC 1951 §3.2.7 strict reading rather than zlib's
+  `hdist > 30` rejection
 - gzip: RFC 1952
 - zlib: RFC 1950
 - zstd: RFC 8878. The upstream reference implementation is dual
@@ -370,7 +373,10 @@ specifications or standards documents:
   `XADLZHOldHandles.m`/`XADLZHStaticHandle` (The Unarchiver,
   LGPL-2.1-or-later; see section 4a). `compress::lzh::st1_enc` is a
   crate-original encoder counterpart and carries no upstream
-  attribution. `lzh_dyn.rs` is additionally transliterated from
+  attribution. `larc_enc.rs` is likewise a crate-original encoder
+  counterpart to `larc.rs` (greedy hash-chain LZSS emitting absolute
+  decoder-ring positions); no upstream encoder was ported.
+  `lzh_dyn.rs` is additionally transliterated from
   `XADLZHOldHandles.m`'s `LhA_Decrunch` for `-lh2-`. jLHA Notes
   (Michel Ishizuka) is used as the level-3 header wire layout source.
   Test fixtures in `tests/fixtures/lha/`: most are the lhasa test
@@ -388,7 +394,8 @@ specifications or standards documents:
   transliteration of the newtua_dos port of XADMaster's
   XADARJFastestHandle (LGPL-3.0-or-later); methods 1-3 reuse the
   shared `compress::lzh::st1` decoder. Garbled-entry semantics follow
-  XADMaster's ARJPasswordModifier + XOR handle behavior. UNARJ sources
+  XADMaster's ARJPasswordModifier + XOR handle behavior; the same
+  transform is used by `ArjEncoder::with_password`. UNARJ sources
   were not consulted or copied.
 - arc: SEA ARC file format description
   (wotsit.org "arc" format entry); member structure facts from the
@@ -440,9 +447,10 @@ specifications or standards documents:
   (pea.pas, pea_utils.pas; LGPLv3, Giorgio Tani). Spec-informed
   implementation; the wire format was reimplemented from the
   specification and reference behavior — no code was copied.
-  An independently written Python PEA writer is used only as a
-  local test-time interoperability oracle; it is not linked or
-  distributed.
+  `src/archive/pea/encode.rs` is written from the same declared
+  provenance. An independently written Python PEA writer and
+  parser are used only as local test-time interoperability
+  oracles; they are not linked or distributed.
 - romfs: Linux kernel romfs documentation
   (Documentation/filesystems/romfs.rst; GPL-2.0 with
   Linux-syscall-note). Spec-informed implementation; no code was
@@ -493,7 +501,10 @@ specifications or standards documents:
   implementation; no code was copied.
 - zip: PKWARE APPNOTE.TXT 6.3.10. The container layer, encryption,
   and methods 0/8/10/12/14/93/95/98 are spec-informed; methods 1-6
-  are ported from the public-domain hwzip reference (see section 2)
+  are ported from the public-domain hwzip reference (see section 2).
+  `detect_sfx_prefix`/`detect_sfx_prefix_zip64` implement the
+  stub-length heuristic also used by CPython `zipfile` (PSF
+  License); behavioral reference only, no code was copied
 - 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00).
   The writer's 7z UINT64 variable-length integer encoding was
   cross-checked against the LZMA SDK `7zIn.c` decoder (public domain);
@@ -648,10 +659,11 @@ against de facto reference behavior:
     counterparts expired in 2004)
 
 - LZO / lzop
-  - Reference: Linux kernel `Documentation/lzo.txt` (LZO1X bytecodes,
-    shipped under GPL-2.0-only as part of the kernel tree) and lzop
-    source (`lzop.h`, `p_lzo.c`, GPL-2.0-or-later, Markus Oberhumer)
-    for the lzop file format
+  - Reference: Linux kernel `Documentation/lzo.txt` (LZO1X bytecodes)
+    and `Documentation/staging/lzo.rst` (v0/v1 bitstream notes;
+    "v0 cannot read v1 data"), both shipped under GPL-2.0-only as
+    part of the kernel tree, and lzop source (`lzop.h`, `p_lzo.c`,
+    GPL-2.0-or-later, Markus Oberhumer) for the lzop file format
   - Repository scope: Rust implementation of LZO1X-1 block compression and
     the lzop framing format; format facts only, no code was copied
   - Patent note: LZO dates to 1994-era work by Markus Oberhumer. No

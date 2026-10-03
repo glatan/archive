@@ -13,6 +13,7 @@ const FREESECT: u32 = 0xFFFF_FFFF;
 // const DIFSECT: u32 = 0xFFFF_FFFC;
 const MAXREGSECT: u32 = 0xFFFF_FFFA;
 const NOSTREAM: u32 = 0xFFFF_FFFF;
+const MAXREGSID: u32 = 0xFFFF_FFFA;
 
 /// Directory-entry metadata ([MS-CFB] 2.6.1): the object CLSID,
 /// user-defined state bits, and the creation / modification
@@ -75,6 +76,7 @@ fn u64le(b: &[u8], o: usize) -> u64 {
 struct DirEntry {
     name: String,
     obj_type: u8,
+    color: u8,
     left: u32,
     right: u32,
     child: u32,
@@ -213,6 +215,80 @@ impl<'a> File<'a> {
             _ => {}
         }
         self.walk(e.right, prefix, out, visited, depth + 1)
+    }
+
+    /// Enforce the directory-entry invariants that `walk` tolerates
+    /// ([MS-CFB] 2.6.1/2.6.4): color flags are red or black only,
+    /// sibling/child IDs follow the NOSTREAM conventions for their
+    /// object type, and sibling names are unique within each storage.
+    /// Used by `decode_strict`.
+    fn validate_directory(&self) -> Result<(), Error> {
+        for e in &self.entries {
+            // 2.6.1 Color Flag: only 0x00 (red) or 0x01 (black).
+            if e.color > 1 {
+                return Err(Error::InvalidData("mscfb"));
+            }
+            // 2.6.1: sibling/child IDs are a REGSID (0..=MAXREGSID) or
+            // NOSTREAM; values in between are not valid, and an SID
+            // must identify an actual directory entry.
+            for v in [e.left, e.right, e.child] {
+                if v == NOSTREAM {
+                    continue;
+                }
+                if v > MAXREGSID || v as usize >= self.entries.len() {
+                    return Err(Error::InvalidData("mscfb"));
+                }
+            }
+            match e.obj_type {
+                // Unallocated entries are all-zero except the three
+                // pointers, which must be NOSTREAM (2.6.1).
+                0x00 if e.left != NOSTREAM || e.right != NOSTREAM || e.child != NOSTREAM => {
+                    return Err(Error::InvalidData("mscfb"));
+                }
+                // Stream objects cannot have children (2.6.1).
+                0x02 if e.child != NOSTREAM => {
+                    return Err(Error::InvalidData("mscfb"));
+                }
+                // The root storage object has no siblings (2.6.4).
+                0x05 if e.left != NOSTREAM || e.right != NOSTREAM => {
+                    return Err(Error::InvalidData("mscfb"));
+                }
+                _ => {}
+            }
+        }
+        let mut visited = BTreeSet::new();
+        let mut names = BTreeSet::new();
+        self.validate_level(self.entries[0].child, &mut names, &mut visited)
+    }
+
+    /// Check one red-black sibling level for unique names (2.6.4),
+    /// recursing into the child trees of storage objects with a fresh
+    /// name set per level.
+    fn validate_level(
+        &self,
+        sid: u32,
+        names: &mut BTreeSet<String>,
+        visited: &mut BTreeSet<u32>,
+    ) -> Result<(), Error> {
+        if sid == NOSTREAM {
+            return Ok(());
+        }
+        if !visited.insert(sid) {
+            return Err(Error::InvalidData("mscfb"));
+        }
+        let e = self.entries.get(sid as usize).ok_or(Error::UnexpectedEof)?;
+        self.validate_level(e.left, names, visited)?;
+        // 2.6.4: sibling names must be unique under the sorting
+        // relationship, which compares uppercased UTF-16 code points;
+        // approximated here by full uppercase folding.
+        if !names.insert(e.name.to_uppercase()) {
+            return Err(Error::InvalidData("mscfb"));
+        }
+        if e.obj_type == 0x01 {
+            let mut sub = BTreeSet::new();
+            self.validate_level(e.child, &mut sub, visited)?;
+        }
+        self.validate_level(e.right, names, visited)
     }
 }
 
@@ -370,6 +446,7 @@ fn parse(input: &[u8]) -> Result<File<'_>, Error> {
         file.entries.push(DirEntry {
             name,
             obj_type,
+            color: e[67],
             left: u32le(e, 68),
             right: u32le(e, 72),
             child: u32le(e, 76),
@@ -398,17 +475,33 @@ fn parse(input: &[u8]) -> Result<File<'_>, Error> {
     Ok(file)
 }
 
-/// Decode a compound file into a flat list of stream entries.
-///
-/// Storage objects contribute path components only; only stream
-/// objects produce entries.
-pub fn decode(input: &[u8]) -> Result<Vec<CfbEntry>, Error> {
-    let file = parse(input)?;
+/// Emit the stream-entry list by walking the directory tree from
+/// the root storage's child pointer.
+fn emit(file: &File) -> Result<Vec<CfbEntry>, Error> {
     let mut out = Vec::new();
     let mut visited = BTreeSet::new();
     visited.insert(0);
     file.walk(file.entries[0].child, "", &mut out, &mut visited, 0)?;
     Ok(out)
+}
+
+/// Decode a compound file into a flat list of stream entries.
+///
+/// Storage objects contribute path components only; only stream
+/// objects produce entries.
+pub fn decode(input: &[u8]) -> Result<Vec<CfbEntry>, Error> {
+    emit(&parse(input)?)
+}
+
+/// Strict variant of [`decode`]: additionally enforces the directory
+/// invariants from [MS-CFB] 2.6.1/2.6.4 that [`decode`] tolerates for
+/// compatibility with non-conforming files: red/black color flags,
+/// NOSTREAM conventions for sibling/child IDs by object type, and
+/// unique sibling names within each storage.
+pub fn decode_strict(input: &[u8]) -> Result<Vec<CfbEntry>, Error> {
+    let file = parse(input)?;
+    file.validate_directory()?;
+    emit(&file)
 }
 
 /// Return the root storage object's directory metadata
@@ -514,6 +607,15 @@ mod tests {
             f[dir_off + 76..dir_off + 80].copy_from_slice(&e.child.to_le_bytes());
             f[dir_off + 116..dir_off + 120].copy_from_slice(&e.start.to_le_bytes());
             f[dir_off + 120..dir_off + 128].copy_from_slice(&e.size.to_le_bytes());
+        }
+        // Remaining directory slots in the first directory sector are
+        // unallocated entries: all zero except the sibling/child
+        // pointers, which are initialized to NOSTREAM (2.6.1).
+        for off in (fx.entries.len() * 128..512).step_by(128) {
+            let base = 512 + fx.first_dir as usize * 512 + off;
+            f[base + 68..base + 72].copy_from_slice(&NOSTREAM.to_le_bytes());
+            f[base + 72..base + 76].copy_from_slice(&NOSTREAM.to_le_bytes());
+            f[base + 76..base + 80].copy_from_slice(&NOSTREAM.to_le_bytes());
         }
         // root entry (index 0) start/size override
         let r = 512 + fx.first_dir as usize * 512;
@@ -822,5 +924,89 @@ mod tests {
         let dir = 512 + 512 + 128;
         f[dir + 64..dir + 66].copy_from_slice(&4u16.to_le_bytes());
         assert!(decode(&f).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_color_byte() {
+        let mut f = mini_file();
+        assert!(decode_strict(&f).is_ok());
+        // entry 1: color flag 0x02 is neither red nor black (2.6.1)
+        let e = 512 + 512 + 128;
+        f[e + 67] = 2;
+        assert!(decode(&f).is_ok());
+        assert!(decode_strict(&f).is_err());
+    }
+
+    #[test]
+    fn rejects_stream_with_child() {
+        let mut f = mini_file();
+        // entry 1 is a stream object; its child ID must be NOSTREAM
+        let e = 512 + 512 + 128;
+        f[e + 76..e + 80].copy_from_slice(&1u32.to_le_bytes());
+        assert!(decode(&f).is_ok());
+        assert!(decode_strict(&f).is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_sibling_names() {
+        // two stream siblings with identical names under the root
+        // storage violate the 2.6.4 uniqueness constraint
+        let entries: &[De] = &[
+            De {
+                name: "Root Entry",
+                ty: 5,
+                left: NOSTREAM,
+                right: NOSTREAM,
+                child: 1,
+                start: 0,
+                size: 0,
+            },
+            De {
+                name: "Dup",
+                ty: 2,
+                left: NOSTREAM,
+                right: 2,
+                child: NOSTREAM,
+                start: 0,
+                size: 3,
+            },
+            De {
+                name: "Dup",
+                ty: 2,
+                left: NOSTREAM,
+                right: NOSTREAM,
+                child: NOSTREAM,
+                start: 1,
+                size: 3,
+            },
+        ];
+        let mut fat = vec![FREESECT; 4];
+        fat[0] = 0xFFFF_FFFD;
+        fat[1] = ENDOFCHAIN; // dir
+        fat[2] = ENDOFCHAIN; // minifat
+        fat[3] = ENDOFCHAIN; // mini stream
+        let mut minifat = vec![FREESECT; 128];
+        minifat[0] = ENDOFCHAIN;
+        minifat[1] = ENDOFCHAIN;
+        let mut ms = alloc::vec![0u8; 512];
+        ms[0..3].copy_from_slice(b"AAA");
+        ms[64..67].copy_from_slice(b"BBB");
+        let mfsec = alloc::vec![0u8; 512];
+        let sectors: &[(u32, &[u8])] = &[(3, &ms), (2, &mfsec)];
+        let f = build_cfb(&Fx {
+            entries,
+            fat: &fat,
+            difat: &[0],
+            mini_fat: &minifat,
+            first_dir: 1,
+            minifat_sector: 2,
+            root_start: 3,
+            root_size: 512,
+            sectors,
+        });
+        // lenient decode still accepts; strict rejects the duplicates
+        let out = decode(&f).unwrap();
+        assert_eq!(out.len(), 2);
+        assert!(decode_strict(&f).is_err());
     }
 }

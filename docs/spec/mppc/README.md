@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | RFC 2118 "Microsoft Point-To-Point Compression Protocol (MPPC)"。LZ77 系のパケット指向圧縮。8192 バイトの履歴バッファを跨パケットで維持し、各パケットは 4bit フラグニブル + 12bit coherency count + データで構成される |
 | 基準仕様 | [RFC 2118](https://www.rfc-editor.org/rfc/rfc2118) (ローカルスナップショット: `docs/spec/sources/rfc2118.txt`) |
+| 参照実装 | rdesktop `mppc.c` (GPL-3.0、テスト時 decode oracle・動作参照)、FreeRDP `mppc.c` (Apache-2.0、動作参照・`tests/fixtures/mppc/external_freerdp_*` ベクタ由来)。詳細: THIRD_PARTY_NOTICES MPPC 項 |
 | 実装 | `archive::compress::mppc` (Encoder / Decoder / encode / decode / decode_bounded)。pure-Rust 実装 |
 
 ## 対応バリアント・スコープ

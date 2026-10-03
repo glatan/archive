@@ -3,6 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [LZ4 Frame Format spec 1.6.2](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Frame_format.md) / [LZ4 Block Format spec 1.3.1](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) (lz4 v1.9.4 `doc/` ピン留め、ローカルスナップショット: `docs/spec/sources/lz4_frame_format_1.6.2.md` / `lz4_block_format_1.3.1.md`) |
+| 参照実装 | なし (書面仕様のみに基づいて実装)。system `lz4` (liblz4 BSD-2-Clause / CLI GPL-2.0) はテスト時の oracle および `tests/fixtures/lz4/hello.lz4` の fixture 生成にのみ使用 |
 
 ## 対応バリアント・仕様版
 

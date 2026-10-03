@@ -143,7 +143,8 @@ impl RpmTagEntry {
 /// A parsed RPM header structure (used for both Signature and Header).
 #[derive(Debug, Clone)]
 pub struct RpmHeaderSection {
-    /// Index entries, in file order (sorted by tag in valid packages).
+    /// Index entries, sorted by tag (unsorted or duplicate-tag input
+    /// is rejected).
     pub entries: Vec<RpmTagEntry>,
     /// Raw data store bytes.
     pub data: Vec<u8>,
@@ -698,7 +699,7 @@ fn parse_header_section(
         return Err(Error::UnexpectedEof);
     }
 
-    let mut entries = Vec::with_capacity(nindex);
+    let mut entries: Vec<RpmTagEntry> = Vec::with_capacity(nindex);
     for i in 0..nindex {
         let base = offset + HEADER_INTRO_SIZE + i * INDEX_ENTRY_SIZE;
         let entry = RpmTagEntry {
@@ -713,6 +714,17 @@ fn parse_header_section(
         if entry.data_type() == Some(RpmTagType::String) && entry.count != 1 {
             return Err(Error::InvalidData("rpm: STRING tag with count != 1"));
         }
+        // Index entries are sorted by tag number with no duplicates
+        // (format_header.html).
+        if let Some(prev) = entries.last()
+            && entry.tag <= prev.tag
+        {
+            return Err(Error::InvalidData(if entry.tag == prev.tag {
+                "rpm: duplicate index tag"
+            } else {
+                "rpm: index entries not sorted by tag"
+            }));
+        }
         entries.push(entry);
     }
 
@@ -721,13 +733,67 @@ fn parse_header_section(
         return Err(Error::InvalidData("rpm: missing immutable region tag"));
     }
 
+    let data = &input[index_end..data_end];
+
+    // In offset order, the bytes between one entry's data end and the
+    // next entry's start are alignment padding, which must be all zero
+    // (format_header.html).
+    let mut by_offset: Vec<&RpmTagEntry> = entries.iter().collect();
+    by_offset.sort_by_key(|entry| entry.offset);
+    let mut filled = 0usize;
+    for entry in by_offset {
+        let (start, end) = tag_data_extent(entry, data)?;
+        if start < filled {
+            return Err(Error::InvalidData("rpm: overlapping tag data"));
+        }
+        if data[filled..start].iter().any(|&b| b != 0) {
+            return Err(Error::InvalidData("rpm: non-zero data store padding"));
+        }
+        filled = end;
+    }
+
     Ok((
         RpmHeaderSection {
             entries,
-            data: input[index_end..data_end].to_vec(),
+            data: data.to_vec(),
         },
         data_end,
     ))
+}
+
+/// Byte range `[start, end)` covered by `entry`'s data inside the
+/// section's data store. String-typed extents are measured by walking
+/// the NUL terminators.
+fn tag_data_extent(entry: &RpmTagEntry, data: &[u8]) -> Result<(usize, usize), Error> {
+    let start = entry.offset as usize;
+    if start > data.len() {
+        return Err(Error::InvalidData("rpm: tag data out of bounds"));
+    }
+    let data_type = entry
+        .data_type()
+        .ok_or(Error::InvalidData("rpm: unknown tag type"))?;
+    let elem: u64 = match data_type {
+        RpmTagType::Char | RpmTagType::Int8 | RpmTagType::Bin => 1,
+        RpmTagType::Int16 => 2,
+        RpmTagType::Int32 => 4,
+        RpmTagType::Int64 => 8,
+        RpmTagType::String | RpmTagType::StringArray | RpmTagType::I18nString => {
+            let mut pos = start;
+            for _ in 0..entry.count {
+                let nul = data[pos..]
+                    .iter()
+                    .position(|&b| b == 0)
+                    .ok_or(Error::InvalidData("rpm: unterminated string"))?;
+                pos += nul + 1;
+            }
+            return Ok((start, pos));
+        }
+    };
+    let end = start as u64 + elem * u64::from(entry.count);
+    if end > data.len() as u64 {
+        return Err(Error::InvalidData("rpm: tag data out of bounds"));
+    }
+    Ok((start, end as usize))
 }
 
 #[cfg(test)]
@@ -906,9 +972,9 @@ mod tests {
             sizes.extend_from_slice(&3i64.to_be_bytes());
             let header = build_header(&[
                 (HDR_REGION_TAG, 7, &region_trailer(HDR_REGION_TAG)),
+                (TAG_BASENAMES, 8, b"a.bin\0b.bin\0"),
                 (TAG_PAYLOADCOMPRESSOR, 6, b"none\0"),
                 (TAG_LONGFILESIZES, 5, &sizes),
-                (TAG_BASENAMES, 8, b"a.bin\0b.bin\0"),
             ]);
             let mut rpm = lead;
             rpm.extend_from_slice(&sig);
@@ -947,6 +1013,64 @@ mod tests {
         rpm.extend_from_slice(&payload);
         let package = decode(&rpm).unwrap();
         assert!(package.payload_entries().is_err());
+    }
+
+    #[test]
+    fn rejects_unsorted_index_entries() {
+        // spec/rpm 要件12a: index entries are sorted by tag number.
+        let header = build_header(&[
+            (HDR_REGION_TAG, 7, &region_trailer(HDR_REGION_TAG)),
+            (TAG_PAYLOADCOMPRESSOR, 6, b"none\0"),
+            (TAG_NAME, 6, b"x\0"),
+        ]);
+        assert!(matches!(
+            parse_header_section(&header, 0, HDR_REGION_TAG),
+            Err(Error::InvalidData(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_duplicate_tag() {
+        // spec/rpm 要件12a: duplicate tags are rejected.
+        let header = build_header(&[
+            (HDR_REGION_TAG, 7, &region_trailer(HDR_REGION_TAG)),
+            (TAG_NAME, 6, b"a\0"),
+            (TAG_NAME, 6, b"b\0"),
+        ]);
+        assert!(matches!(
+            parse_header_section(&header, 0, HDR_REGION_TAG),
+            Err(Error::InvalidData(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_nonzero_store_padding() {
+        // spec/rpm 要件12b: alignment padding in the data store must
+        // be zero. Here the INT32 tag forces 2 padding bytes after the
+        // 2-byte "x\0" string.
+        let mut header = build_header(&[
+            (HDR_REGION_TAG, 7, &region_trailer(HDR_REGION_TAG)),
+            (TAG_NAME, 6, b"x\0"),                   // data[16..18]
+            (TAG_FILESIZES, 4, &1i32.to_be_bytes()), // aligned to 20
+        ]);
+        let data_start = HEADER_INTRO_SIZE + 3 * INDEX_ENTRY_SIZE;
+        header[data_start + 18] = 0xff;
+        assert!(matches!(
+            parse_header_section(&header, 0, HDR_REGION_TAG),
+            Err(Error::InvalidData(_))
+        ));
+    }
+
+    #[test]
+    fn accepts_aligned_zero_padding() {
+        // spec/rpm 要件12b: zero alignment padding is accepted.
+        let header = build_header(&[
+            (HDR_REGION_TAG, 7, &region_trailer(HDR_REGION_TAG)),
+            (TAG_NAME, 6, b"x\0"),
+            (TAG_FILESIZES, 4, &1i32.to_be_bytes()),
+        ]);
+        let (section, _) = parse_header_section(&header, 0, HDR_REGION_TAG).unwrap();
+        assert_eq!(section.get_i32s(TAG_FILESIZES).unwrap().unwrap(), [1]);
     }
 
     #[test]

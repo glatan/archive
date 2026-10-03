@@ -51,6 +51,10 @@
 - doc comment や README では、未実装機能を実装済みのように書かない。過大 claim を避ける。
 - テストを追加して coverage claim を強めた場合は、`docs/spec/` の該当行も更新する。
 - `docs/spec/` の要件・網羅項目を書くときは、単に仕様名を書くのではなく、対応する仕様書の節・章・項目まで辿れる粒度を意識する。
+- 参照実装・外部 oracle・fixture を新たに利用した場合は、次を同一変更で同期する。
+  - `docs/spec/<format>/README.md` の `参照実装` 行
+  - `THIRD_PARTY_NOTICES` の該当フォーマットエントリ
+  - `docs/spec/sources/manifest.json` (fetch 可能な資料は `sources`、URL のない参照物は `no_url_available`)
 - 意図的な scope 制約を維持する場合は、「未対応」ではなく **intentional scope** と分かる書き方を優先する。
 
 ## 補足

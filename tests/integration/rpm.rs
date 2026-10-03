@@ -12,10 +12,21 @@ fn build_header(tags: &[(u32, u32, &[u8])]) -> Vec<u8> {
     let mut index = Vec::new();
     let mut data = Vec::new();
     for &(tag, ty, bytes) in tags {
+        // Element count per type: CHAR/INT8/BIN count bytes, INT16/32/64
+        // count elements, STRING_ARRAY counts NUL-separated strings,
+        // STRING/I18NSTRING hold exactly one.
+        let count = match ty {
+            1 | 2 | 7 => bytes.len() as u32,
+            3 => (bytes.len() / 2) as u32,
+            4 => (bytes.len() / 4) as u32,
+            5 => (bytes.len() / 8) as u32,
+            8 => bytes.iter().filter(|&&b| b == 0).count() as u32,
+            _ => 1,
+        };
         index.extend_from_slice(&tag.to_be_bytes());
         index.extend_from_slice(&ty.to_be_bytes());
         index.extend_from_slice(&(data.len() as u32).to_be_bytes());
-        index.extend_from_slice(&1u32.to_be_bytes());
+        index.extend_from_slice(&count.to_be_bytes());
         data.extend_from_slice(bytes);
     }
     let mut out = Vec::new();
@@ -58,6 +69,8 @@ fn make_rpm(payload: &[u8], compressor: Option<&str>, tags: &[(u32, u32, &[u8])]
         header_tags.push((1125, 6, compressor.as_bytes()));
     }
     header_tags.extend_from_slice(tags);
+    // Index entries must be sorted by tag number.
+    header_tags.sort_by_key(|(tag, _, _)| *tag);
     let header = build_header(&header_tags);
 
     let mut rpm = lead;
@@ -148,8 +161,8 @@ fn test_rpm_decode_stripped_payload() {
         &payload,
         Some("none\0"),
         &[
-            (5008, 5, &sizes),                   // RPMTAG_LONGFILESIZES
             (1117, 8, b"file.bin\0".as_slice()), // RPMTAG_BASENAMES
+            (5008, 5, &sizes),                   // RPMTAG_LONGFILESIZES
         ],
     );
 

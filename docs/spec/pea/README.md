@@ -4,7 +4,8 @@
 |------|------|
 | 形式概要 | PeaZip の PEA (Pack, Encrypt, Authenticate) 1.x アーカイブ。10B アーカイブヘッダ + POD ストリームヘッダ + オブジェクト列 + EOA トリガ + ストリーム/ボリューム完全性タグ |
 | 基準仕様 | 「PEA file format specifications and implementation notes」(`pea_help.pdf`) および参照実装 `pea.pas` / `pea_utils.pas` (PeaZip, LGPLv3) — `docs/spec/sources/` にスナップショット |
-| 実装 | `archive::archive::pea::decode` (read のみ)。`pea` feature 配下 (`zlib` feature に依存) |
+| 参照実装 | PeaZip `pea.pas` / `pea_utils.pas` (LGPLv3、ワイヤ形式の動作参照 — spec-informed、コード取り込みなし)、独自 Python PEA writer/parser (統合テストの oracle)。詳細: THIRD_PARTY_NOTICES pea 項 |
+| 実装 | `archive::archive::pea::{decode, encode}` (単一ストリーム read/write)。`pea` feature 配下 (`zlib` feature に依存) |
 
 ## ヘッダ層
 
@@ -44,7 +45,7 @@
 |---|------|------|------|
 | 18 | 認証付き暗号ストリーム (EAX/TF/SP/HMAC + カスケード、コード 48-51, 65-76) | ❌ intentional scope | crypto subheader + パスワード鍵導出が必要。archive 展開の領域外。各プリミティブの一次仕様は公開済み (manifest `no_url_available` `pea-crypto-specs`) が crypto 実装前提のため scope 維持 |
 | 19 | マルチボリューム分割結合 | ❌ intentional scope | 単一ファイル内ではボリュームタグのみ処理。`.pea` 分割出力の結合は split/join 側機能 |
-| 20 | PEA write / EOS 後のマルチストリーム生成 | ❌ intentional scope | PeaZip が参照プロデューサー |
+| 20 | EOS 後のマルチストリーム生成・暗号ストリーム出力 | ⚠️ | 単一ストリームの PEA 書き込みは `PeaEncoder` で実装済み (stored / PCOMPRESS2 deflate、CRC32/ADLER32/CRC64/MD5/SHA1/SHA256 タグの出力に対応)。`pea_encode_roundtrip`, `pea_encode_compressed_roundtrip`, `pea_encode_control_algo_selection`, `test_pea_encode_python_oracle`, `test_pea_archive_encoder_trait`。EOS 後のストリーム追加および暗号化ストリーム出力は intentional scope 外とする |
 | 21 | 属性・タイムスタンプのファイルシステム適用 | ❌ intentional scope | SETATTR/RESETATTR は OS 依存。raw 値として公開 |
 
 ## 集計
@@ -52,6 +53,6 @@
 | 状態 | 件数 |
 |------|------|
 | ✅ 実装+テスト済み  | 17 |
-| ⚠️ 部分対応  | 0 |
-| ❌ 未対応  | 0 |
+| ⚠️ 部分対応  | 1 |
+| ❌ 未対応  | 3 (intentional scope) |
 | **合計** | **21** |

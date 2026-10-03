@@ -145,6 +145,29 @@ fn test_iso9660_path_table() {
 }
 
 #[test]
+fn test_iso9660_pvd_metadata() {
+    // bsdtar writes system id "LINUX", application id
+    // "LIBARCHIVE <version>", creation/modification/effective
+    // timestamps, and leaves the expiration field unspecified.
+    let img = iso9660::decode::decode(PLAIN).unwrap();
+    let m = &img.meta;
+    assert_eq!(m.system_id, "LINUX");
+    assert!(m.application_id.starts_with("LIBARCHIVE "));
+    assert_eq!(m.creation_time, Some(1790617411)); // 2026-09-28 17:43:31 GMT
+    assert_eq!(m.modification_time, m.creation_time);
+    assert_eq!(m.effective_time, m.creation_time);
+    assert_eq!(m.expiration_time, None);
+
+    // the Joliet fixture's SVD carries the same fields as UCS-2BE
+    let img = iso9660::decode::decode(JOLIET).unwrap();
+    let jm = img.joliet_meta.expect("joliet meta");
+    assert_eq!(jm.system_id, "Linux");
+    assert!(jm.application_id.starts_with("libarchive "));
+    assert_eq!(jm.creation_time, img.meta.creation_time);
+    assert_eq!(jm.expiration_time, None);
+}
+
+#[test]
 fn test_iso9660_codec_trait() {
     use archive::traits::{ArchiveDecode, ArchiveEntry};
     let codec = iso9660::Iso9660Codec;

@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | `"(This file must be converted with BinHex 4.0)"` プロローグ + `:` + 64 文字アルファベットの 6bit エンコード + 末尾 `:` で構成される古典 Macintosh 転送形式。内部は `0x90` マーカー RLE で圧縮され、header + data fork + resource fork がそれぞれ CRC-16 (poly 0x1021, init 0, 2 ゼロバイト拡張) で終端される |
 | 基準仕様 | [BinHex 4.0 Definition (Peter N Lewis, Aug 1991)](https://files.stairways.com/other/binhex-40-specs-info.txt) (スナップショット: `docs/spec/sources/binhex-40-specs-info.txt`)、[RFC 1741 Appendix A](https://datatracker.ietf.org/doc/html/rfc1741) |
+| 参照実装 | CPython `binascii.crc_hqx` (PSF License、oracle)、独自 Python 参照エンコーダ (oracle)。詳細: THIRD_PARTY_NOTICES binhex 項 |
 | 実装 | `archive::encoding::binhex` (encode / decode)。`binhex` feature 配下 |
 
 ## テキスト層

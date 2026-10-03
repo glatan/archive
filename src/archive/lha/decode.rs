@@ -10,8 +10,9 @@
 //!   `-pm0-`/`-pm1-`/`-pm2-` for reading; other methods are rejected with
 //!   [Error::Unsupported];
 //! - writing emits `-lh0-`/`-lhd-` entries at header level 0, 1, 2, or 3
-//!   (`LhaEncoder::with_level`), plus `-lz4-`/`-pm0-` stored-alias and
-//!   `-lh4-`/`-lh5-`/`-lh6-`/`-lh7-` file entries via
+//!   (`LhaEncoder::with_level`), plus `-lz4-`/`-pm0-` stored-alias,
+//!   `-lh4-`/`-lh5-`/`-lh6-`/`-lh7-` static-Huffman, and LArc
+//!   `-lzs-`/`-lz5-` LZSS file entries via
 //!   `LhaEncoder::with_method` (stored fallback when
 //!   compression does not win). Level 0 requires the whole filename to
 //!   fit in one byte (at most 255 bytes); levels 1/2/3 carry the name
@@ -847,13 +848,16 @@ mod tests {
             Err(Error::Unsupported(_))
         ));
         assert!(matches!(
-            LhaEncoder::new().with_method(b"-lz5-"),
+            LhaEncoder::new().with_method(b"-pm1-"),
             Err(Error::Unsupported(_))
         ));
-        // `-lh0-` and the stored aliases stay valid selections.
+        // `-lh0-`, the stored aliases, and the LArc LZSS methods stay
+        // valid selections.
         assert!(LhaEncoder::new().with_method(b"-lh0-").is_ok());
         assert!(LhaEncoder::new().with_method(b"-lz4-").is_ok());
         assert!(LhaEncoder::new().with_method(b"-pm0-").is_ok());
+        assert!(LhaEncoder::new().with_method(b"-lzs-").is_ok());
+        assert!(LhaEncoder::new().with_method(b"-lz5-").is_ok());
     }
 
     #[test]
@@ -868,6 +872,50 @@ mod tests {
             assert_eq!(&a[2..7], method.as_slice());
             let e = decode(&a).unwrap();
             assert_eq!(e[0].data, b"raw stored bytes");
+        }
+    }
+
+    #[test]
+    fn lzs_lz5_encode_roundtrip() {
+        // LArc LZSS methods: compressible data keeps its method tag
+        // and shrinks; decode must return the original bytes.
+        let data = b"the quick brown fox jumps over the lazy dog. ".repeat(500);
+        for method in [b"-lzs-", b"-lz5-"] {
+            let mut enc = crate::archive::lha::encode::LhaEncoder::new()
+                .with_method(method)
+                .unwrap();
+            enc.add_file("fox.txt", &data, 0).unwrap();
+            let a = enc.finish();
+            assert_eq!(&a[2..7], method.as_slice());
+            assert!(packed_size(&a) < data.len());
+            let e = decode(&a).unwrap();
+            assert_eq!(e.len(), 1);
+            assert_eq!(e[0].name, "fox.txt");
+            assert_eq!(e[0].data, data.as_slice());
+        }
+    }
+
+    #[test]
+    fn lzs_lz5_fall_back_to_stored() {
+        // Incompressible input under `-lzs-`/`-lz5-` is emitted
+        // `-lh0-`, like the st1 methods.
+        let mut data = Vec::new();
+        let mut s = 0x9e3779b9u32;
+        while data.len() < 512 {
+            s ^= s << 13;
+            s ^= s >> 17;
+            s ^= s << 5;
+            data.push((s >> 24) as u8);
+        }
+        for method in [b"-lzs-", b"-lz5-"] {
+            let mut enc = crate::archive::lha::encode::LhaEncoder::new()
+                .with_method(method)
+                .unwrap();
+            enc.add_file("rand.bin", &data, 0).unwrap();
+            let a = enc.finish();
+            assert_eq!(&a[2..7], b"-lh0-");
+            let e = decode(&a).unwrap();
+            assert_eq!(e[0].data, data.as_slice());
         }
     }
 }

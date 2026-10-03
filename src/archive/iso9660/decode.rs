@@ -128,6 +128,42 @@ pub struct ElTorito {
     pub entries: Vec<ElToritoEntry>,
 }
 
+/// Textual metadata and volume timestamps carried by a primary
+/// or supplementary volume descriptor (ECMA-119 §8.4.5,
+/// §8.4.19-8.4.29). String fields have their trailing space/NUL
+/// padding removed; on a Joliet SVD they are decoded as UCS-2BE.
+/// Empty fields decode as empty strings.
+#[derive(Debug, Clone, Default)]
+pub struct VolumeMeta {
+    /// System identifier (§8.4.5; a-characters).
+    pub system_id: String,
+    /// Volume set identifier (§8.4.19; d-characters).
+    pub volume_set_id: String,
+    /// Publisher identifier (§8.4.20; a-characters).
+    pub publisher_id: String,
+    /// Data preparer identifier (§8.4.21; a-characters).
+    pub data_preparer_id: String,
+    /// Application identifier (§8.4.22; a-characters).
+    pub application_id: String,
+    /// Copyright file identifier (§8.4.23; d-characters).
+    pub copyright_file_id: String,
+    /// Abstract file identifier (§8.4.24; d-characters).
+    pub abstract_file_id: String,
+    /// Bibliographic file identifier (§8.4.25; d-characters).
+    pub bibliographic_file_id: String,
+    /// Volume creation time (§8.4.26) as Unix seconds; `None`
+    /// when the field is unspecified (all `'0'` digits, tz 0)
+    /// or not parseable.
+    pub creation_time: Option<i64>,
+    /// Volume modification time (§8.4.27) as Unix seconds.
+    pub modification_time: Option<i64>,
+    /// Volume expiration time (§8.4.28) as Unix seconds; `None`
+    /// means no expiration is recorded.
+    pub expiration_time: Option<i64>,
+    /// Volume effective time (§8.4.29) as Unix seconds.
+    pub effective_time: Option<i64>,
+}
+
 /// Decoded ISO 9660 image.
 #[derive(Debug)]
 pub struct IsoImage {
@@ -149,6 +185,13 @@ pub struct IsoImage {
     /// descriptors (El Torito 1.0 §2), in descriptor order. Empty for
     /// non-bootable images.
     pub el_torito: Vec<ElTorito>,
+    /// Metadata strings and volume timestamps from the primary
+    /// volume descriptor (ECMA-119 §8.4).
+    pub meta: VolumeMeta,
+    /// The same descriptor fields decoded from the Joliet
+    /// supplementary volume descriptor (UCS-2BE strings), when one
+    /// is present.
+    pub joliet_meta: Option<VolumeMeta>,
 }
 
 fn u16le(b: &[u8], o: usize) -> u16 {
@@ -187,6 +230,20 @@ fn both16(b: &[u8], o: usize) -> Result<u16, Error> {
     Ok(lo)
 }
 
+/// Unix seconds for a broken-down civil time; `tz` is the signed
+/// 15-minute GMT offset byte shared by both ISO9660 time formats.
+fn civil_unix(year: i64, month: i64, day: i64, hour: i64, min: i64, sec: i64, tz: i64) -> i64 {
+    // days since epoch (civil from days, Howard Hinnant's algorithm)
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    days * 86400 + hour * 3600 + min * 60 + sec - tz * 900
+}
+
 /// 7-byte directory record timestamp (ECMA-119 §9.1.5):
 /// years since 1900, month, day, hour, min, sec, tz (15-min offset
 /// from GMT, signed). Returns Unix seconds.
@@ -201,15 +258,59 @@ fn dec_datetime(b: &[u8], o: usize) -> i64 {
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return 0;
     }
-    // days since epoch (civil from days, Howard Hinnant's algorithm)
-    let y = if month <= 2 { year - 1 } else { year };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let mp = (month + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146097 + doe - 719468;
-    days * 86400 + hour * 3600 + min * 60 + sec - tz * 900
+    civil_unix(year, month, day, hour, min, sec, tz)
+}
+
+/// a/d-character descriptor field with trailing space/NUL padding
+/// removed.
+fn dec_str(raw: &[u8]) -> String {
+    let mut s = String::from_utf8_lossy(raw).into_owned();
+    while s.ends_with(' ') || s.ends_with('\x00') {
+        s.pop();
+    }
+    s
+}
+
+/// 17-byte volume descriptor timestamp (ECMA-119 §8.4.26.1):
+/// 16 ASCII digits "YYYYMMDDHHMMSSCC" followed by a signed tz
+/// byte in 15-minute units. Returns `None` when the field is
+/// unspecified (all digits `'0'` and tz 0) or not parseable.
+fn dec_vd_datetime(b: &[u8], o: usize) -> Option<i64> {
+    let f = b.get(o..o + 17)?;
+    if f[..16].iter().all(|&c| c == b'0') && f[16] == 0 {
+        return None;
+    }
+    let field = |lo: usize, hi: usize| -> Option<i64> {
+        let mut v = 0i64;
+        for &c in &f[lo..hi] {
+            if !c.is_ascii_digit() {
+                return None;
+            }
+            v = v * 10 + i64::from(c - b'0');
+        }
+        Some(v)
+    };
+    let year = field(0, 4)?;
+    let month = field(4, 6)?;
+    let day = field(6, 8)?;
+    let hour = field(8, 10)?;
+    let min = field(10, 12)?;
+    let sec = field(12, 14)?;
+    // The hundredths field is below the resolution we expose but
+    // still must be digits.
+    field(14, 16)?;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || min > 59 || sec > 59 {
+        return None;
+    }
+    Some(civil_unix(
+        year,
+        month,
+        day,
+        hour,
+        min,
+        sec,
+        f[16] as i8 as i64,
+    ))
 }
 
 /// Parsed directory record fields (ECMA-119 §9.1).
@@ -524,6 +625,8 @@ struct VolDesc {
     path_table_extent: u32,
     path_table_size: u32,
     root: DirRecOwned,
+    /// Descriptor metadata strings and volume timestamps.
+    meta: VolumeMeta,
 }
 
 #[derive(Clone, Copy)]
@@ -547,15 +650,17 @@ fn parse_vd(sec: &[u8], joliet: bool) -> Result<VolDesc, Error> {
     if sec[0] != expected || &sec[1..6] != VD_ID || sec[6] != 1 {
         return Err(Error::InvalidData("iso9660 bad volume descriptor"));
     }
-    let volume_id = if joliet {
-        decode_ucs2(&sec[40..72])
-    } else {
-        let mut vid = String::from_utf8_lossy(&sec[40..72]).into_owned();
-        while vid.ends_with(' ') || vid.ends_with('\x00') {
-            vid.pop();
+    // Character fields are a/d-characters in the PVD and UCS-2BE
+    // in a Joliet SVD (per the Joliet spec the SVD carries every
+    // character field in the declared supplementary encoding).
+    let dec_field = |raw: &[u8]| {
+        if joliet {
+            decode_ucs2(raw)
+        } else {
+            dec_str(raw)
         }
-        vid
     };
+    let volume_id = dec_field(&sec[40..72]);
     let volume_blocks = both32(sec, 80)?;
     let lbs = both16(sec, 128)? as usize;
     if !lbs.is_power_of_two() || !(512..=32 * 1024).contains(&lbs) {
@@ -570,6 +675,21 @@ fn parse_vd(sec: &[u8], joliet: bool) -> Result<VolDesc, Error> {
     if r[0] != 34 {
         return Err(Error::InvalidData("iso9660 bad root record"));
     }
+    // Descriptor metadata (ECMA-119 §8.4.5, §8.4.19-8.4.29).
+    let meta = VolumeMeta {
+        system_id: dec_field(&sec[8..40]),
+        volume_set_id: dec_field(&sec[190..318]),
+        publisher_id: dec_field(&sec[318..446]),
+        data_preparer_id: dec_field(&sec[446..574]),
+        application_id: dec_field(&sec[574..702]),
+        copyright_file_id: dec_field(&sec[702..739]),
+        abstract_file_id: dec_field(&sec[739..776]),
+        bibliographic_file_id: dec_field(&sec[776..813]),
+        creation_time: dec_vd_datetime(sec, 813),
+        modification_time: dec_vd_datetime(sec, 830),
+        expiration_time: dec_vd_datetime(sec, 847),
+        effective_time: dec_vd_datetime(sec, 864),
+    };
     Ok(VolDesc {
         volume_id,
         volume_blocks,
@@ -585,6 +705,7 @@ fn parse_vd(sec: &[u8], joliet: bool) -> Result<VolDesc, Error> {
             gap_size: r[27],
             mtime: dec_datetime(r, 18),
         },
+        meta,
     })
 }
 
@@ -1238,6 +1359,8 @@ pub fn decode(input: &[u8]) -> Result<IsoImage, Error> {
         entries,
         path_table,
         el_torito,
+        meta: pvd.meta,
+        joliet_meta: joliet_svd.map(|s| s.meta),
     })
 }
 
@@ -2271,5 +2394,118 @@ mod tests {
         img[17 * SECTOR + 7..17 * SECTOR + 20].copy_from_slice(b"OTHER BOOT   ");
         let out = decode(&img).unwrap();
         assert!(out.el_torito.is_empty());
+    }
+
+    /// PVD metadata strings (ECMA-119 §8.4.5, §8.4.19-8.4.25):
+    /// a/d-character fields are returned with trailing padding
+    /// removed.
+    #[test]
+    fn pvd_metadata_fields() {
+        let mut img = plain_iso();
+        let s = 16 * SECTOR;
+        img[s + 8..s + 8 + 9].copy_from_slice(b"TESTSYS 1");
+        img[s + 190..s + 190 + 7].copy_from_slice(b"VOLSET1");
+        img[s + 318..s + 318 + 9].copy_from_slice(b"PUBLISHER");
+        img[s + 446..s + 446 + 8].copy_from_slice(b"PREPARER");
+        img[s + 574..s + 574 + 11].copy_from_slice(b"MKISOFS 1.0");
+        img[s + 702..s + 702 + 10].copy_from_slice(b"COPY.TXT;1");
+        img[s + 739..s + 739 + 10].copy_from_slice(b"ABST.TXT;1");
+        img[s + 776..s + 776 + 10].copy_from_slice(b"BIBL.TXT;1");
+        let out = decode(&img).unwrap();
+        let m = &out.meta;
+        assert_eq!(m.system_id, "TESTSYS 1");
+        assert_eq!(m.volume_set_id, "VOLSET1");
+        assert_eq!(m.publisher_id, "PUBLISHER");
+        assert_eq!(m.data_preparer_id, "PREPARER");
+        assert_eq!(m.application_id, "MKISOFS 1.0");
+        assert_eq!(m.copyright_file_id, "COPY.TXT;1");
+        assert_eq!(m.abstract_file_id, "ABST.TXT;1");
+        assert_eq!(m.bibliographic_file_id, "BIBL.TXT;1");
+        // the builder writes no volume timestamps
+        assert_eq!(m.creation_time, None);
+        assert_eq!(m.modification_time, None);
+        assert_eq!(m.expiration_time, None);
+        assert_eq!(m.effective_time, None);
+        assert!(out.joliet_meta.is_none());
+    }
+
+    /// Volume datetimes (ECMA-119 §8.4.26-8.4.29): 17-byte
+    /// "YYYYMMDDHHMMSSCC" + signed 15-minute tz byte.
+    #[test]
+    fn pvd_volume_datetimes() {
+        let mut img = plain_iso();
+        let s = 16 * SECTOR;
+        // creation: 2020-01-02 03:04:05.00 GMT
+        img[s + 813..s + 830].copy_from_slice(b"2020010203040500\x00");
+        // modification: same instant, tz +4 (local is GMT+1)
+        let mut m = *b"2020010203040500\x00";
+        m[16] = 4;
+        img[s + 830..s + 847].copy_from_slice(&m);
+        // expiration: all '0' digits + tz 0 means unspecified
+        img[s + 847..s + 864].copy_from_slice(b"0000000000000000\x00");
+        // effective: same instant, tz -4 (local is GMT-1)
+        let mut e = *b"2020010203040500\x00";
+        e[16] = (-4i8) as u8;
+        img[s + 864..s + 881].copy_from_slice(&e);
+        let out = decode(&img).unwrap();
+        assert_eq!(out.meta.creation_time, Some(1577934245));
+        assert_eq!(out.meta.modification_time, Some(1577934245 - 3600));
+        assert_eq!(out.meta.expiration_time, None);
+        assert_eq!(out.meta.effective_time, Some(1577934245 + 3600));
+    }
+
+    /// Datetime fields that are blank or not parseable decode as
+    /// `None` rather than failing the whole image.
+    #[test]
+    fn unparseable_datetime_is_none() {
+        let mut img = plain_iso();
+        let s = 16 * SECTOR;
+        // all spaces (blank field left by some writers)
+        img[s + 813..s + 830].copy_from_slice(b"                 ");
+        // non-digit bytes
+        img[s + 830..s + 847].copy_from_slice(b"YYYYMMDDHHMMSSCC\x00");
+        // out-of-range month
+        img[s + 847..s + 864].copy_from_slice(b"2020130203040500\x00");
+        // NUL inside the digit area
+        img[s + 864..s + 881].copy_from_slice(b"20200102030405\0\0\0");
+        let out = decode(&img).unwrap();
+        let m = &out.meta;
+        assert_eq!(m.creation_time, None);
+        assert_eq!(m.modification_time, None);
+        assert_eq!(m.expiration_time, None);
+        assert_eq!(m.effective_time, None);
+    }
+
+    /// A Joliet SVD carries the same fields as UCS-2BE; both the
+    /// PVD meta and the SVD meta are exposed.
+    #[test]
+    fn joliet_metadata_fields() {
+        let mut b = IsoBuilder::new();
+        b.next_sector = 19; // VD region: 16 PVD, 17 SVD, 18 term
+        let jd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+        ]);
+        let jroot = b.alloc(&jd);
+        let pd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+        ]);
+        let proot = b.alloc(&pd);
+        let mut img = b.finish_ext(proot, SECTOR as u32, Some((jroot, SECTOR as u32)), None);
+        let svd = 17 * SECTOR;
+        // UCS-2BE publisher id + an ASCII volume timestamp.
+        for (i, u) in "JPUB".encode_utf16().enumerate() {
+            img[svd + 318 + i * 2..svd + 320 + i * 2].copy_from_slice(&u.to_be_bytes());
+        }
+        img[svd + 813..svd + 830].copy_from_slice(b"2020010203040500\x00");
+        let pvd = 16 * SECTOR;
+        img[pvd + 318..pvd + 327].copy_from_slice(b"PUBLISHER");
+        let out = decode(&img).unwrap();
+        assert_eq!(out.meta.publisher_id, "PUBLISHER");
+        assert_eq!(out.meta.creation_time, None);
+        let jm = out.joliet_meta.expect("joliet meta");
+        assert_eq!(jm.publisher_id, "JPUB");
+        assert_eq!(jm.creation_time, Some(1577934245));
     }
 }

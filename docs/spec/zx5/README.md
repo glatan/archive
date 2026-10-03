@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | Einar Saukas の ZX5 が使用する raw LZ77 ストリーム。ZX0 から派生し、copy-from-2nd-last-offset / copy-from-3rd-last-offset の 2 ブロック型を追加した形式。制御ビット列とデータバイトがインターリーブする。magic・コンテナヘッダ・チェックサムは持たない |
 | 基準仕様 | [ZX5 README](https://github.com/einar-saukas/ZX5) "File Format" (ローカルスナップショット: `docs/spec/sources/zx5_README_v2.0.md`) + 参照実装 `dzx5.c` / `compress.c` (Einar Saukas, BSD 3-Clause) |
+| 参照実装 | ZX5 参照実装 `dzx5.c`/`compress.c` (Einar Saukas、BSD 3-Clause。動作参照、既知解答ベクタは参照コンプレッサ ZX5 v2.0 で生成)。詳細: THIRD_PARTY_NOTICES ZX5 項 |
 | 実装 | `archive::compress::zx5` (decode / decode_bounded / decode_classic / decode_with_prefix / decode_classic_with_prefix / decode_backwards / decode_backwards_bounded / decode_backwards_with_suffix / encode / encode_classic / encode_quick / encode_with_prefix / encode_classic_with_prefix / encode_backwards / encode_backwards_quick / encode_backwards_with_suffix)。pure-Rust 実装 |
 
 ## 対応バリアント・仕様版

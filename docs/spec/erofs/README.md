@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | Linux 向け read-only ファイルシステムイメージ。1024B オフセットのスーパーブロック + `meta_blkaddr` 起点の inode メタデータ領域 (32B スロット) + ブロックアラインされたデータ領域 |
 | 基準仕様 | Linux kernel `Documentation/filesystems/erofs.rst`、`fs/erofs/erofs_fs.h` — いずれも `docs/spec/sources/` にスナップショット |
+| 参照実装 | erofs-utils `mkfs.erofs`/`fsck.erofs` (GPL-2.0+、fixture 生成・交差検証 oracle)。詳細: THIRD_PARTY_NOTICES erofs 項 |
 | 実装 | `archive::archive::erofs::decode` (read のみ)。`erofs` feature 配下 |
 
 ## スーパーブロック層

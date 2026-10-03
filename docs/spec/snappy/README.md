@@ -4,6 +4,7 @@
 |------|------|
 | raw format 仕様 | Google snappy [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt) |
 | framing format 仕様 | Google snappy [`framing_format.txt`](https://raw.githubusercontent.com/google/snappy/main/framing_format.txt) |
+| 参照実装 | なし (書面仕様のみに基づいて実装) |
 | current scope | raw block format (varint preamble + 4 種タグ) と framing format (stream identifier + chunk types + CRC-32C) の両方を encode/decode 対象にする |
 
 ## 対応バリアント・仕様版
