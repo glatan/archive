@@ -125,3 +125,26 @@ fn test_lzma_alone_encode_decoded_by_system() {
         }
     }
 }
+
+#[test]
+fn test_fuzz_regression_lzma_original_decompress_1() {
+    // Regression for a fuzz failure: with a known-size header + EoPM stream,
+    // system xz (liblzma) fails to decode when the end-of-payload marker is
+    // split across its internal ~8KiB input-buffer boundary. The encoder now
+    // writes an unknown-size header, matching `xz --format=lzma` output.
+    let input = include_bytes!("../fixtures/fuzz/lzma_original_decompress_1.bin");
+    let compressed = lzma_alone::encode::encode(input);
+
+    assert_eq!(
+        u64::from_le_bytes(compressed[5..13].try_into().unwrap()),
+        u64::MAX
+    );
+
+    match xz_lzma_system_decode(&compressed) {
+        Some(stdout) => assert_eq!(stdout, input),
+        None => {
+            let decoded = lzma_alone::decode::decode(&compressed).unwrap();
+            assert_eq!(decoded, input.as_slice());
+        }
+    }
+}

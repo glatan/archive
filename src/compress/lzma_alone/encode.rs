@@ -29,9 +29,12 @@ const DEFAULT_DICT_SIZE: u32 = 1 << 23;
 /// Encode data as a `.lzma` stream with the default dictionary size (8 MiB)
 /// and the default `lc=3, lp=0, pb=2` property tuple.
 ///
-/// The header records the uncompressed size and the LZMA stream is
-/// terminated with an end-of-payload marker, matching what `xz --format=lzma`
-/// produces.
+/// The header marks the uncompressed size as unknown (`0xFFFF_FFFF_FFFF_FFFF`)
+/// and the LZMA stream is terminated with an end-of-payload marker, matching
+/// what `xz --format=lzma` produces. Writing the known size is legal per the
+/// format spec, but liblzma-based decoders (including `xz`) can reject such
+/// streams when the end-of-payload marker is split across their internal
+/// input-buffer boundary, so this encoder avoids the known-size form.
 ///
 /// # Examples
 ///
@@ -65,7 +68,7 @@ pub fn encode_with_dict_size(data: &[u8], dict_size: u32) -> Result<Vec<u8>, Err
     let mut output = Vec::with_capacity(HEADER_SIZE + data.len() / 2 + 32);
     output.push(props.to_props_byte());
     output.extend_from_slice(&dict_size.to_le_bytes());
-    output.extend_from_slice(&(data.len() as u64).to_le_bytes());
+    output.extend_from_slice(&u64::MAX.to_le_bytes());
     output.extend_from_slice(&lzma_encode_with_props(data, dict_size, props));
     Ok(output)
 }
@@ -85,7 +88,7 @@ mod tests {
         );
         assert_eq!(
             u64::from_le_bytes(encoded[5..13].try_into().unwrap()),
-            data.len() as u64
+            u64::MAX // uncompressed size unknown; stream ends with EoPM
         );
         assert!(encoded.len() > HEADER_SIZE);
     }
