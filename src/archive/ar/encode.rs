@@ -398,6 +398,16 @@ mod tests {
     }
 
     #[test]
+    fn test_newline_in_name_rejected() {
+        let mut encoder = ArEncoder::new();
+        encoder.add_file("bad\nname", b"x");
+        assert!(matches!(encoder.finish(), Err(Error::InvalidData(_))));
+        let mut encoder = ArEncoder::new_bsd();
+        encoder.add_file("bad\nname", b"x");
+        assert!(matches!(encoder.finish(), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
     fn test_thin_roundtrip() {
         let mut encoder = ArEncoder::new_thin();
         encoder.add_reference("obj1.o", 4096, &ArEntryOptions::default());

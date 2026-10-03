@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 形式概要 | flag-counter バイトを先頭に持つパケットの列からなる RLE codec。`0..=127` は続く N+1 バイトのリテラル、`129..=255` (signed `-127..=-1`) は続く 1 バイトを `1-N` 回反復、`128` (`-128`) は予約済み no-op |
-| 基準仕様 | [Apple Technical Note TN1023 "Understanding PackBits"](https://developer.apple.com/library/mac/technotes/tn1023/_index.html) (ローカルスナップショット: `docs/spec/sources/apple_tn1023_packbits.html`)、[TIFF Revision 6.0](https://download.osgeo.org/libtiff/doc/TIFF6.pdf) Section 9 "PackBits Compression" (スナップショット: `docs/spec/sources/tiff6.pdf`) |
+| 基準仕様 | [Apple Technical Note TN1023 "Understanding PackBits"](https://developer.apple.com/library/mac/technotes/tn1023/_index.html) (ローカルスナップショット: `docs/spec/sources/apple_tn1023_packbits.html`)、[TIFF Revision 6.0](https://download.osgeo.org/libtiff/doc/TIFF6.pdf) Section 9 "PackBits Compression" (スナップショット: `docs/spec/sources/tiff6.pdf` — PDF テキスト抽出不可のため §9 の直接検証は未実施。事実上の一次根拠は TN1023)。`docs/spec/sources/packbits_egff.htm` は内容が無関係な JPEG 章であり参照不可 (manifest 未登録の stray ファイル) |
 | 実装 | `archive::compress::packbits` (encode / decode)。`packbits` feature 配下 |
 
 ## パケット構造
@@ -40,7 +40,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 12 |
-| ⚠️ 部分対応 | 0 |
-| ❌ 未対応 | 3 |
+| ✅ 実装+テスト済み  | 12 |
+| ⚠️ 部分対応  | 0 |
+| ❌ 未対応  | 0 |
 | **合計** | **15** |

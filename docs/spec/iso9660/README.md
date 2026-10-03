@@ -27,13 +27,13 @@
 | 10 | record 長 ≥34、name 長、padding byte (name 偶数時)、record は論理ブロックを跨がない (残りはゼロパッド) | ECMA-119 §9.1.1/§9.1.13 | ✅ | `test_iso9660_plain_image`、builder/parse の往復で確認 |
 | 11 | extent/size は both-endian (LE+BE 両記述が一致することを検証) | ECMA-119 §7.3.3 | ✅ | `test_iso9660_rejects_corrupt` 内検証 |
 | 12 | flags bit1 = directory、それ以外は file | ECMA-119 §9.1.6 | ✅ | `test_iso9660_plain_image` |
-| 13 | file unit size / interleave gap ≠ 0 (インターリーブファイル) は `Unsupported` | ECMA-119 §9.1.8/§9.1.9 | ✅ | decode 時検証 |
+| 13 | file unit size / interleave gap ≠ 0 (インターリーブファイル) の識別 | ECMA-119 §9.1.8/§9.1.9 | ✅ | decode 時検証。読み出し自体は #34 で対応 (unit/gap で連結) |
 | 14 | file identifier `\x00` / `\x01` は `.` / `..` で出力しない | ECMA-119 §9.1.10、isofs.rst | ✅ | `test_iso9660_*` (全 fixture で `.`/`..` 非出現を検査) |
 | 15 | ISO9660 identifier の `;version` サフィックスと裸の末尾 `.` を除去 | ECMA-119 §9.1.11/§10 | ✅ | `test_iso9660_plain_image` (`HELLO.TXT` 等) |
 | 16 | extent 読み出しは `extent + ext_attr_len` ブロック開始、全アクセス範囲検査 | ECMA-119 §9.1.3、防御的検証 | ✅ | `test_iso9660_rejects_truncated` (sector 30 切断) |
 | 17 | ディレクトリ循環・深さ >64 を拒否 (extent+size の BTreeSet で検出) | 防御的検証 | ✅ | `rejects_*` / walk guard |
 | 18 | 7 バイト directory time (year=1900+, tz 15min 単位) を Unix epoch に変換 | ECMA-119 §9.1.5 | ✅ | civil-from-days (Howard Hinnant) で実装、`test_iso9660_*` |
-| 19 | multi-extent file (flags bit7) は `Unsupported` | ECMA-119 §9.1.6 | ✅ | decode 時検証 |
+| 19 | multi-extent file (flags bit7) の識別 | ECMA-119 §9.1.6 | ✅ | decode 時検証。読み出し自体は #33 で対応 (extent 連結) |
 
 ## SUSP / Rock Ridge 層
 
@@ -59,7 +59,7 @@
 | 31 | Joliet ツリーの file identifier は UCS-2BE、U+0000 で終端、`;version` 除去 | Joliet spec | ✅ | `test_iso9660_joliet_image` (lowercase 名) |
 | 32 | Joliet ツリーは primary ツリーで Rock Ridge 名が得られなかった場合のみ使用 | 優先順位設計 | ✅ | RR fixture が RR 名で decode されることで確認 |
 | 41 | UTF-16 surrogate ペア・Joliet level 3 超の UCS-2 拡張 | Joliet spec (UCS-2 規定 + 規格外入力の防御) | ✅ | `decode_ucs2` が `char::decode_utf16` で非 BMP を合成 (孤立 surrogate は `U+FFFD`)。`joliet_surrogate_pair_names` |
-| 42 | Path Table の読み出し | ECMA-119 §8.4, §9.2 | ✅ | type-L path table を `PathTableEntry` として parse・`IsoImage.path_table` で公開 (欠落・範囲外は空で寛容、木走査が authoritative)。`path_table_matches_tree`, `path_table_absent_or_bad_extent_is_tolerated`, `test_iso9660_path_table` |
+| 42 | Path Table の読み出し | ECMA-119 §8.4, §9.2 | ✅ | type-L path table のみ `PathTableEntry` として parse・`IsoImage.path_table` で公開 (type-M は未解釈。欠落・範囲外は空で寛容、木走査が authoritative)。`path_table_matches_tree`, `path_table_absent_or_bad_extent_is_tolerated`, `test_iso9660_path_table` |
 | 33 | multi-extent file (File Flags bit7: >4GiB 分割記録) | ECMA-119 §9.1.6 Table 10, §9.2 | ✅ | 同一 File Identifier の連続レコードをグループ化し extent を連結 (flags/unit/gap 不一致・未終端は reject)。`multi_extent_file`, `multi_extent_rejects_unterminated` |
 | 34 | interleaved file (file unit size / interleave gap ≠ 0) | ECMA-119 §6.4.3, §9.1.7/8 | ✅ | unit ブロックを (unit+gap) 間隔で読み連結。`interleaved_file`, `interleave_gap_without_unit_rejected` |
 | 39 | RRIP `PN`/`CL`/`RE` (PL は informational で読み飛ばし) | RRIP 1.12 §4.1.2, §4.1.5 | ✅ | `dev_t` を `IsoEntry` に公開、CL で relocated dir の実体 walk、RE 複製は列挙スキップ。`rr_pn_device`, `rr_cl_re_relocated_dir`, `rr_cl_rejects_bad_target` |
@@ -72,7 +72,8 @@
 
 | 37 | extended attribute record の内容解釈 | ❌ intentional scope | extent 開始ブロックへの加算のみ (読み飛ばし) |
 | 38 | multi-session / UDF bridge / HFS ハイブリッドの別ツリー | ❌ intentional scope | primary + Joliet SVD のみ。UDF 実装時の一次仕様は OSTA UDF 2.60 / ECMA TR/112-2 (manifest `no_url_available` `osta-udf-260`) — ISO 9660 拡張ではなく別 FS 扱い |
-| 39b | RRIP `PN`/`CL`/`RE`/`NM`/`PX`/`SL`/`TF`/`CE`/`SP`/`ST`/`ER` 以外の残エントリ (hardlink dev/inode、Apple `AA`/`BA` 等) | ❌ intentional scope | 読み飛ばし (decode に必須でない)。zisofs `ZF` は #35 で対応済み。Apple 拡張の資料は TN FL36 (`sources/apple_iso9660_fl36.html`) |
+| 39b | RRIP `PN`/`CL`/`RE`/`NM`/`PX`/`SL`/`TF`/`CE`/`SP`/`ST`/`ER` 以外の残エントリ (`SF` sparse file、SUSP `PD`/`ES`、hardlink dev/inode、Apple `AA`/`BA` 等) | ❌ intentional scope | 読み飛ばし (decode に必須でない)。`ER` は識別のみ。zisofs `ZF` は #35 で対応済み。Apple 拡張の資料は TN FL36 (`sources/apple_iso9660_fl36.html`) |
+| 39c | PVD/SVD のメタデータフィールド群 (system_id, volume_set_id, publisher, preparer, application, copyright/abstract/bibliographic ID, 4 個のボリューム日付) | ❌ intentional scope | `IsoImage` は volume_id/volume_blocks のみ公開。ECMA-119 §8.4.19-8.4.29 相当。Volume Set の sequence 整合・File Structure Version (§8.4.30) の検証・Enhanced VD (version=2) の解釈も同じく scope 外。El Torito section entry の extension entry は未知 indicator で走査打ち切り。High Sierra ("CDROM" magic) は非対応 |
 | 40 | ISO 9660 write | ❌ intentional scope | mkisofs/xorriso の領域 (write 実装時は producer oracle として利用可) |
 
 ## Fixture / interop

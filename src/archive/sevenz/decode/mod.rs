@@ -68,7 +68,10 @@ const METHOD_PPMD: &[u8] = &[0x03, 0x04, 0x01];
 const METHOD_DEFLATE: &[u8] = &[0x04, 0x01, 0x08];
 const METHOD_DEFLATE64: &[u8] = &[0x04, 0x01, 0x09];
 const METHOD_BZIP2: &[u8] = &[0x04, 0x02, 0x02];
-const METHOD_BROTLI: &[u8] = &[0x04, 0xF7, 0x11, 0x01];
+// Methods.txt "external codecs" (Tino Reichardt, 04 F7 11 xx):
+// 01 = ZSTD, 02 = BROTLI.
+const METHOD_ZSTD: &[u8] = &[0x04, 0xF7, 0x11, 0x01];
+const METHOD_BROTLI: &[u8] = &[0x04, 0xF7, 0x11, 0x02];
 
 /// A single decoded 7z entry.
 #[derive(Debug, Clone, PartialEq, Eq)]

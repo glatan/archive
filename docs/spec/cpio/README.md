@@ -56,7 +56,7 @@
 | 31 | odc field widths: dev(6)/ino(6)/mode(6)/uid(6)/gid(6)/nlink(6)/rdev(6)/mtime(11)/namesize(6)/filesize(11) | POSIX cpio odc | ✅ | パーサーで固定幅読み取り |
 | 32 | newc field widths: 各フィールド 8 hex digits | SVR4 newc/newcrc | ✅ | パーサーで固定幅読み取り |
 | 33 | newcrc check フィールド: 全データバイトの unsigned sum mod 2^32 | SVR4 newcrc | ✅ | `test_crc_mismatch_detected` |
-| 34 | Hard link 検出: ino + dev 一致 | POSIX cpio | ✅ | `is_hard_link()`, `find_hard_link_groups()`, `test_is_hard_link`, `test_find_hard_link_groups` |
+| 34 | Hard link 検出: ino + dev 一致。newc/newcrc の wire 規約では filesize=0 (先頭エントリ以外)、データは最初の出現のみ | POSIX cpio / FreeBSD cpio(5) "New ASCII Format" | ✅ | `is_hard_link()`, `find_hard_link_groups()`, `test_is_hard_link`, `test_find_hard_link_groups`, `test_roundtrip_hardlink` |
 | 35 | Socket type (S_IFSOCK = 0140000) | POSIX cpio | ✅ | `S_IFSOCK` 定数、`is_socket()` メソッド、`add_socket()` エンコーダー、`test_socket_roundtrip` |
 
 ### `bin` (SVR4 binary) 形式要件
@@ -78,7 +78,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 42 |
-| ⚠️ 部分対応 | 1 |
+| ✅ 実装+テスト済み  | 42 |
+| ⚠️ 部分対応  | 1 |
 | **合計** | **43** |
 

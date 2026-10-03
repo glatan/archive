@@ -77,18 +77,26 @@ pub(crate) fn execute_sequences(
     sequences: &[Sequence],
     output: &mut Vec<u8>,
 ) -> Result<(), Error> {
-    execute_sequences_with_dict(literals, sequences, output, &[])
+    execute_sequences_with_dict(literals, sequences, output, &[], u64::MAX)
 }
 
 /// Execute sequences with optional dictionary content as prefix history.
 ///
 /// When a dictionary is used, `dict_content` provides additional history
 /// that sequences can reference via offsets beyond the current output.
+///
+/// `window_size` bounds how far back offsets may reach (RFC 8878
+/// §3.1.1.4/§5). While the decoded output stays within Window_Size, the
+/// whole dictionary prefix remains reachable — this is the only case in
+/// which an offset may legitimately exceed Window_Size. Once the output
+/// surpasses Window_Size, at most the trailing Window_Size bytes remain
+/// valid history and the dictionary can no longer be referenced.
 pub(crate) fn execute_sequences_with_dict(
     literals: &[u8],
     sequences: &[Sequence],
     output: &mut Vec<u8>,
     dict_content: &[u8],
+    window_size: u64,
 ) -> Result<(), Error> {
     let mut lit_pos = 0;
     let dict_len = dict_content.len();
@@ -113,6 +121,13 @@ pub(crate) fn execute_sequences_with_dict(
         let total_history = dict_len + output.len();
         if offset > total_history {
             return Err(Error::InvalidData("offset beyond available history"));
+        }
+
+        // RFC 8878 §3.1.1.4/§5: once the decoded output surpasses
+        // Window_Size, only the last Window_Size bytes are valid history
+        // and offsets exceeding Window_Size must be rejected.
+        if output.len() as u64 > window_size && offset as u64 > window_size {
+            return Err(Error::InvalidData("offset exceeds Window_Size"));
         }
 
         // The virtual history is: [dict_content | output]
@@ -299,5 +314,102 @@ mod tests {
         let (n, pos) = decode_sequences_header(&data).unwrap();
         assert_eq!(n, (254 - 128) * 256 + 255);
         assert_eq!(pos, 2);
+    }
+
+    // Phase 4: Window_Size bounds on offsets (RFC 8878 §3.1.1.4/§5)
+
+    #[test]
+    fn test_execute_offset_beyond_window_size() {
+        // Window_Size=4: after 8 literals the output surpasses the window,
+        // so an offset of 5 (> Window_Size) is out of the valid window even
+        // though enough decoded history exists.
+        let literals = b"abcdefgh";
+        let sequences = vec![Sequence {
+            literal_length: 8,
+            offset: 5,
+            match_length: 3,
+        }];
+        let mut output = Vec::new();
+        let result = execute_sequences_with_dict(literals, &sequences, &mut output, &[], 4);
+        assert!(matches!(
+            result,
+            Err(Error::InvalidData("offset exceeds Window_Size"))
+        ));
+    }
+
+    #[test]
+    fn test_execute_offset_within_window_size_ok() {
+        // Same layout, but the offset stays inside the trailing
+        // Window_Size bytes of history and must be accepted.
+        let literals = b"abcdefgh";
+        let sequences = vec![Sequence {
+            literal_length: 8,
+            offset: 4,
+            match_length: 3,
+        }];
+        let mut output = Vec::new();
+        execute_sequences_with_dict(literals, &sequences, &mut output, &[], 4).unwrap();
+        assert_eq!(output, b"abcdefghefg");
+    }
+
+    #[test]
+    fn test_execute_dict_reference_allowed_before_window() {
+        // RFC 8878 §5: while the decoded output is <= Window_Size, the
+        // entire dictionary prefix is reachable, even through offsets
+        // larger than Window_Size.
+        let dict_content = b"ABCDEFGH";
+        let literals = b"WXYZ";
+        let sequences = vec![Sequence {
+            literal_length: 4,
+            offset: 12, // reaches dict[0] across 8 dict + 4 output bytes
+            match_length: 3,
+        }];
+        let mut output = Vec::new();
+        execute_sequences_with_dict(literals, &sequences, &mut output, dict_content, 4).unwrap();
+        assert_eq!(output, b"WXYZABC");
+    }
+
+    #[test]
+    fn test_execute_dict_cutoff_after_window() {
+        // RFC 8878 §5: once the output surpasses Window_Size the dictionary
+        // is no longer accessible. offset=8 would reach dict bytes but is
+        // > Window_Size, so it must be rejected.
+        let dict_content = b"ABCDEFGH";
+        let literals = b"WXYZ";
+        let sequences = vec![
+            Sequence {
+                literal_length: 4,
+                offset: 12,
+                match_length: 3,
+            },
+            Sequence {
+                literal_length: 0,
+                offset: 8, // would land in dict; output (7) > window (4)
+                match_length: 2,
+            },
+        ];
+        let mut output = Vec::new();
+        let result =
+            execute_sequences_with_dict(literals, &sequences, &mut output, dict_content, 4);
+        assert!(matches!(
+            result,
+            Err(Error::InvalidData("offset exceeds Window_Size"))
+        ));
+    }
+
+    #[test]
+    fn test_execute_output_reference_after_window_ok() {
+        // Offsets into the last Window_Size bytes of output remain valid
+        // after the dictionary has been cut off.
+        let dict_content = b"ABCDEFGH";
+        let literals = b"abcdef";
+        let sequences = vec![Sequence {
+            literal_length: 6,
+            offset: 3, // output-only reference inside the window
+            match_length: 2,
+        }];
+        let mut output = Vec::new();
+        execute_sequences_with_dict(literals, &sequences, &mut output, dict_content, 4).unwrap();
+        assert_eq!(output, b"abcdefde");
     }
 }

@@ -65,6 +65,7 @@
 | 29 | segmentation 検証 (Clause 7): continuation は `WARC-Segment-Origin-ID`+`WARC-Segment-Number` (>=2) 必須、非 continuation の Segment-Number は 1 のみ、ファイル内系列で number 連番・Total-Length で系列クローズ・累積長照合。cross-file 系列の途中観測は寛容 | WARC 1.1 Clause 7 | ✅ | `accepts_segmented_series`, `rejects_continuation_missing_segment_fields`, `rejects_bad_segment_number`, `rejects_total_length_mismatch`, `rejects_segment_after_total_length`, `accepts_late_joined_segment_series` |
 | 30 | segment ('continuation') 結合: `decode::join()` で origin + continuation 系列を単一論理 record に連結 (orphan continuation は pass-through、Total-Length 照合) | WARC 1.1 Clause 7 | ✅ | `join_merges_segmented_series`, `join_passes_orphan_continuations`, `join_unsegmented_is_identity`, `join_rejects_bad_total_length` |
 | 31 | `WARC-Concurrent-To` グルーピング: `decode::concurrent_groups()` で capture group を index 集合として解決 | WARC 1.1 §5 named fields | ✅ | `concurrent_groups_links_capture_members` |
+| 32 | field name の照合は case-insensitive ("names are not case-sensitive")。必須フィールド・型別制約・digest 検証・extension field 保持のいずれでも case 違いを同一フィールドとして扱う | WARC 1.1 §named fields grammar | ✅ | 実装済み — named-field は parse 時に小文字正規化され、全 lookup (必須フィールド・型別制約・digest・segmentation) が case-insensitive。`field_names_are_case_insensitive` |
 
 ### CLI / fuzz 連携
 

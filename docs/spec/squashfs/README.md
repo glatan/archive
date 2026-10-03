@@ -38,7 +38,6 @@ mksquashfs 生成イメージの decode、`unsquashfs` による本 writer 出�
 | 9 | ID 5 lz4 = raw LZ4 block → `compress::lz4` | §2.4 | ✅ | 同上 (lz4) |
 | 10 | ID 6 zstd → `compress::zstd` | §2.4 | ✅ | 同上 (zstd) |
 | 11 | ID 3 lzo = LZO1X raw → `compress::lzo` | §2.4 | ✅ | 同上 (lzo) |
-| 12 | ID 2 lzma (LZMA1, deprecated) は `Unsupported` | §2.4 | ❌ | upstream で deprecated のため非対応を明示 (intentional exclusion) |
 | 13 | 圧縮が入力を超える場合の非圧縮格納 (data block bit24 / metadata MSB) | §2.1/§2.2 | ✅ | `parses_compressed_metadata_and_data` ほか |
 | 14 | metadata/data block の伸張上限 (8KiB / block_size) を強制 | §2.1/§2.2 | ✅ | bounded decompress |
 
@@ -98,5 +97,5 @@ mksquashfs 生成イメージの decode、`unsquashfs` による本 writer 出�
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 38 | LZMA1 (compressor id 2) payload の伸張 | §2.4 | ❌ | upstream deprecated。`Unsupported` を返す (intentional) |
+| 38 | LZMA1 (compressor id 2) payload の伸張 | §2.4 | ❌ | upstream deprecated。`compressor_dispatch` で `Unsupported` を返す (intentional) |
 | 40 | filesystem セマンティクス (デバイス node 作成、パーミッション適用) | crate-local | ❌ | 抽出は name/content 列挙まで (intentional) |

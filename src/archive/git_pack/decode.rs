@@ -8,7 +8,8 @@
 //! use 32-byte object names throughout (REF_DELTA bases, entry IDs).
 //!
 //! [`decode_idx`] reads checksummed v2 indexes; [`decode_idx_v1`]
-//! reads the checksum-less legacy v1 format.
+//! reads the legacy v1 format (its trailing idx checksum is
+//! verified; the embedded pack checksum is parsed only).
 
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -556,19 +557,29 @@ fn decode_idx_with_kind(input: &[u8], pack: &[u8], hash: HashKind) -> Result<Vec
     Ok(entries)
 }
 
-/// Decode a version-1 `.idx` file (legacy, no magic/checksums).
+/// Decode a version-1 `.idx` file (legacy, no magic).
 ///
-/// Layout: 256-entry fanout table then `fanout[255]` rows of
-/// `u32 offset + 20-byte SHA-1`, sorted by object name. v1 has no
-/// CRC32 table and no trailing checksums, so `crc32` is reported as
-/// 0 and no integrity verification is possible.
+/// Layout: 256-entry fanout table, `fanout[255]` rows of
+/// `u32 offset + 20-byte SHA-1` sorted by object name, then a
+/// 40-byte trailer holding the pack checksum (parsed but not
+/// verified — the pack itself is not an input) and the idx
+/// checksum (SHA-1 of all preceding bytes, verified). v1 has no
+/// CRC32 table, so `crc32` is reported as 0.
 pub fn decode_idx_v1(input: &[u8]) -> Result<Vec<IdxEntry>, Error> {
-    if input.len() < 256 * 4 {
+    if input.len() < 256 * 4 + 2 * SHA1_LEN {
         return Err(invalid("git-pack: truncated idx"));
     }
     if input[..4] == IDX_MAGIC {
         return Err(invalid("git-pack: v2 idx passed to v1 decoder"));
     }
+    // Trailer: 20-byte pack checksum then the 20-byte idx checksum
+    // (SHA-1 of everything before itself). The pack checksum cannot
+    // be verified without the .pack bytes.
+    let idx_sum_at = input.len() - SHA1_LEN;
+    if sha1(&input[..idx_sum_at]) != input[idx_sum_at..] {
+        return Err(invalid("git-pack: idx v1 checksum mismatch"));
+    }
+    let entries_end = idx_sum_at - SHA1_LEN;
     let mut fanout = [0u32; 256];
     for (i, f) in fanout.iter_mut().enumerate() {
         *f = u32::from_be_bytes(input[i * 4..i * 4 + 4].try_into().unwrap());
@@ -579,7 +590,11 @@ pub fn decode_idx_v1(input: &[u8]) -> Result<Vec<IdxEntry>, Error> {
         }
     }
     let n = fanout[255] as usize;
-    if input.len() != 256 * 4 + n * 24 {
+    let table_end = n
+        .checked_mul(24)
+        .and_then(|b| b.checked_add(256 * 4))
+        .ok_or_else(|| invalid("git-pack: idx v1 size mismatch"))?;
+    if table_end != entries_end {
         return Err(invalid("git-pack: idx v1 size mismatch"));
     }
     let mut entries = Vec::with_capacity(n);
@@ -911,26 +926,60 @@ mod tests {
         assert!(matches!(decode(&p), Err(Error::Unsupported(_))));
     }
 
+    /// Build a v1 idx: 256-entry fanout, sorted `u32 offset +
+    /// 20-byte id` rows, then the 40-byte trailer (`pack_sum` +
+    /// idx checksum over everything before it).
+    fn build_idx_v1(rows: &[(u32, ObjectId)], pack_sum: &[u8; 20]) -> Vec<u8> {
+        let mut sorted = rows.to_vec();
+        sorted.sort_by_key(|r| r.1);
+        let mut idx = Vec::new();
+        let mut fanout = [0u32; 256];
+        for r in &sorted {
+            fanout[r.1[0] as usize] += 1;
+        }
+        let mut acc = 0u32;
+        for f in &fanout {
+            acc += f;
+            idx.extend_from_slice(&acc.to_be_bytes());
+        }
+        for r in &sorted {
+            idx.extend_from_slice(&be32(r.0));
+            idx.extend_from_slice(&r.1);
+        }
+        idx.extend_from_slice(pack_sum);
+        let sum = sha1(&idx);
+        idx.extend_from_slice(&sum);
+        idx
+    }
+
+    /// Build a v1 idx body (fanout + rows) with an explicit fanout
+    /// table, then append a trailer with a valid idx checksum.
+    fn idx_v1_with_fanout(fanout: &[u32; 256], rows: &[(u32, ObjectId)]) -> Vec<u8> {
+        let mut idx = Vec::new();
+        for f in fanout {
+            idx.extend_from_slice(&be32(*f));
+        }
+        for r in rows {
+            idx.extend_from_slice(&be32(r.0));
+            idx.extend_from_slice(&r.1);
+        }
+        idx.extend_from_slice(&[0xCC; 20]);
+        let sum = sha1(&idx);
+        idx.extend_from_slice(&sum);
+        idx
+    }
+
     #[test]
     fn decode_idx_v1_handbuilt() {
-        // v1: fanout + N x (u32 offset + 20B sha1), name-sorted.
+        // v1: fanout + N x (u32 offset + 20B sha1) + 40B trailer,
+        // name-sorted.
         let lo: ObjectId = [0x10; 20];
         let hi: ObjectId = [0x80; 20];
-        let mut idx = Vec::new();
-        for i in 0..256u32 {
-            let v = if i <= 0x10 {
-                0
-            } else if i <= 0x80 {
-                1
-            } else {
-                2
-            };
-            idx.extend_from_slice(&be32(v));
-        }
-        idx.extend_from_slice(&be32(100));
-        idx.extend_from_slice(&lo);
-        idx.extend_from_slice(&be32(200));
-        idx.extend_from_slice(&hi);
+        let idx = build_idx_v1(&[(100, lo), (200, hi)], &[0xCC; 20]);
+        // Trailer layout: pack checksum then idx checksum.
+        let n = idx.len();
+        assert_eq!(idx[n - 40..n - 20], [0xCC; 20]);
+        assert_eq!(sha1(&idx[..n - 20]).as_slice(), &idx[n - 20..]);
 
         let entries = decode_idx_v1(&idx).unwrap();
         assert_eq!(entries.len(), 2);
@@ -940,34 +989,46 @@ mod tests {
         assert_eq!(entries[1].offset, 200);
         assert_eq!(entries[1].name, hex_id(&hi));
     }
+
+    #[test]
+    fn decode_idx_v1_trailer_verified() {
+        let idx = build_idx_v1(&[(100, [0x10; 20])], &[0xCC; 20]);
+        assert_eq!(decode_idx_v1(&idx).unwrap().len(), 1);
+        // Corrupted idx checksum is rejected.
+        let mut bad = idx.clone();
+        let n = bad.len();
+        bad[n - 1] ^= 0xFF;
+        assert!(decode_idx_v1(&bad).is_err());
+        // Missing trailer (rows only, the historical strict-length
+        // form) is rejected: the spec mandates the 40-byte trailer.
+        let rows_only = &idx[..idx.len() - 40];
+        assert!(decode_idx_v1(rows_only).is_err());
+        // Trailing garbage makes the size check fail even with a
+        // recomputed idx checksum.
+        let mut garbage = idx[..idx.len() - 20].to_vec();
+        garbage.extend_from_slice(b"junk");
+        let sum = sha1(&garbage);
+        garbage.extend_from_slice(&sum);
+        assert!(decode_idx_v1(&garbage).is_err());
+    }
+
     #[test]
     fn decode_idx_v1_rejects_bad_input() {
         // Truncated.
         assert!(decode_idx_v1(&[0u8; 100]).is_err());
-        // Non-monotonic fanout.
-        let mut idx = Vec::new();
-        idx.extend_from_slice(&be32(2));
-        for _ in 1..256 {
-            idx.extend_from_slice(&be32(0));
-        }
-        assert!(decode_idx_v1(&idx).is_err());
-        // Size mismatch (fanout says 1 but no entry).
-        let mut idx = Vec::new();
-        for _ in 0..255 {
-            idx.extend_from_slice(&be32(0));
-        }
-        idx.extend_from_slice(&be32(1));
-        assert!(decode_idx_v1(&idx).is_err());
+        // Non-monotonic fanout (idx checksum valid so the structural
+        // check is what fires).
+        let mut fanout = [0u32; 256];
+        fanout[0] = 2;
+        assert!(decode_idx_v1(&idx_v1_with_fanout(&fanout, &[])).is_err());
+        // Size mismatch (fanout says 1 but the entry table is empty).
+        let mut fanout = [0u32; 256];
+        fanout[255] = 1;
+        assert!(decode_idx_v1(&idx_v1_with_fanout(&fanout, &[])).is_err());
         // Unsorted names.
-        let mut idx = Vec::new();
-        for _ in 0..255 {
-            idx.extend_from_slice(&be32(0));
-        }
-        idx.extend_from_slice(&be32(2));
-        idx.extend_from_slice(&be32(0));
-        idx.extend_from_slice(&[0xFF; 20]);
-        idx.extend_from_slice(&be32(4));
-        idx.extend_from_slice(&[0x00; 20]);
-        assert!(decode_idx_v1(&idx).is_err());
+        let mut fanout = [0u32; 256];
+        fanout[255] = 2;
+        let rows = [(0u32, [0xFF; 20]), (4u32, [0x00; 20])];
+        assert!(decode_idx_v1(&idx_v1_with_fanout(&fanout, &rows)).is_err());
     }
 }

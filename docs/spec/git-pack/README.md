@@ -14,7 +14,7 @@
 | pack v1 | 同節 (idx なし旧形式) | ❌ | ❌ | Git 現行ツール未使用の旧形式 (intentional scope) |
 | pack v3 (SHA-256 repo) | 同節 | ✅ | ✅ | 32B object name / SHA-256 trailer。write は `new_sha256` |
 | idx v2 | gitformat-pack "pack-*.idx files" | ✅ | ✅ | fanout + sorted names + CRC32 + offset 表 |
-| idx v1 | 同節 | ✅ | ✅ | fanout + (offset,sha1) sorted table。checksum なし。crc32 は 0 報告。write は `finish_with_index_v1` |
+| idx v1 | 同節 | ✅ | ✅ | fanout + (offset,sha1) sorted table + trailer (pack checksum + idx checksum、計 40B)。decode は `decode_idx_v1` が trailer 必須・idx checksum を SHA-1 検証、encode は `finish_with_index_v1` (#24a/#25d) |
 
 ## pack ヘッダ / エントリ
 
@@ -55,12 +55,12 @@
 | 22 | idx v2: magic `FF 74 4F 63` + version 2 | "pack-*.idx files" v2 | ✅ | `decode_real_idx` |
 | 23 | idx v2: fanout[256] (単調増加)、sorted SHA-1 名表、CRC32 表、4B offset 表、8B large-offset 表 (MSB=1 のエントリが指す) | 同節 | ✅ | `decode_real_idx`, `idx_large_offset_table` (合成 idx による large offset 経路) |
 | 24 | idx 末尾は pack チェックサム + idx チェックサム (自身の SHA-1)。両者を検証 | 同節 | ✅ | `decode_real_idx`, `idx_bad_checksums_rejected` |
-| 24a | idx v1: fanout[256] + sorted (u32 offset + 20B sha1) 24B 行。checksum なし、crc32 は 0 報告。非単調 fanout / サイズ不一致 / 未ソートは reject | "pack-*.idx files" v1 | ✅ | `decode_idx_v1_handbuilt`, `decode_idx_v1_rejects_bad_input` |
+| 24a | idx v1: fanout[256] + sorted (u32 offset + 20B sha1) 24B 行 + trailer (pack checksum 20B + idx checksum 20B)。非単調 fanout / サイズ不一致 / 未ソートは reject | "pack-*.idx files" v1 | ✅ | `decode_idx_v1` は `len == 1024 + 24n + 40` (trailer 必須) を要求し、末尾 idx checksum を SHA-1 検証。pack checksum は parse のみ。`decode_idx_v1_trailer_verified` |
 | 25 | encode: pack v2 を出力し、`finish_with_index` で対応 idx v2 を生成。git `index-pack` が受理する | gitformat-pack 全体 | ✅ | `encode_roundtrip`, `encode_roundtrip_with_index` + git interop (手動確認: `git index-pack`/`verify-pack` が受理、生成 idx は git 生成物とバイト一致) |
 | 25a | encode: `add_delta_object` が先行エントリを base とする OFS_DELTA (type 6) を出力。delta 命令列は greedy block matcher で生成 (delta 生成戦略は仕様非規定)。実 `git index-pack`/`verify-pack` が depth-2 chain を受理 | "object entries" + "deltified representation" 節 | ✅ | `delta_encoder_object_roundtrip`, `delta_chain_of_three`, `delta_rejects_bad_base_index`, `create_delta_roundtrip_various`, `delta_with_index_roundtrip`, `ofs_offset_encoding`, `ofs_delta_pack_accepted_by_git_index_pack` |
 | 25b | encode: `add_ref_delta_object` が REF_DELTA (type 7) (hash 長の base オブジェクト名埋め込み) を出力。実 `git index-pack --strict` が受理 | "object entries" | ✅ | `ref_delta_roundtrip`, `ref_delta_rejects_bad_base_index`, `ref_delta_pack_accepted_by_git_index_pack` |
 | 25c | encode: `new_sha256` が pack v3 (32B オブジェクト名・SHA-256 trailer) を出力。`finish_with_index` は 32B 名・SHA-256 checksum の idx v2 を emit、`decode_idx_v2_sha256` で検証付き読み戻し。実 `git index-pack --strict` (sha256 repo) が受理 | "pack-*.pack files" + "pack-*.idx files" | ✅ | `v3_sha256_roundtrip`, `v3_index_roundtrip`, `v3_pack_accepted_by_git_index_pack` |
-| 25d | encode: `finish_with_index_v1` が idx v1 (fanout + u32 offset + 20B id、checksum なし) を出力。SHA-256 encoder では `Unsupported` | "pack-*.idx files" v1 | ✅ | `idx_v1_write_roundtrip` (`decode_idx_v1` で読み戻し), `idx_v1_rejected_for_sha256` |
+| 25d | encode: `finish_with_index_v1` が idx v1 (fanout + u32 offset + 20B id + trailer (pack checksum + idx checksum)) を出力。SHA-256 encoder では `Unsupported` | "pack-*.idx files" v1 | ✅ | `finish_with_index_v1` は trailer (pack checksum + idx checksum) 付き idx v1 を emit。実 git `verify-pack -v` で受理確認。`idx_v1_write_roundtrip` `v1_idx_accepted_by_git_verify_pack` |
 
 ## エントリモデル / API
 

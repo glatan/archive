@@ -17,6 +17,7 @@
 | 5 | root inode (offset 64) は directory 必須 | cramfs_fs.h `cramfs_super.root` | ✅ | decode 時 assert |
 | 6 | オフセット/ポインタは 4B 単位 (`offset` field = byte_offset/4) | cramfs_fs.h `cramfs_inode.offset` コメント | ✅ | 全テスト |
 | 23 | fsid CRC 検証 | mkcramfs.c (crc32 over `[shift..size)`、fsid.crc フィールドは 0 扱い) | ✅ | `CramfsImage::fsid_crc_ok: Option<bool>` — `CRAMFS_FLAG_FSID_VERSION_2` 時のみ検証し結果を情報として公開 (kernel 同様 reject はしない)。`fsid_crc_verified_as_info`, `test_cramfs_fsid_crc_mismatch_is_informational` |
+| 24 | ボリューム名 (superblock offset 48, 16B、ヌル終端/pad) の公開 | cramfs_fs.h `cramfs_super.name` | ✅ | `CramfsImage::name` = `lossy_name(&sb[48..64])`。decode.rs:80-81,348 |
 
 ## inode・ディレクトリ層
 
@@ -35,7 +36,7 @@
 |---|------|----------|------|----------------|
 | 13 | nblocks = ceil(size/4096)、各 u32 ポインタは i 番ブロックの「終端」絶対オフセット、先頭ブロックはポインタ列直後 | fs/cramfs/README `<file_data>` | ✅ | `decodes_multiblock_file` (10000B → 3 ブロック) |
 | 14 | ブロックは zlib compress 出力 (ヘッダ+adler あり) | README `<block>` | ✅ | mkfs.cramfs interop で実検証 |
-| 15 | ポインタ 0 = hole ブロック → 4096/残りバイトの NUL | cramfs.rst Holes 節 | ✅ | `file_data` hole 分岐 (ユニット fixture でカバー) |
+| 15 | ブロックポインタ 0 = hole ブロック → 4096B (末尾では残り分) の NUL 出力 | fs/cramfs/README (cramfs_layout.txt) "Holes" 節 + inode.c readpage | ✅ | `file_data` hole 分岐 (ユニット fixture でカバー) |
 | 16 | `CRAMFS_FLAG_EXT_BLOCK_POINTERS`: UNCOMPRESSED(bit31) は生コピー、DIRECT_PTR(bit30) は `ptr<<2` の絶対位置 (uncompressed は blksize、compressed は先頭 2B が長さ) | fs/cramfs/README EXT_BLOCK_POINTERS 節 | ✅ | 実装済み (mkfs.cramfs が発行しないため合成 fixture でテスト) |
 | 17 | symlink のデータ = リンク先パス (ファイルと同じブロック形式) | inode.c readpage/コメント | ✅ | `test_cramfs_decode_mkfs_image` (alink) |
 | 18 | 空ファイル/空ディレクトリは offset=0, size=0 でデータなし | inode コメント | ✅ | `test_cramfs_decode_mkfs_image` (empty.txt) |
@@ -53,7 +54,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 19 |
-| ⚠️ 部分対応 | 0 |
-| ❌ 未対応 | 4 |
-| **合計** | **23** |
+| ✅ 実装+テスト済み  | 20 |
+| ⚠️ 部分対応  | 0 |
+| ❌ 未対応  | 0 |
+| **合計** | **24** |

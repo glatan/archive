@@ -21,10 +21,10 @@
 | 1 | グローバルヘッダー `!<arch>\n` (8B) 検証 | IEEE Std 1003.1: ar magic string | ✅ | `decode()` 冒頭で検証, `test_decode_short_gnu_archive` |
 | 2 | 60B 固定長メンバーヘッダー: ar_name[16] / ar_date[12] / ar_uid[6] / ar_gid[6] / ar_mode[8] / ar_size[10] / ar_fmag[2] | IEEE Std 1003.1: ar member header fields | ✅ | `test_decode_short_gnu_archive` |
 | 3 | ar_fmag (bytes 58-59): `` `\n`` (backtick + newline) 検証 | IEEE Std 1003.1: ar_fmag field | ✅ | デコーダーで検証 |
-| 4 | ar_date: 10進 ASCII (右スペースパディング) | IEEE Std 1003.1: ar member header fields | ✅ | `parse_decimal()` |
-| 5 | ar_uid / ar_gid: 10進 ASCII (右スペースパディング) | IEEE Std 1003.1: ar member header fields | ✅ | `parse_decimal()` |
-| 6 | ar_mode: 8進 ASCII (右スペースパディング) | IEEE Std 1003.1: ar member header fields | ✅ | `parse_octal()` |
-| 7 | ar_size: 10進 ASCII (右スペースパディング) | IEEE Std 1003.1: ar member header fields | ✅ | `parse_decimal()` |
+| 4 | ar_date: 10進 ASCII (右スペースパディング) | IEEE Std 1003.1: ar member header fields | ✅ | `parse_decimal_field()` |
+| 5 | ar_uid / ar_gid: 10進 ASCII (右スペースパディング) | IEEE Std 1003.1: ar member header fields | ✅ | `parse_decimal_field()` |
+| 6 | ar_mode: 8進 ASCII (右スペースパディング) | IEEE Std 1003.1: ar member header fields | ✅ | `parse_octal_field()` |
+| 7 | ar_size: 10進 ASCII (右スペースパディング) | IEEE Std 1003.1: ar member header fields | ✅ | `parse_decimal_field()` / `parse_decimal_str()` |
 | 8 | 奇数長エントリの `\n` パディング (2B アラインメント) | IEEE Std 1003.1: ar file alignment | ✅ | `test_decode_odd_sized_entry_padding` |
 
 ### GNU 拡張
@@ -50,7 +50,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 17 | 空ファイル名 reject | ar validation | ✅ | `test_empty_name_rejected` |
-| 18 | 改行含有ファイル名 reject | ar validation | ✅ | エンコーダーで reject |
+| 18 | 改行含有ファイル名 reject | ar validation | ✅ | エンコーダーで reject (encode.rs:333)。`test_newline_in_name_rejected` |
 | 19 | system `ar` 生成アーカイブの decode | system interop | ✅ | `test_ar_decode_system_archive` |
 | 20 | 自前 GNU archive → system `ar` で一覧可能 | system interop | ✅ | `test_ar_gnu_system_compat` |
 | 21 | 自前 BSD archive → `bsdtar` で一覧可能 | system interop | ✅ | `test_ar_bsd_system_compat` |
@@ -60,7 +60,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 23 | BSD symbol table (`__.SYMDEF` / `__.SYMDEF SORTED`) スキップ | [BSD ar](https://man.freebsd.org/cgi/man.cgi?ar(5)) | ✅ | decode.rs:106-109 の identifier 判定でスキップ (同一パスは `test_sym64_symbol_table_skipped` でカバー) |
+| 23 | BSD symbol table (`__.SYMDEF` / `__.SYMDEF SORTED`) スキップ | [BSD ar](https://man.freebsd.org/cgi/man.cgi?ar(5)) | ✅ | decode.rs:88-92/115-119 の identifier 判定でスキップ (同一パスは `test_sym64_symbol_table_skipped` でカバー) |
 | 24 | ar_date / ar_uid / ar_gid: all-space (空) の許容 | GNU/BSD ar | ✅ | パーサーで space trim |
 | 25 | Thin archives (`!<thin>\n`): 通常メンバはヘッダのみ (size は実ファイルサイズ、payload 非格納)。`//`・`/` 等の特殊メンバは payload を持つ | GNU ar thin (binutils `ar rcT` 出力で検証) | ✅ | `THIN_MAGIC` 認識、`ArEntry::is_thin`、`test_thin_archive_decode`、`test_ar_decode_gnu_thin_fixture` (実 ar バイト) |
 | 26 | 64-bit GNU symbol table (`/SYM64/`) | GNU ar 64-bit | ✅ | identifier 判定でスキップ (`test_sym64_symbol_table_skipped`) |
@@ -72,5 +72,6 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 27 |
+| ✅ 実装+テスト済み  | 27 |
+| ⚠️ 部分実装  | 0 |
 | **合計** | **27** |

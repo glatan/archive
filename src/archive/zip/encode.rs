@@ -872,7 +872,9 @@ fn write_local_file_header(output: &mut Vec<u8>, entry: &EncodedEntry) -> Result
     let extra = local_extra_field(entry);
 
     output.extend_from_slice(&LOCAL_FILE_HEADER_SIGNATURE.to_le_bytes());
-    output.extend_from_slice(&version_needed(zip64, entry.aes.is_some()).to_le_bytes());
+    output.extend_from_slice(
+        &compute_version_needed(entry_compression(entry), zip64, entry.aes.is_some()).to_le_bytes(),
+    );
     output.extend_from_slice(&entry.flags.to_le_bytes());
     output.extend_from_slice(&entry.compression_method.to_le_bytes());
     output.extend_from_slice(&entry.mod_time.to_le_bytes());
@@ -948,11 +950,10 @@ fn write_central_directory_record(output: &mut Vec<u8>, entry: &EncodedEntry) ->
 }
 
 /// Map an encoded entry's compression_method back to ZipCompression for version calc.
-fn entry_compression(entry: &EncodedEntry) -> ZipCompression {
-    // If AES, the actual method is stored inside the AES extra field
-    let method = entry
-        .aes
-        .map_or(entry.compression_method, |a| a.actual_compression_method);
+/// Resolve the effective compression method; for AES entries the real
+/// method lives in the AES extra field.
+fn method_compression(method: u16, aes: Option<&ZipAesExtraField>) -> ZipCompression {
+    let method = aes.map_or(method, |a| a.actual_compression_method);
     match method {
         0 => ZipCompression::Store,
         8 => ZipCompression::Deflate,
@@ -963,6 +964,15 @@ fn entry_compression(entry: &EncodedEntry) -> ZipCompression {
         98 => ZipCompression::Ppmd,
         _ => ZipCompression::Store,
     }
+}
+
+fn entry_compression(entry: &EncodedEntry) -> ZipCompression {
+    method_compression(entry.compression_method, entry.aes.as_ref())
+}
+
+#[cfg(feature = "std")]
+fn streamed_compression(entry: &StreamedEntry) -> ZipCompression {
+    method_compression(entry.compression_method, entry.aes.as_ref())
 }
 
 fn write_end_of_central_directory(
@@ -1081,7 +1091,10 @@ fn write_streamed_local_file_header(
     let extra = streamed_local_extra_field(entry);
 
     output.extend_from_slice(&LOCAL_FILE_HEADER_SIGNATURE.to_le_bytes());
-    output.extend_from_slice(&version_needed(zip64, entry.aes.is_some()).to_le_bytes());
+    output.extend_from_slice(
+        &compute_version_needed(streamed_compression(entry), zip64, entry.aes.is_some())
+            .to_le_bytes(),
+    );
     output.extend_from_slice(&entry.flags.to_le_bytes());
     output.extend_from_slice(&entry.compression_method.to_le_bytes());
     output.extend_from_slice(&entry.mod_time.to_le_bytes());
@@ -1117,8 +1130,13 @@ fn write_streamed_central_directory_record(
     let extra = streamed_central_extra_field(entry);
 
     output.extend_from_slice(&CENTRAL_DIRECTORY_HEADER_SIGNATURE.to_le_bytes());
-    output.extend_from_slice(&version_needed(zip64, entry.aes.is_some()).to_le_bytes());
-    output.extend_from_slice(&version_needed(zip64, entry.aes.is_some()).to_le_bytes());
+    output.extend_from_slice(
+        &version_made_by(zip64, streamed_compression(entry), entry.aes.is_some()).to_le_bytes(),
+    );
+    output.extend_from_slice(
+        &compute_version_needed(streamed_compression(entry), zip64, entry.aes.is_some())
+            .to_le_bytes(),
+    );
     output.extend_from_slice(&entry.flags.to_le_bytes());
     output.extend_from_slice(&entry.compression_method.to_le_bytes());
     output.extend_from_slice(&entry.mod_time.to_le_bytes());
@@ -1351,16 +1369,6 @@ const fn needs_zip64_entry(entry: &EncodedEntry) -> bool {
         || entry.uncompressed_size > u32::MAX as u64
         || entry.compressed_data.len() as u64 > u32::MAX as u64
         || entry.local_header_offset > u32::MAX as u64
-}
-
-const fn version_needed(zip64: bool, aes: bool) -> u16 {
-    if aes {
-        51
-    } else if zip64 {
-        ZIP_VERSION_ZIP64
-    } else {
-        ZIP_VERSION_DEFAULT
-    }
 }
 
 fn u16_len(len: usize, error: &'static str) -> Result<u16, Error> {

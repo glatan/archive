@@ -209,7 +209,9 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
         }
     }
 
-    if output.len() as u64 != total_size {
+    // total_size == 0 means "unknown" (streaming encoders that do not
+    // know the source size up front); skip the check in that case.
+    if total_size != 0 && output.len() as u64 != total_size {
         return Err(Error::InvalidData("lrzip: output size mismatch"));
     }
 
@@ -459,7 +461,7 @@ pub fn decode_to_writer<R: std::io::Read, W: std::io::Write>(
         }
     }
 
-    if total_written != total_size {
+    if total_size != 0 && total_written != total_size {
         return Err(std::io::Error::from(Error::InvalidData(
             "lrzip: output size mismatch",
         )));
@@ -801,6 +803,16 @@ mod tests {
         assert!(
             matches!(decode(&data), Err(Error::InvalidData(msg)) if msg.contains("size mismatch"))
         );
+    }
+
+    /// magic.header.txt: a Source File Size of 0 means "unknown" —
+    /// such streams must decode without the size check.
+    #[test]
+    fn test_zero_total_size_is_unknown() {
+        let payload = b"payload for unknown size";
+        let mut data = super::super::encode::encode(payload);
+        data[6..14].fill(0);
+        assert_eq!(decode(&data).unwrap(), payload);
     }
 
     #[test]

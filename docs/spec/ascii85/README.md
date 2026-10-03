@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 形式概要 | 4 octet を 5 文字 (base-85 数字) にエンコードするバイナリ→テキスト形式。Adobe `ASCII85Decode` 変種 (`!`..`u` 空間、`z` 省略、`~>` 終端/`<~ ~>` 括弧) と RFC 1924 の 128bit 固定エンコードの 2 系統がある |
-| 基準仕様 | [PDF 32000-1:2008 §7.4.3 ASCII85Decode](https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/PDF32000_2008.pdf) (ローカル: `docs/spec/sources/pdf32000_2008.pdf`)、[RFC 1924](https://www.rfc-editor.org/rfc/rfc1924.txt) (ローカル: `docs/spec/sources/rfc1924.txt`) |
+| 基準仕様 | [PDF 32000-1:2008 §7.4.3 ASCII85Decode](https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/PDF32000_2008.pdf) (ローカル: `docs/spec/sources/pdf32000_2008.pdf` — **監査メモ: この PDF はテキスト抽出不可のため §7.4.3 の逐語確認は未実施。内容は広く知られた ASCII85 仕様との整合を前提とする**)、[RFC 1924](https://www.rfc-editor.org/rfc/rfc1924.txt) (ローカル: `docs/spec/sources/rfc1924.txt`) |
 | 実装 | `archive::encoding::ascii85` (encode / decode / encode_rfc1924 / decode_rfc1924)。`ascii85` feature 配下 |
 
 ## 対応バリアント・仕様版
@@ -45,9 +45,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 17 |
-| ⚠️ 部分対応 | 0 |
-| ❌ 未対応 | 0 |
+| ✅ 実装+テスト済み  | 17 |
+| ⚠️ 部分対応  | 0 |
+| ❌ 未対応  | 0 |
 | **合計** | **17** |
 
 variant 表の btoa (decode ⚠️※ / encode ❌) は集計対象外の intentional scope。`y` 省略と `xbtoa Begin/End` 行はいずれも非対応のまま (`y` は `Error::Unsupported` で明示拒否)。

@@ -425,3 +425,50 @@ changed",
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// A crate-emitted v1 idx (fanout + offset/name rows + 40-byte
+/// trailer) must be accepted by real `git verify-pack`, which reads
+/// both the embedded pack checksum and the idx checksum.
+#[test]
+fn v1_idx_accepted_by_git_verify_pack() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let mut enc = git_pack::encode::GitPackEncoder::new();
+    enc.add_object(git_pack::ObjectType::Blob, b"v1 idx one");
+    enc.add_object(git_pack::ObjectType::Blob, b"v1 idx two");
+    enc.add_object(git_pack::ObjectType::Blob, b"v1 idx three");
+    let (pack, idx) = enc.finish_with_index_v1().unwrap();
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_gitpack_idxv1_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("test.pack"), &pack).unwrap();
+    std::fs::write(dir.join("test.idx"), &idx).unwrap();
+
+    let output = Command::new("git")
+        .args(["verify-pack", "-v"])
+        .arg(dir.join("test.idx"))
+        .current_dir(&dir)
+        .output();
+    let Ok(output) = output else {
+        std::fs::remove_dir_all(&dir).ok();
+        return;
+    };
+    if String::from_utf8_lossy(&output.stderr).contains("verify-pack") {
+        std::fs::remove_dir_all(&dir).ok();
+        return;
+    }
+    assert!(
+        output.status.success(),
+        "git verify-pack rejected crate v1 idx: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let list = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(list.matches(" blob").count(), 3, "{list}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}

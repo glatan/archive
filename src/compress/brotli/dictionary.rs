@@ -592,6 +592,34 @@ mod tests {
     }
 
     #[test]
+    fn test_copy_static_dictionary_rejects_out_of_range_copy_len() {
+        // RFC 7932 section 8: dictionary copy lengths are 4..=24.
+        let mut output = Vec::new();
+        for copy_len in [3usize, 25] {
+            let result = copy_static_dictionary_word(&mut output, 100, copy_len, 0);
+            assert!(
+                matches!(&result, Err(Error::InvalidData(msg)) if msg.contains("dictionary length")),
+                "copy_len {copy_len}: expected rejection, got {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_copy_static_dictionary_rejects_out_of_range_transform() {
+        // RFC 7932 section 8: only transform ids 0..=120 exist.
+        // copy_len 24 uses 5 size bits, so address 121 << 5 selects
+        // transform 121, which is out of range.
+        let mut output = Vec::new();
+        let result = copy_static_dictionary_word(&mut output, 1 + (121usize << 5), 24, 0);
+        assert!(
+            matches!(&result, Err(Error::InvalidData(msg)) if msg.contains("dictionary transform")),
+            "expected dictionary transform rejection, got {result:?}"
+        );
+        // Boundary check: transform 120 (the last valid one) is accepted.
+        assert!(copy_static_dictionary_word(&mut Vec::new(), 1 + (120usize << 5), 24, 0).is_ok());
+    }
+
+    #[test]
     fn test_transform_table_uses_default_transform_types_only() {
         for idx in 0..(TRANSFORMS.len() / 3) {
             let transform = transform_triplet(idx).unwrap();

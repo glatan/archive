@@ -19,7 +19,11 @@ specifications or standards documents:
 - DEFLATE: RFC 1951. The encoder's bit-length repair
   (`src/compress/deflate/encode.rs`) consults the behavior of zlib's
   `gen_bitlen`/`inflate_table` (zlib license) as a reference oracle;
-  no code was copied
+  no code was copied. The decoder's over-subscribed Huffman-tree
+  rejection (`HuffmanTable::from_lengths`) uses a Kraft-sum
+  left-tracking counter arithmetically equivalent to zlib
+  `inflate_table`'s `left` accounting; the check is the standard
+  Kraft-inequality validation per RFC 1951 §3.2.2
 - gzip: RFC 1952
 - zlib: RFC 1950
 - zstd: RFC 8878. The upstream reference implementation is dual
@@ -227,6 +231,8 @@ specifications or standards documents:
   LZ4 block format specification
   (https://github.com/lz4/lz4/blob/dev/doc/lz4_Block_format.md)
 - tar: POSIX.1-2001 UStar / GNU tar extensions / POSIX PAX extensions
+  (PAX extended-header semantics incl. empty-value attribute deletion
+  follow IEEE Std 1003.1-2017, pinned as docs/spec/sources/posix-pax)
 - cpio: POSIX `odc` / SVR4 `newc` / `newcrc` / `bin` (FreeBSD
   `cpio(5)` "PWB format" / "New Binary Format" descriptions).
   `bin` test fixtures are produced by GNU cpio (GPL-3.0-or-later),
@@ -491,7 +497,10 @@ specifications or standards documents:
 - 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00).
   The writer's 7z UINT64 variable-length integer encoding was
   cross-checked against the LZMA SDK `7zIn.c` decoder (public domain);
-  behavior reference only, no code was copied
+  behavior reference only, no code was copied. The `F7 11` external
+  codec ID range (Tino Reichardt's mcmilk/7-Zip-zstd assignment) is
+  used per Methods.txt: `04 F7 11 01` = Zstandard decode,
+  `04 F7 11 02` = Brotli
 - LZMA codec: LZMA algorithm specification (`lzma-specification.txt`)
   from the LZMA SDK documentation
 - LZMA2 (`src/compress/lzma2/`): LZMA2 chunk format as documented in
@@ -629,7 +638,11 @@ against de facto reference behavior:
 - LZW / Unix compress `.Z`
   - Reference: `ncompress` / `compress42.c`
   - Repository scope: Rust implementation of the historical Unix `compress`
-    format behavior
+    format behavior. The encoder's block-mode adaptive reset
+    (`src/compress/lzw/encode.rs`: `CHECK_GAP` input-byte interval,
+    cumulative-ratio comparison, CLEAR emission on worsening ratio)
+    follows the design of compress42.c `cl_block()` — constants and
+    algorithm adapted, no C code copied verbatim
   - Patent note (expired): LZW was historically covered by Welch's
     Unisys US 4,558,302 (expired 2003-06-20 in the US; foreign
     counterparts expired in 2004)
@@ -910,7 +923,10 @@ Pinned upstream sources in `docs/spec/sources/`:
   pinned file itself carries no license header), and `pea.pas` /
   `pea_utils.pas` (PeaZip, LGPL-3.0; license headers retained). These
   snapshots are reference material only: they are not compiled into
-  the crate and no code was copied from them into `src/`. Statements
+  the crate and no code was copied from them into `src/` (compress42.c
+  is additionally the design/constant reference for the adaptive-reset
+  logic in `src/compress/lzw/encode.rs`, as noted in the LZW entry).
+  Statements
   elsewhere in this file that no upstream source is bundled refer to
   `src/` and the shipped library.
   Most pinned files are fetched on demand via

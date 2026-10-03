@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | [ZPAQ Level 1 and Level 2 specification (zpaq206.pdf, 2016-03-22)](https://mattmahoney.net/dc/zpaq206.pdf)。低レイヤ codec (ZPAQL VM・predictor component・block/model 構造) はこの仕様が根拠 |
+| 基準仕様 | [ZPAQ Level 1 and Level 2 specification (zpaq206.pdf, 2016-03-22)](https://mattmahoney.net/dc/zpaq206.pdf)。低レイヤ codec (ZPAQL VM・predictor component・block/model 構造) はこの仕様が根拠。**監査メモ: zpaq206.pdf は埋め込みフォントの関係でテキスト抽出が不完全 (断片のみ)。仕様記述の一次参照としては不完全であり、既存 spec の記述正確性の再検証は部分的** |
 | 仕様対象外の層 | crate-local の multi-entry archive 層・journaling transaction・archive editor は upstream 仕様 (v6.x journaling format) ではなく crate 独自のため bounded contract で管理 |
 | current scope | 単一 payload codec、basic multi-entry archive、crate-local journaling transaction helper、materialized archive editor を対象にする |
 | public encoder / archive writer | low-level encoder は built-in level `1..=3` と validated custom model、archive writer は basic writer / same-block append / journaling / materialized archive editor を持つ |

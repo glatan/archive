@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 形式概要 | LZMA アルゴリズムに固定パラメータ (`lc=3`, `lp=0`, `pb=2`) を使用し、6バイトヘッダー + LZMA ストリーム + 20バイトトレーラーで構成される |
-| 基準仕様 | [lzip manual 1.24.1](https://www.nongnu.org/lzip/manual/lzip_manual.html) "File format" (ローカルスナップショット: `docs/spec/sources/lzip_manual_1.24.1.html`) |
+| 基準仕様 | [lzip manual 1.26](https://www.nongnu.org/lzip/manual/lzip_manual.html) "File format" (ローカルスナップショット: `docs/spec/sources/lzip_manual_1.26.html`) |
 
 ### ストリームフォーマット
 
@@ -73,6 +73,8 @@
 | 37 | LZMA properties 固定値違反 rejection (lc≠3/lp≠0/pb≠2) | lzip manual | ✅ | item 11 で検証 |
 | 38 | Trailing data after last member | lzip manual | ✅ | 無視 (lzip manual は reject を要求しない。正しい動作) |
 | 39 | EOS marker 必須 | lzip manual | ✅ | LZMA decoder で検証 |
+| 40 | multimember file 内の empty member (data size = 0) は不許可 | lzip manual ch.5 | ✅ | 実装済み — multimember 内の empty member (data size = 0) を reject。単一メンバーの空ファイルは受理。`test_empty_member_in_multimember_rejected` |
+| 41 | member size 上限 (member あたり 2 PiB / 16 EiB−1) | lzip manual ch.5 | ❌ | 未記載・未検証 (実用上到達不可能な intentional scope 相当) |
 
 ---
 
@@ -80,8 +82,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 39 |
-| **合計** | **39** |
+| ✅ 実装+テスト済み  | 40 |
+| ❌ 未実装  | 1 |
+| **合計** | **41** |
 
 
 ---

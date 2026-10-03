@@ -112,6 +112,13 @@
 | 50 | Context map: 値域が [0..NTREES-1] であること | RFC 7932 §7.3 | ✅ | read_context_map(): value >= ntrees で InvalidData |
 | 51 | 非圧縮メタブロックは最後のメタブロックになれない | RFC 7932 §9.2 | ✅ | `is_last && is_uncompressed` で InvalidData |
 | 52 | 最終メタブロック末尾の未使用ビットは 0 であること | RFC 7932 §9.3 | ✅ | `test_last_metablock_rejects_nonzero_trailing_padding`, `test_last_empty_padding_must_be_zero` |
+| 53 | MNIBBLES>4 かつ最終ニブルが全 0 → non-canonical MLEN として reject | RFC 7932 §9.2 | ✅ | `decode.rs` "non-canonical metablock length" + `test_noncanonical_metablock_length_rejected` |
+| 54 | MSKIPBYTES>1 かつ最終バイトが全 0 → non-canonical MSKIPLEN として reject + metadata fill bits は全 0 必須 | RFC 7932 §9.2 | ✅ | `test_noncanonical_metadata_length_rejected` `test_metadata_nonzero_fill_bits_rejected` |
+| 55 | literal/copy/dictionary 出力が MLEN を超過 → reject、insert で MLEN 満了時は copy を無視 | RFC 7932 §9.3 | ✅ | `test_command_exceeding_metablock_length_rejected` |
+| 56 | repeat code の繰り返しが alphabet size 超過 → reject | RFC 7932 §3.5 | ✅ | `huffman.rs` "code length repeat overflow" + `test_complex_prefix_repeat_previous_overflow_rejected` |
+| 57 | NTREES = context map 内の異なる値の個数 (全 tree index が使用されること) | RFC 7932 §7.3 | ✅ | `test_context_map_rejects_unused_tree_index` |
+| 58 | dictionary 参照: copy_len ∈ [4,24] かつ transform_id ≤ 120 でなければ reject | RFC 7932 §8 | ✅ | `test_copy_static_dictionary_rejects_out_of_range_copy_len` `test_copy_static_dictionary_rejects_out_of_range_transform` |
+| 59 | static dictionary reference を解決した distance はリングバッファに push しない | RFC 7932 §10 / §4 | ✅ | 辞書参照 distance (`distance > max_allowed_distance`) は `recent_distances` push を抑止。`test_dictionary_distance_not_pushed_to_recent_ring` `test_decode_dictionary_reference_preserves_distance_ring` |
 
 ---
 
@@ -119,6 +126,8 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 52 |
-| **合計** | **52** |
+| ✅ 実装+テスト済み  | 59 |
+| ⚠️ 部分実装  | 0 |
+| ❌ 未実装  | 0 |
+| **合計** | **59** |
 

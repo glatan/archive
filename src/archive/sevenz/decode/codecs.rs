@@ -22,7 +22,7 @@ use super::{
     METHOD_7Z_AES, METHOD_BCJ_ARM, METHOD_BCJ_ARM64, METHOD_BCJ_ARMTHUMB, METHOD_BCJ_IA64,
     METHOD_BCJ_POWERPC, METHOD_BCJ_RISCV, METHOD_BCJ_SPARC, METHOD_BCJ_X86, METHOD_BCJ2_X86,
     METHOD_BROTLI, METHOD_BZIP2, METHOD_COPY, METHOD_DEFLATE, METHOD_DEFLATE64, METHOD_DELTA,
-    METHOD_LZMA, METHOD_LZMA2, METHOD_PPMD,
+    METHOD_LZMA, METHOD_LZMA2, METHOD_PPMD, METHOD_ZSTD,
 };
 
 pub(super) fn decode_folder(
@@ -350,6 +350,20 @@ pub(super) fn decode_coder(
             ));
         }
         crate::compress::bzip2::decode::decode(&inputs[0])?
+    } else if coder.method_id == METHOD_ZSTD {
+        if inputs.len() != 1 {
+            return Err(Error::Unsupported(
+                "7z: non-BCJ2 multi-input coder methods are not supported",
+            ));
+        }
+        #[cfg(feature = "zstd")]
+        {
+            crate::compress::zstd::decode::decode(&inputs[0])?
+        }
+        #[cfg(not(feature = "zstd"))]
+        {
+            return Err(Error::Unsupported("7z: zstd feature not enabled"));
+        }
     } else if coder.method_id == METHOD_BROTLI {
         if inputs.len() != 1 {
             return Err(Error::Unsupported(

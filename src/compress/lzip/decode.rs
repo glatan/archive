@@ -88,6 +88,7 @@ pub fn decode(data: &[u8]) -> Result<Vec<u8>, Error> {
     }
 
     // Decode each member
+    let mut member_count = 0usize;
     loop {
         if pos >= data.len() {
             break;
@@ -199,6 +200,13 @@ pub fn decode(data: &[u8]) -> Result<Vec<u8>, Error> {
         let actual_member_size = (pos - member_start) as u64;
         if actual_member_size != expected_member_size {
             return Err(Error::InvalidData("lzip: member size mismatch"));
+        }
+
+        // Lzip manual ch.5: a multimember file cannot contain empty
+        // members (a member whose data size is zero).
+        member_count += 1;
+        if decoded.is_empty() && (member_count > 1 || pos < data.len()) {
+            return Err(Error::InvalidData("lzip: empty member in multimember file"));
         }
 
         output.extend_from_slice(&decoded);
@@ -386,6 +394,34 @@ mod tests {
         expected.extend_from_slice(data1);
         expected.extend_from_slice(data2);
         assert_eq!(decompressed, expected);
+    }
+
+    /// Lzip manual ch.5: a multimember file cannot contain empty
+    /// members. An empty member before or after a non-empty member is
+    /// rejected; a file consisting of a single empty member is accepted.
+    #[test]
+    fn test_empty_member_in_multimember_rejected() {
+        use super::super::encode;
+        let empty_member = encode::encode(b"");
+        let member = encode::encode(b"non-empty member");
+
+        // Single-member file containing only an empty member is fine.
+        assert!(decode(&empty_member).unwrap().is_empty());
+
+        for combined in [
+            {
+                let mut c = empty_member.clone();
+                c.extend_from_slice(&member);
+                c
+            },
+            {
+                let mut c = member.clone();
+                c.extend_from_slice(&empty_member);
+                c
+            },
+        ] {
+            assert!(matches!(decode(&combined), Err(Error::InvalidData(_))));
+        }
     }
 
     #[test]

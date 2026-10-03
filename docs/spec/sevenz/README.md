@@ -4,7 +4,7 @@
 |------|------|
 | 基準仕様 | [`7zFormat.txt`](https://raw.githubusercontent.com/ip7z/7zip/main/DOC/7zFormat.txt) / [`Methods.txt`](https://raw.githubusercontent.com/ip7z/7zip/main/DOC/Methods.txt) ([LZMA SDK](https://www.7-zip.org/sdk.html) 26.00 同梱文書、GitHub mirror: ip7z/7zip。ローカルスナップショット: `docs/spec/sources/7zformat.txt` / `7z_methods.txt`) |
 | current scope | multi-folder decode (supported single-output DAG subset)、multi-folder linear writer (arbitrary split points)、supported codec/filter chain (LZMA2, LZMA, PPMdH, Copy, Deflate, Deflate64, BZip2 + x86/PowerPC/ARM/ARM-Thumb/SPARC/ARM64/RISC-V BCJ, Delta, BCJ2, Brotli) + 7zAES file-content / encoded-header encrypt + timestamp metadata (ctime/atime/mtime) |
-| intentional exclusion | folder 間で stream を共有する non-linear DAG writer、empty-stream/directory/anti-item entries、external stream/folder lists、Deflate64 拡張域 encode (code 285 / 64KB distance) |
+| intentional exclusion | folder 間で stream を共有する non-linear DAG writer、empty-stream/directory/anti-item entries、external stream/folder lists、Deflate64 拡張域 encode (code 285 / 64KB distance)。Methods.txt で定義済みの未対応 method ID 群 (Swap2/Swap4、Alpha、M68、Zip 系 Shrink/Implode/Imploding/LZMA-zip、ZSTD `04 01 5D`、xz `04 01 5F`、Jpeg/WavPack/PPMd-zip/wzAES、Rar1-5、Arj、NSIS、LZHAM、LZ4/LZ5/LIZARD、AES-128/192/ECB/CFB/OFB/CTR `06 F0 01 xx`、ZipCrypto、Rar29AES 等) は #69/#70 の generic reject でカバー。BCJ short-form ID (`04`-`09`) も未受理 (long-form `03 03 xx yy` + `0A`/`0B` のみ) |
 
 ## 対応バリアント・仕様版
 
@@ -130,6 +130,7 @@
 | 47 | kDummy (0x19): parsed, skipped | 7zFormat.txt: FilesInfo / kDummy | ✅ | パース対応。ダミーレコードを正しくスキップ |
 | 48 | External name streams (external=1): reject | 7zFormat.txt: FilesInfo / kName | ✅ | `test_parse_names_property_rejects_external_streams` |
 | 49 | External attributes (external=1): reject | 7zFormat.txt: FilesInfo / kWinAttributes | ✅ | `test_parse_attributes_property_rejects_external_streams` |
+| 49a | kCTime/kATime/kMTime の External flag (external=1 → DataStreamIndex): reject | 7zFormat.txt: FilesInfo / kCTime | ✅ | `parse.rs` で `"7z: external timestamps are not supported"` として reject |
 
 ---
 
@@ -151,7 +152,7 @@
 | 54 | LZMA (0x03 0x01 0x01): 5B props (lc/lp/pb + dict_size LE), decode with external unpack size | Methods.txt: LZMA | ✅ | `test_decode_raw_lzma_archive` |
 | 55 | LZMA2 (0x21): 1B props (dict exponent 0-40), encode/decode | Methods.txt: LZMA2 | ✅ | self roundtrip + system fixture |
 | 56 | PPMdH (0x03 0x04 0x01): 2B props (order + mem_size LE), encode/decode | Methods.txt: PPMd | ✅ | `test_decode_roundtrip_with_ppmd_method`, `test_encode_ppmd_method_roundtrip`, system interop |
-| 57 | x86 BCJ (0x04): encode/decode, 1-in/1-out filter | Methods.txt: BCJ | ✅ | `test_decode_roundtrip_with_bcj_filter`, `test_sevenz_x86_bcj_filter_system_extract_compat` |
+| 57 | x86 BCJ (`03 03 01 03`): encode/decode, 1-in/1-out filter | Methods.txt: BCJ (long-form ID; short-form `04` は未受理) | ✅ | `test_decode_roundtrip_with_bcj_filter`, `test_sevenz_x86_bcj_filter_system_extract_compat` |
 | 58 | Delta (0x03): 1B props (distance-1, range 1-256), encode/decode | Methods.txt: Delta | ✅ | `test_decode_roundtrip_with_delta_filter`, `test_encode_delta_distance_256_roundtrip` |
 | 59 | BCJ2 (0x03 0x03 0x01 0x1B): 4-input/1-output, decode-only | Methods.txt: BCJ2 | ✅ | `test_decode_bcj2_type0_copy_archive`, `test_decode_bcj2_with_lzma_main_chain_archive` |
 | 60 | 7zAES (0x06 0xF1 0x07 0x01): SHA-256 KDF + AES-256-CBC, encode/decode | Methods.txt: 7zAES | ✅ | `test_encode_encrypted_roundtrip`, `test_sevenz_encrypted_archive_system_extract_compat` |
@@ -164,14 +165,14 @@
 
 | # | 仕様要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|---------|---------|------|----------------|
-| 63 | PowerPC BCJ (0x04 0x02) | Methods.txt: BCJ PPC | ✅ | decode + encode: `SevenZFilter::PowerPcBcj`, `test_encode_powerpc_bcj_roundtrip` |
-| 64 | IA64 BCJ (0x04 0x01) | Methods.txt: BCJ IA64 | ✅ | decode + encode: `SevenZFilter::Ia64Bcj`, `test_encode_ia64_bcj_roundtrip` |
-| 65 | ARM BCJ (0x04 0x05) | Methods.txt: BCJ ARM | ✅ | decode + encode: `SevenZFilter::ArmBcj` |
-| 66 | ARM-Thumb BCJ (0x04 0x08) | Methods.txt: BCJ ARMT | ✅ | decode + encode: `SevenZFilter::ArmThumbBcj` |
-| 67 | SPARC BCJ (0x04 0x04) | Methods.txt: BCJ SPARC | ✅ | decode + encode: `SevenZFilter::SparcBcj` |
-| 67a | ARM64 BCJ (0x04 0x09) | Methods.txt: BCJ ARM64 | ✅ | decode + encode: `SevenZFilter::Arm64Bcj` |
-| 67b | RISC-V BCJ (0x04 0x0B) | Methods.txt: BCJ RISC-V | ✅ | decode + encode: `SevenZFilter::RiscVBcj` |
-| 68 | Brotli (0x04 0xF7 0x11 0x01) | Methods.txt: Brotli | ✅ | decode + encode (`brotli` feature): `SevenZMethod::Brotli`, `test_encode_brotli_method_roundtrip` |
+| 63 | PowerPC BCJ (`03 03 02 05`; Methods.txt short-form `05`) | Methods.txt: BCJ PPC | ✅ | decode + encode: `SevenZFilter::PowerPcBcj`, `test_encode_powerpc_bcj_roundtrip` |
+| 64 | IA64 BCJ (`03 03 04 01`; Methods.txt short-form `06`) | Methods.txt: BCJ IA64 | ✅ | decode + encode: `SevenZFilter::Ia64Bcj`, `test_encode_ia64_bcj_roundtrip` |
+| 65 | ARM BCJ (`03 03 05 01`; Methods.txt short-form `07`) | Methods.txt: BCJ ARM | ✅ | decode + encode: `SevenZFilter::ArmBcj` |
+| 66 | ARM-Thumb BCJ (`03 03 07 01`; Methods.txt short-form `08`) | Methods.txt: BCJ ARMT | ✅ | decode + encode: `SevenZFilter::ArmThumbBcj` |
+| 67 | SPARC BCJ (`03 03 08 05`; Methods.txt short-form `09`) | Methods.txt: BCJ SPARC | ✅ | decode + encode: `SevenZFilter::SparcBcj` |
+| 67a | ARM64 BCJ (`0A`) | Methods.txt: BCJ ARM64 | ✅ | decode + encode: `SevenZFilter::Arm64Bcj` |
+| 67b | RISC-V BCJ (`0B`) | Methods.txt: BCJ RISC-V | ✅ | decode + encode: `SevenZFilter::RiscVBcj` |
+| 68 | Brotli (`04 F7 11 xx`) | Methods.txt: External codecs `F7 11` (Tino Reichardt) | ✅ | pinned Methods.txt に整合: `04 F7 11 02` を Brotli、`04 F7 11 01` を ZSTD (zstd feature 時は decode 対応) として扱う。encode は `02` を emit。`test_encode_brotli_method_roundtrip` |
 | 68a | Deflate (0x04 0x01 0x08): no properties, encode/decode | Methods.txt: Deflate | ✅ | `SevenZMethod::Deflate`, `test_decode_folder_deflate_method`, `test_encode_deflate_method_roundtrip`, system interop |
 | 68b | Deflate64 (0x04 0x01 0x09): no properties, encode/decode | Methods.txt: Deflate64 + PKWARE APPNOTE §5.6 (概要) + Info-ZIP deflate64 de facto 挙動 (距離コード 30/31・14bit 拡張・長さコード 285・16bit 拡張は APPNOTE 未記載のため参照実装観察に基づく)。encode は DEFLATE 互換 subset (code 285 不使用・32KB window) | ✅ | `test_decode_folder_deflate64_method`, `test_sevenz_deflate64_method_system_decode_compat`, `test_encode_deflate64_method_roundtrip`, `roundtrip_long_runs`, `test_sevenz_deflate64_method_system_extract_compat` |
 | 68c | BZip2 (0x04 0x02 0x02): no properties, encode/decode | Methods.txt: BZip2 | ✅ | `SevenZMethod::Bzip2`, `test_decode_folder_bzip2_method`, `test_encode_bzip2_method_roundtrip`, system interop |
@@ -254,7 +255,7 @@
 | 110 | crate encode (PPMd) → system `7z` extract | system interop | ✅ | `test_sevenz_ppmd_method_system_extract_compat` |
 | 111 | crate encode (x86 BCJ) → system `7z` extract | system interop | ✅ | `test_sevenz_x86_bcj_filter_system_extract_compat` |
 | 112 | crate encode (Delta) → system `7z` extract | system interop | ✅ | `test_sevenz_delta_filter_system_extract_compat` |
-| 113 | crate encode (two-folder + encrypted/encoded-header/PPMd/BCJ/Delta combinations) → system `7z` extract | system interop | ✅ | 20+ two-folder system interop tests |
+| 113 | crate encode (two-folder + encrypted/encoded-header/PPMd/BCJ/Delta combinations) → system `7z` extract | system interop | ✅ | tests/integration/sevenz.rs の two-folder system テスト 16 件 (multi-folder 込みで 17) |
 | 114 | system `7z` encode (Deflate / Deflate64 / BZip2) → crate decode | system interop | ✅ | `test_sevenz_deflate_method_system_decode_compat`, `test_sevenz_deflate64_method_system_decode_compat`, `test_sevenz_bzip2_method_system_decode_compat` |
 | 115 | crate encode (Deflate / Deflate64 / BZip2) → system `7z` extract | system interop | ✅ | `test_sevenz_deflate_method_system_extract_compat`, `test_sevenz_deflate64_method_system_extract_compat`, `test_sevenz_bzip2_method_system_extract_compat` |
 
@@ -264,7 +265,8 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 120 |
-| **合計** | **120** |
+| ✅ 実装+テスト済み  | 121 |
+| ⚠️ 部分実装  | 0 |
+| **合計** | **121** |
 
-**カバー率**: 120 / 120 = **100%** (仕様全体)
+**カバー率**: 121 / 121 = **100%** (仕様全体)

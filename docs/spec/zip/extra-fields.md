@@ -15,6 +15,7 @@
 | 99 | Header ID 0x7075: Info-ZIP Unicode Path | §4.6.9 | ✅ | decode: `ZipHeader.unicode_path` に公開。encode: extra field 0x7075 書き込み対応 |
 | 100 | Header ID 0x9901: WinZip AES | Appendix E | ✅ | `test_roundtrip_aes_encrypted_single_file` |
 | 101 | 未知 extra field: スキップ (round-trip しない) | §4.5 | ✅ | パーサーで skip |
+| 157 | Header ID 0x000b/0x000c (OS/2 Extended Attributes / OpenVMS)、0x0009 (OS/2 ACL) 等のシステム固有 extra field の意味解釈 | §4.5.8-4.5.10 | ❌ intentional scope | 未知 ID として読み飛ばし (#101)。ホスト固有属性は `external_attributes` で独立に保持 |
 | 153 | ZIP64 extra field: conditional presence (sentinel 値の場合のみ出現) | §4.5.3 | ✅ | `parse_zip64_extra()` で `need_compressed`/`need_uncompressed`/`need_offset` フラグで制御 |
 | 154 | Unicode Comment Extra Field (0x6375) | §4.6.8 | ✅ | decode: `ZipHeader.unicode_comment` に公開。encode: `ZipEntryOptions.unicode_comment` で 0x6375 書き込み対応。`test_unicode_comment_roundtrip`, `test_reencode_preserves_extra_fields` |
 

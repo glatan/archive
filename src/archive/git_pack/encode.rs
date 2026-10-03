@@ -186,8 +186,9 @@ impl GitPackEncoder {
         (pack, idx)
     }
 
-    /// Finish and also produce a legacy v1 `.idx` file
-    /// (fanout + `u32 offset + 20-byte id` rows, no checksums).
+    /// Finish and also produce a legacy v1 `.idx` file (fanout +
+    /// `u32 offset + 20-byte id` rows + the 40-byte trailer holding
+    /// the pack checksum and idx checksum).
     ///
     /// # Errors
     ///
@@ -199,7 +200,7 @@ impl GitPackEncoder {
         }
         let records = self.records.clone();
         let pack = self.finish();
-        let idx = encode_idx_v1(&records);
+        let idx = encode_idx_v1(&records, &pack);
         Ok((pack, idx))
     }
 }
@@ -269,10 +270,11 @@ fn encode_idx(records: &[(Vec<u8>, u32, u64)], pack: &[u8], hash: decode::HashKi
     idx
 }
 
-/// Build a legacy v1 `.idx` file: fanout table then `u32 offset +
-/// 20-byte SHA-1` rows sorted by object name. v1 has no magic, no
-/// CRC32 table, and no checksums.
-fn encode_idx_v1(records: &[(Vec<u8>, u32, u64)]) -> Vec<u8> {
+/// Build a legacy v1 `.idx` file for `records` over the completed
+/// `pack` bytes: fanout table, `u32 offset + 20-byte SHA-1` rows
+/// sorted by object name, then the 40-byte trailer (pack checksum +
+/// idx checksum). v1 has no magic and no CRC32 table.
+fn encode_idx_v1(records: &[(Vec<u8>, u32, u64)], pack: &[u8]) -> Vec<u8> {
     let mut sorted: Vec<&(Vec<u8>, u32, u64)> = records.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -293,6 +295,10 @@ fn encode_idx_v1(records: &[(Vec<u8>, u32, u64)]) -> Vec<u8> {
         idx.extend_from_slice(&(r.2 as u32).to_be_bytes());
         idx.extend_from_slice(&r.0);
     }
+    // Trailer: the pack checksum (the .pack's own trailing SHA-1)
+    // then the idx checksum over everything before it.
+    idx.extend_from_slice(&pack[pack.len() - 20..]);
+    idx.extend_from_slice(&crate::util::sha1::sha1(&idx));
     idx
 }
 
@@ -592,6 +598,14 @@ mod tests {
         enc.add_object(ObjectType::Blob, b"two");
         enc.add_object(ObjectType::Blob, b"three");
         let (pack, idx) = enc.finish_with_index_v1().unwrap();
+        // Spec trailer: embedded pack checksum then the idx checksum
+        // (SHA-1 of everything before it).
+        let n = idx.len();
+        assert_eq!(idx[n - 40..n - 20], pack[pack.len() - 20..]);
+        assert_eq!(
+            crate::util::sha1::sha1(&idx[..n - 20]).as_slice(),
+            &idx[n - 20..]
+        );
         let entries = decode::decode_idx_v1(&idx).unwrap();
         assert_eq!(entries.len(), 3);
         // v1 has no magic; sorted by name with valid offsets.

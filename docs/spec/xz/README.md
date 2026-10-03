@@ -34,7 +34,7 @@
 | 13 | Input too short error | xz-file-format.txt: Stream Header | ✅ | `test_input_too_short` |
 | 14 | Backward Size validation: (stored_value + 1) * 4 must match Index size | xz-file-format.txt §6.1 | ✅ | decode で `backward_size_raw` を計算し Index サイズと照合 |
 | 15 | Backward Size field encoding formula | xz-file-format.txt §6.1 | ✅ | `((backward_size_raw as usize) + 1) * 4` で実装 |
-| 16 | Filter ID ranges: 0x00-0x3F standard, 0x40-0x7F reserved | xz-file-format.txt §5.3 | ✅ | reserved range (0x40-0x7F) を `Unsupported` で reject。`test_reserved_filter_id_rejected`, `test_reserved_filter_id_boundary` |
+| 16 | Filter ID ranges: 0x00-0x3F standard。本実装は 0x40-0x7F を `Unsupported` で reject (安全側)。正式な予約範囲は §3.1.5 (≥2^62) と §5.4.1 (0x0000_0300-0x0000_04FF, 0x0002_0000-0x0007_FFFF, 0x0200_0000-0x07FF_FFFF) | xz-file-format.txt §3.1.5 / §5.4.1 | ✅ | `test_reserved_filter_id_rejected`, `test_reserved_filter_id_boundary`。§5.4.1 の reserved range は decode では Unknown filter 経由で実質 reject |
 
 ### ブロック構造
 
@@ -109,6 +109,10 @@
 | 53 | ファイル全体サイズは 4 バイトの倍数 | xz-file-format.txt §2 | ✅ | `input.len().is_multiple_of(4)` で検証、不一致で InvalidData |
 | 54 | ストリームサイズ上限 8 EiB (2^63 bytes) | xz-file-format.txt §2.1 | ✅ | 実用上到達不可能。u64 範囲内で処理 |
 | 55 | Filter chain security: 非最終フィルターのうちサイズ変更可能なものは最大 2 個 | xz-file-format.txt §5.2 | ✅ | フィルター設計者向け MUST。標準フィルター (BCJ/Delta) はサイズ保存のため構造的に充足。custom registry 経由のフィルターは登録側責務であり crate は件数を強制しない (liblzma も decode 時に強制しない) |
+| 56 | Block Header Padding は MUST null (ゼロ) バイト | xz-file-format.txt §3.1.6 | ✅ | `decode.rs` で non-zero block header padding を reject |
+| 57 | BCJ/Delta は最終フィルターにできない (Allow as the last filter: No → 最終は LZMA2 のみ) | xz-file-format.txt §5.3.2 / §5.3.3 | ✅ | `parse_filter` の `is_last` チェック、`test_parse_unknown_final_filter_rejected` |
+| 58 | Filter IDs ≥ 2^62 (0x4000_0000_0000_0000) は List of Filter Flags で使用禁止 | xz-file-format.txt §3.1.5 | ✅ | 実装済み — `FILTER_ID_RESERVED_START` (2^62) 以上を `Error::InvalidData` で reject (parse/validate/registry)。`test_reserved_high_filter_id_rejected` `test_block_header_reserved_high_filter_id_rejected` |
+| 59 | Index field 最大 16 GiB (2^34) | xz-file-format.txt §2.1 | ❌ | 未検証・未記載 (実用上到達不可能に近い intentional scope 相当) |
 
 ---
 
@@ -116,5 +120,6 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 55 |
-| **合計** | **55** |
+| ✅ 実装+テスト済み  | 58 |
+| ❌ 未実装  | 1 |
+| **合計** | **59** |

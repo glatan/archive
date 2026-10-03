@@ -27,6 +27,12 @@ pub(crate) const FILTER_RISCV: u64 = 0x0B;
 /// xz LZMA2 filter ID.
 pub(crate) const FILTER_LZMA2: u64 = 0x21;
 
+/// First filter ID in the range reserved for implementation-dependent
+/// internal use (xz-file-format.txt §3.1.5). Filter IDs in
+/// `FILTER_ID_RESERVED_START..` must never appear in a List of Filter
+/// Flags, so a stream carrying one is malformed data.
+pub(crate) const FILTER_ID_RESERVED_START: u64 = 0x4000_0000_0000_0000;
+
 /// Supported pre-LZMA2 xz block filters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Filter {
@@ -100,6 +106,9 @@ impl Filter {
             }
             Self::Delta { distance } if (1..=256).contains(distance) => Ok(()),
             Self::Delta { .. } => Err(Error::InvalidData("xz: delta distance must be 1..=256")),
+            Self::Unknown { id, .. } if *id >= FILTER_ID_RESERVED_START => {
+                Err(Error::InvalidData("xz: reserved filter ID (>= 2^62)"))
+            }
             Self::Unknown { .. } => Ok(()),
         }
     }
@@ -353,6 +362,29 @@ mod tests {
             Err(Error::InvalidData(msg)) if msg.contains("not aligned")
         ));
         assert!(Filter::RiscV { start_offset: 2 }.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_unknown_reserved_high_id_rejected() {
+        // xz-file-format.txt §3.1.5: Filter IDs >= 2^62 must never appear
+        // in a List of Filter Flags, so emitting one is invalid too.
+        assert!(matches!(
+            Filter::Unknown {
+                id: FILTER_ID_RESERVED_START,
+                properties: vec![],
+            }
+            .validate(),
+            Err(Error::InvalidData("xz: reserved filter ID (>= 2^62)"))
+        ));
+        // The largest usable Filter ID remains a valid custom ID.
+        assert!(
+            Filter::Unknown {
+                id: FILTER_ID_RESERVED_START - 1,
+                properties: vec![],
+            }
+            .validate()
+            .is_ok()
+        );
     }
 
     #[test]

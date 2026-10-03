@@ -608,6 +608,29 @@ mod tests {
     }
 
     #[test]
+    fn test_complex_prefix_repeat_previous_overflow_rejected() {
+        // RFC 7932 section 3.5: a repeat-previous-non-zero code (16)
+        // whose repeat count would extend past the end of the alphabet
+        // must be rejected as "code length repeat overflow".
+        let mut lengths = vec![0u8; 18];
+        lengths[8] = 1;
+        lengths[16] = 1;
+        let table = HuffmanTable::from_code_lengths(&lengths, 5).unwrap();
+
+        let mut bits = Vec::new();
+        push_bits(&mut bits, 0, 1); // code length 8 for symbol 0
+        push_bits(&mut bits, 1, 1); // symbol 16 (repeat previous non-zero)
+        push_bits(&mut bits, 3, 2); // repeat 6 times -> index 7 > alphabet 4
+        let bytes = bits_to_bytes(&bits);
+        let mut reader = BitReader::new(&bytes);
+        let result = read_code_lengths(&mut reader, &table, 4);
+        assert!(
+            matches!(&result, Err(Error::InvalidData(msg)) if msg.contains("repeat overflow")),
+            "expected code length repeat overflow rejection, got {result:?}"
+        );
+    }
+
+    #[test]
     fn test_repeat_count_resets_between_16_and_17() {
         let mut table_lengths = vec![0u8; 18];
         table_lengths[2] = 1;

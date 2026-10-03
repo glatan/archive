@@ -90,14 +90,15 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 49 | Legacy frame format (magic 0x184C2102) | LZ4 Legacy Frame | ✅ | `LEGACY_MAGIC` 定数、decode: `decode_legacy_frame()`、encode: `encode_legacy()` / `encode_legacy_with_options()` |
+| 49 | Legacy frame format (magic 0x184C2102)。legacy ブロックは 8MB 固定・最終ブロック以外は全埋め | LZ4 Legacy Frame | ✅ | `LEGACY_MAGIC` 定数、decode: `decode_legacy_frame()`、encode: `encode_legacy()` / `encode_legacy_with_options()` (`LEGACY_BLOCK_SIZE = 8MB` で chunked) |
 | 50 | Content_Size mismatch error (decode 時に検証) | LZ4 Frame: Content_Size | ✅ | デコーダーで検証 |
-| 51 | Block decompressed size ≤ Block_MaxSize 検証 | LZ4 Frame: Data Blocks | ✅ | デコーダーで検証 |
+| 51 | Block decompressed size ≤ Block_MaxSize 検証 | LZ4 Frame: Data Blocks | ✅ | 実装済み — `decompress_block` の `max_output` に Block_MaxSize を適用、展開超過は `Error::InvalidData`。`test_block_decompressed_size_exceeds_max_rejected` `test_block_size_at_max_accepted` |
 | 52 | Block_MaxSize ID → size mapping: 4=64KB, 5=256KB, 6=1MB, 7=4MB | LZ4 Frame: BD | ✅ | 実装済み |
 | 53 | Header checksum algorithm: (xxhash32 >> 8) & 0xFF | LZ4 Frame: HC | ✅ | 実装済み |
 | 54 | Multi-frame (concatenated frames) | LZ4 Frame | ✅ | `test_multi_frame_standard_concat`, `test_multi_frame_legacy_then_standard`, `test_multi_frame_standard_then_legacy`, `test_multi_frame_three_legacy` |
 | 55 | Block-dependent mode: encode | LZ4 Frame: FLG | ✅ | `encode_block_dependent()`, `test_block_dependent_header_flag`, `test_block_dependent_roundtrip`, `test_block_dependent_roundtrip_large`, `test_block_dependent_with_block_sizes` |
-| 56 | Block_Size が Block_Maximum_Size を超えない | LZ4 Frame Format §Data Blocks | ✅ | デコーダーで block size 検証 |
+| 56 | Block_Size が Block_Maximum_Size を超えない | LZ4 Frame Format §Data Blocks | ✅ | 実装済み — ブロックループで宣言 Block_Size > Block_MaxSize を reject (圧縮/非圧縮共通、EOF チェックより前)。`test_block_size_exceeds_max_rejected` `test_uncompressed_block_size_exceeds_max_rejected` |
+| 57 | `0x80000000` (bit31=1, size=0) は有効な空非圧縮ブロックで EndMark ではない | LZ4 Frame Format §Data Blocks | ✅ | 実装は `block_data_size==0` → 0 バイト extend で自然に受理 |
 
 ---
 
@@ -105,8 +106,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 58 |
-| **合計** | **58** |
+| ✅ 実装+テスト済み  | 59 |
+| ❌ 未実装  | 0 |
+| **合計** | **59** |
 
 
 ---

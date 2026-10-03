@@ -189,6 +189,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<TarEntry>, Error> {
                     if let Some(attrs) = pending_pax_attrs.take() {
                         merged_attrs.extend(attrs);
                     }
+                    let merged_attrs = effective_pax_attrs(merged_attrs);
                     apply_pax_attributes(&mut header, &merged_attrs);
                     apply_sparse_pax_attributes(&mut header, &merged_attrs);
                 }
@@ -199,6 +200,20 @@ pub fn decode(input: &[u8]) -> Result<Vec<TarEntry>, Error> {
     }
 
     Ok(entries)
+}
+
+/// Resolve PAX attribute lists per POSIX.1-2008: an extended-header
+/// record with an empty value deletes the attribute (the field from
+/// the ustar header is used), and later records override earlier ones.
+fn effective_pax_attrs(attrs: Vec<(String, String)>) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for (key, value) in attrs {
+        out.retain(|(k, _)| k != &key);
+        if !value.is_empty() {
+            out.push((key, value));
+        }
+    }
+    out
 }
 
 /// Apply PAX extended attributes to a tar header, overriding octal-encoded values.
@@ -1093,6 +1108,37 @@ mod tests {
         assert_eq!(entries[0].header.uname, "globaluser");
         // Per-entry overrides global
         assert_eq!(entries[1].header.uname, "localuser");
+    }
+
+    /// POSIX.1-2008: an extended-header record with an empty value
+    /// deletes the attribute; the ustar header field is used instead.
+    #[test]
+    fn test_pax_empty_value_deletes_attribute() {
+        use crate::archive::tar::encode::{TarEncoder, TarEntryOptions};
+
+        let entry_pax = b"9 uname=\n";
+        let mut encoder = TarEncoder::new();
+        encoder.add_file_with_options(
+            entry_pax,
+            &TarEntryOptions {
+                name: alloc::string::String::from("PaxHeaders.0/a.txt"),
+                file_type: FileType::PaxHeader,
+                ..Default::default()
+            },
+        );
+        encoder.add_file_with_options(
+            b"data",
+            &TarEntryOptions {
+                name: alloc::string::String::from("a.txt"),
+                uname: alloc::string::String::from("ustaruser"),
+                ..Default::default()
+            },
+        );
+        let archive = encoder.finish();
+        let entries = decode(&archive).unwrap();
+        assert_eq!(entries.len(), 1);
+        // Empty `uname=` must not clobber the ustar uname field.
+        assert_eq!(entries[0].header.uname, "ustaruser");
     }
 
     /// Decoding a zero-length byte slice succeeds with an empty entry list.

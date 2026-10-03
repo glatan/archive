@@ -31,6 +31,7 @@
 | 9 | `control.tar*` / `data.tar*` member の重複を reject | deb(5): single required member | ✅ | `rejects_duplicate_data_member` |
 | 10 | member 名は厳密一致 (`control.tar` or `control.tar.<ext>`、`control.tarball` 等は非該当) | deb(5): member naming | ✅ | `rejects_name_prefix_lookalikes` |
 | 11 | `debian-binary` / `control.tar*` / `data.tar*` 以外の member (署名 member 等) は `Other` として保持 | deb(5): "Programs may assume... additional members" | ✅ | `keeps_extra_members` |
+| 11a | member 順序 `debian-binary` → `control.tar*` → `data.tar*` (deb(5) canonical layout) | deb(5): "The second ... control.tar" / "The third ... data.tar" | ⚠️ | decode は `debian-binary` 先頭のみ強制し、control/data の位置は名前検索 (lenient)。encode 側 (#17) は canonical 順 emit |
 
 ### tar member の圧縮
 

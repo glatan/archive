@@ -65,8 +65,10 @@
 | 31 | Copy-4 length = (bits 2-7) + 1, range 1-64 | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt): Copy-4 | ✅ | encode/decode 実装 |
 | 32 | Framing: compressed chunk max payload ~76,490B (65,536 * ~1.17) | [`framing_format.txt`](https://raw.githubusercontent.com/google/snappy/main/framing_format.txt): Compressed data | ✅ | エンコーダーで chunk 分割 |
 | 33 | Copy-1 max offset: 2047 (11 bits) / Copy-2 max offset: 65535 (u16) / Copy-4 max offset: u32 | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt): Copy tags | ✅ | フィールド幅で暗黙的 |
-| 34 | Preamble varint max decoded length: 2^32 - 1 | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt): Preamble | ✅ | u32 範囲で処理 |
+| 34 | Preamble varint max decoded length: 2^32 - 1 | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt): Preamble | ✅ | preamble varint > 2^32-1 は `Error::InvalidData` で reject (確保サイズとして信用しない)。`test_raw_preamble_over_u32_max_rejected` |
 | 35 | Padding chunk (0xFE): データ内容を検証しない | [`framing_format.txt`](https://raw.githubusercontent.com/google/snappy/main/framing_format.txt) §4.4 | ✅ | skippable chunk として読み飛ばし (0x80..=0xFE の range に包含) |
+| 36 | copy offset > 現在の出力位置は不正 ("not allowed") | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt) §2.2 | ✅ | `decode.rs:180` `offset > output.len()` で reject |
+| 37 | preamble 達成後の trailing bytes reject | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt) | ✅ | `decode.rs:139` + `test_snappy_raw_decode_rejects_trailing_bytes` |
 
 ---
 
@@ -74,5 +76,6 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 35 |
-| **合計** | **35** |
+| ✅ 実装+テスト済み  | 37 |
+| ⚠️ 部分実装  | 0 |
+| **合計** | **37** |

@@ -151,7 +151,7 @@
 | 88 | 大入力の複数ブロック分割 (128KB境界) | RFC 8878 §3.1.1 / §3.1.1.2-§3.1.1.5 / §4.1 / §4.2 / §5 | ✅ | `test_roundtrip_large` |
 | 89 | XXH64 コンテンツチェックサム生成 | RFC 8878 §3.1.1 / §3.1.1.2-§3.1.1.5 / §4.1 / §4.2 / §5 | ✅ | `test_checksum_present` |
 | 90 | encode_writer (std::io::Write 対応) | RFC 8878 §3.1.1 / §3.1.1.2-§3.1.1.5 / §4.1 / §4.2 / §5 | ✅ | `test_encode_writer` |
-| 91 | エンコード→デコード ラウンドトリップ | RFC 8878 §3.1.1 / §3.1.1.2-§3.1.1.5 / §4.1 / §4.2 / §5 | ✅ | `test_roundtrip_*` (7テスト) |
+| 91 | エンコード→デコード ラウンドトリップ | RFC 8878 §3.1.1 / §3.1.1.2-§3.1.1.5 / §4.1 / §4.2 / §5 | ✅ | `test_roundtrip_*` (11テスト) |
 | 92 | public encoder: LZ77 圧縮ブロック生成 (Compressed block type) | RFC 8878 §3.1.1 / §3.1.1.2-§3.1.1.5 / §4.1 / §4.2 / §5 | ✅ | `test_public_encoder_emits_compressed_block_for_compressible_input`, `test_roundtrip_repetitive`, `test_roundtrip_prose` |
 | 93 | public encoder: 事前定義FSEテーブルによるシーケンスエンコード (mode=0) | RFC 8878 §3.1.1 / §3.1.1.2-§3.1.1.5 / §4.1 / §4.2 / §5 | ✅ | public path は predefined-table block を生成。`test_public_encoder_emits_compressed_block_for_compressible_input`, `test_roundtrip_prose` |
 | 94 | Raw_Literals_Block 生成 | RFC 8878 §3.1.1 / §3.1.1.2-§3.1.1.5 / §4.1 / §4.2 / §5 | ✅ | `test_roundtrip_repetitive` |
@@ -192,6 +192,20 @@
 | 124 | FSE テーブル: 累積確率超過で corruption エラー | RFC 8878 §4.1.1 | ✅ | remaining != 1 チェックにより "FSE probabilities do not sum to table size" で InvalidData |
 | 125 | FSE テーブル: デコード済みシンボル数の検証 | RFC 8878 §4.1.1 | ✅ | `symbol > max_symbol + 1` で InvalidData |
 | 126 | 4-stream Jump_Table: ストリームサイズ合計超過で corruption エラー | RFC 8878 §3.1.1.3.1.6 | ✅ | `s3_end > stream_data.len()` で InvalidData |
+| 127 | Frame_Header_Descriptor の unused bit (bit 4) は decoder が解釈しない | RFC 8878 §3.1.1.1.1.3 | ✅ | bit3 のみ検査し bit4 は無視 |
+| 128 | 各 frame は少なくとも 1 ブロックを持つ | RFC 8878 §3.1.1.2 | ✅ | decode ループ構造上暗黙に強制 |
+| 129 | literals ヘッダ byte0==0 のとき Repeat_Mode の FSE テーブルは更新されない | RFC 8878 §3.1.1.3.2.1 | ✅ | decode.rs の早期 return パス |
+| 130 | Raw/RLE ブロックは offset history (repeat offsets) に寄与しない | RFC 8878 §3.1.1.5 | ✅ | rep_offsets は compressed block 内でのみ変更 |
+| 131 | Repeat_Mode は直前モード (RLE/Predefined 含む) のテーブルを再利用する | RFC 8878 §3.1.1.3.2.1 | ✅ | `get_fse_table` が prev_table に常に格納 |
+| 132 | Huffman 重み用 FSE の max accuracy log = 6 | RFC 8878 §4.2.1.2 | ✅ | `from_bitstream(data, 12, 6)` |
+| 133 | raw content dictionary (magic なし、≥8 bytes) | RFC 8878 §5 | ✅ | `ZstdDict::from_content` |
+| 134 | Window_Size より大きい過去データへの offset は error (all offsets leading to previously decoded data must be smaller than Window_Size) | RFC 8878 §3.1.1.4 | ✅ | `execute_sequences_with_dict` で `output.len() > window_size` のとき `offset > window_size` を reject (RFC §5: output ≤ window の間は dict 領域を window 超 offset で参照可能)。`test_execute_offset_beyond_window_size` `test_execute_offset_within_window_size_ok` `test_compressed_block_offset_exceeds_window` |
+| 135 | dictionary は出力総量が Window_Size を超えた後はアクセス不可 | RFC 8878 §5 | ✅ | output.len() > window_size 以降は offset <= window_size のみ許容されるため dict 領域への参照は自動的に不可。`test_execute_dict_cutoff_after_window` `test_execute_dict_reference_allowed_before_window` |
+| 136 | FSE テーブル記述は nonzero probability を持つシンボルが 2 個以上必要 | RFC 8878 §4.1.1 | ✅ | `FseTable::from_probabilities` で nonzero < 2 を reject。RLE mode は別経路で影響なし。`test_from_probabilities_rejects_fewer_than_two_nonzero_symbols` `test_from_bitstream_rejects_single_symbol_description` |
+| 137 | dictionary の repeat offsets (rep1-3) は dictionary size 未満でなければならない | RFC 8878 §5 | ✅ | `ZstdDict::parse` で `rep == 0 || rep >= content.len()` を reject。`test_dict_parse_rep_offset_out_of_range` `test_dict_parse_rep_offset_zero` |
+| 138 | Dictionary_ID = 0 は dictionary magic 形式で無効 (`parse` 経路) | RFC 8878 §5 | ✅ | `ZstdDict::parse` で `id == 0` を reject。`test_dict_parse_zero_dictionary_id` |
+| 139 | decoder はメモリ要求を制限すべき (FCS に基づく無制限 reserve の禁止) | RFC 8878 §3.1.1.1.1.2 / §8 | ✅ | `decode_frame` は `try_reserve(min(FCS, 128 MiB))` にクランプ (MAX_WINDOW_SIZE と同値)、失敗は非致命で通常伸長にフォールバック。`test_decode_frame_huge_fcs_no_panic` |
+| 140 | reserved Dictionary_ID 範囲 (≤32767, ≥2^31) を参照する payload は error | RFC 8878 §3.1.1.1.3 | ✅ | `is_reserved_dictionary_id` で [1,32767] ∪ [2^31,2^32-1] を検出、dict 未提供なら reject。dict 提供で ID 一致なら受理。`test_decode_reserved_dictionary_id_no_dict` `test_decode_nonreserved_dictionary_id_boundaries` `test_decode_reserved_dictionary_id_with_matching_dict` |
 
 ---
 
@@ -199,6 +213,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 126 |
-| **合計** | **126** |
+| ✅ 実装+テスト済み  | 140 |
+| ❌ 未実装  | 0 |
+| **合計** | **140** |
 

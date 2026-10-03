@@ -65,6 +65,13 @@ fn parse_header(data: &[u8]) -> Result<Header, Error> {
     let unpacked_size = u64::from_le_bytes([
         data[5], data[6], data[7], data[8], data[9], data[10], data[11], data[12],
     ]);
+    // XZ Utils policy (lzma-file-format.txt §1.1.3): a known
+    // uncompressed size of 256 GiB or more is rejected.
+    if unpacked_size != UNKNOWN_SIZE && unpacked_size >= (256 << 30) {
+        return Err(Error::InvalidData(
+            "lzma: uncompressed size >= 256 GiB not supported",
+        ));
+    }
     Ok(Header {
         props,
         dict_size,
@@ -257,6 +264,15 @@ mod tests {
         let data = b"dict";
         let mut file = header_bytes(0x5D, 0, data.len() as u64);
         file.extend_from_slice(&stream_bytes(data, DEFAULT_DICT_SIZE));
+        assert!(matches!(decode(&file), Err(Error::InvalidData(_))));
+    }
+
+    /// XZ Utils policy: a declared uncompressed size of 256 GiB or
+    /// more is rejected before any decoding work.
+    #[test]
+    fn test_decode_rejects_oversized_known_size() {
+        let data = b"payload";
+        let file = file_bytes(data, DEFAULT_DICT_SIZE, 256 << 30);
         assert!(matches!(decode(&file), Err(Error::InvalidData(_))));
     }
 

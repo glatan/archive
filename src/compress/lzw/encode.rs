@@ -34,6 +34,12 @@ const FIRST_CODE: u16 = 257;
 /// Default maximum code bits.
 const DEFAULT_MAX_BITS: u8 = 16;
 
+/// Input-byte interval between compression-ratio checks, matching
+/// `CHECK_GAP` in compress42.c. In block mode the encoder re-evaluates
+/// the ratio every `CHECK_GAP` input bytes and emits a CLEAR code when
+/// the ratio has worsened since the previous check (adaptive reset).
+const CHECK_GAP: u64 = 10000;
+
 /// Compress data using LZW (Unix compress `.Z` format).
 ///
 /// Uses 16-bit maximum code size with block mode enabled.
@@ -90,7 +96,9 @@ pub fn encode_with_options(input: &[u8], max_bits: u8) -> Vec<u8> {
 /// Spark `0x7f` method, which wrap the stream in their own member
 /// records. `max_bits` is the maximum code width (9-16); `block_mode`
 /// reserves clear code 256 and emits it with the group-of-8 padding
-/// when the dictionary fills.
+/// when the dictionary fills or when the adaptive ratio check
+/// (CHECK_GAP input-byte intervals, compress42.c `cl_block()`) detects
+/// a worsening compression ratio.
 pub(crate) fn encode_body(input: &[u8], max_bits: u8, block_mode: bool) -> Vec<u8> {
     let max_bits = max_bits.clamp(9, 16);
     let max_code = (1u32 << max_bits) - 1;
@@ -189,12 +197,54 @@ pub(crate) fn encode_body(input: &[u8], max_bits: u8, block_mode: bool) -> Vec<u
         }
     };
 
+    // Emit the CLEAR code, align the output to the group-of-8 boundary,
+    // and reset the dictionary. Shared by the dict-full path and the
+    // adaptive ratio-check path.
+    let emit_clear = |bit_buf: &mut u64,
+                      bit_count: &mut u32,
+                      code_bits: &mut u32,
+                      next_code: &mut u32,
+                      hash_prefix: &mut [u32],
+                      output: &mut Vec<u8>| {
+        write_code(CLEAR_CODE as u32, *code_bits, bit_buf, bit_count, output);
+
+        // Pad to code_bits-aligned boundary (Unix compress behavior):
+        // Codes are packed in groups of 8 into code_bits bytes.
+        // After clear, remaining bits in the group are discarded.
+        // Flush remaining bits first.
+        if *bit_count > 0 {
+            output.push(*bit_buf as u8);
+            *bit_buf = 0;
+            *bit_count = 0;
+        }
+        // Pad output to code_bits-byte alignment
+        let group_bytes = *code_bits as usize;
+        let remainder = output.len() % group_bytes;
+        if remainder != 0 {
+            let pad = group_bytes - remainder;
+            output.resize(output.len() + pad, 0);
+        }
+
+        // Reset dictionary
+        clear_table(hash_prefix);
+        *next_code = FIRST_CODE as u32;
+        *code_bits = 9;
+    };
+
     let table_sz = table_size as usize;
+
+    // Adaptive-reset state (compress42.c `cl_block()`): the compression
+    // ratio is re-evaluated every CHECK_GAP input bytes; `old_ratio`
+    // holds the baseline established by the previous check.
+    let mut bytes_in: u64 = 1; // input[0] is already the initial prefix
+    let mut checkpoint: u64 = CHECK_GAP;
+    let mut old_ratio: u64 = 0;
 
     // Start with first byte as the current prefix (not output yet)
     let mut w = input[0] as u16;
 
     for &byte in &input[1..] {
+        bytes_in += 1;
         if let Some(code) = lookup(w, byte, &hash_prefix, &hash_suffix, &hash_code, table_sz) {
             // String w+byte is in dictionary
             w = code;
@@ -228,38 +278,47 @@ pub(crate) fn encode_body(input: &[u8], max_bits: u8, block_mode: bool) -> Vec<u
                 }
             } else if block_mode {
                 // Dictionary full — emit clear code and reset
-                write_code(
-                    CLEAR_CODE as u32,
-                    code_bits,
+                emit_clear(
                     &mut bit_buf,
                     &mut bit_count,
+                    &mut code_bits,
+                    &mut next_code,
+                    &mut hash_prefix,
                     &mut output,
                 );
-
-                // Pad to code_bits-aligned boundary (Unix compress behavior):
-                // Codes are packed in groups of 8 into code_bits bytes.
-                // After clear, remaining bits in the group are discarded.
-                // Flush remaining bits first.
-                if bit_count > 0 {
-                    output.push(bit_buf as u8);
-                    bit_buf = 0;
-                    bit_count = 0;
-                }
-                // Pad output to code_bits-byte alignment
-                let group_bytes = code_bits as usize;
-                let remainder = output.len() % group_bytes;
-                if remainder != 0 {
-                    let pad = group_bytes - remainder;
-                    output.resize(output.len() + pad, 0);
-                }
-
-                // Reset dictionary
-                clear_table(&mut hash_prefix);
-                next_code = FIRST_CODE as u32;
-                code_bits = 9;
+                // Reset the ratio baseline, as compress42.c `cl_block()`
+                // does after every clear, so the next ratio check
+                // cannot trigger immediately after this clear.
+                old_ratio = 0;
             }
             // Non-block mode: when the dictionary is full, simply stop
             // inserting (no clear code exists).
+
+            // compress42.c `cl_block()` (lines 1418-1446): every
+            // CHECK_GAP input bytes, recompute the compression ratio as
+            //     ratio = (bytes_in << 8) / bytes_out
+            // (input bytes per output byte, with 8 fractional bits).
+            // If the ratio has not improved since the last check, the
+            // dictionary has gone stale for the new input — emit CLEAR
+            // and reset it.
+            if block_mode && bytes_in >= checkpoint {
+                checkpoint = bytes_in + CHECK_GAP;
+                let bytes_out = output.len() as u64;
+                let ratio = (bytes_in << 8).checked_div(bytes_out).unwrap_or(u64::MAX);
+                if ratio > old_ratio {
+                    old_ratio = ratio;
+                } else {
+                    emit_clear(
+                        &mut bit_buf,
+                        &mut bit_count,
+                        &mut code_bits,
+                        &mut next_code,
+                        &mut hash_prefix,
+                        &mut output,
+                    );
+                    old_ratio = 0;
+                }
+            }
 
             w = byte as u16;
         }
@@ -285,7 +344,8 @@ pub(crate) fn encode_body(input: &[u8], max_bits: u8, block_mode: bool) -> Vec<u
 /// Compress data using LZW with full control over max bits and block mode.
 ///
 /// When `block_mode` is `true`, code 256 is reserved as a clear code and
-/// the dictionary resets when full (same as [`encode_with_options`]).
+/// the dictionary resets when full or when the adaptive ratio check
+/// detects worsening compression (same as [`encode_with_options`]).
 ///
 /// When `block_mode` is `false`, no clear code is reserved, dictionary
 /// codes start at 256, and once the dictionary is full new entries are
@@ -346,6 +406,59 @@ pub fn encode_writer<W: std::io::Write>(input: &[u8], mut writer: W) -> std::io:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Scan a headerless block-mode codestream and count the CLEAR codes
+    /// (256) it contains. The scanner mirrors the encoder's code-width
+    /// progression and the group-of-8 resync after each clear.
+    fn count_clear_codes(body: &[u8], max_bits: u8) -> usize {
+        let max_code = (1u32 << max_bits) - 1;
+        let mut next_code: u32 = FIRST_CODE as u32;
+        let mut code_bits: u32 = 9;
+        let mut bit_pos: usize = 0;
+        let mut clears = 0usize;
+        // The first code of the stream (and of each post-clear segment)
+        // emits no new dictionary entry.
+        let mut saw_first = false;
+        loop {
+            let cb = code_bits as usize;
+            if bit_pos + cb > body.len() * 8 {
+                break;
+            }
+            let mut code = 0u32;
+            for i in 0..cb {
+                let bit = (body[(bit_pos + i) / 8] >> ((bit_pos + i) % 8)) & 1;
+                code |= (bit as u32) << i;
+            }
+            bit_pos += cb;
+
+            if code == CLEAR_CODE as u32 {
+                clears += 1;
+                // Codes are packed in groups of 8 (cb * 8 bits); the
+                // rest of the current group is padding after a clear.
+                let group_bits = cb * 8;
+                let rem = bit_pos % group_bits;
+                if rem != 0 {
+                    bit_pos += group_bits - rem;
+                }
+                next_code = FIRST_CODE as u32;
+                code_bits = 9;
+                saw_first = false;
+                continue;
+            }
+
+            if !saw_first {
+                saw_first = true;
+                continue;
+            }
+            if next_code <= max_code {
+                next_code += 1;
+                if should_bump_encode_code_width(next_code, code_bits, max_bits as u32) {
+                    code_bits += 1;
+                }
+            }
+        }
+        clears
+    }
 
     #[test]
     fn test_should_bump_encode_code_width_at_boundary() {
@@ -436,6 +549,44 @@ mod tests {
         );
         // max_bits should be 12
         assert_eq!(compressed[2] & 0x1F, 12);
+    }
+
+    #[test]
+    fn test_ratio_clear_on_worsening_input() {
+        // Highly compressible prefix followed by incompressible data:
+        // the cumulative ratio is high at the first CHECK_GAP boundary
+        // and drops below it at the second, forcing an adaptive CLEAR
+        // (compress42.c cl_block).
+        let mut data = vec![b'A'; 12_000];
+        let mut x: u32 = 0x9E37_79B9;
+        for _ in 0..12_000 {
+            // deterministic pseudo-random tail (xorshift32)
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            data.push((x >> 16) as u8);
+        }
+        let compressed = encode(&data);
+        // The dictionary cannot fill at max_bits=16 on this input size,
+        // so any CLEAR in the stream must come from the ratio check.
+        assert!(
+            count_clear_codes(&compressed[3..], 16) >= 1,
+            "expected at least one ratio-based CLEAR code"
+        );
+        let decompressed = super::super::decode::decode(&compressed).unwrap();
+        assert_eq!(decompressed, data);
+    }
+
+    #[test]
+    fn test_no_ratio_clear_when_ratio_improves() {
+        // Uniformly compressible input keeps improving the cumulative
+        // ratio, so no adaptive CLEAR is emitted across the CHECK_GAP
+        // checkpoints.
+        let data = vec![b'B'; 30_000];
+        let compressed = encode(&data);
+        assert_eq!(count_clear_codes(&compressed[3..], 16), 0);
+        let decompressed = super::super::decode::decode(&compressed).unwrap();
+        assert_eq!(decompressed, data);
     }
 
     #[test]

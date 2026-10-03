@@ -124,7 +124,7 @@
 | 54 | version 4.5 (45): ZIP64 | §4.4.3 | ✅ | ZIP64 時に設定 |
 | 55 | version 5.1 (51): AES encryption | §4.4.3 | ✅ | AES 使用時に version_needed=51 で write |
 | 56 | version 6.3 (63): LZMA / PPMd | §4.4.3 | ✅ | `compute_version_needed()` で LZMA/PPMd 時に version=63 設定 |
-| 57 | feature version に基づく最小バージョン強制 | §4.4.3.1 | ✅ | decode: `ZipHeader.version_needed` に公開。encode: feature に応じた version を自動計算 |
+| 57 | feature version に基づく最小バージョン強制 | §4.4.3.1 | ✅ | decode: `ZipHeader.version_needed` に公開。encode: local/central とも `compute_version_needed()` で compression method 考慮 (bzip2=46, deflate64=21, lzma/ppmd=63, aes=51, zip64=45)。`test_bzip2_version_needed_in_local_and_central` |
 
 ---
 
@@ -169,6 +169,8 @@
 | # | 仕様要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|---------|---------|------|----------------|
 | 125 | Multi-disk / split archive | §8 | ✅ | `decode_parts(&[&[u8]])` / `decode_parts_with_password_bytes` が segment を連結し、disk 相対オフセット (entry `disk_start` + local header offset、CD disk、ZIP64 locator/record) を各 segment 開始位置で解決。disk 数と EOCD/ZIP64 disk フィールドの整合を検証、PKZIP spanning signature 0x08074b50 を受理。`split_parts_roundtrip`, `split_parts_real_disk_offsets`, `split_parts_zip64_multidisk`, `split_parts_disk_count_mismatch`, `split_parts_rejects_empty_and_accepts_single`, `split_parts_spanning_signature_tolerated` |
+| 155 | ZIP64 EOCD Locator は ZIP64 EOCD record と同一 disk 上に存在すること | §4.3.15 ("MUST reside on the same disk") | ✅ | `decode_parts` の disk 番号整合検証で間接的に保証 (locator disk ≠ EOCD disk は reject) |
+| 156 | self-extracting archive (SFX): 先頭の実行可能部を読み飛ばしてアーカイブ開始位置を検出 | APPNOTE 前言 "self-extracting" / de facto | ❌ intentional scope | decoder は CD offset をアーカイブ先頭基準の絶対位置として解釈するため、非ゼロ先頭を持つ SFX zip は未対応 |
 | 126 | Record が segment 境界を跨がない | §8.5.2 | — | writer 側のレイアウト制約であり reader は各 record を連結ストリーム上でシークして読むだけのため該当なし |
 
 ---

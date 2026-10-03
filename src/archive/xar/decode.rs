@@ -277,3 +277,56 @@ fn hex_bytes(s: &str) -> Option<Vec<u8>> {
         .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::sha1::sha1;
+
+    fn make_xar_cksum3(digest_name: &str, heap: &[u8], toc_xml: &str) -> Vec<u8> {
+        // cksum_alg=3: extended header stores a NUL-terminated digest
+        // name; hdr_size must be a multiple of 4.
+        let name_len = digest_name.len() + 1; // + NUL
+        let hdr_size = 28 + name_len.div_ceil(4) * 4;
+        let toc_comp = crate::compress::zlib::encode::encode(toc_xml.as_bytes());
+        let mut out = Vec::new();
+        out.extend_from_slice(&MAGIC);
+        out.extend_from_slice(&(hdr_size as u16).to_be_bytes());
+        out.extend_from_slice(&1u16.to_be_bytes());
+        out.extend_from_slice(&(toc_comp.len() as u64).to_be_bytes());
+        out.extend_from_slice(&(toc_xml.len() as u64).to_be_bytes());
+        out.extend_from_slice(&3u32.to_be_bytes());
+        out.extend_from_slice(digest_name.as_bytes());
+        out.push(0);
+        out.resize(hdr_size, 0);
+        out.extend_from_slice(&toc_comp);
+        out.extend_from_slice(heap);
+        out
+    }
+
+    #[test]
+    fn test_cksum_alg3_named_digest() {
+        // cksum_alg=3 with the digest named "sha1": the TOC checksum
+        // element selects sha1 over the compressed TOC bytes.
+        let toc = concat!(
+            "<?xml version='1.0'?><xar><toc>",
+            "<checksum style='sha1'><offset>0</offset><size>20</size></checksum>",
+            "<file id='1'><name>f.txt</name><type>file</type>",
+            "<data><offset>20</offset><size>5</size><length>5</length>",
+            "<encoding style='none'/></data></file></toc></xar>"
+        );
+        let toc_comp = crate::compress::zlib::encode::encode(toc.as_bytes());
+        let mut heap = sha1(&toc_comp).to_vec();
+        heap.extend_from_slice(b"hello");
+        let x = make_xar_cksum3("sha1", &heap, toc);
+        let entries = decode(&x).unwrap();
+        assert_eq!(entries[0].name, "f.txt");
+        assert_eq!(entries[0].data, b"hello");
+    }
+
+    #[test]
+    fn test_cksum_alg3_unknown_digest_rejected() {
+        let x = make_xar_cksum3("sha256", &[], "<xar><toc/></xar>");
+        assert!(matches!(decode(&x), Err(Error::Unsupported(_))));
+    }
+}

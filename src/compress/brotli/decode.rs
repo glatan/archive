@@ -623,7 +623,10 @@ fn decode_compressed_metablock(
                 "brotli: command exceeds metablock length",
             ));
         }
-        if should_push_distance {
+        // RFC 7932 section 4 / section 10: distances that resolve to
+        // static dictionary references are not pushed to the ring
+        // buffer of last distances.
+        if should_push_distance && distance <= max_allowed_distance {
             recent_distances.push(distance);
         }
     }
@@ -1540,5 +1543,219 @@ mod tests {
         // Brotli empty stream: the byte 0x33 encodes an empty last metablock.
         let decoded = decode_bounded(&[0x33], 0).unwrap();
         assert!(decoded.is_empty());
+    }
+
+    /// Build the bit-level prefix of a last, compressed metablock whose
+    /// metablock info uses single block types, NPOSTFIX = 0, NDIRECT = 0,
+    /// one literal/distance tree each, a literal singleton 'A' tree, a
+    /// simple insert-and-copy code over `ic_symbols`, and a distance
+    /// singleton tree over symbol 16.  The caller appends command bits
+    /// and converts with `bits_to_bytes`.
+    fn build_compressed_metablock_bits(mlen: u32, ic_symbols: &[u16]) -> Vec<u8> {
+        let mut bits = build_stream_prefix();
+        push_bits(&mut bits, 1, 1); // is_last
+        push_bits(&mut bits, 0, 1); // not last-empty
+        push_bits(&mut bits, 0, 2); // MNIBBLES = 4
+        push_bits(&mut bits, mlen - 1, 16); // MLEN - 1
+        push_bits(&mut bits, 0, 1); // NBLTYPES_L = 1
+        push_bits(&mut bits, 0, 1); // NBLTYPES_I = 1
+        push_bits(&mut bits, 0, 1); // NBLTYPES_D = 1
+        push_bits(&mut bits, 0, 2); // NPOSTFIX = 0
+        push_bits(&mut bits, 0, 4); // NDIRECT = 0
+        push_bits(&mut bits, 0, 2); // literal context mode = LSB6
+        push_bits(&mut bits, 0, 1); // NTREES_L = 1
+        push_bits(&mut bits, 0, 1); // NTREES_D = 1
+
+        // literal prefix code: singleton 'A'
+        push_bits(&mut bits, 1, 2);
+        push_bits(&mut bits, 0, 2);
+        push_bits(&mut bits, 65, 8);
+
+        // insert-and-copy prefix code: simple code over `ic_symbols`
+        push_bits(&mut bits, 1, 2);
+        push_bits(&mut bits, (ic_symbols.len() - 1) as u32, 2);
+        for &symbol in ic_symbols {
+            push_bits(&mut bits, u32::from(symbol), 10);
+        }
+
+        // distance prefix code: singleton symbol 16
+        push_bits(&mut bits, 1, 2);
+        push_bits(&mut bits, 0, 2);
+        push_bits(&mut bits, 16, 6);
+
+        bits
+    }
+
+    #[test]
+    fn test_noncanonical_metablock_length_rejected() {
+        // RFC 7932 section 9.2: when MNIBBLES > 4 the most significant
+        // nibble of MLEN-1 must be non-zero.
+        let mut bits = build_stream_prefix();
+        push_bits(&mut bits, 0, 1); // ISLAST = 0
+        push_bits(&mut bits, 1, 2); // MNIBBLES = 5
+        push_bits(&mut bits, 0x0_FFFF, 20); // MLEN-1: top nibble is zero
+        let stream = bits_to_bytes(&bits);
+        let result = decode(&stream);
+        assert!(
+            matches!(&result, Err(Error::InvalidData(msg)) if msg.contains("non-canonical metablock length")),
+            "expected non-canonical metablock length rejection, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_noncanonical_metadata_length_rejected() {
+        // RFC 7932 section 9.2: when MSKIPBYTES > 1 the most
+        // significant byte of MSKIPLEN-1 must be non-zero.
+        let mut bits = build_stream_prefix();
+        push_bits(&mut bits, 0, 1); // ISLAST = 0
+        push_bits(&mut bits, 3, 2); // MNIBBLES = 0 (metadata block)
+        push_bits(&mut bits, 0, 1); // reserved bit
+        push_bits(&mut bits, 2, 2); // MSKIPBYTES = 2
+        push_bits(&mut bits, 0x00FF, 16); // MSKIPLEN-1: top byte is zero
+        let stream = bits_to_bytes(&bits);
+        let result = decode(&stream);
+        assert!(
+            matches!(&result, Err(Error::InvalidData(msg)) if msg.contains("non-canonical metadata length")),
+            "expected non-canonical metadata length rejection, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_metadata_nonzero_fill_bits_rejected() {
+        // RFC 7932 section 9.2: the reserved fill bits between MSKIPLEN
+        // and the skipped metadata bytes must be zero.
+        let mut bits = build_stream_prefix();
+        push_bits(&mut bits, 0, 1); // ISLAST = 0
+        push_bits(&mut bits, 3, 2); // MNIBBLES = 0 (metadata block)
+        push_bits(&mut bits, 0, 1); // reserved bit
+        push_bits(&mut bits, 1, 2); // MSKIPBYTES = 1
+        push_bits(&mut bits, 0, 8); // MSKIPLEN-1 = 0 (skip one byte)
+        push_bits(&mut bits, 1, 1); // non-zero fill bit
+        let stream = bits_to_bytes(&bits);
+        assert!(matches!(decode(&stream), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn test_command_exceeding_metablock_length_rejected() {
+        // RFC 7932 section 9.3: a command must not produce more than
+        // MLEN bytes.  Covers insert-length overflow, backward-copy
+        // overflow, and dictionary-copy overflow.  All trees are
+        // singletons, so the command bodies consume no bits.
+        for (mlen, ic_symbol) in [(1u32, 16u16), (5, 34), (2, 10)] {
+            let bits = build_compressed_metablock_bits(mlen, &[ic_symbol]);
+            let stream = bits_to_bytes(&bits);
+            let result = decode(&stream);
+            assert!(
+                matches!(&result, Err(Error::InvalidData(msg)) if msg.contains("exceeds metablock length")),
+                "mlen {mlen} symbol {ic_symbol}: expected rejection, got {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_context_map_rejects_unused_tree_index() {
+        // RFC 7932 section 7.3: NTREES is the number of distinct tree
+        // indices appearing in the context map; every index must be
+        // used.  Here the map fills all four entries with tree 0 while
+        // NTREES = 2.
+        let mut bits = Vec::new();
+        push_bits(&mut bits, 0, 1); // RLEMAX = 0
+        // prefix code over two symbols [0, 1]
+        push_bits(&mut bits, 1, 2);
+        push_bits(&mut bits, 1, 2);
+        push_bits(&mut bits, 0, 1);
+        push_bits(&mut bits, 1, 1);
+        // context map: four entries, all tree index 0
+        for _ in 0..4 {
+            push_bits(&mut bits, 0, 1);
+        }
+        push_bits(&mut bits, 0, 1); // inverse move-to-front disabled
+        let bytes = bits_to_bytes(&bits);
+        let mut reader = BitReader::new(&bytes);
+        let result = read_context_map(&mut reader, 4, 2);
+        assert!(
+            matches!(&result, Err(Error::InvalidData(msg)) if msg.contains("non-canonical context map trees")),
+            "expected non-canonical context map rejection, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_dictionary_distance_not_pushed_to_recent_ring() {
+        // RFC 7932 section 4 / section 10: a distance that resolves to
+        // a static dictionary reference must not update the ring
+        // buffer of last distances.
+        let header = CompressedMetablockInfo {
+            nbltypes_l: 1,
+            nbltypes_i: 1,
+            nbltypes_d: 1,
+            literal_block_types: BlockTypeInfo::single(),
+            insert_copy_block_types: BlockTypeInfo::single(),
+            distance_block_types: BlockTypeInfo::single(),
+            npostfix: 0,
+            ndirect: 0,
+            context_modes: vec![0],
+            ntrees_l: 1,
+            ntrees_d: 1,
+            literal_context_map: vec![0; 64],
+            distance_context_map: vec![0; 4],
+            literal_trees: vec![
+                huffman::HuffmanTable::from_simple_code(&[65], None, 256, 15).unwrap(),
+            ],
+            insert_copy_trees: vec![
+                huffman::HuffmanTable::from_simple_code(&[2, 130], None, 704, 15).unwrap(),
+            ],
+            distance_trees: vec![
+                huffman::HuffmanTable::from_simple_code(&[16], None, 64, 15).unwrap(),
+            ],
+        };
+
+        // Command bits (LSB first):
+        //   cmd1: ic symbol 130 -> explicit distance, 1 extra bit = 0
+        //         -> distance 1, a dictionary reference to word "time"
+        //         (output is empty, so max distance is 0)
+        //   cmd2: ic symbol 2 -> implicit distance code 0 (last distance)
+        //   cmd3: ic symbol 130 -> explicit distance, 1 extra bit = 1
+        //         -> distance 2, a normal backward copy that is pushed
+        let body = [0b0001_1001u8];
+        let mut reader = BitReader::new(&body);
+        let mut output = Vec::new();
+        let mut recent = RecentDistances::new();
+        decode_compressed_metablock(
+            &mut reader,
+            &header,
+            &mut output,
+            12,
+            true,
+            65520,
+            &mut recent,
+        )
+        .unwrap();
+
+        assert_eq!(&output[..8], b"timetime");
+        assert_eq!(&output[8..], b"meme");
+        // Only the normal backward copy (distance 2) was pushed; the
+        // dictionary distance 1 left the ring untouched, so the
+        // implicit distance-0 command still resolved to the initial
+        // last distance 4.
+        assert_eq!(recent.ring, [2, 15, 11, 4]);
+        assert_eq!(recent.index, 1);
+        assert_eq!(recent.last(), 2);
+    }
+
+    #[test]
+    fn test_decode_dictionary_reference_preserves_distance_ring() {
+        // End-to-end form of the above: command 1 copies dictionary
+        // word "time" (distance 1 > max distance 0), command 2 copies
+        // 4 bytes at the implicit last distance.  With a correct ring
+        // the last distance is the initial value 4, producing
+        // "time" + "time"; if the dictionary distance were pushed,
+        // distance 1 would be reused and the output would be
+        // "time" + "eeee".
+        let mut bits = build_compressed_metablock_bits(8, &[2, 130]);
+        push_bits(&mut bits, 1, 1); // cmd1: ic symbol 130
+        push_bits(&mut bits, 0, 1); // distance extra bit -> distance 1
+        push_bits(&mut bits, 0, 1); // cmd2: ic symbol 2 (implicit distance 0)
+        let stream = bits_to_bytes(&bits);
+        assert_eq!(decode(&stream).unwrap(), b"timetime");
     }
 }
