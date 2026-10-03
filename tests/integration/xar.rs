@@ -263,10 +263,14 @@ fn xar_encoded_data_unar_oracle() {
             compress::bzip2::encode::encode(&payload),
         ),
         ("application/x-xz", compress::xz::encode::encode(&payload)),
-        (
-            "application/x-lzma",
-            compress::lzma_alone::encode::encode(&payload),
-        ),
+        ("application/x-lzma", {
+            // unar requires a known-size .lzma header for embedded data;
+            // the encoder emits an unknown-size field (xz-compatible), so
+            // patch it to the declared size for this oracle test.
+            let mut lzma = compress::lzma_alone::encode::encode(&payload);
+            lzma[5..13].copy_from_slice(&(payload.len() as u64).to_le_bytes());
+            lzma
+        }),
     ] {
         let x = xar_with_encoding(style, &stored, payload.len());
         let uniq = SystemTime::now()

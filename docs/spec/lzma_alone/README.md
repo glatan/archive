@@ -43,7 +43,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 19 | ヘッダー形式 (0x5D + dict u32 LE + size u64 LE) | lzma-file-format.txt: LZMA_Alone header | ✅ | `test_encode_header_format` |
-| 20 | エンコーダは既知サイズ + EoPM を出力 (`xz --format=lzma` と同構成) | lzma-file-format.txt | ✅ | `test_lzma_alone_encode_decoded_by_system` (統合) |
+| 20 | エンコーダはサイズ不明 (`0xFFFF_FFFF_FFFF_FFFF`) + EoPM を出力 (`xz --format=lzma` と同構成) | lzma-file-format.txt | ✅ | `test_lzma_alone_encode_decoded_by_system`, `test_fuzz_regression_lzma_original_decompress_1` (統合) |
 | 21 | デフォルト辞書サイズ 8 MiB (`xz -6` 相当) | lzma-file-format.txt | ✅ | `test_encode_header_format` |
 | 22 | 辞書サイズ指定エンコード | lzma-file-format.txt | ✅ | `test_encode_with_dict_size` |
 | 23 | ラウンドトリップ: 空/hello/repeated/all_bytes/1kb | lzma-file-format.txt | ✅ | `test_encode_roundtrip_*` |
