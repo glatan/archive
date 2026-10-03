@@ -6,9 +6,12 @@
 //! 2. `control.tar` or `control.tar.<ext>` — package metadata.
 //! 3. `data.tar` or `data.tar.<ext>` — the installed payload.
 //!
-//! Additional members may follow; they are preserved with kind
-//! [`DebMemberKind::Other`]. Recognized member compressions are uncompressed
-//! tar, gzip, xz, zstd, bzip2, LZMA-Alone, and Unix compress (`.Z`).
+//! Additional members may follow `data.tar*`; members inserted between the
+//! required members are accepted only with a leading `_` in the name, which
+//! deb(5) reserves for safely-ignorable members. Both are preserved with
+//! kind [`DebMemberKind::Other`]. Recognized member compressions are
+//! uncompressed tar, gzip, xz, zstd, bzip2, LZMA-Alone, and Unix compress
+//! (`.Z`).
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -180,10 +183,14 @@ impl DebPackage {
 
 /// Decode a `.deb` package from a byte slice.
 ///
-/// Validates that the input is a non-thin `ar` archive whose first member is
-/// `debian-binary`, that exactly one `control.tar*` and one `data.tar*`
-/// member are present, and that each tar member uses a recognized
-/// compression suffix.
+/// Validates that the input is a non-thin `ar` archive whose required members
+/// occur in the deb(5) canonical order — `debian-binary`, `control.tar*`,
+/// `data.tar*` — that exactly one `control.tar*` and one `data.tar*` member
+/// are present, and that each tar member uses a recognized compression
+/// suffix. A member inserted between the required members is accepted only
+/// when its name starts with `_`, which deb(5) reserves for members that can
+/// be safely ignored; additional members after `data.tar*` are kept as
+/// [`DebMemberKind::Other`].
 ///
 /// # Errors
 ///
@@ -205,13 +212,18 @@ pub fn decode(input: &[u8]) -> Result<DebPackage, Error> {
     let mut members = Vec::with_capacity(entries.len());
     let mut have_control = false;
     let mut have_data = false;
-    for entry in entries {
+    for (index, entry) in entries.into_iter().enumerate() {
         let kind = classify_member(&entry.name);
         let compression = match kind {
             DebMemberKind::Control | DebMemberKind::Data => Some(member_compression(&entry.name)?),
             DebMemberKind::DebianBinary | DebMemberKind::Other => None,
         };
         match kind {
+            DebMemberKind::DebianBinary => {
+                if index != 0 {
+                    return Err(Error::InvalidData("deb: duplicate debian-binary member"));
+                }
+            }
             DebMemberKind::Control => {
                 if have_control {
                     return Err(Error::InvalidData("deb: duplicate control member"));
@@ -222,9 +234,22 @@ pub fn decode(input: &[u8]) -> Result<DebPackage, Error> {
                 if have_data {
                     return Err(Error::InvalidData("deb: duplicate data member"));
                 }
+                if !have_control {
+                    return Err(Error::InvalidData("deb: data member before control member"));
+                }
                 have_data = true;
             }
-            DebMemberKind::DebianBinary | DebMemberKind::Other => {}
+            DebMemberKind::Other => {
+                // deb(5): members inserted between the required members are
+                // named with a leading '_' so they can be safely ignored;
+                // anything else in that position cannot be safely ignored.
+                // Members after data.tar are ignored unconditionally.
+                if !have_data && !entry.name.starts_with('_') {
+                    return Err(Error::InvalidData(
+                        "deb: unexpected member between required members",
+                    ));
+                }
+            }
         }
         members.push(DebMember {
             header: entry.header,
@@ -464,6 +489,62 @@ mod tests {
         enc.add_file("data.tar.gz", b"e");
         let input = enc.finish().unwrap();
         assert!(decode(&input).is_err());
+    }
+
+    #[test]
+    fn rejects_data_before_control() {
+        let mut enc = ar::encode::ArEncoder::new();
+        enc.add_file(DEBIAN_BINARY, b"2.0\n");
+        enc.add_file("data.tar", b"d");
+        enc.add_file("control.tar", b"c");
+        let input = enc.finish().unwrap();
+        assert!(decode(&input).is_err());
+    }
+
+    #[test]
+    fn rejects_member_between_required() {
+        // A member without a leading '_' inserted between the required
+        // members cannot be safely ignored per deb(5).
+        for extra_at in [1usize, 2] {
+            let mut enc = ar::encode::ArEncoder::new();
+            enc.add_file(DEBIAN_BINARY, b"2.0\n");
+            if extra_at == 1 {
+                enc.add_file("signature", b"sig");
+            }
+            enc.add_file("control.tar", b"c");
+            if extra_at == 2 {
+                enc.add_file("signature", b"sig");
+            }
+            enc.add_file("data.tar", b"d");
+            let input = enc.finish().unwrap();
+            assert!(decode(&input).is_err(), "extra member at {extra_at}");
+        }
+        // A second debian-binary member is also out of order.
+        let mut enc = ar::encode::ArEncoder::new();
+        enc.add_file(DEBIAN_BINARY, b"2.0\n");
+        enc.add_file(DEBIAN_BINARY, b"2.0\n");
+        enc.add_file("control.tar", b"c");
+        enc.add_file("data.tar", b"d");
+        let input = enc.finish().unwrap();
+        assert!(decode(&input).is_err());
+    }
+
+    #[test]
+    fn keeps_ignorable_member_between_required() {
+        // deb(5): '_' members inserted between the required members are
+        // safely ignorable, e.g. signature members.
+        let mut enc = ar::encode::ArEncoder::new();
+        enc.add_file(DEBIAN_BINARY, b"2.0\n");
+        enc.add_file("_gpgorigin", b"sig");
+        enc.add_file("control.tar", b"c");
+        enc.add_file("data.tar", b"d");
+        let input = enc.finish().unwrap();
+        let package = decode(&input).unwrap();
+        assert_eq!(package.members.len(), 4);
+        assert_eq!(package.members[1].kind, DebMemberKind::Other);
+        assert_eq!(package.members[1].name, "_gpgorigin");
+        assert_eq!(package.members[2].kind, DebMemberKind::Control);
+        assert_eq!(package.members[3].kind, DebMemberKind::Data);
     }
 
     #[test]

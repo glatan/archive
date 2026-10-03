@@ -15,9 +15,10 @@
 //! - writing emits `-lh0-`/`-lhd-` entries at header level 0, 1, 2, or 3
 //!   (`LhaEncoder::with_level`), or `-lz4-`/`-pm0-` stored-alias and
 //!   static-Huffman `-lh4-`/`-lh5-`/`-lh6-`/`-lh7-` file entries via
-//!   `LhaEncoder::with_method` (falling back to `-lh0-` when
-//!   compression does not shrink the
-//!   input). Level 0 requires the whole filename to fit in one byte
+//!   `LhaEncoder::with_method`, or LArc `-lzs-`/`-lz5-` LZSS file
+//!   entries (falling back to `-lh0-` when compression does not
+//!   shrink the input). Level 0 requires the whole filename to fit
+//!   in one byte
 //!   (at most 255 bytes); levels 1/2/3 carry the name through
 //!   extended headers.
 //!
@@ -42,6 +43,7 @@ pub mod decode;
 /// LHA archive encoding.
 pub mod encode;
 mod larc;
+mod larc_enc;
 mod lzh_dyn;
 mod lzh_st0;
 mod lzhuf;

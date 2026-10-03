@@ -9,7 +9,10 @@
 //! the 4096-byte cutoff, and UTF-16LE name decoding. Stream
 //! entries expose their directory metadata (CLSID, state bits,
 //! creation/modification FILETIMEs); the root storage's metadata
-//! is available via root_meta.
+//! is available via root_meta. `decode::decode_strict` additionally
+//! enforces the directory-entry invariants of [MS-CFB] 2.6.1/2.6.4
+//! (color flags, NOSTREAM sibling/child conventions, unique sibling
+//! names) that the lenient decoder tolerates.
 //!
 //! Writing compound files, transactions, the range lock sector, and
 //! structured-storage property semantics are intentionally out of scope.

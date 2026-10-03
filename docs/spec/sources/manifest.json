@@ -834,7 +834,8 @@
    "reference_url": [
     "https://www.sourceware.org/bzip2/",
     "https://www.sourceware.org/bzip2/manual/manual.html"
-   ]
+   ],
+   "license": "BSD-style (bzip2 license)"
   },
   {
    "id": "lzop-format",
@@ -842,7 +843,8 @@
    "title": "lzop file format (lzop.h / p_lzo.c)",
    "version": "lzop 1.x",
    "note": "lzop コンテナ層の書面仕様なし。ソースコードが規範。LZO1X バイトコード仕様は sources/linux_lzo.rst にスナップショット済み",
-   "reference_url": "https://www.lzop.org/"
+   "reference_url": "https://www.lzop.org/",
+   "license": "GPL-2.0-or-later"
   },
   {
    "id": "lzw-ncompress",
@@ -850,7 +852,8 @@
    "title": "ncompress (compress42.c)",
    "version": "4.2.4",
    "note": "正式な仕様書なし。Unix compress .Z フォーマットのデファクト標準。参照実装は sources/ncompress_4.2.4_compress42.c にスナップショット済み",
-   "reference_url": "https://github.com/vapier/ncompress"
+   "reference_url": "https://github.com/vapier/ncompress",
+   "license": "public domain"
   },
   {
    "id": "rzip-format",
@@ -862,7 +865,8 @@
     "https://rzip.samba.org/",
     "https://sources.debian.org/src/rzip/2.1-5/",
     "https://manpages.debian.org/unstable/rzip/rzip.1.en.html"
-   ]
+   ],
+   "license": "GPL-2.0-or-later"
   },
   {
    "id": "sa22-7208",
@@ -870,7 +874,8 @@
    "title": "IBM ESA/390 Data Compression (SA22-7208)",
    "version": "SA22-7208-03",
    "note": "IBM Publications の BKMGR softcopy 形式のみで直 fetch 可能なテキスト/PDF URL なし (BookManager リーダー経由)。POP SA22-7832-12 は sources/sa22-7832-12.pdf にスナップショット済み",
-   "reference_url": "https://www.ibm.com/resources/publications/OutputPubsDetails?PubID=SA22720801"
+   "reference_url": "https://www.ibm.com/resources/publications/OutputPubsDetails?PubID=SA22720801",
+   "license": "IBM documentation"
   },
   {
    "id": "fastlz-reference",
@@ -878,7 +883,8 @@
    "title": "fastlz.c (Ariya Hidayat)",
    "version": "fastlz 2007-11-06",
    "note": "正式な仕様書なし。参照実装ソースがデファクト仕様 (MIT)。sources/fastlz.c にスナップショット済み",
-   "reference_url": "https://github.com/ariya/FastLZ"
+   "reference_url": "https://github.com/ariya/FastLZ",
+   "license": "MIT"
   },
   {
    "id": "lzrw1a-reference",
@@ -889,7 +895,8 @@
    "reference_url": [
     "http://www.ross.net/compression/lzrw1a.html",
     "https://ftp.funet.fi/pub/misc/compression/"
-   ]
+   ],
+   "license": "public domain"
   },
   {
    "id": "lzf-reference",
@@ -900,7 +907,8 @@
    "reference_url": [
     "http://cvs.schmorp.de/liblzf/",
     "https://github.com/nemequ/liblzf"
-   ]
+   ],
+   "license": "BSD-2-Clause OR GPL-2.0-or-later"
   },
   {
    "id": "lha-format",
@@ -912,7 +920,8 @@
     "https://github.com/jca02266/lha/blob/master/header.doc.md",
     "https://web.archive.org/web/20080724142842/http://homepage1.nifty.com/dangan/en/Content/Program/Java/jLHA/Notes/Notes.html",
     "http://justsolve.archiveteam.org/wiki/LHarc"
-   ]
+   ],
+   "license": "format document"
   },
   {
    "id": "arj-format",
@@ -920,7 +929,8 @@
    "title": "ARJ archive format / TECHNOTE.ARJ",
    "version": "ARJ 2.x de facto",
    "note": "正式標準なし。TECHNOTE.TXT (ARJ/UNARJ 配布物同梱) 相当の記述を参照。安定な単一ファイル URL なし",
-   "reference_url": "http://fileformats.archiveteam.org/wiki/ARJ"
+   "reference_url": "http://fileformats.archiveteam.org/wiki/ARJ",
+   "license": "format document"
   },
   {
    "id": "arc-format",
@@ -928,7 +938,8 @@
    "title": "ARC file format (System Enhancement Associates)",
    "version": "ARC 5.x/6.x de facto",
    "note": "正式標準なし。wotsit 'arc' entry の fileformat.info mirror を sources/arc_format_corion.htm にスナップショット済み",
-   "reference_url": "https://www.fileformat.info/format/arc/corion.htm"
+   "reference_url": "https://www.fileformat.info/format/arc/corion.htm",
+   "license": "format document"
   },
   {
    "id": "apple-tn1023",
@@ -939,7 +950,8 @@
    "reference_url": [
     "https://developer.apple.com/library/mac/technotes/tn1023/_index.html",
     "https://preterhuman.net/"
-   ]
+   ],
+   "license": "Apple documentation"
   },
   {
    "id": "compcol",
@@ -950,7 +962,8 @@
    "reference_url": [
     "https://github.com/KarpelesLab/compcol",
     "https://docs.rs/compcol"
-   ]
+   ],
+   "license": "MIT"
   },
   {
    "id": "lha-211-source",
@@ -961,7 +974,8 @@
    "reference_url": [
     "https://www.vector.co.jp/download/file/dos/util/fh002420.html",
     "https://ftp.vector.co.jp/00/24/521/lha211_s.lzh"
-   ]
+   ],
+   "license": "LHa license (custom, non-OSI)"
   },
   {
    "id": "newtua-dos",
@@ -972,7 +986,8 @@
    "reference_url": [
     "https://github.com/new-the-unarchiver/newtua-formats",
     "https://docs.rs/newtua-dos"
-   ]
+   ],
+   "license": "LGPL-3.0"
   },
   {
    "id": "hyc-arc",
@@ -984,7 +999,8 @@
     "https://github.com/hyc/arc",
     "https://github.com/ani6al/arc",
     "https://sources.debian.org/src/arc/"
-   ]
+   ],
+   "license": "GPL-2.0"
   },
   {
    "id": "lhasa",
@@ -995,7 +1011,8 @@
    "reference_url": [
     "https://github.com/fragglet/lhasa",
     "https://lhasa.soulsphere.org/"
-   ]
+   ],
+   "license": "ISC"
   },
   {
    "id": "libmspack-quantum",
@@ -1006,7 +1023,8 @@
    "reference_url": [
     "https://github.com/kyz/libmspack",
     "https://www.cabextract.org.uk/libmspack/"
-   ]
+   ],
+   "license": "LGPL-2.1"
   },
   {
    "id": "hwzip-legacy-zip",
@@ -1017,7 +1035,8 @@
    "reference_url": [
     "https://www.hanshq.net/zip2.html",
     "https://github.com/madler/unzip"
-   ]
+   ],
+   "license": "public domain"
   },
   {
    "id": "unarj-source",
@@ -1027,7 +1046,8 @@
    "note": "ARJ 公式 decoder ソース (制限付き freeware: ソース利用は「ARJ archiver＝圧縮+解凍の双方を行う製品」でない範囲のみ自由、改変版は改変表示必須、再配布は無改変完全パッケージ・無償のみ)。本 crate は ARJ read+write を持つため同条件に触れ得る — 参照・oracle 用途のみでコード取り込み不可。method 1-4 decode・garbled flag・multi-volume 処理の参照。TECHNOTE.DOC に method 概略記述あり。Debian `arj` は non-free のため oracle は unar/7z を推奨",
    "reference_url": [
     "http://fileformats.archiveteam.org/wiki/ARJ"
-   ]
+   ],
+   "license": "restricted freeware (not freely usable; reference/oracle only)"
   },
   {
    "id": "osta-udf-260",
@@ -1038,7 +1058,8 @@
    "reference_url": [
     "https://www.osta.org/specs/",
     "https://ecma-international.org/wp-content/uploads/ECMA_TR-112-2_1st_edition_december_2023.pdf"
-   ]
+   ],
+   "license": "specification document (ECMA TR/112-2 permits copying)"
   },
   {
    "id": "mscfb-write-refs",
@@ -1049,7 +1070,8 @@
    "reference_url": [
     "https://github.com/mdsteele/rust-cfb",
     "https://gitlab.gnome.org/GNOME/libgsf"
-   ]
+   ],
+   "license": "cfb: MIT / Apache POI: Apache-2.0 / libgsf: LGPL-2.1"
   },
   {
    "id": "pea-crypto-specs",
@@ -1060,7 +1082,8 @@
    "reference_url": [
     "https://web.cs.ucdavis.edu/~rogaway/papers/eax.pdf",
     "https://www.schneier.com/academic/twofish/"
-   ]
+   ],
+   "license": "published papers and specs"
   },
   {
    "id": "xadmaster",
@@ -1070,7 +1093,8 @@
    "note": "LGPL-2.1-or-later。port source: lha/lzh_dyn.rs は XADLZHOldHandles.m の LhA_Decrunch (-lh2-) を transliterate、lha/lzh_st0.rs / compress::lzh/st1.rs は XADLZHOldHandles.m / XADLZHStaticHandle への adapted。newtua_dos 経由の arc/arj port も最終的には XADMaster 由来",
    "reference_url": [
     "https://github.com/MacPaw/XADMaster"
-   ]
+   ],
+   "license": "LGPL-2.1-or-later"
   },
   {
    "id": "lha-114i-source",
@@ -1080,7 +1104,8 @@
    "note": "LHa 独自ライセンス (copyright notice 保持義務、非 OSI)。port source: lha/lzh_dyn.rs は dhuf.c の transliteration (上流 attribution はファイル内に verbatim 複写済み)。fixture 生成ツールとしても使用",
    "reference_url": [
     "https://github.com/jca02266/lha"
-   ]
+   ],
+   "license": "LHa license (custom, non-OSI)"
   },
   {
    "id": "deark",
@@ -1090,7 +1115,8 @@
    "note": "MIT-style ライセンス (deark による修正は選択により public domain 扱いも可)。port source: lha/lzhuf.rs が foreign/lzhuf.h を参照 (元は Yoshizaki lzhuf.c の移植; 明示的ライセンス供与なし)",
    "reference_url": [
     "https://github.com/jsummers/deark"
-   ]
+   ],
+   "license": "MIT"
   }
  ]
 }

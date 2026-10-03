@@ -36,27 +36,36 @@ pub(crate) mod xxhash;
 #[cfg(any(feature = "lzo", feature = "zlib", feature = "vcdiff"))]
 pub(crate) mod adler32;
 
-/// CRC-64/XZ checksum for xz.
-#[cfg(feature = "xz")]
+/// CRC-64/XZ checksum for xz and PEA integrity tags.
+#[cfg(any(feature = "xz", feature = "pea"))]
 pub(crate) mod crc64;
 
-/// SHA-256 for xz SHA-256 integrity checks and SHA-256 git pack object IDs.
-#[cfg(any(feature = "xz", feature = "sevenz", feature = "git-pack"))]
+/// SHA-256 for xz SHA-256 integrity checks, SHA-256 git pack object IDs,
+/// PEA integrity tags, XAR "sha256" digests, and CRX3 crx_id checks.
+#[cfg(any(
+    feature = "xz",
+    feature = "sevenz",
+    feature = "git-pack",
+    feature = "pea",
+    feature = "xar",
+    feature = "crx3"
+))]
 pub(crate) mod sha256;
 
-/// SHA-1 for ZIP AES key derivation, git pack object IDs/checksums, and
-/// WARC digests.
+/// SHA-1 for ZIP AES key derivation, git pack object IDs/checksums,
+/// WARC digests, and PEA integrity tags.
 #[cfg(any(
     feature = "zip",
     feature = "git-pack",
     feature = "xar",
-    feature = "warc"
+    feature = "warc",
+    feature = "pea"
 ))]
 pub(crate) mod sha1;
 
-/// MD5 for lrzip file-level integrity verification, XAR checksums, and
-/// ZIM trailer checksums.
-#[cfg(any(feature = "lrzip", feature = "xar", feature = "zim"))]
+/// MD5 for lrzip file-level integrity verification, XAR checksums,
+/// ZIM trailer checksums, and PEA integrity tags.
+#[cfg(any(feature = "lrzip", feature = "xar", feature = "zim", feature = "pea"))]
 pub(crate) mod md5;
 
 /// AES-256 helpers for encrypted 7z and ZIP streams.

@@ -43,7 +43,10 @@ pub enum RomfsKind {
     Symlink,
     /// Hard link; resolved to the target's kind and data.
     Hardlink,
-    /// Block / char device, socket, or fifo.
+    /// Block / char device, socket, or fifo. The payload is the
+    /// raw type nibble from the `next` field (4=block, 5=char,
+    /// 6=socket, 7=fifo); device major/minor numbers for block/char
+    /// entries are exposed via `RomfsEntry::dev`.
     Other(u32),
 }
 
@@ -63,6 +66,11 @@ pub struct RomfsEntry {
     /// File contents or symlink/hardlink target data; empty for
     /// directories and special files.
     pub data: Vec<u8>,
+    /// Device `(major, minor)` pair decoded from `spec.info`;
+    /// `Some` only for block and char devices (romfs.rst: 16/16
+    /// bits major/minor). Socket/fifo `spec.info` is unused (MBZ)
+    /// and stays `None`. Analogous to the iso9660 `dev_t` field.
+    pub dev: Option<(u16, u16)>,
 }
 
 impl crate::traits::ArchiveEntry for RomfsEntry {
@@ -170,6 +178,16 @@ fn mode_for(ty: u32, exec: bool) -> u16 {
     base | 0o444 | if exec { 0o111 } else { 0 }
 }
 
+/// `spec.info` is a 16/16-bit major/minor pair for block and char
+/// devices (romfs.rst mapping table); it is unused (MBZ) for every
+/// other type.
+fn device_number(ty: u32, spec: u32) -> Option<(u16, u16)> {
+    match ty {
+        TYPE_BLOCK | TYPE_CHAR => Some(((spec >> 16) as u16, (spec & 0xFFFF) as u16)),
+        _ => None,
+    }
+}
+
 struct Image<'a> {
     input: &'a [u8],
     end: usize,
@@ -234,6 +252,7 @@ impl<'a> Image<'a> {
                         kind: RomfsKind::Directory,
                         mode: mode_for(h.ty, h.exec),
                         data: Vec::new(),
+                        dev: None,
                     });
                     self.walk(h.spec, &path, out, visited, depth + 1)?;
                 }
@@ -259,6 +278,7 @@ impl<'a> Image<'a> {
                             let _ = kind;
                             data
                         },
+                        dev: device_number(t.ty, t.spec),
                     });
                 }
                 ty => {
@@ -276,6 +296,7 @@ impl<'a> Image<'a> {
                         },
                         mode: mode_for(ty, h.exec),
                         data,
+                        dev: device_number(ty, h.spec),
                     });
                 }
             }
@@ -344,11 +365,25 @@ mod tests {
     use super::*;
     use crate::traits::ArchiveEntry;
 
+    /// One fixture row for `build_typed`:
+    /// (path, explicit type, exec, spec.info, data).
+    type Row<'a> = (&'a str, Option<u32>, bool, u32, Option<&'a [u8]>);
+
     /// Build a romfs image. `files`: (path, exec, data); dirs passed
     /// as (path, false, None). Entries must be given so that each
     /// directory's children form a contiguous chain per genromfs
     /// conventions (we emit siblings in list order and fix `next`).
     fn build(entries: &[(&str, bool, Option<&[u8]>)]) -> Vec<u8> {
+        let typed: Vec<Row<'_>> = entries
+            .iter()
+            .map(|&(p, exec, data)| (p, None, exec, 0, data))
+            .collect();
+        build_typed(&typed)
+    }
+
+    /// Like `build`, but a `None` type selects the dir/regular
+    /// guess that `build` uses.
+    fn build_typed(entries: &[Row<'_>]) -> Vec<u8> {
         use alloc::collections::BTreeMap;
         // Assign types: a path that is a prefix of another is a dir.
         let paths: Vec<&str> = entries.iter().map(|e| e.0).collect();
@@ -371,14 +406,13 @@ mod tests {
         // Build tree
         let mut idx_of: BTreeMap<String, usize> = BTreeMap::new();
         let mut recs: Vec<Rec> = Vec::new();
-        for (i, (p, exec, data)) in entries.iter().enumerate() {
-            let ty = if is_dir(p) { TYPE_DIR } else { TYPE_REG };
-            let _ = i;
+        for (p, ty, exec, spec, data) in entries.iter() {
+            let ty = ty.unwrap_or_else(|| if is_dir(p) { TYPE_DIR } else { TYPE_REG });
             recs.push(Rec {
                 name: p.rsplit('/').next().unwrap().to_string(),
                 ty,
                 exec: *exec,
-                spec: 0,
+                spec: *spec,
                 size: data.map_or(0, |d| d.len() as u32),
                 data: data.map_or_else(Vec::new, |d| d.to_vec()),
                 children: Vec::new(),
@@ -386,7 +420,7 @@ mod tests {
             idx_of.insert(p.to_string(), recs.len() - 1);
         }
         let mut roots = Vec::new();
-        for (p, _, _) in entries {
+        for (p, ..) in entries {
             match p.rfind('/') {
                 Some(i) => {
                     let par = &p[..i];
@@ -523,6 +557,48 @@ mod tests {
         // exec.sh carries the executable bit
         assert_ne!(find("exec.sh").mode & 0o111, 0);
         assert_eq!(find("hello.txt").mode & 0o111, 0);
+    }
+
+    /// spec.info for block/char devices is a 16/16-bit major/minor
+    /// pair (romfs.rst mapping table).
+    #[test]
+    fn exposes_device_major_minor() {
+        let f = build_typed(&[
+            // Leading non-dir entry: the first header doubles as
+            // the volume root, which decode does not surface.
+            ("top.txt", None, false, 0, Some(b"x")),
+            ("dev", None, false, 0, None),
+            ("dev/console", Some(TYPE_CHAR), false, (5 << 16) | 1, None),
+            ("dev/sda", Some(TYPE_BLOCK), false, (8 << 16) | 16, None),
+        ]);
+        let img = decode(&f).unwrap();
+        let find = |p: &str| img.entries.iter().find(|e| e.name == p).unwrap();
+        let console = find("dev/console");
+        assert_eq!(console.kind, RomfsKind::Other(TYPE_CHAR));
+        assert_eq!(console.dev, Some((5, 1)));
+        assert_eq!(console.mode & S_IFCHR, S_IFCHR);
+        let sda = find("dev/sda");
+        assert_eq!(sda.kind, RomfsKind::Other(TYPE_BLOCK));
+        assert_eq!(sda.dev, Some((8, 16)));
+        assert_eq!(find("dev").dev, None);
+    }
+
+    /// spec.info is unused (MBZ) for socket/fifo: never a device
+    /// number even when nonzero.
+    #[test]
+    fn socket_fifo_have_no_device() {
+        let f = build_typed(&[
+            ("sock", Some(TYPE_SOCKET), false, 0x1234, None),
+            ("pipe", Some(TYPE_FIFO), false, 0x5678, None),
+            ("plain.txt", None, false, 0, Some(b"x")),
+        ]);
+        let img = decode(&f).unwrap();
+        let find = |p: &str| img.entries.iter().find(|e| e.name == p).unwrap();
+        assert_eq!(find("sock").kind, RomfsKind::Other(TYPE_SOCKET));
+        assert_eq!(find("sock").dev, None);
+        assert_eq!(find("pipe").kind, RomfsKind::Other(TYPE_FIFO));
+        assert_eq!(find("pipe").dev, None);
+        assert_eq!(find("plain.txt").dev, None);
     }
 
     /// Rewrite the `next` field of the header at `off` and repair

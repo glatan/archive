@@ -3,6 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [RFC 1950](https://www.rfc-editor.org/rfc/rfc1950.txt) — ZLIB Compressed Data Format Specification version 3.3 (ローカルスナップショット: `docs/spec/sources/rfc1950.txt`) |
+| 参照実装 | zlib (zlib license、共有 DEFLATE codec が `gen_bitlen`/`inflate_table` を動作参照)、CPython `zlib` モジュール (テスト時 oracle)。詳細: THIRD_PARTY_NOTICES zlib/DEFLATE 項 |
 | current scope | RFC 1950 の zlib wrapper として、2-byte header (`CMF`/`FLG`)・raw DEFLATE payload・big-endian Adler-32 trailer を対象にする |
 
 ### テスト対象要件と網羅状況
@@ -33,7 +34,7 @@
 | 17 | Adler-32 modulus 65521 | RFC 1950 §8 | ✅ | 実装済み |
 | 18 | 全 multi-byte 数値は MSB first (big-endian) で格納 | RFC 1950 §2.1 | ✅ | Adler-32 trailer を big-endian で読み書き |
 | 19 | FDICT=0 を期待するコンテキストで FDICT=1 を reject | RFC 1950 §2.3 | ✅ | decode() は FDICT=1 で Unsupported、decode_with_dict() で対応 |
-| 20 | ADLER32 以後のデータは zlib ストリームに含まれない (trailing data 許容) | RFC 1950 §2.2 | ❌ | 実装は trailer を末尾 4B 固定と仮定するため trailing data は reject (intentional な厳格化) |
+| 20 | ADLER32 以後のデータは zlib ストリームに含まれない (trailing data 許容) | RFC 1950 §2.2 | ✅ | DEFLATE ストリーム終端 (`byte_position()`) からトレーラーの位置を特定し、後続の残余データは無視する (`test_decode_trailing_data_ignored`, `test_decode_with_dict_trailing_data`, `test_decode_truncated_adler_still_rejected`) |
 
 ---
 
@@ -41,7 +42,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 19 |
-| ❌ 未実装 | 1 (intentional scope) |
+| ✅ 実装+テスト済み  | 20 |
+| ❌ 未実装 | 0 |
 | **合計** | **20** |
 

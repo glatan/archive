@@ -879,3 +879,77 @@ fn test_arj_encoder_filename_length_boundary() {
     let entries = arj_decode::decode(&enc.finish()).unwrap();
     assert_eq!(entries.len(), 2);
 }
+
+// ============================================================
+// Encoder-side garbled (password) and volume discovery tests.
+// ============================================================
+
+#[test]
+fn test_arj_garbled_write_roundtrip() {
+    use archive::archive::arj::encode::ArjEncoder;
+    let data = b"garbled secret contents ".repeat(32);
+    for method in [0u8, 2] {
+        let mut enc = ArjEncoder::with_method(method)
+            .unwrap()
+            .with_password(b"hunter2", 0x33)
+            .unwrap();
+        enc.add_file("sec.bin", &data, 0).unwrap();
+        let a = enc.finish();
+        // Password-less decode must fail; the matching password and
+        // decode_with_password_bytes must restore the bytes.
+        assert!(arj_decode::decode(&a).is_err());
+        let entries = arj_decode::decode_with_password(&a, "hunter2").unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].data, data.as_slice());
+        // A wrong password never yields the original bytes.
+        let bad = arj_decode::decode_with_password(&a, "wrong");
+        if let Ok(bad) = bad {
+            assert_ne!(bad[0].data, data.as_slice());
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+#[test]
+fn test_arj_volume_paths_discovery_roundtrip() {
+    use archive::archive::arj::encode::ArjEncoder;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let data = b"multi volume discovery payload".repeat(16);
+    let mut enc = ArjEncoder::new();
+    enc.add_file("big.bin", &data, 0).unwrap();
+    let parts = enc.finish_parts(160).unwrap();
+    assert!(parts.len() > 1);
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_arj_disc_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let first = dir.join("v.arj");
+    for (i, part) in parts.iter().enumerate() {
+        let path = if i == 0 {
+            first.clone()
+        } else {
+            dir.join(format!("v.a{i:02}"))
+        };
+        std::fs::write(&path, part).unwrap();
+    }
+
+    // The helper enumerates exactly the sibling volumes decode_parts
+    // needs, in order.
+    let paths = arj_decode::volume_paths(&first);
+    assert_eq!(paths.len(), parts.len());
+    let bufs: Vec<Vec<u8>> = paths
+        .iter()
+        .map(std::fs::read)
+        .collect::<std::io::Result<_>>()
+        .unwrap();
+    let refs: Vec<&[u8]> = bufs.iter().map(Vec::as_slice).collect();
+    let entries = arj_decode::decode_parts(&refs).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "big.bin");
+    assert_eq!(entries[0].data, data.as_slice());
+    let _ = std::fs::remove_dir_all(&dir);
+}

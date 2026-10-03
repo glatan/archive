@@ -3,6 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [gitformat-pack(5)](https://git-scm.com/docs/gitformat-pack) (ローカルスナップショット: `docs/spec/sources/gitformat-pack.adoc`、git v2.51.0 Documentation) |
+| 参照実装 | `git` (GPL-2.0、oracle — `git repack` による fixture 生成と `git index-pack` による encode 検証)。詳細: THIRD_PARTY_NOTICES Git pack format 項 |
 | 形式概要 | `PACK` + u32 version + u32 object count の 12B ヘッダのあと、各オブジェクトエントリ (可変長オブジェクトヘッダ + zlib 本体)。delta エントリ (OFS_DELTA/REF_DELTA) は base 参照を伴う。末尾は pack チェックサム (全先行バイトの SHA-1)。オブジェクト ID は git オブジェクトモデルの `SHA-1("<type> <len>\0" + payload)` |
 | 実装範囲 | pack v2 (SHA-1) の read/write (write は OFS_DELTA/REF_DELTA 出力対応)、pack v3 (SHA-256) の read/write、idx v2 の read/write (SHA-256 名・checksum 含む)、idx v1 の read/write。delta 解決は pack 内完結のみ (thin pack は reject) |
 

@@ -3,6 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [[MS-CAB]](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) Cabinet File Format (Microsoft Open Specifications、2011-03-04 版 PDF。HTML 版: <https://learn.microsoft.com/en-us/previous-versions/bb417343(v=msdn.10)>、ローカルスナップショット: `docs/spec/sources/ms-cab_20110304.pdf`) |
+| 参照実装 | libmspack / cabextract (LGPL-2.1、Quantum `qtmd.c` の移植元・LZX `lzx.c` errata と checksum の動作参照・fixture 由来)、compcol (MIT、Quantum 移植の中間参照)。`bsdtar`/`cabextract` は統合テストの oracle。詳細: THIRD_PARTY_NOTICES mscab 項 |
 | 形式概要 | CFHEADER + CFFOLDER 配列 + CFFILE 配列 + CFDATA ブロック列。フォルダ単位で圧縮 |
 | 実装範囲 | read/write (単一 cabinet・単一 folder の NONE/MSZIP) + LZX/Quantum folder の read + `decode_parts` による multi-cabinet set read。LZX/Quantum write / multi-cabinet write は intentional scope 外 |
 
@@ -81,4 +82,4 @@
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
 
-| 26 | 属性 / 日時のファイルシステム復元 | MS-CAB §2.3 | ❌ | 展開時の metadata 適用は対象外 (アーカイブ抽出の範囲)。encode 側も date/time/attribs は 0 出力 |
+| 26 | 属性 / 日時のファイルシステム復元 | MS-CAB §2.3 | ⚠️ | 生の値は `MscabEntry::date` / `time` / `attribs` で公開する (`exposes_cffile_date_time_attribs`)。ファイルシステムへの属性復元はアーカイブ抽出層の責務として intentional scope 外とする。encode 側は date/time/attribs を 0 で出力する |

@@ -258,6 +258,12 @@ pub(crate) fn decompress_lzo1x(src: &[u8], expected_len: usize) -> Result<Vec<u8
 
     let t = src[sp] as usize;
 
+    // First byte 17 marks the v1 (LZO-RLE) bitstream, which this decoder does
+    // not support (kernel lzo.rst: "v0 cannot read v1 data").
+    if t == 17 {
+        return Err(Error::Unsupported("lzo: v1/RLE bitstream not supported"));
+    }
+
     // Initial literal run
     if t > 17 {
         // First byte > 17: (t - 17) literal bytes follow
@@ -594,6 +600,15 @@ mod tests {
         let compressed = super::super::encode::encode(data);
         let decompressed = decode(&compressed).unwrap();
         assert_eq!(decompressed, data);
+    }
+
+    #[test]
+    fn test_v1_bitstream_first_byte_rejected() {
+        // Bitstream version byte 17 marks the v1 (LZO-RLE) format; the v0
+        // decoder must reject it instead of misinterpreting it as an M4
+        // instruction (kernel lzo.rst: "v0 cannot read v1 data").
+        let result = decompress_lzo1x(&[17, 0, 0], 10);
+        assert!(matches!(result, Err(Error::Unsupported(_))));
     }
 
     #[test]

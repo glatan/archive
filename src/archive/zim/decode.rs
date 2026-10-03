@@ -402,14 +402,38 @@ pub fn decode(input: &[u8]) -> Result<Vec<ZimEntry>, Error> {
     Ok(entries)
 }
 
-/// Decode a ZIM archive into a list of entries ordered by the
-/// archive's title pointer list (title-sorted dirent indices).
+/// Dirent name (`N/path` form) of the v0 title index listing entry.
+const TITLE_ORDERED_LISTING: &str = "X/listing/titleordered/v0";
+
+/// Build a dirent-index -> title-rank map from the
+/// `X/listing/titleordered/v0` listing entry. Returns `None` when the
+/// entry is absent or its payload is not a u32 index list.
+fn title_order_rank(entries: &[ZimEntry]) -> Option<alloc::collections::BTreeMap<u32, u32>> {
+    let listing = entries.iter().find(|e| e.name == TITLE_ORDERED_LISTING)?;
+    if listing.data.is_empty() || !listing.data.len().is_multiple_of(4) {
+        return None;
+    }
+    let mut rank = alloc::collections::BTreeMap::new();
+    for (i, idx) in listing.data.as_chunks::<4>().0.iter().enumerate() {
+        rank.insert(u32::from_le_bytes(*idx), i as u32);
+    }
+    Some(rank)
+}
+
+/// Decode a ZIM archive into a list of entries ordered by title.
 ///
-/// When the title pointer list is absent or malformed, entries keep
-/// the default path order returned by [`decode`].
+/// The `X/listing/titleordered/v0` listing entry (a u32 dirent-index
+/// list in title order) is preferred; the header's `titlePtrPos`
+/// title pointer list is obsolete per the ZIM spec and only used as a
+/// fallback. When both are absent or malformed, entries keep the
+/// default path order returned by [`decode`].
 pub fn decode_title_order(input: &[u8]) -> Result<Vec<ZimEntry>, Error> {
     let mut entries = decode(input)?;
     if input.len() < 80 {
+        return Ok(entries);
+    }
+    if let Some(rank) = title_order_rank(&entries) {
+        entries.sort_by_key(|e| rank.get(&e.index).copied().unwrap_or(u32::MAX));
         return Ok(entries);
     }
     let entry_count = le_u32(input, 24)? as usize;
@@ -1125,5 +1149,81 @@ mod tests {
         oob[40..48].copy_from_slice(&oob_pos.to_le_bytes());
         let e = decode_title_order(&oob).unwrap();
         assert_eq!(e.iter().map(|e| e.name()).collect::<Vec<_>>(), path_order);
+    }
+
+    /// Pack a title-sorted dirent index list as the
+    /// `X/listing/titleordered/v0` blob payload (u32 LE).
+    fn title_listing_blob(order: &[u32]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for &i in order {
+            out.extend_from_slice(&i.to_le_bytes());
+        }
+        out
+    }
+
+    /// Builder with three `C/` content dirents plus an
+    /// `X/listing/titleordered/v0` dirent whose blob is `listing`.
+    /// Dirent indices: 0=aaa, 1=bbb, 2=ccc, 3=listing.
+    fn builder_with_listing(listing: &[u8]) -> ZimBuilder {
+        let mut b = ZimBuilder::new();
+        for (i, p) in ["aaa", "bbb", "ccc"].iter().enumerate() {
+            b.entries.push(DirentSpec::Content {
+                cluster: 0,
+                blob: i as u32,
+                ns: b'C',
+                path: p,
+            });
+        }
+        b.entries.push(DirentSpec::Content {
+            cluster: 0,
+            blob: 3,
+            ns: b'X',
+            path: "listing/titleordered/v0",
+        });
+        b.clusters
+            .push((CLUSTER_NONE, stored_cluster(&[b"a", b"b", b"c", listing])));
+        b
+    }
+
+    #[test]
+    fn title_order_uses_x_listing_v0() {
+        // Listing says title order is ccc, aaa, bbb (dirents 2, 0, 1).
+        let b = builder_with_listing(&title_listing_blob(&[2, 0, 1]));
+        let data = b.build();
+        let by_title = decode_title_order(&data).unwrap();
+        assert_eq!(
+            by_title.iter().map(|e| e.name()).collect::<Vec<_>>(),
+            vec!["C/ccc", "C/aaa", "C/bbb", "X/listing/titleordered/v0"]
+        );
+        // decode() is unaffected and keeps path order.
+        let by_path = decode(&data).unwrap();
+        assert_eq!(by_path[0].name(), "C/aaa");
+    }
+
+    #[test]
+    fn title_order_prefers_listing_over_titleptrpos() {
+        let mut b = builder_with_listing(&title_listing_blob(&[2, 0, 1]));
+        // Contradicting titlePtrPos order: the v0 listing wins.
+        b.title_ptrs = Some(vec![0, 1, 2, 3]);
+        let data = b.build();
+        let by_title = decode_title_order(&data).unwrap();
+        assert_eq!(
+            by_title.iter().map(|e| e.name()).collect::<Vec<_>>(),
+            vec!["C/ccc", "C/aaa", "C/bbb", "X/listing/titleordered/v0"]
+        );
+    }
+
+    #[test]
+    fn title_order_falls_back_when_listing_malformed() {
+        // Payload is not a multiple of 4: not a valid u32 index list,
+        // so the titlePtrPos list applies instead.
+        let mut b = builder_with_listing(&[0x02, 0x00, 0x00]);
+        b.title_ptrs = Some(vec![1, 0, 2, 3]);
+        let data = b.build();
+        let by_title = decode_title_order(&data).unwrap();
+        assert_eq!(
+            by_title.iter().map(|e| e.name()).collect::<Vec<_>>(),
+            vec!["C/bbb", "C/aaa", "C/ccc", "X/listing/titleordered/v0"]
+        );
     }
 }

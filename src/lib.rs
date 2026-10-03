@@ -89,7 +89,7 @@
 //! | `erofs` (default) | Linux erofs read-only filesystem image (incl. z_erofs LZ4/MicroLZMA/DEFLATE/Zstd) |
 //! | `iso9660` (default) | ISO 9660 CD-ROM image (Rock Ridge / Joliet) |
 //! | `crx3` (default) | Chrome extension package (CRX3) read support |
-//! | `pea` (default) | PEA (Pack, Encrypt, Authenticate) archive read support |
+//! | `pea` (default) | PEA (Pack, Encrypt, Authenticate) archive read/write support (stored/PCOMPRESS2 deflate write) |
 //! | `zim` (default) | ZIM archive (`.zim`) read/write support (v5/v6 write) |
 //! | `mtree` (default) | mtree(5) manifest read/write support |
 //! | `warc` (default) | WARC (`.warc`) record read/write support |

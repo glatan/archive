@@ -99,6 +99,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<XarEntry>, Error> {
             match name {
                 "sha1" => Some("sha1"),
                 "md5" => Some("md5"),
+                "sha256" => Some("sha256"),
                 _ => return Err(Error::Unsupported("xar: unsupported digest algorithm")),
             }
         }
@@ -164,6 +165,7 @@ fn digest(kind: &str, data: &[u8]) -> Result<Vec<u8>, Error> {
     Ok(match kind {
         "sha1" => crate::util::sha1::sha1(data).to_vec(),
         "md5" => crate::util::md5::md5(data).to_vec(),
+        "sha256" => crate::util::sha256::sha256(data).to_vec(),
         _ => return Err(Error::Unsupported("xar: unsupported digest")),
     })
 }
@@ -204,7 +206,7 @@ fn walk_file(
         {
             let expected =
                 hex_bytes(cs.text.trim()).ok_or_else(|| invalid("xar: bad archived-checksum"))?;
-            if let "sha1" | "md5" = style
+            if let "sha1" | "md5" | "sha256" = style
                 && digest(style, stored)?[..] != expected[..]
             {
                 return Err(invalid("xar: archived-checksum mismatch"));
@@ -243,7 +245,7 @@ fn walk_file(
             let expected =
                 hex_bytes(cs.text.trim()).ok_or_else(|| invalid("xar: bad extracted-checksum"))?;
             // Unknown digest styles are not verified.
-            if let "sha1" | "md5" = style
+            if let "sha1" | "md5" | "sha256" = style
                 && digest(style, &data)?[..] != expected[..]
             {
                 return Err(invalid("xar: extracted-checksum mismatch"));
@@ -282,6 +284,16 @@ fn hex_bytes(s: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
     use crate::util::sha1::sha1;
+    use crate::util::sha256::sha256;
+
+    fn hex_lower(data: &[u8]) -> String {
+        use core::fmt::Write;
+        let mut s = String::new();
+        for b in data {
+            write!(s, "{b:02x}").unwrap();
+        }
+        s
+    }
 
     fn make_xar_cksum3(digest_name: &str, heap: &[u8], toc_xml: &str) -> Vec<u8> {
         // cksum_alg=3: extended header stores a NUL-terminated digest
@@ -325,8 +337,70 @@ mod tests {
     }
 
     #[test]
+    fn test_cksum_alg3_sha256() {
+        // cksum_alg=3 with the digest named "sha256": the TOC
+        // checksum and the per-file archived/extracted checksums
+        // all verify via SHA-256.
+        let cksum = hex_lower(&sha256(b"hello"));
+        let toc = alloc::format!(
+            concat!(
+                "<?xml version='1.0'?><xar><toc>",
+                "<checksum style='sha256'><offset>0</offset><size>32</size></checksum>",
+                "<file id='1'><name>f.txt</name><type>file</type>",
+                "<data><offset>32</offset><size>5</size><length>5</length>",
+                "<archived-checksum style='sha256'>{}</archived-checksum>",
+                "<extracted-checksum style='sha256'>{}</extracted-checksum>",
+                "<encoding style='none'/></data></file></toc></xar>"
+            ),
+            cksum,
+            cksum,
+        );
+        let toc_comp = crate::compress::zlib::encode::encode(toc.as_bytes());
+        let mut heap = sha256(&toc_comp).to_vec();
+        heap.extend_from_slice(b"hello");
+        let x = make_xar_cksum3("sha256", &heap, &toc);
+        let entries = decode(&x).unwrap();
+        assert_eq!(entries[0].name, "f.txt");
+        assert_eq!(entries[0].data, b"hello");
+    }
+
+    #[test]
+    fn test_cksum_alg3_sha256_mismatch() {
+        // A corrupted sha256 TOC checksum and a tampered file byte
+        // (caught by the sha256 archived-checksum) are rejected.
+        let cksum = hex_lower(&sha256(b"hello"));
+        let toc = alloc::format!(
+            concat!(
+                "<?xml version='1.0'?><xar><toc>",
+                "<checksum style='sha256'><offset>0</offset><size>32</size></checksum>",
+                "<file id='1'><name>f.txt</name><type>file</type>",
+                "<data><offset>32</offset><size>5</size><length>5</length>",
+                "<archived-checksum style='sha256'>{}</archived-checksum>",
+                "<encoding style='none'/></data></file></toc></xar>"
+            ),
+            cksum,
+        );
+        let toc_comp = crate::compress::zlib::encode::encode(toc.as_bytes());
+
+        // Corrupt the stored TOC checksum in the heap.
+        let mut heap = sha256(&toc_comp).to_vec();
+        heap.extend_from_slice(b"hello");
+        heap[0] ^= 0xFF;
+        let x = make_xar_cksum3("sha256", &heap, &toc);
+        assert!(matches!(decode(&x), Err(Error::InvalidData(_))));
+
+        // Corrupt the stored file bytes: sha256 mismatch.
+        let mut heap = sha256(&toc_comp).to_vec();
+        heap.extend_from_slice(b"jello");
+        let x = make_xar_cksum3("sha256", &heap, &toc);
+        assert!(matches!(decode(&x), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
     fn test_cksum_alg3_unknown_digest_rejected() {
-        let x = make_xar_cksum3("sha256", &[], "<xar><toc/></xar>");
+        // Digest names without a util implementation (sha512 etc.)
+        // remain Unsupported.
+        let x = make_xar_cksum3("sha512", &[], "<xar><toc/></xar>");
         assert!(matches!(decode(&x), Err(Error::Unsupported(_))));
     }
 }

@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 use crate::compress::deflate;
 use crate::error::Error;
 use crate::util::adler32;
+use crate::util::bitreader::BitReader;
 
 /// Informational fields parsed from the zlib header (RFC 1950 §2.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,7 +55,58 @@ const fn parse_header(cmf: u8, flg: u8) -> Result<(u8, bool), Error> {
     Ok((flevel, has_fdict))
 }
 
+/// Decode a DEFLATE payload from the front of `input`, returning the
+/// decompressed data and the byte offset where the DEFLATE stream ends
+/// (rounded up to the next byte boundary).
+///
+/// The DEFLATE stream is self-terminating (BFINAL block), so the exact end
+/// offset is recovered from the bit reader instead of assuming the payload
+/// extends to the end of `input`. This lets the caller locate the Adler-32
+/// trailer and ignore any trailing data after it (RFC 1950 §2.2).
+///
+/// When `dict` is `Some`, the dictionary is pre-seeded into the output
+/// buffer so back-references can reach into it, then stripped from the
+/// returned data (same scheme as `deflate::decode_with_dict`).
+fn decode_deflate_payload(input: &[u8], dict: Option<&[u8]>) -> Result<(Vec<u8>, usize), Error> {
+    let mut reader = BitReader::new(input);
+    let mut output = match dict {
+        Some(d) => Vec::from(d),
+        None => Vec::new(),
+    };
+    deflate::decode::decode_stream(&mut reader, &mut output)?;
+    reader.align_to_byte();
+    let deflate_end = reader.byte_position();
+
+    let decompressed = match dict {
+        Some(d) => output.split_off(d.len()),
+        None => output,
+    };
+    Ok((decompressed, deflate_end))
+}
+
+/// Verify the 4-byte big-endian Adler-32 trailer at `trailer_start`.
+///
+/// Bytes after the trailer are ignored: per RFC 1950 §2.2 the zlib stream
+/// ends at ADLER32 and trailing data is not part of the stream.
+fn verify_adler32(input: &[u8], trailer_start: usize, decompressed: &[u8]) -> Result<(), Error> {
+    let trailer = input
+        .get(trailer_start..trailer_start + 4)
+        .ok_or(Error::UnexpectedEof)?;
+    let expected_adler = u32::from_be_bytes([trailer[0], trailer[1], trailer[2], trailer[3]]);
+    let actual_adler = adler32::adler32(decompressed);
+    if actual_adler != expected_adler {
+        return Err(Error::ChecksumMismatch {
+            expected: expected_adler,
+            actual: actual_adler,
+        });
+    }
+    Ok(())
+}
+
 /// Decompress zlib format data.
+///
+/// Bytes after the 4-byte Adler-32 trailer are ignored: the zlib stream
+/// ends at ADLER32 (RFC 1950 §2.2).
 ///
 /// # Errors
 ///
@@ -83,25 +135,11 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
         return Err(Error::Unsupported("zlib: preset dictionary not supported"));
     }
 
-    // Decompress DEFLATE payload (between header and trailer)
-    let trailer_start = input.len() - 4;
-    let deflate_data = &input[2..trailer_start];
-    let decompressed = deflate::decode::decode(deflate_data)?;
+    // Decompress DEFLATE payload; the trailer follows the exact stream end.
+    let (decompressed, deflate_end) = decode_deflate_payload(&input[2..], None)?;
 
-    // Verify Adler-32 checksum (big-endian)
-    let expected_adler = u32::from_be_bytes([
-        input[trailer_start],
-        input[trailer_start + 1],
-        input[trailer_start + 2],
-        input[trailer_start + 3],
-    ]);
-    let actual_adler = adler32::adler32(&decompressed);
-    if actual_adler != expected_adler {
-        return Err(Error::ChecksumMismatch {
-            expected: expected_adler,
-            actual: actual_adler,
-        });
-    }
+    // Verify Adler-32 checksum (big-endian); trailing data is ignored.
+    verify_adler32(input, 2 + deflate_end, &decompressed)?;
 
     Ok(decompressed)
 }
@@ -112,6 +150,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 /// Identical to [`decode`] except it also returns a [`ZlibInfo`] containing
 /// the FLEVEL compression-level hint from the zlib header (RFC 1950 §2.2).
 /// FLEVEL is purely informational and does not affect decompression.
+/// Like [`decode`], bytes after the Adler-32 trailer are ignored.
 ///
 /// # Errors
 ///
@@ -141,25 +180,11 @@ pub fn decode_with_info(input: &[u8]) -> Result<(Vec<u8>, ZlibInfo), Error> {
         return Err(Error::Unsupported("zlib: preset dictionary not supported"));
     }
 
-    // Decompress DEFLATE payload (between header and trailer)
-    let trailer_start = input.len() - 4;
-    let deflate_data = &input[2..trailer_start];
-    let decompressed = deflate::decode::decode(deflate_data)?;
+    // Decompress DEFLATE payload; the trailer follows the exact stream end.
+    let (decompressed, deflate_end) = decode_deflate_payload(&input[2..], None)?;
 
-    // Verify Adler-32 checksum (big-endian)
-    let expected_adler = u32::from_be_bytes([
-        input[trailer_start],
-        input[trailer_start + 1],
-        input[trailer_start + 2],
-        input[trailer_start + 3],
-    ]);
-    let actual_adler = adler32::adler32(&decompressed);
-    if actual_adler != expected_adler {
-        return Err(Error::ChecksumMismatch {
-            expected: expected_adler,
-            actual: actual_adler,
-        });
-    }
+    // Verify Adler-32 checksum (big-endian); trailing data is ignored.
+    verify_adler32(input, 2 + deflate_end, &decompressed)?;
 
     Ok((decompressed, ZlibInfo { flevel }))
 }
@@ -169,7 +194,8 @@ pub fn decode_with_info(input: &[u8]) -> Result<(Vec<u8>, ZlibInfo), Error> {
 /// When the zlib header has the FDICT flag set, the stream includes a 4-byte
 /// DICTID (Adler-32 of the dictionary). This function verifies DICTID matches
 /// the supplied dictionary, then decompresses using the dictionary as initial
-/// history for back-references.
+/// history for back-references. Like [`decode`], bytes after the Adler-32
+/// trailer are ignored.
 ///
 /// # Errors
 ///
@@ -201,25 +227,13 @@ pub fn decode_with_dict(input: &[u8], dict: &[u8]) -> Result<Vec<u8>, Error> {
         });
     }
 
-    // Decompress DEFLATE payload with dict (after header + DICTID, before trailer)
-    let trailer_start = input.len() - 4;
-    let deflate_data = &input[6..trailer_start];
-    let decompressed = deflate::decode::decode_with_dict(deflate_data, dict)?;
+    // Decompress DEFLATE payload with dict (after header + DICTID);
+    // the trailer follows the exact stream end.
+    let (decompressed, deflate_end) = decode_deflate_payload(&input[6..], Some(dict))?;
 
-    // Verify Adler-32 checksum of decompressed data (big-endian)
-    let expected_adler = u32::from_be_bytes([
-        input[trailer_start],
-        input[trailer_start + 1],
-        input[trailer_start + 2],
-        input[trailer_start + 3],
-    ]);
-    let actual_adler = adler32::adler32(&decompressed);
-    if actual_adler != expected_adler {
-        return Err(Error::ChecksumMismatch {
-            expected: expected_adler,
-            actual: actual_adler,
-        });
-    }
+    // Verify Adler-32 checksum of decompressed data (big-endian);
+    // trailing data is ignored.
+    verify_adler32(input, 6 + deflate_end, &decompressed)?;
 
     Ok(decompressed)
 }
@@ -431,5 +445,46 @@ mod tests {
             err,
             crate::error::Error::OutputLimitExceeded { .. }
         ));
+    }
+
+    #[test]
+    fn test_decode_trailing_data_ignored() {
+        // RFC 1950 §2.2: the zlib stream ends at the ADLER32 field; bytes
+        // after it are not part of the stream and must be ignored.
+        let data = b"Hello, zlib trailing data!";
+        let mut compressed = super::super::encode::encode(data);
+        compressed.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x11]);
+        let decompressed = decode(&compressed).unwrap();
+        assert_eq!(decompressed, data);
+
+        // decode_with_info follows the same rule.
+        let (decompressed, info) = decode_with_info(&compressed).unwrap();
+        assert_eq!(decompressed, data);
+        assert_eq!(info.flevel, 2);
+    }
+
+    #[test]
+    fn test_decode_with_dict_trailing_data() {
+        let dict = b"the quick brown fox jumps over the lazy dog";
+        let data = b"the quick brown fox is fast";
+        let mut compressed = super::super::encode::encode_with_dict(data, dict);
+        compressed.extend_from_slice(&[0xAA, 0xBB, 0xCC]);
+        let decompressed = decode_with_dict(&compressed, dict).unwrap();
+        assert_eq!(decompressed, data);
+    }
+
+    #[test]
+    fn test_decode_truncated_adler_still_rejected() {
+        // Fewer than 4 bytes after the DEFLATE stream end is a truncated
+        // ADLER32 trailer and must still be rejected.
+        let data = b"Hello, zlib!";
+        let compressed = super::super::encode::encode(data);
+        for cut in 1..=4 {
+            let truncated = &compressed[..compressed.len() - cut];
+            assert!(
+                matches!(decode(truncated), Err(Error::UnexpectedEof)),
+                "cut={cut} should be rejected as truncated trailer"
+            );
+        }
     }
 }

@@ -3,6 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | rpm.org Package Format documentation ([`format_v6.html`](https://rpm-software-management.github.io/rpm/manual/format_v6.html) / [`format_header.html`](https://rpm-software-management.github.io/rpm/manual/format_header.html) / [`format_lead.html`](https://rpm-software-management.github.io/rpm/manual/format_lead.html)、ローカルスナップショット: `docs/spec/sources/rpm_format_*.html`) + rpm `lib/cpio.c` (stripped payload 挙動) |
+| 参照実装 | rpm `lib/cpio.c` (GPL-2.0-only、stripped payload 挙動の動作参照 — コード取り込みなし)、`bsdtar` (BSD-2-Clause、writer 出力の oracle)。詳細: THIRD_PARTY_NOTICES rpm 項 |
 | 形式概要 | 96B Lead + Signature header + 8B パディング + Header + 圧縮 payload (cpio `newc` / stripped `07070X`) |
 | 実装範囲 | **read/write** (署名検証は intentional scope 外) |
 
@@ -35,8 +36,8 @@
 | 10 | 文字列 tag は NUL 終端、STRING_ARRAY は NUL 区切り列 | [format_header.html](https://rpm-software-management.github.io/rpm/manual/format_header.html) | ✅ | `get_string`/`get_strings` |
 | 11 | 整数型は要素サイズで整列 | [format_header.html](https://rpm-software-management.github.io/rpm/manual/format_header.html) | ✅ | `entry_bytes` の offset 計算 |
 | 12 | index/データ範囲の bounds 検査 (truncated → `UnexpectedEof`) | crate エラー規約 | ✅ | `rejects_*` 系 |
-| 12a | index entry は tag 昇順ソート・重複 tag なし | format_header.html ("entries are sorted by tag number") | ⚠️ | decoder は file order のまま保持しソート/重複検証をしない (lenient)。encode 側 (#26) は昇順 emit |
-| 12b | データ store の整列パディングはゼロ | format_header.html | ⚠️ | decoder は pad 内容を検証しない (lenient)。encode はゼロパッド emit |
+| 12a | index entry は tag 昇順ソート・重複 tag なし | format_header.html ("entries are sorted by tag number") | ✅ | decoder 側は tag の単調増加と重複の有無を検証する (`rejects_unsorted_index_entries`, `rejects_duplicate_tag`)。encode 側 (#26) は昇順で出力する |
+| 12b | データ store の整列パディングはゼロ | format_header.html | ✅ | decoder 側はデータストアの整列パディングがゼロであるかを検証する (`rejects_nonzero_store_padding`, `accepts_aligned_zero_padding`)。encode 側はゼロパディングを出力する |
 
 ### payload
 

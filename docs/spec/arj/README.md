@@ -3,8 +3,9 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | ARJ technical note `TECHNOTE.TXT` (ARJ/UNARJ 配布物同梱、ARJ 2.x file format description)。所在: [Just Solve Wiki: ARJ](http://fileformats.archiveteam.org/wiki/ARJ) (安定した単一ファイル URL なし)。参照実装: UNARJ 2.41 (公式 decoder、制限付き freeware — ソースは ARJ archiver 以外の製品でのみ自由利用可。本 crate への取り込み不可、参照・oracle 用途のみ)、7-Zip `NArj`、newtua_dos (LGPL-3.0、XADMaster port、method 1-4) — manifest `no_url_available` の `unarj-source`/`newtua-dos` |
+| 参照実装 | newtua_dos (LGPL-3.0-or-later、method4 の移植元)、UNARJ 2.41 (制限付き freeware、oracle のみ)、unar/7z (oracle)。詳細は基準仕様行および THIRD_PARTY_NOTICES arj 項・4a 節 |
 | 形式概要 | `0x60 0xEA` + `u16le header size` の header ブロック列 (0 = end)。基本 header は 30B 固定 + NUL 終端 filename/comment + u32 header CRC + u16 ext size。main header の後に file header 列と data が続く |
-| 実装範囲 | **method 0-4 + file type 3 (directory) / 4 (label) + garbled (password 必須) + multi-volume (供給 parts の連結)** を read。write は `ArjEncoder::with_method` で method 0-4 (圧縮不利時は stored fallback) + `finish_parts` で multi-volume 分割 emit。security envelope / chapter / 自動 volume 探索は非対応 |
+| 実装範囲 | 展開 (read) は **method 0-4、file type 3 (directory) / 4 (label)、garbled (暗号化、パスワード必須)、および multi-volume (供給された parts の連結)** に対応する。作成 (write) は `ArjEncoder::with_method` による method 0-4 (圧縮効果が得られない場合は stored にフォールバック)、`with_password` による暗号化出力、および `finish_parts` による multi-volume 分割出力に対応する。`decode::volume_paths` (`std` feature) により、同一ディレクトリ内の sibling volume を自動探索できる。security envelope および chapter 機能は非対応とする |
 
 ## 対応バリアント・仕様版
 
@@ -14,7 +15,7 @@
 | file_type 3 (dir) / 4 (label) | ARJ technical note | ✅ | — | メタデータエントリ |
 | method 1-3 (LZH st1 系) | TECHNOTE 概略 + newtua_dos/UNARJ de facto 参照 | ✅ | ✅ | 15-bit window の静的 Huffman (LHA st1 共有実装)。encode は `with_method(1-3)` → `compress::lzh::st1_enc` |
 | method 4 (fastest LZSS) | TECHNOTE 概略 + newtua_dos de facto 参照 | ✅ | ✅ | 0x8000B window LZSS。encode は `with_method(4)` → `method4::encode` |
-| garbled (password) | ARJ technical note | ✅ | ❌ | password API 必須。write は非対応 (#20) |
+| garbled (password) | ARJ technical note | ✅ | ✅ | `decode_with_password{,_bytes}` / `ArjEncoder::with_password` (#20) |
 | multi-volume | ARJ technical note | ✅ | ✅ | `decode_parts` で parts 供給、encode は `finish_parts` で分割 emit (自己 roundtrip 検証のみ。外部ツールによる multi-volume interop は未検証) |
 
 ### ヘッダ構造
@@ -38,6 +39,7 @@
 | 10 | method 4 (fastest LZSS、0x8000B window) decode | ARJ tech note 概略 + newtua_dos | ✅ | `test_arj_compressed_methods`, `arj::method4` 単体 |
 | 10a | arj_flags bit0 (garbled/password): password API で XOR 解除、未供給/誤 password は reject | ARJ tech note | ✅ | `test_arj_garbled` |
 | 10b | arj_flags bit2 (multi-volume): `decode_parts` で供給 parts を filename で連結 | ARJ tech note | ✅ | `test_arj_multi_volume`, `test_arj_multi_volume_three_way` |
+| 21 | multi-volume の自動ファイル探索 | crate extension | ✅ | `decode::volume_paths` (`std` feature) で `.arj` / `.aNN` の sibling ファイルを順序付きで列挙する。`volume_paths_discovers_siblings`, `test_arj_volume_paths_discovery_roundtrip` |
 | 11 | entry data CRC-32 を検証、不一致は reject | ARJ tech note | ✅ | decode 内検証 |
 | 12 | bounds 検査 (truncated signature/header/data → エラー) | crate エラー規約 | ✅ | `test_arj_rejects_truncated` |
 | 13 | filename は UTF-8 必須 | crate エラー規約 | ✅ | `read_cstr` |
@@ -68,8 +70,7 @@
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
 | 19 | method 5+ / security envelope / chapter 機能は非対応 | ❌ | `Error::Unsupported`。decode 参照実装は manifest `no_url_available` (`newtua-dos` が安全側、`unarj-source` は制限付き freeware のため参照のみ)。oracle は `unar`/`7z` (Debian `arj` は non-free) |
-| 20 | garbled の write / password なし decode は非対応 | ❌ | `decode_with_password{,_bytes}` でのみ解除 |
-| 21 | multi-volume の自動ファイル探索は非対応 | ❌ | 呼び出し側が parts を順に渡す (`decode_parts{,_with_password_bytes}`)。flag bit2 + 同名 filename で継続判定 |
+| 20 | 暗号化 (garbled) の write / パスワードなし decode | ⚠️ | garbled の write は `ArjEncoder::with_password` で対応する (`ungarble` は対称変換であるため encode と decode で共用)。パスワードなしの復号は暗号化の性質上不可能なため intentional scope 外とする。`garbled_roundtrip`, `garbled_write_requires_password_decode`, `test_arj_garbled_write_roundtrip` |
 | 22 | method 5+ の write は非対応 | ❌ | `with_method` は 0-4 のみ受理 (method 5+ は `InvalidData`)。圧縮不利時は method 0 fallback |
 
 ### 実装メモ

@@ -30,6 +30,50 @@ cargo run --release -p archive-fuzz -- --pattern original-decompress
 
 外部ツールが見つからない場合、該当パターンを自動的にスキップする。
 
+## 外部ツール一覧
+
+`original-compress` / `original-decompress` パターンおよび統合テスト (`tests/integration/`) の
+相互運用性検証で利用する外部ツールの一覧である。環境に導入するツール一覧の正本は `Containerfile` であり、
+本表はその導線としての要約である。ツールを追加または更新するときは `Containerfile` を先に変更し、本表を更新する。
+なお、アルゴリズムとツールコマンドの対応関係は `fuzz/src/external.rs` の `tool_spec` を正本とする。
+
+### テスト実行時に必要なツール
+
+| ツール (コマンド) | 提供形式 | 主な用途 |
+|---|---|---|
+| `gzip` | pacman `gzip` | gzip/deflate の interop |
+| `bzip2` | pacman `bzip2` | bzip2 の interop |
+| `lzip` | pacman `lzip` | lzip の interop |
+| `xz` | pacman `xz` | xz / lzma-alone の interop |
+| `zstd` | pacman `zstd` | zstd の interop |
+| `brotli` | pacman `brotli` | brotli の interop |
+| `lz4` | pacman `lz4` | lz4 の interop |
+| `lzop` | pacman `lzop` | lzo (lzop container) の interop |
+| `lrzip` | pacman `lrzip` | lrzip の interop (完全互換は非保証、known issue 参照) |
+| `compress` / `uncompress` | pacman `ncompress` | lzw (`.Z`) の interop |
+| `rzip` | PKGBUILD (`pkg/rzip`) | rzip `.rz` の interop |
+| `zpaq` | PKGBUILD (`pkg/zpaq`) | zpaq の interop |
+| `zip` / `unzip` | pacman `zip`/`unzip` | ZIP の interop |
+| `7z` / `7zr` / `7zz` | pacman `7zip` | 7z の interop + arj/arc/lha 等の decode oracle |
+| `bsdtar` | pacman `libarchive` | tar/cpio/lha/rpm/xar 等の汎用 oracle |
+| `unar` / `lsar` | pacman `unarchiver` | arj/arc の decode oracle |
+| `lhasa` | pacman `lhasa` | lha の decode oracle |
+| `cabextract` | pacman `cabextract` | mscab の decode oracle |
+| `cpio` | pacman `cpio` | cpio の interop |
+| `tar` / `ar` | base-devel (GNU binutils/tar) | tar/ar/deb の interop |
+| `arc` / `marc` | Debian deb (sha256 pin、`Containerfile` 参照) | arc の oracle |
+| `nomarch` | Debian deb (sha256 pin) | arc の decode oracle |
+| `mksquashfs` / `unsquashfs` | pacman `squashfs-tools` | squashfs の interop |
+| `git` | pacman `git` | git-pack の interop (`index-pack` 等) |
+| `python3` | pacman `python` | 独自 oracle スクリプト (pea 等) |
+
+### fixture 生成時のみ必要 (テスト実行時は不要)
+
+`genromfs` (romfs)、`erofs-utils` の `mkfs.erofs`/`fsck.erofs` (erofs)、`xar` 1.6.1 (xar)、
+hwzip (zip method 1-6) などのツールは、テスト用 fixture の生成時にのみ必要であり、テスト実行時には不要である。
+生成済みの fixture は `tests/fixtures/` に格納している。
+各 fixture の由来 (provenance) は `tests/fixtures/README.md` および `THIRD_PARTY_NOTICES` に記載している。
+
 ## Coverage-guided モード
 
 `fuzz/corpus/` をシードとしてミューテーションを行い、新規入力を探索する。

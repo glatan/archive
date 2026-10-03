@@ -3,6 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [RFC 1951](https://www.rfc-editor.org/rfc/rfc1951.txt) — DEFLATE Compressed Data Format Specification version 1.3 (ローカルスナップショット: `docs/spec/sources/rfc1951.txt`) |
+| 参照実装 | zlib (zlib license、`inflate_table`/`gen_bitlen` の動作参照)。詳細: THIRD_PARTY_NOTICES DEFLATE 項 |
 | 仕様メモ | 仕様にテストベクターは含まれず、ハフマン符号構築例 (bit lengths `[3,3,3,3,3,2,4,4]`) が主要な具体例 |
 
 ### テスト対象要件と網羅状況
@@ -75,7 +76,7 @@
 | 58 | 距離コードの特別規則: 距離コード 0 個 (コード長全ゼロ) は all-literals ストリームとして受理。距離コード 1 個のみの場合は 0bit ではなく 1bit で符号化し、残りは未使用コード | RFC 1951 §3.2.7 | ✅ | `HuffmanTable::from_lengths` は全ゼロ距離長を空テーブルとして受理 (距離コード使用時のみ `empty Huffman table` で拒否)。`test_dynamic_huffman_all_literals_empty_dist_tree`, `test_dynamic_huffman_empty_dist_tree_rejects_match`, `test_encode_dynamic_all_literals_roundtrip`, `test_dynamic_huffman_direct` 系 |
 | 59 | コード長リピートコード (16/17/18) は HLIT+257 → HDIST+1 の境界をまたいで適用される。全コード長は HLIT+HDIST+258 要素の単一シーケンス | RFC 1951 §3.2.7 | ✅ | `decode_dynamic_huffman` は lit/dist を単一 `lengths` バッファとして処理 |
 | 60 | マルチバイト整数は LSB-first (little-endian) で格納される (LEN/NLEN 等) | RFC 1951 §3.1 | ✅ | `read_u16_le` 等 |
-| 61 | HDIST=31/32 の受理 (dist code 30/31 のコード長が 0 なら RFC 上は合法) | RFC 1951 §3.2.7 / §3.3 | ❌ | zlib の inflate と同様に `hdist > 30` を無条件 reject する intentional な厳格化 |
+| 61 | HDIST=31/32 の受理 (dist code 30/31 のコード長が 0 なら RFC 上は合法) | RFC 1951 §3.2.7 / §3.3 | ✅ | 予約された距離コード 30/31 のコード長が非ゼロであれば拒絶し、コード長 0 であれば受理する。`test_dynamic_huffman_hdist_31_zero_lengths_accepted`, `test_dynamic_huffman_hdist_32_zero_lengths_accepted`, `test_dynamic_huffman_hdist_31_nonzero_reserved_length_rejected` |
 
 ---
 
@@ -83,8 +84,8 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 60 |
+| ✅ 実装+テスト済み  | 61 |
 | ⚠️ 部分実装  | 0 |
-| ❌ 未実装  | 1 |
+| ❌ 未実装  | 0 |
 | **合計** | **61** |
 

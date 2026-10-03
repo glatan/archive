@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | Emmanuel Marty らの LZSA。ストリーム形式 (`7b 9e` magic + traits + 64KiB フレーム列 + EOD フレーム) と、LZSA1 / LZSA2 という 2 種類のブロックフォーマットから構成される |
 | 基準仕様 | [`emmanuel-marty/lzsa`](https://github.com/emmanuel-marty/lzsa) リポジトリの [`StreamFormat.md`](https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/StreamFormat.md) / [`BlockFormat_LZSA1.md`](https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/BlockFormat_LZSA1.md) / [`BlockFormat_LZSA2.md`](https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/BlockFormat_LZSA2.md) (v1.4.1、ローカルスナップショット: `docs/spec/sources/lzsa_*_1.4.1.md`)。参照実装は zlib license (`src/matchfinder.c` のみ CC0) |
+| 参照実装 | upstream `lzsa` (Emmanuel Marty 他、zlib license / `src/matchfinder.c` は CC0、動作参照 + fixture 生成: `tests/integration/lzsa.rs` の known-answer ベクターは `lzsa` v1.4.1 出力)。詳細: THIRD_PARTY_NOTICES LZSA 項 |
 | 実装 | `archive::compress::lzsa` (decode / decode_bounded / decode_lzsa1_block / decode_lzsa2_block / decode_with_prefix / decode_lzsa1_block_with_prefix / decode_lzsa2_block_with_prefix / decode_lzsa1_block_backwards / decode_lzsa1_block_backwards_with_prefix / decode_lzsa2_block_backwards / decode_lzsa2_block_backwards_with_prefix / encode / encode_lzsa2 / encode_with_prefix / encode_lzsa2_with_prefix / encode_lzsa1_block / encode_lzsa1_block_with_prefix / encode_lzsa2_block / encode_lzsa2_block_with_prefix / encode_lzsa1_block_backwards / encode_lzsa1_block_backwards_with_prefix / encode_lzsa2_block_backwards / encode_lzsa2_block_backwards_with_prefix)。pure-Rust 実装 |
 
 ## 対応バリアント・仕様版

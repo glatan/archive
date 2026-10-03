@@ -527,13 +527,14 @@ fn lha_fixture_method(name: &str, data: &[u8], method: &[u8; 5]) -> Vec<u8> {
     enc.finish()
 }
 
-/// Compressed write→read roundtrip for every writable st1 method.
+/// Compressed write→read roundtrip for every writable compressed
+/// method (st1 `-lh4-`..`-lh7-` and LArc `-lzs-`/`-lz5-`).
 #[test]
 fn test_lha_compressed_method_roundtrip() {
     let mut data = Vec::new();
     data.extend_from_slice(&b"lha compressed roundtrip ".repeat(2000));
     data.extend_from_slice(&[7u8; 1000]);
-    for method in [b"-lh4-", b"-lh5-", b"-lh6-", b"-lh7-"] {
+    for method in [b"-lh4-", b"-lh5-", b"-lh6-", b"-lh7-", b"-lzs-", b"-lz5-"] {
         let a = lha_fixture_method("c.bin", &data, method);
         // Method tag at offset 2; packed size (u32le) at offset 7.
         assert_eq!(&a[2..7], method.as_slice());
@@ -608,4 +609,49 @@ fn test_lha_lh5_bsdtar_interop() {
     );
     let extracted = std::fs::read(out_dir.join("lh5.txt")).unwrap();
     assert_eq!(extracted, data.as_slice());
+}
+
+/// libarchive also reads the LArc methods: crate-generated `-lzs-` /
+/// `-lz5-` archives must list and extract under `bsdtar` when its lha
+/// reader supports them (otherwise the test skips).
+#[test]
+fn test_lha_lzs_lz5_bsdtar_interop() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_lha_larc_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let data = b"bsdtar larc compressed payload ".repeat(64);
+
+    for (method, tag) in [(b"-lzs-", "lzs"), (b"-lz5-", "lz5")] {
+        let path = dir.join(format!("test{tag}.lzh"));
+        let name = format!("{tag}.txt");
+        std::fs::write(&path, lha_fixture_method(&name, &data, method)).unwrap();
+
+        let output = Command::new("bsdtar").args(["-tf"]).arg(&path).output();
+        let Ok(output) = output else { return };
+        if !output.status.success() {
+            return; // libarchive build without lzh support
+        }
+        let listing = String::from_utf8_lossy(&output.stdout);
+        assert!(listing.contains(&name), "bsdtar -tf output: {listing}");
+
+        let out_dir = dir.join(format!("out_{tag}"));
+        std::fs::create_dir_all(&out_dir).unwrap();
+        let output = Command::new("bsdtar")
+            .args(["-xf"])
+            .arg(&path)
+            .current_dir(&out_dir)
+            .output()
+            .unwrap();
+        if !output.status.success() {
+            continue; // oracle lacks support for this method
+        }
+        let extracted = std::fs::read(out_dir.join(&name)).unwrap();
+        assert_eq!(extracted, data.as_slice(), "{tag}: bsdtar output differs");
+    }
 }

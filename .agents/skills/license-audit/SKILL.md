@@ -21,6 +21,7 @@ description: "アルゴリズム・実装の権利関係とライセンス互換
 2. `THIRD_PARTY_NOTICES` の該当エントリとの整合性
 3. 参照した仕様書・参照実装のライセンス
 4. アルゴリズムの特許状況
+5. 三者の整合性: `docs/spec/<format>/README.md` の `参照実装` 行、`THIRD_PARTY_NOTICES`、および `docs/spec/sources/manifest.json` の三者で記載が一致しているか
 
 ### `all` 指定時
 

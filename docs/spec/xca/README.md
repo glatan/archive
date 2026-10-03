@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | Microsoft Xpress Compression Algorithms の 3 バリアント: Plain LZ77 ("Xpress", `COMPRESSION_FORMAT_XPRESS`)、LZ77+Huffman ("Xpress Huffman", `COMPRESSION_FORMAT_XPRESS_HUFF`)、LZNT1 (`COMPRESSION_FORMAT_LZNT1`) |
 | 基準仕様 | [MS-XCA] Xpress Compression Algorithm (Microsoft Open Specifications, <https://learn.microsoft.com/openspecs/windows_protocols/ms-xca/>、rev 10.0 版固定 PDF: <https://winprotocoldocs-bhdugrdyduf5h2e4.b02.azurefd.net/MS-XCA/%5bMS-XCA%5d-240423.pdf>。ローカルスナップショット: `docs/spec/sources/ms-xca_10.0_240423.pdf`)。**監査メモ: この PDF は保護付きでテキスト抽出不可のため、spec↔コード突合は実装内コメント・既存 spec 記述の相互確認にとどまる。仕様書側の全要件網羅は未検証** |
+| 参照実装 | なし (書面仕様のみに基づいて実装)。既知解答ベクターは Samba `lib/compression` テストスイート (GPLv3+) の Windows `RtlCompressBuffer` 出力を fixture として利用。詳細: THIRD_PARTY_NOTICES xca 項 |
 | 実装 | `archive::compress::xca::{lz77, huffman, lznt1}`。仕様書のみからの pure-Rust 実装。サードパーティコードの移植なし |
 
 MS-XCA のストリームはコンテナヘッダや magic を持たない生コーデック列であり、

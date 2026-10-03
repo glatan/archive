@@ -170,7 +170,7 @@
 |---|---------|---------|------|----------------|
 | 125 | Multi-disk / split archive | §8 | ✅ | `decode_parts(&[&[u8]])` / `decode_parts_with_password_bytes` が segment を連結し、disk 相対オフセット (entry `disk_start` + local header offset、CD disk、ZIP64 locator/record) を各 segment 開始位置で解決。disk 数と EOCD/ZIP64 disk フィールドの整合を検証、PKZIP spanning signature 0x08074b50 を受理。`split_parts_roundtrip`, `split_parts_real_disk_offsets`, `split_parts_zip64_multidisk`, `split_parts_disk_count_mismatch`, `split_parts_rejects_empty_and_accepts_single`, `split_parts_spanning_signature_tolerated` |
 | 155 | ZIP64 EOCD Locator は ZIP64 EOCD record と同一 disk 上に存在すること | §4.3.15 ("MUST reside on the same disk") | ✅ | `decode_parts` の disk 番号整合検証で間接的に保証 (locator disk ≠ EOCD disk は reject) |
-| 156 | self-extracting archive (SFX): 先頭の実行可能部を読み飛ばしてアーカイブ開始位置を検出 | APPNOTE 前言 "self-extracting" / de facto | ❌ intentional scope | decoder は CD offset をアーカイブ先頭基準の絶対位置として解釈するため、非ゼロ先頭を持つ SFX zip は未対応 |
+| 156 | self-extracting archive (SFX): 先頭の実行可能部を読み飛ばしてアーカイブ開始位置を検出 | APPNOTE 前言 "self-extracting" / de facto | ✅ | `detect_sfx_prefix` および `detect_sfx_prefix_zip64` が EOCD 算術 (eocd_offset − cd_size − cd_offset) でプレフィックス長を推定し、CD・ローカルヘッダー・ZIP64 のオフセットを補正する (`decodes_sfx_prefixed_archive`, `sfx_prefix_via_zip64`) |
 | 126 | Record が segment 境界を跨がない | §8.5.2 | — | writer 側のレイアウト制約であり reader は各 record を連結ストリーム上でシークして読むだけのため該当なし |
 
 ---

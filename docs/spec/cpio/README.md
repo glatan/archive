@@ -3,6 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [POSIX.1-2001 cpio/pax](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/pax.html) (`odc`)。SVR4 `newc` / `newcrc` は [FreeBSD `cpio(5)` man page](https://man.freebsd.org/cgi/man.cgi?cpio(5)) 等の de facto 記述に準拠 (ローカルスナップショット: `docs/spec/sources/posix_pax_9699919799.html` / `cpio_5_freebsd.html`) |
+| 参照実装 | GNU cpio (GPL-3.0-or-later、`bin` 形式 fixture 生成・interop oracle)。詳細: THIRD_PARTY_NOTICES cpio 項 |
 
 ## 対応バリアント・仕様版
 

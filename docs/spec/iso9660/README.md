@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | ISO 9660 (= ECMA-119) CD-ROM ファイルシステムイメージ。System Area + Volume Descriptor 列 + Path Table + ディレクトリレコード木。Rock Ridge (IEEE P1282) と Joliet 補足ボリュームを decode |
 | 基準仕様 | ECMA-119 4th ed. (`sources/ecma119.pdf`)、Linux kernel `Documentation/filesystems/isofs.rst` + `include/uapi/linux/iso_fs.h`、SUSP 1.10 (`sources/susp.shar`)、RRIP 1.12 (`sources/rrip112.pdf`)、Joliet spec (`sources/jolspec.html`)、El Torito 1.0 (`sources/eltorito_spec_1.0.pdf`)、zisofs format (`sources/zisofs_format.txt`)、Apple TN FL36 (`sources/apple_iso9660_fl36.html`) — いずれも `docs/spec/sources/` にスナップショット |
+| 参照実装 | bsdtar / libarchive (BSD-2-Clause、oracle + fixture 生成: `tests/fixtures/iso9660/bsdtar-*.iso`)。詳細: THIRD_PARTY_NOTICES iso9660 項 |
 | 実装 | `archive::archive::iso9660::decode` (read のみ)。`iso9660` feature 配下 |
 
 ## Volume Descriptor 層
@@ -73,7 +74,7 @@
 | 37 | extended attribute record の内容解釈 | ❌ intentional scope | extent 開始ブロックへの加算のみ (読み飛ばし) |
 | 38 | multi-session / UDF bridge / HFS ハイブリッドの別ツリー | ❌ intentional scope | primary + Joliet SVD のみ。UDF 実装時の一次仕様は OSTA UDF 2.60 / ECMA TR/112-2 (manifest `no_url_available` `osta-udf-260`) — ISO 9660 拡張ではなく別 FS 扱い |
 | 39b | RRIP `PN`/`CL`/`RE`/`NM`/`PX`/`SL`/`TF`/`CE`/`SP`/`ST`/`ER` 以外の残エントリ (`SF` sparse file、SUSP `PD`/`ES`、hardlink dev/inode、Apple `AA`/`BA` 等) | ❌ intentional scope | 読み飛ばし (decode に必須でない)。`ER` は識別のみ。zisofs `ZF` は #35 で対応済み。Apple 拡張の資料は TN FL36 (`sources/apple_iso9660_fl36.html`) |
-| 39c | PVD/SVD のメタデータフィールド群 (system_id, volume_set_id, publisher, preparer, application, copyright/abstract/bibliographic ID, 4 個のボリューム日付) | ❌ intentional scope | `IsoImage` は volume_id/volume_blocks のみ公開。ECMA-119 §8.4.19-8.4.29 相当。Volume Set の sequence 整合・File Structure Version (§8.4.30) の検証・Enhanced VD (version=2) の解釈も同じく scope 外。El Torito section entry の extension entry は未知 indicator で走査打ち切り。High Sierra ("CDROM" magic) は非対応 |
+| 39c | PVD/SVD のメタデータフィールド群 (system_id, volume_set_id, publisher, preparer, application, copyright/abstract/bibliographic ID, 4 個のボリューム日付) | ⚠️ | 各メタデータフィールドは `VolumeMeta` 構造体として `IsoImage::meta` (PVD) および `joliet_meta` (SVD) で公開する (ECMA-119 §8.4.19-8.4.29、Joliet 側は UCS-2BE をデコード)。`pvd_metadata_fields`, `joliet_metadata_fields`, `test_iso9660_pvd_metadata` 等。Volume Set のシーケンス整合性、File Structure Version (§8.4.30) の検証、Enhanced VD (version=2) の解釈、および High Sierra ("CDROM" magic) は引き続き intentional scope 外とする |
 | 40 | ISO 9660 write | ❌ intentional scope | mkisofs/xorriso の領域 (write 実装時は producer oracle として利用可) |
 
 ## Fixture / interop

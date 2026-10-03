@@ -4,6 +4,7 @@
 |------|------|
 | 形式概要 | Ross N. Williams の LZRW3-A (1991) が使用する圧縮ストリーム。LZRW3 の deep-hash 版: hash table の各エントリが 8 候補の partition を持ち、copy item の index は partition 内の位置まで指定する。magic・チェックサムは持たない |
 | 基準仕様 | 参照実装 [`lzrw3-a.c`](https://ftp.funet.fi/pub/misc/compression/lzrw3-a.c) (Ross N. Williams, public domain、[ross.net/compression](http://www.ross.net/compression/lzrw3a.html) / funet ミラー) の "DEFINITION OF COMPRESSED FILE FORMAT" 節 + `lzrw3-a.txt` (ローカルスナップショット: `docs/spec/sources/lzrw3-a.c` / `lzrw3-a.txt`) |
+| 参照実装 | `lzrw3-a.c` (Ross N. Williams、public domain、de facto 仕様 + 移植元 (共有 `compress::lzrw` の hash 算術) + fixture 生成: `tests/integration/lzrw3a.rs` の known-answer ベクター)。詳細: THIRD_PARTY_NOTICES LZRW1 / LZRW2 / LZRW3 / LZRW3-A 項 |
 | 実装 | `archive::compress::lzrw3a` (decode / decode_bounded / encode)。pure-Rust 実装 |
 
 ## ストリーム構造

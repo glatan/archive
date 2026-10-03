@@ -82,6 +82,35 @@ pub struct Crx3Image {
     pub entries: Vec<Crx3Entry>,
 }
 
+impl Crx3Image {
+    /// Check `SignedData.crx_id` against the RSA public keys carried
+    /// by the `sha256_with_rsa` proofs. Per crx3.proto, the first
+    /// 128 bits of the SHA-256 hash of the public key must equal the
+    /// `crx_id`.
+    ///
+    /// Returns `Some(true)` when an RSA proof key matches,
+    /// `Some(false)` when RSA public keys are present but none
+    /// matches, and `None` when the check cannot be performed —
+    /// the header carries no `crx_id` or no RSA public key. The
+    /// archive is decoded either way; this only reports the consistency
+    /// result to the caller.
+    pub fn verify_crx_id(&self) -> Option<bool> {
+        let crx_id = self.crx_id?;
+        let mut saw_rsa_key = false;
+        for proof in &self.proofs {
+            if proof.algorithm != ProofAlgorithm::Sha256WithRsa || proof.public_key.is_empty() {
+                continue;
+            }
+            saw_rsa_key = true;
+            let digest = crate::util::sha256::sha256(&proof.public_key);
+            if digest[..16] == crx_id[..] {
+                return Some(true);
+            }
+        }
+        if saw_rsa_key { Some(false) } else { None }
+    }
+}
+
 // ---- minimal protobuf wire parser (varint + length-delimited only) ----
 
 fn read_varint(b: &[u8], pos: &mut usize) -> Result<u64, Error> {
@@ -339,5 +368,57 @@ mod tests {
         // truncated protobuf (varint without terminator)
         let hdr = alloc::vec![0xFF, 0xFF];
         assert!(decode(&build(&hdr, &z)).is_err());
+    }
+
+    #[test]
+    fn crx_id_matches_rsa_pubkey() {
+        // crx_id == SHA-256(proof public_key)[..16] verifies as true.
+        let pubkey = b"fake-der-spki";
+        let digest = crate::util::sha256::sha256(pubkey);
+        let mut id = [0u8; 16];
+        id.copy_from_slice(&digest[..16]);
+        let mut hdr = Vec::new();
+        len_field(F_RSA_PROOF as u64, &proof_msg(pubkey, b"SIG"), &mut hdr);
+        len_field(F_SIGNED_HEADER_DATA as u64, &signed_data_msg(&id), &mut hdr);
+        let img = decode(&build(&hdr, &zip_bytes())).unwrap();
+        assert_eq!(img.verify_crx_id(), Some(true));
+    }
+
+    #[test]
+    fn crx_id_mismatch_reported() {
+        // A crx_id derived from a different key reports Some(false)
+        // without rejecting the archive.
+        let digest = crate::util::sha256::sha256(b"other-key");
+        let mut id = [0u8; 16];
+        id.copy_from_slice(&digest[..16]);
+        let mut hdr = Vec::new();
+        len_field(
+            F_RSA_PROOF as u64,
+            &proof_msg(b"proof-key", b"SIG"),
+            &mut hdr,
+        );
+        len_field(F_SIGNED_HEADER_DATA as u64, &signed_data_msg(&id), &mut hdr);
+        let img = decode(&build(&hdr, &zip_bytes())).unwrap();
+        assert_eq!(img.verify_crx_id(), Some(false));
+    }
+
+    #[test]
+    fn crx_id_none_when_no_signed_data() {
+        // No signed_header_data at all: the check is not applicable.
+        let mut hdr = Vec::new();
+        len_field(F_RSA_PROOF as u64, &proof_msg(b"K", b"S"), &mut hdr);
+        let img = decode(&build(&hdr, &zip_bytes())).unwrap();
+        assert_eq!(img.verify_crx_id(), None);
+
+        // crx_id present but only an ECDSA proof: no RSA key to check.
+        let mut hdr = Vec::new();
+        len_field(F_ECDSA_PROOF as u64, &proof_msg(b"EC", b"S"), &mut hdr);
+        len_field(
+            F_SIGNED_HEADER_DATA as u64,
+            &signed_data_msg(&[9u8; 16]),
+            &mut hdr,
+        );
+        let img = decode(&build(&hdr, &zip_bytes())).unwrap();
+        assert_eq!(img.verify_crx_id(), None);
     }
 }

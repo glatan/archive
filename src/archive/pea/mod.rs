@@ -1,4 +1,4 @@
-//! PEA (Pack, Encrypt, Authenticate) archive read support.
+//! PEA (Pack, Encrypt, Authenticate) archive read/write support.
 //!
 //! Decoder for the PEA 1.x file format as implemented by PeaZip's
 //! `pea`/`unpea` backend (reference source `pea.pas`/`pea_utils.pas`,
@@ -13,13 +13,18 @@
 //! verified when the algorithm is one this crate implements; other
 //! hash algorithms are parsed and skipped unverified. Authenticated-
 //! encryption streams (EAX/Twofish/Serpent/HMAC and cascades) and
-//! multi-volume spanning are intentionally out of scope, as is
-//! writing PEA files.
+//! multi-volume spanning are intentionally out of scope. The
+//! encoder emits single-stream archives with PCOMPRESS0 (stored)
+//! or PCOMPRESS2 (zlib deflate) file data and integrity tags for
+//! the algorithms this crate implements.
 
 use crate::error::Error;
 
 /// PEA archive decoding.
 pub mod decode;
+
+/// PEA archive encoding.
+pub mod encode;
 
 /// Codec struct for trait-based PEA decode operations.
 pub struct PeaCodec;
@@ -29,5 +34,36 @@ impl crate::traits::ArchiveDecode for PeaCodec {
 
     fn decode(&self, input: &[u8]) -> Result<alloc::vec::Vec<Self::Entry>, Error> {
         decode::decode(input).map(|img| img.entries)
+    }
+}
+
+/// Encoder struct for trait-based PEA encode operations.
+pub struct PeaArchiveEncoder {
+    inner: encode::PeaEncoder,
+}
+
+impl PeaArchiveEncoder {
+    /// Create a new trait-based PEA encoder (PCOMPRESS2 deflate,
+    /// CRC-32 tags).
+    pub fn new() -> Self {
+        Self {
+            inner: encode::PeaEncoder::new(),
+        }
+    }
+}
+
+impl Default for PeaArchiveEncoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl crate::traits::ArchiveEncode for PeaArchiveEncoder {
+    fn add_file(&mut self, name: &str, data: &[u8]) {
+        self.inner.add_file(name, data);
+    }
+
+    fn finish(self) -> Result<alloc::vec::Vec<u8>, Error> {
+        self.inner.finish()
     }
 }

@@ -8,8 +8,9 @@
 //! `=yend` keyword lines; a line may end with an escape pair (length n+1).
 //!
 //! Single-part documents and individual parts of multipart documents are
-//! supported (`part=`/`=ypart`/`pcrc32` verification). Joining multiple
-//! parts into the whole file is the caller's responsibility.
+//! supported (`part=`/`=ypart`/`pcrc32` verification). [`join_parts`](crate::encoding::yenc::join_parts)
+//! concatenates a complete, verified set of decoded parts into the whole
+//! file.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -29,6 +30,8 @@ pub struct YEncEntry {
     pub data: Vec<u8>,
     /// `part=` number when the document is one part of a multipart binary.
     pub part: Option<u32>,
+    /// `total=` parameter (total part count) from the `=ybegin` line.
+    pub total: Option<u32>,
     /// Inclusive byte range of this part within the whole file (`=ypart`).
     pub range: Option<(u64, u64)>,
 }
@@ -313,7 +316,84 @@ pub fn decode(input: &[u8]) -> Result<YEncEntry, Error> {
         name,
         data,
         part: part.map(|v| v as u32),
+        total: total.map(|v| v as u32),
         range,
+    })
+}
+
+/// Join decoded multipart parts into the whole file.
+///
+/// `parts` must be the complete set of [`YEncEntry`] values produced by
+/// [`decode`] for one multipart binary, in any order. Every entry must
+/// carry `part`/`range` (single-part documents are rejected), all `name`
+/// and `total` values must agree, part numbers must be unique, and the
+/// `=ypart` ranges must tile the file contiguously starting at byte 1 —
+/// a gap means a missing part and is an error. When `total=` is present
+/// in the headers the part count must equal it, which also detects a
+/// missing final part (undetectable from ranges alone when pre-1.2
+/// writers omit `total=`).
+///
+/// The returned entry carries the shared `name`, the concatenated `data`,
+/// and `part`/`total`/`range` set to `None` since it describes the whole
+/// file, like a decoded single-part document.
+///
+/// # Errors
+///
+/// Returns `Error::InvalidData` for an empty slice, a non-part entry,
+/// mismatched `name`/`total`, a `part=` number of 0 or above `total`,
+/// a duplicate part number, a `data` length not matching the `=ypart`
+/// range, or non-contiguous/overlapping ranges (missing part).
+pub fn join_parts(parts: &[YEncEntry]) -> Result<YEncEntry, Error> {
+    let first = parts.first().ok_or(Error::InvalidData("yenc: no parts"))?;
+    let mut sorted: Vec<&YEncEntry> = Vec::with_capacity(parts.len());
+    let mut part_nums: Vec<u32> = Vec::with_capacity(parts.len());
+    for e in parts {
+        if e.name != first.name {
+            return Err(Error::InvalidData("yenc: name mismatch"));
+        }
+        if e.total != first.total {
+            return Err(Error::InvalidData("yenc: total mismatch"));
+        }
+        let p = e.part.ok_or(Error::InvalidData("yenc: not a part"))?;
+        let (begin, end) = e.range.ok_or(Error::InvalidData("yenc: not a part"))?;
+        // decode() verifies all of this already; these checks also guard
+        // caller-constructed entries.
+        if p == 0
+            || end < begin
+            || e.data.len() as u64 != end - begin + 1
+            || first.total.is_some_and(|t| p > t)
+        {
+            return Err(Error::InvalidData("yenc: bad part"));
+        }
+        part_nums.push(p);
+        sorted.push(e);
+    }
+    if let Some(t) = first.total
+        && parts.len() as u64 != u64::from(t)
+    {
+        return Err(Error::InvalidData("yenc: missing part"));
+    }
+    part_nums.sort_unstable();
+    if part_nums.windows(2).any(|w| w[0] == w[1]) {
+        return Err(Error::InvalidData("yenc: duplicate part"));
+    }
+    sorted.sort_by_key(|e| e.range.unwrap().0);
+    let mut expected = 1u64;
+    let mut data = Vec::new();
+    for e in &sorted {
+        let (begin, end) = e.range.unwrap();
+        if begin != expected {
+            return Err(Error::InvalidData("yenc: missing part"));
+        }
+        data.extend_from_slice(&e.data);
+        expected = end + 1;
+    }
+    Ok(YEncEntry {
+        name: first.name.clone(),
+        data,
+        part: None,
+        total: None,
+        range: None,
     })
 }
 
@@ -500,5 +580,85 @@ mod tests {
     #[test]
     fn rejects_dangling_escape() {
         assert!(decode(b"=ybegin line=128 size=2 name=x\nab=\n=yend size=2").is_err());
+    }
+
+    /// Encode+decode `whole` as one part per `(start, end)` slice of `cuts`.
+    fn make_parts(name: &str, whole: &[u8], cuts: &[(usize, usize)]) -> Vec<YEncEntry> {
+        let total = cuts.len() as u32;
+        cuts.iter()
+            .enumerate()
+            .map(|(i, &(s, e))| {
+                decode(&encode_part(
+                    name,
+                    i as u32 + 1,
+                    total,
+                    s as u64 + 1,
+                    &whole[s..e],
+                    whole.len() as u64,
+                ))
+                .unwrap()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn join_parts_roundtrip() {
+        let whole: Vec<u8> = (0..300u32).map(|v| v as u8).collect();
+        let parts = make_parts("m.bin", &whole, &[(0, 100), (100, 200), (200, 300)]);
+        let joined = join_parts(&parts).unwrap();
+        assert_eq!(joined.name, "m.bin");
+        assert_eq!(joined.data, whole);
+        // The joined whole looks like a decoded single-part document.
+        assert_eq!(joined.part, None);
+        assert_eq!(joined.total, None);
+        assert_eq!(joined.range, None);
+        // A multipart binary consisting of a single part is accepted.
+        let one = make_parts("m.bin", &whole, &[(0, 300)]);
+        assert_eq!(join_parts(&one).unwrap().data, whole);
+    }
+
+    #[test]
+    fn join_parts_detects_missing_part() {
+        let whole: Vec<u8> = (0..300u32).map(|v| v as u8).collect();
+        let parts = make_parts("m.bin", &whole, &[(0, 100), (100, 200), (200, 300)]);
+        // Middle part missing.
+        assert!(join_parts(&[parts[0].clone(), parts[2].clone()]).is_err());
+        // Final part missing: the remaining ranges tile 1..=200 with no
+        // gap, so this is only caught by the `total` count check.
+        assert!(join_parts(&parts[..2]).is_err());
+        // `total` absent (pre-1.2 writers): an interior gap is still
+        // detected via the =ypart ranges.
+        let mut e1 = parts[0].clone();
+        let mut e3 = parts[2].clone();
+        e1.total = None;
+        e3.total = None;
+        assert!(join_parts(&[e1, e3]).is_err());
+        // Empty input.
+        assert!(join_parts(&[]).is_err());
+    }
+
+    #[test]
+    fn join_parts_reorders() {
+        let whole: Vec<u8> = (0..300u32).map(|v| v as u8).collect();
+        let parts = make_parts("m.bin", &whole, &[(0, 100), (100, 200), (200, 300)]);
+        let shuffled = [parts[2].clone(), parts[0].clone(), parts[1].clone()];
+        let joined = join_parts(&shuffled).unwrap();
+        assert_eq!(joined.data, whole);
+    }
+
+    #[test]
+    fn join_parts_rejects_name_mismatch() {
+        let whole: Vec<u8> = (0..300u32).map(|v| v as u8).collect();
+        let mut parts = make_parts("m.bin", &whole, &[(0, 100), (100, 200), (200, 300)]);
+        // A part of a different file mixed in.
+        parts[1] = decode(&encode_part("other.bin", 2, 3, 101, &whole[100..200], 300)).unwrap();
+        assert!(join_parts(&parts).is_err());
+        // Duplicate part number is rejected too.
+        let mut dup = make_parts("m.bin", &whole, &[(0, 100), (100, 200), (200, 300)]);
+        dup[1] = dup[0].clone();
+        assert!(join_parts(&dup).is_err());
+        // A single-part (non-multipart) entry is rejected.
+        let single = decode(&encode("plain.bin", &whole)).unwrap();
+        assert!(join_parts(&[single]).is_err());
     }
 }

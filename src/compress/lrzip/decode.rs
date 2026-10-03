@@ -34,6 +34,10 @@ const MAGIC: &[u8; 4] = b"LRZI";
 /// Maximum supported major version.
 const MAX_VERSION_MAJOR: u8 = 0;
 
+/// Latest supported minor version (v0.6x). v0.7 changes byte 14/23 semantics
+/// (streaming flag, last-block flag) and adds LRZC/CryptoDesc headers.
+const MAX_VERSION_MINOR: u8 = 6;
+
 /// Number of streams per chunk.
 const NUM_STREAMS: usize = 2;
 
@@ -80,7 +84,10 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
         return Err(Error::Unsupported("lrzip: unsupported version"));
     }
 
-    let _minor = input[5];
+    let minor = input[5];
+    if minor > MAX_VERSION_MINOR {
+        return Err(Error::Unsupported("lrzip: unsupported minor version"));
+    }
 
     let total_size = u64::from_le_bytes([
         input[6], input[7], input[8], input[9], input[10], input[11], input[12], input[13],
@@ -567,6 +574,18 @@ mod tests {
         let mut bpos = block_offset + 1;
         let c_len = read_le_n_test(data, &mut bpos, cb) as usize;
         (cb, block_offset, c_len)
+    }
+
+    #[test]
+    fn test_decode_rejects_minor_above_6() {
+        // minor=7 (v0.7) changes byte 14/23 semantics; reject rather than
+        // misparse it as a v0.6 stream.
+        let mut input = [0u8; 24];
+        input[0..4].copy_from_slice(MAGIC);
+        input[4] = 0; // major
+        input[5] = 7; // minor
+        let result = decode(&input);
+        assert!(matches!(result, Err(Error::Unsupported(_))));
     }
 
     fn build_lrzip_with_lzma_props(data: &[u8], props: LzmaProperties) -> Vec<u8> {
