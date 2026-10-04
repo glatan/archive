@@ -27,7 +27,10 @@ specifications or standards documents:
   31/32 are accepted when the reserved distance-code lengths are
   zero, per the RFC 1951 §3.2.7 strict reading rather than zlib's
   `hdist > 30` rejection
-- gzip: RFC 1952
+- gzip: RFC 1952. The system `gzip` binary (GNU gzip,
+  GPL-3.0-or-later) is invoked only as a local test-time
+  interoperability oracle and fixture generator
+  (`tests/fixtures/gzip/`); it is not linked or distributed
 - zlib: RFC 1950
 - zstd: RFC 8878. The upstream reference implementation is dual
   BSD-3-Clause OR GPLv2 licensed; Meta's earlier BSD+PATENTS grant was
@@ -120,6 +123,10 @@ specifications or standards documents:
   standalone via the library API, archive-cli --format mppc, and the
   fuzz harness; readers should be aware of that tension. This is
   recorded for transparency and does not constitute legal advice.
+  Context: the clause is part of Stac Electronics' license offer
+  (section 1.1 directs licensees to Stac), whose practical basis was
+  the Stac patent portfolio documented as expired in the Stac LZS
+  entry below; RFC 2118 is Informational and is not itself a license.
   Patent note: rdesktop's comments additionally reference the separate
   Stac/Hi/fn LZS patent family (now expired); MPPC's LZ77 token format
   is distinct from Stac LZS.
@@ -224,8 +231,13 @@ specifications or standards documents:
   confirmation only; no code was copied.
 - Snappy: Google snappy `format_description.txt` (raw block format) and
   `framing_format.txt` (framed stream format)
-- xz: `xz-file-format.txt` from Tukaani
-- lzip container: GNU lzip manual
+- xz: `xz-file-format.txt` from Tukaani. The system `xz` binary is
+  invoked only as a test-time interoperability oracle; it is not
+  linked or distributed. The BCJ/Delta filter cores are ported from
+  public-domain liblzma (see section 2)
+- lzip container: GNU lzip manual. The system `lzip` binary
+  (GPL-2.0-or-later) is invoked only as a local test-time
+  interoperability oracle; it is not linked or distributed
 - LZMA-Alone `.lzma` container: `lzma-file-format.txt` (2022-07-13)
   from the XZ documentation (public domain). The system `xz` binary is
   invoked only as a test-time interoperability oracle; it is not
@@ -233,10 +245,21 @@ specifications or standards documents:
 - LZ4: LZ4 frame format specification
   (https://github.com/lz4/lz4/blob/dev/doc/lz4_Frame_format.md) and
   LZ4 block format specification
-  (https://github.com/lz4/lz4/blob/dev/doc/lz4_Block_format.md)
+  (https://github.com/lz4/lz4/blob/dev/doc/lz4_Block_format.md).
+  The system `lz4` binary (liblz4 BSD-2-Clause / CLI GPL-2.0) is
+  invoked only as a local test-time interoperability oracle and
+  fixture generator (`tests/fixtures/lz4/hello.lz4`); it is not
+  linked or distributed
 - tar: POSIX.1-2001 UStar / GNU tar extensions / POSIX PAX extensions
   (PAX extended-header semantics incl. empty-value attribute deletion
-  follow IEEE Std 1003.1-2017, pinned as docs/spec/sources/posix-pax)
+  follow IEEE Std 1003.1-2017, pinned as docs/spec/sources/posix-pax).
+  GNU sparse handling (the old-style 'S' header + sparse map and the
+  GNU.sparse.* PAX keys) follows the observed behavior of GNU tar
+  `sparse.c` (GPL-3.0-or-later), consulted as a behavioral reference
+  only; no code was copied. The system `tar` binary is invoked only
+  as a local test-time interoperability oracle (e.g.
+  `test_tar_*_system_compat`, `test_tar_gnu_sparse_oracle`); it is
+  not linked or distributed
 - cpio: POSIX `odc` / SVR4 `newc` / `newcrc` / `bin` (FreeBSD
   `cpio(5)` "PWB format" / "New Binary Format" descriptions).
   `bin` test fixtures are produced by GNU cpio (GPL-3.0-or-later),
@@ -274,8 +297,9 @@ specifications or standards documents:
   (Microsoft Open Specifications,
   https://learn.microsoft.com/openspecs/windows_protocols/ms-cab/).
   Writer output is validated with `bsdtar` (libarchive, BSD-2-Clause)
-  invoked only as a local test-time tool; it is not linked or
-  distributed.
+  and decoder output with `cabextract` (libmspack project,
+  GPL-2.0-or-later), invoked only as local test-time tools; they
+  are not linked or distributed.
   The decoder also accepts multi-cabinet sets (`decode_parts`:
   iCabinet/setID validation, continued-folder sentinel handling,
   CFDATA blocks split across cabinet boundaries, MSZIP history
@@ -352,7 +376,10 @@ specifications or standards documents:
   code copied; split-archive reading (decode_parts), title/MIME
   metadata exposure, and trailing MD5 archive checksum verification
   are implemented from the same document's dirent/header/split-file
-  descriptions. No external ZIM tooling is used as a test oracle.
+  descriptions. No external ZIM tooling is used as a test oracle;
+  decoding of the openzim zim-testing-suite's `small.zim` (v5.0,
+  17 entries, xz + stored cluster) was additionally verified
+  manually and is not checked in as a fixture.
 - mtree: FreeBSD mtree(5) manual page
   (https://man.freebsd.org/cgi/man.cgi?mtree(5)); dialect behavior
   (optional `#mtree` signature, keyword handling) was cross-checked
@@ -411,8 +438,9 @@ specifications or standards documents:
   document. Compression methods 5-7/0xa/0xb
   (`src/archive/arc/{crunch,crush,distill}.rs`) are Rust
   transliterations of the newtua_dos ports of XADMaster's handlers
-  (LGPL-3.0-or-later -> incorporated under LGPL-3.0 section 2 /
-  GPL-3.0, combined under AGPL-3.0 section 13). `squeeze.rs` is
+  (LGPL-3.0-or-later -> incorporated under GPL-3.0 via GPLv3
+  section 7 removal of the LGPL additional permissions, combined under
+  AGPL-3.0 section 13). `squeeze.rs` is
   adapted from compcol's `arc_squeeze` documentation/strings (MIT);
   `rle90.rs` is spec-informed. ARC 5.21 for Unix (hyc/arc,
   GPL version unstated — Debian records GPL-2.0) and nomarch
@@ -578,7 +606,8 @@ against de facto reference behavior:
   - Reference: PKWARE APPNOTE.TXT registers the method ID only; the
     bit-level structure (64 KiB window, distance codes 30/31, length
     code 285) is defined by the de facto description embodied in
-    Info-ZIP `unzip`/`inflate.c` ("Info-ZIP APPNOTE additions")
+    Info-ZIP `unzip`/`inflate.c` ("Info-ZIP APPNOTE additions") and
+    in the public-domain hwzip reference (see section 2)
   - Repository scope: Rust reimplementation of the Deflate64 bit
     structure; decode and encode, no upstream code copied. The encoder
     (`src/compress/deflate64/encode.rs`) reuses the crate's own DEFLATE
@@ -774,7 +803,29 @@ against de facto reference behavior:
   - Repository scope: Rust reimplementation of the blast.c decompression algorithm;
     no upstream C source files are bundled
   - Provenance note: Huffman code tables (LITLEN_REP, LENLEN_REP, DISTLEN_REP) and
-    algorithm structure are derived from blast.c's static arrays and decode logic
+    algorithm structure are derived from blast.c's static arrays and decode logic;
+    the file header of `dcl_implode.rs` plainly marks it as a modified
+    reimplementation of blast.c
+  - blast.c's license notice (in blast.h, zlib license) is reproduced
+    verbatim below to satisfy its notice-retention condition:
+
+        Copyright (C) 2003, 2012, 2013 Mark Adler
+
+        This software is provided 'as-is', without any express or implied
+        warranty.  In no event will the author be held liable for any damages
+        arising from the use of this software.
+
+        Permission is granted to anyone to use this software for any purpose,
+        including commercial applications, and to alter it and redistribute it
+        freely, subject to the following restrictions:
+
+        1. The origin of this software must not be misrepresented; you must not
+           claim that you wrote the original software. If you use this software
+           in a product, an acknowledgment in the product documentation would be
+           appreciated but is not required.
+        2. Altered source versions must be plainly marked as such, and must not be
+           misrepresented as being the original software.
+        3. This notice may not be removed or altered from any source distribution.
 
 
 3. Public-domain or permissively licensed upstream material
@@ -792,17 +843,30 @@ against de facto reference behavior:
     style and 7z method integration
 
 - ZPAQ (`src/compress/zpaq/**`, `src/archive/zpaq/**`)
-  - Reference: Matt Mahoney's ZPAQ format, context-mixing model, and ZPAQL
-    VM (`zpaq`/`libzpaq`, released to the public domain; the bundled
-    upstream `libdivsufsort-lite` component is MIT). The low-level codec
-    follows the official specification: "ZPAQ Level 1 and Level 2"
-    (zpaq206.pdf, https://mattmahoney.net/dc/zpaq206.pdf)
+  - Reference and port source: Matt Mahoney's ZPAQ format, context-mixing
+    model, and ZPAQL VM (`zpaq`/`libzpaq` v7.15, released to the public
+    domain; the bundled upstream `libdivsufsort-lite` component is MIT and
+    is not used by this port). The written specification "ZPAQ Level 1
+    and Level 2" (zpaq206.pdf, https://mattmahoney.net/dc/zpaq206.pdf) is
+    partially non-extractable (embedded-font PDF), so the spec's own
+    reference implementation was used as the authoritative source for the
+    predictor state table, squash/stretch tables, built-in level 1-3
+    model blobs, and arithmetic coder semantics (the
+    IMPLEMENTATION_POLICY exception for a materially incomplete written
+    specification with a clean rights chain).
+  - libzpaq was also compiled locally (interpreter path, -DNOJIT) as a
+    development oracle: bidirectional encode/decode compatibility was
+    verified for modeled levels 1-3, unmodeled (n=0) stored streams,
+    PASS and PROG (PCOMP) segments, empty/binary/large/random payloads,
+    and multi-segment archives. Upstream-generated fixtures are committed
+    under `tests/fixtures/zpaq/`; the oracle harness lives under
+    `.local/refs/libzpaq/` (gitignored).
   - Patent note: upstream explicitly states the format is "not encumbered
     by any patents or pending patents" and that all past versions were
     published to establish prior art (zpaq.html)
-  - Repository scope: Rust implementation of a low-level single-payload codec
-    plus a multi-entry archive layer with crate-local journaling;
-    upstream v6.x journaling format compatibility is not claimed
+  - Repository scope: wire-compatible low-level codec plus a multi-entry
+    archive layer with crate-local journaling; upstream v6.x journaling
+    format semantics and encoder-side PCOMP emission are not claimed
 
 
 4. Bundled tables and static assets
@@ -885,8 +949,8 @@ incorporation:
   and `src/archive/arj/method4.rs` are transliterations of its faithful
   ports of The Unarchiver's XADMaster parsers. The `encode` paths in
   those files are crate-original (upstream provides decoders only).
-  Incorporated under LGPL-3.0 section 2 -> GPL-3.0, combined under
-  AGPL-3.0 section 13.
+  Incorporated under GPL-3.0 via GPLv3 section 7 removal of the LGPL
+  additional permissions, combined under AGPL-3.0 section 13.
 - XADMaster (The Unarchiver, LGPL-2.1-or-later): port source —
   the newtua_dos transliterations above (arc/arj) ultimately derive
   from XADMaster handlers. The former lha adaptations
