@@ -12,6 +12,8 @@
 //! - append-as-new-block workflows that reuse an existing parsed header/model
 //! - crate-local journaling transactions via `ZpaqJournalEncoder`
 //!   together with `decode_journal_latest` / `decode_journal_versions`
+//! - upstream JIDAC journaling streams via [`jidac`]: decode of
+//!   multi-transaction `zpaq add` archives plus single-transaction emit
 //! - materialized archive editing via `ZpaqArchiveEditor`, including
 //!   import from plain archives or latest journal view followed by
 //!   push/put/delete and rewrite
@@ -24,6 +26,8 @@ use crate::error::Error;
 pub mod decode;
 /// zpaq archive encoding.
 pub mod encode;
+/// Upstream zpaq JIDAC journaling format support.
+pub mod jidac;
 
 /// Codec struct for trait-based zpaq decode operations.
 ///

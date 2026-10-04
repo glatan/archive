@@ -15,7 +15,7 @@
 //! The public encoder exposes the built-in upstream model levels `1..=3`
 //! plus a validated `encode::CustomModel` surface for arbitrary
 //! predictor/HCOMP authoring. Emitted segments always select the PASS
-//! postprocessor; encoder-side PCOMP emission is not supported. As in
+//! postprocessor; encoder-side PCOMP emission is available through `CustomModel::with_pcomp`. As in
 //! upstream, the decoder accepts only level bytes 1 (modeled) and 2
 //! (unmodeled).
 //!
