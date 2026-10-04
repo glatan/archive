@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 形式概要 | Einar Saukas の ZX1 が使用する raw LZ77 ストリーム。ZX0 から派生した形式で、制御ビット列とデータバイトがインターリーブする。ZX0 との差分は Elias 符号の継続ビット反転 (ZX1 では `1` が継続) とオフセット表現 (ZX1 は 1〜2 バイトの反転格納)。magic・コンテナヘッダ・チェックサムは持たない |
-| 基準仕様 | [ZX1 README](https://github.com/einar-saukas/ZX1) "File Format" (ローカルスナップショット: `docs/spec/sources/zx1_README.md`) + 参照実装 `dzx1.c` / `zx1.c` (Einar Saukas, BSD 3-Clause) |
+| 基準仕様 | [ZX1 README](https://github.com/einar-saukas/ZX1) "File Format" (ローカルスナップショット: `docs/spec/sources/zx1_README_v1.5.md`) + 参照実装 `dzx1.c` / `zx1.c` (Einar Saukas, BSD 3-Clause) |
 | 参照実装 | ZX1 参照実装 `dzx1.c`/`zx1.c` (Einar Saukas、BSD 3-Clause。動作参照、既知解答ベクタは参照コンプレッサ ZX1 v1.5 で生成)。詳細: THIRD_PARTY_NOTICES ZX1 項 |
 | 実装 | `archive::compress::zx1` (decode / decode_bounded / decode_with_prefix / decode_backwards / decode_backwards_bounded / decode_backwards_with_suffix / encode / encode_with_prefix / encode_backwards / encode_backwards_with_suffix)。pure-Rust 実装 |
 

@@ -6,12 +6,12 @@
 //! through `-lh7-` and by ARJ methods 1-3 (15-bit window);
 //! [`st1_enc`] is its encoder counterpart.
 //!
-//! De-facto format references: LHa for UNIX (Yoshizaki, free-use
-//! license), lhasa (ISC), and XADMaster's
-//! `XADLZHStaticHandle`/`XADLZHOldHandles.m` (The Unarchiver,
-//! LGPL-2.1-or-later; see `THIRD_PARTY_NOTICES`). `st1` is
-//! behaviour-matched/adapted against them; `st1_enc` is a crate-original
-//! encoder counterpart.
+//! Format references: the static-Huffman block format is documented
+//! by Haruhiko Okumura's `ar002` reference implementation, which the
+//! author released to the public domain; decoder behaviour is
+//! cross-checked against lhasa (ISC; see `THIRD_PARTY_NOTICES`).
+//! `st1` follows that format; `st1_enc` is a crate-original encoder
+//! counterpart.
 
 pub(crate) mod bits;
 pub(crate) mod huf;

@@ -1,0 +1,38 @@
+# 実装ポリシー (provenance)
+
+このプロジェクトは **他実装を参照しての実装を基本的に拒絶する**。実装は書面仕様 (各 `docs/spec/<format>/README.md` の「基準仕様」行に記載の文書) に基づいて行う。
+
+## 用語の分類
+
+参照の性質は次の3種に分ける。ポリシーが規制するのは **実装参照** のみである。
+
+- **実装参照**: 移植・transliteration・adaptation、または wire format 等の format facts を他実装から採用したもの。例外条件の適用対象。
+- **仕様文書**: 書面で公開されたフォーマット定義・標準文書・配布物同梱の技術メモ (GPL プロジェクト配布のドキュメントや UAPI/syscall-note 適用の kernel ヘッダを含む)。文書を仕様として読むことは実装参照に該当しない。
+- **oracle / fixture**: テスト時の相互検証・fixture 生成のみに用いる外部実装。ツールのプログラム出力はツールのライセンスに従属しないため、oracle/fixture 利用は実装参照に該当しない。ただし使用記録は残す。
+
+## 例外条件
+
+他実装の参照を許可するのは、次の **両方** を満たす場合のみである:
+
+1. **書面仕様等の代替手段がない** (bit レベルの wire format が実装コードにのみ存在する等)
+2. **参照先の権利状態が明確にクリーン** (public domain 宣言、または OSI 承認ライセンスで権利チェーンが明らか)
+
+条件 2 の解釈:
+
+- public domain / MIT / BSD / zlib / ISC / Apache-2.0 等の permissive ライセンスは明確にクリーン。
+- **LGPL §3 / §2** (LGPL-2.0/2.1→GPL、LGPL-3→GPL-3) および **GPL-2.0-or-later** の変換パスは条文上の明示権利であり、明確にクリーンとみなす。変換パスを記録するのは**実際にコード取り込みが発生した場合**とし、format facts の確認のみの場合は「変換パスあり (取り込みが発生した場合)」と条件付きで記す。
+- **GPL-2.0-only には変換パスが存在しない** (GPL-3/AGPL-3 と結合不能)。実装参照には使えず、oracle/fixture 用途に限定する。
+- ライセンス版番号未記の GPL (GPL §9 により任意版を選択できる解釈はある) は権利状態が不明瞭として**保守的に扱い**、実装参照には使わず oracle/fixture に限定する。
+
+## 例外適用時の記録義務
+
+参照元とその根拠を次のすべてに同期して記録する:
+
+- `docs/spec/<format>/README.md` の `参照実装` 行
+- `THIRD_PARTY_NOTICES` の該当フォーマットエントリ
+- `docs/spec/sources/manifest.json` (`sources` または `no_url_available`)
+- 該当 module doc / doc comment
+
+## 非対応の原則
+
+例外条件を満たせない variant / メソッドは実装しない (`Error::Unsupported` で拒否) ことを原則とし、「未対応」ではなく **intentional scope** として記録する。

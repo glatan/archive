@@ -7,9 +7,11 @@
 //! binary trie (`left`/`right` links; node ids start at `nchar` and
 //! links below `nchar` are leaf symbols).
 //!
-//! De-facto format reference (adapted from): LHa for UNIX
-//! `maketbl`/`read_pt_len`/`read_c_len` algorithms (Yoshizaki, free-use
-//! license) and lhasa `lh_new_decoder.c` (ISC).
+//! Format reference: Haruhiko Okumura's `ar002` `huf.c`
+//! (`make_table`/`read_pt_len`/`read_c_len` equivalents), released
+//! by the author to the public domain. Behaviour cross-checked
+//! against lhasa `lh_new_decoder.c` (ISC). Not derived from LHa for
+//! UNIX source (non-OSI license).
 
 use alloc::vec;
 use alloc::vec::Vec;

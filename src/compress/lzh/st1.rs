@@ -13,13 +13,22 @@
 //! Parameters: `hist_bits` is log2 of the history ring (14 for
 //! lh4/lh5, 15 for ARJ, 16 for lh6, 17 for lh7) and `offset_bits` is
 //! the width of the offset-table symbol count (4 below 15-bit
-//! windows, 5 at 15 and above).
+//! windows, 5 at 15 and above). The serialized table section is
+//! self-describing (each table is preceded by its symbol count), so
+//! a larger-than-original history ring is a decoding superset: the
+//! 14/16/17-bit values are the de facto decoder parameters used by
+//! lhasa and cover every stream written by the original LHA/LHa
+//! encoders (12/13/15/16-bit dictionaries).
 //!
-//! De-facto format reference (behaviour-matched/adapted from):
-//! LHa for UNIX `huf.c`/`maketbl.c` (Yoshizaki, free-use license;
-//! the st1 functions live in `huf.c`, `shuf.c` is the st0 decoder),
-//! lhasa `lh_new_decoder.c` (ISC), and the XADMaster
-//! `XADLZHStaticHandle` port.
+//! Format reference: Haruhiko Okumura's `ar002` distribution
+//! (`huf.c`/`decode.c`), which the author released to the public
+//! domain — the algorithm inventor's own reference implementation of
+//! this block format. `-lh4-`/`-lh5-` use its parameters directly
+//! (`DICBIT` 13 documented as "12(-lh4-) or 13(-lh5-)" in `ar.h`);
+//! `-lh6-`/`-lh7-` are the same format at the LHa-extended
+//! dictionary sizes. Behaviour cross-checked against lhasa
+//! `lh_new_decoder.c` (ISC). No code is derived from LHa for UNIX
+//! (non-OSI license) or `lzhuf.c` (no license grant).
 
 use alloc::vec;
 use alloc::vec::Vec;

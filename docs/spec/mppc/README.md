@@ -4,7 +4,7 @@
 |------|------|
 | 形式概要 | RFC 2118 "Microsoft Point-To-Point Compression Protocol (MPPC)"。LZ77 系のパケット指向圧縮。8192 バイトの履歴バッファを跨パケットで維持し、各パケットは 4bit フラグニブル + 12bit coherency count + データで構成される |
 | 基準仕様 | [RFC 2118](https://www.rfc-editor.org/rfc/rfc2118) (ローカルスナップショット: `docs/spec/sources/rfc2118.txt`) |
-| 参照実装 | rdesktop `mppc.c` (GPL-3.0、テスト時 decode oracle・動作参照)、FreeRDP `mppc.c` (Apache-2.0、動作参照・`tests/fixtures/mppc/external_freerdp_*` ベクタ由来)。詳細: THIRD_PARTY_NOTICES MPPC 項 |
+| 参照実装 | FreeRDP `mppc.c` (Apache-2.0、動作参照・`tests/fixtures/mppc/external_freerdp_*` ベクタ由来)、rdesktop `mppc.c` (GPL-3.0-or-later、テスト時 decode oracle のみ — 実装参照ではない)。詳細: THIRD_PARTY_NOTICES MPPC 項 |
 | 実装 | `archive::compress::mppc` (Encoder / Decoder / encode / decode / decode_bounded)。pure-Rust 実装 |
 
 ## 対応バリアント・スコープ
@@ -39,7 +39,7 @@ MSB-first でパックされる (RFC 2118 §4.2)。
 | 10 | Copy offset `64..=319`: `1110` + 8bit (値 - 64) | RFC 2118 §4.2.1 | ✅ | `known_answer_mid_offsets` |
 | 11 | Copy offset `320..=8191`: `110` + 13bit (値 - 320) | RFC 2118 §4.2.1 | ✅ | `known_answer_mid_offsets`、fixture `offsets` 相当 |
 | 12 | match length `3`: bit `0`。それ以外: 先頭 `k` 個の `1` + `0` + `k+1` bit の下位値 (`2^(k+1) + value`)。k ≤ 11 で最大 8191。`k > 11` は拒否 | RFC 2118 §4.2.2 Length-of-Match Encoding | ✅ | 全 roundtrip + `rejects_truncated_bitstream` |
-| 13 | Copy 参照位置は `(書き込み位置 - offset) mod 8192` のリング参照。offset 分だけ遡った履歴バイトを 1 バイトずつ複写 (オーバーラップ可) | RFC 2118 §4 (導入部) + 参照実装 (rdesktop/FreeRDP) の挙動 | ✅ | `overlap` fixture、oracle 検証 |
+| 13 | Copy 参照位置は `(書き込み位置 - offset) mod 8192` のリング参照。offset 分だけ遡った履歴バイトを 1 バイトずつ複写 (オーバーラップ可) | RFC 2118 §4 (導入部) + FreeRDP `mppc.c` (Apache-2.0) の挙動 | ✅ | `overlap` fixture、oracle 検証 |
 | 14 | トークン列終端はバッファ末尾。最終バイトの残り bit はゼロパディングとして受理。全ゼロ末尾バイトはパディングではなくリテラル `0x00` としてデコードする | RFC 2118 §4 + crate 判定 | ✅ | roundtrip 系 |
 | 15 | 1 パケットの出力が履歴バッファ残量を超える場合は拒否 (適合送信側は必ず FRONT で折り返す) | RFC 2118 §3.1 Bit B | ✅ | `rejects_history_overflow` |
 
@@ -48,7 +48,7 @@ MSB-first でパックされる (RFC 2118 §4.2)。
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
 | 16 | 履歴バッファ 8192 バイト、初期値ゼロ。FLUSHED でゼロ初期化 + 位置リセット | RFC 2118 §1, §3, §3.1 Bit A | ✅ | `reset` |
-| 17 | 非圧縮パケットは履歴を更新しない。RFC 2118 §3 "Data Expansion" は expansion 送信後に sender が履歴を flush して次パケットで FLUSHED を立てることを要求しており、参照実装 (rdesktop, FreeRDP) も非圧縮パケットの履歴更新を行わない | RFC 2118 §3 + 参照実装挙動 | ✅ | `expansion_fallback` |
+| 17 | 非圧縮パケットは履歴を更新しない。RFC 2118 §3 "Data Expansion" は expansion 送信後に sender が履歴を flush して次パケットで FLUSHED を立てることを要求しており、FreeRDP (Apache-2.0) も非圧縮パケットの履歴更新を行わない | RFC 2118 §3 + FreeRDP 挙動 | ✅ | `expansion_fallback` |
 | 18 | エンコーダは expansion (圧縮結果 >= 入力) の場合 C=0 の非圧縮パケットを出し、次パケットに FLUSHED を立てる | RFC 2118 §3 "Data Expansion" | ✅ | `expansion_fallback` |
 | 19 | エンコーダは `pos + len > 8192` の場合 FRONT を立てて書き込み位置を 0 に戻す | RFC 2118 §3.1 Bit B | ✅ | `front_wrap` |
 | 20 | 1 パケットのペイロードは最大 8192 バイト (履歴サイズ)。超過入力は InvalidData。マルチパケット化は呼び出し側のパケット化責任 | RFC 2118 §1, §3 | ✅ | `payload_too_large`、`oversized_input_rejected` (統合) |
@@ -83,7 +83,7 @@ MSB-first でパックされる (RFC 2118 §4.2)。
 ## Intentional scope / 既知制約
 
 - PPP カプセル化 (protocol `0x00FD`、CCP、Reset-Request/Ack) はリンク層の責任として対象外。
-- RFC 2118 の in-band 2B ヘッダ経路 (8KiB 履歴) に加え、MS-RDPBCGR §3.1.8.4 の外部 flags/type byte 経路 (`RdpDecoder`/`RdpEncoder`、RDP4 8KiB / RDP5 64KiB) を対応済み。RDP6/6.1 bulk compression は別 codec のため対象外。
+- RFC 2118 の in-band 2B ヘッダ経路 (8KiB 履歴) に加え、MS-RDPBCGR §3.1.8.4 の外部 flags/type byte 経路 (`RdpDecoder`/`RdpEncoder`、RDP4 8KiB / RDP5 64KiB) を対応済み。RDP6/6.1 bulk compression は別 codec のため対象外。なお RFC 2118 パスと異なり、RDP variant では非圧縮パケットも履歴に供給する (MS-RDPBCGR §3.1.8.4 / FreeRDP 挙動)。
 - エンコーダは greedy 単一ハッシュのベースライン品質 (圧縮率最適化は意図しない)。
 - RFC 2118 §1.1 の licensing statement (MPPC は PPP 実装製品かつ相互運用目的でのみ使用可、というフィールドオブユース制限) を記録する。本 crate は PPP 非実装の汎用ライブラリとして codec を単体公開しており、透明性のため THIRD_PARTY_NOTICES にも明記 (法的助言ではない)。
 - `decode(input)` は入力全体を 1 パケットとして扱う。パケット長フィールドが wire 上に存在しないため、連接ストリームの split は仕様上不可能 (パケット境界はリンク層情報)。

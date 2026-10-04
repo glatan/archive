@@ -72,18 +72,6 @@ pub(crate) mod md5;
 #[cfg(any(feature = "sevenz", feature = "zip"))]
 pub(crate) mod aes256;
 
-/// DES and Triple DES (3DES) for ZIP Strong Encryption.
-#[cfg(feature = "zip")]
-pub(crate) mod des;
-
-/// RC2 block cipher for ZIP Strong Encryption.
-#[cfg(feature = "zip")]
-pub(crate) mod rc2;
-
-/// RC4 stream cipher for ZIP Strong Encryption.
-#[cfg(feature = "zip")]
-pub(crate) mod rc4;
-
 /// Output size limit helpers for decompression bomb protection.
 pub(crate) mod bounded;
 

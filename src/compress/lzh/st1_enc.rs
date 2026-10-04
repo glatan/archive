@@ -429,6 +429,12 @@ fn write_block(w: &mut MsbWriter, cmds: &[Cmd], offset_bits: u32) {
 /// Encode `input` as an st1 stream; `hist_bits`/`offset_bits` carry
 /// the same meaning as in `st1::decode` (14/4 for `-lh4-`/`-lh5-`,
 /// 16/5 for `-lh6-`, 17/5 for `-lh7-`, 15/5 for ARJ methods 1-3).
+/// These are the de facto (lhasa-family) window sizes, so the
+/// encoder may emit distances beyond the original LHa dictionary
+/// (8/32/64 KiB for `-lh5-`/`-lh6-`/`-lh7-`): valid wire within the
+/// ar002 alphabet and correct under modern decoders, but strict old
+/// de jure-window decoders may not reproduce the stream — an
+/// intentional scope choice (see `docs/spec/lha/README.md`).
 pub(crate) fn encode(hist_bits: u32, offset_bits: u32, input: &[u8]) -> Vec<u8> {
     let window = 1usize << hist_bits;
     let cmds = parse(input, window);

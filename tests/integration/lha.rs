@@ -356,10 +356,12 @@ fn test_lha_level2_bsdtar_interop() {
 }
 
 // ============================================================
-// LHA compressed-method fixtures (-lh1-..-lh7-, LArc, PMarc) and
+// LHA compressed-method fixtures (-lh4-..-lh7-, LArc, PMarc) and
 // header level 3. Fixture provenance: lhasa test corpus
-// (tests/fixtures/lha), plus synthesized -lh2-/-lh3- archives
-// cross-checked byte-for-byte against the reference  tool.
+// (tests/fixtures/lha). The -lh1-/-lh2-/-lh3- archives are kept
+// as rejection inputs: those methods are intentionally
+// unsupported because no rights-clean format reference exists
+// (lzhuf.c has no license grant; LHa dhuf.c/shuf.c are non-OSI).
 // ============================================================
 
 fn lha_fixture_entry(name: &str) -> archive::archive::lha::decode::LhaEntry {
@@ -369,15 +371,12 @@ fn lha_fixture_entry(name: &str) -> archive::archive::lha::decode::LhaEntry {
     entries.into_iter().next().unwrap()
 }
 
-/// Every vendored fixture must decode; the header CRC-16 inside each
-/// archive validates the decompressed bytes.
+/// Every vendored fixture for a supported method must decode; the
+/// header CRC-16 inside each archive validates the decompressed
+/// bytes.
 #[test]
 fn test_lha_compressed_method_fixtures() {
     for (name, expect_bytes) in [
-        ("lh1.lzh", 18092),
-        ("lh1_lharc.lzh", 18092),
-        ("lh2.lzh", 378),
-        ("lh3.lzh", 268),
         ("lh4.lzh", 18092),
         ("lh5.lzh", 18092),
         ("lh5_255e.lzh", 18092),
@@ -402,6 +401,21 @@ fn test_lha_compressed_method_fixtures() {
     ] {
         let e = lha_fixture_entry(name);
         assert_eq!(e.data.len(), expect_bytes, "{name}: decoded size mismatch");
+    }
+}
+
+/// `-lh1-`/`-lh2-`/`-lh3-` archives must be rejected: the methods
+/// are intentionally unsupported (no rights-clean format
+/// reference exists).
+#[test]
+fn test_lha_legacymethod_rejection() {
+    for name in ["lh1.lzh", "lh1_lharc.lzh", "lh2.lzh", "lh3.lzh"] {
+        let data = std::fs::read(format!("tests/fixtures/lha/{name}")).unwrap();
+        let err = archive::archive::lha::decode::decode(&data).unwrap_err();
+        assert!(
+            matches!(err, archive::error::Error::Unsupported(_)),
+            "{name}: expected Unsupported, got {err:?}"
+        );
     }
 }
 
@@ -474,6 +488,11 @@ fn test_lha_fixture_oracle_extract() {
         let name = p.file_name().unwrap().to_str().unwrap().to_string();
         if name.starts_with("level") {
             continue; // store-method coverage lives elsewhere
+        }
+        // `-lh1-`/`-lh2-`/`-lh3-` archives are rejection inputs; the
+        // methods are intentionally unsupported.
+        if name.starts_with("lh1") || name.starts_with("lh2") || name.starts_with("lh3") {
+            continue;
         }
         let data = std::fs::read(&p).unwrap();
         let ours = archive::archive::lha::decode::decode(&data)

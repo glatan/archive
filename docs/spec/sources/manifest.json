@@ -704,17 +704,18 @@
    "id": "linux-erofs-doc",
    "format": "erofs",
    "title": "Linux kernel Documentation/filesystems/erofs.rst",
-   "version": "linux master (fetched 2026-09)",
-   "url": "https://raw.githubusercontent.com/torvalds/linux/master/Documentation/filesystems/erofs.rst",
+   "version": "linux master 058884d23488 (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/torvalds/linux/058884d23488/Documentation/filesystems/erofs.rst",
    "filename": "erofs.rst"
   },
   {
    "id": "linux-erofs-fs-h",
    "format": "erofs",
    "title": "Linux kernel fs/erofs/erofs_fs.h (on-disk structures)",
-   "version": "linux master (fetched 2026-09)",
-   "url": "https://raw.githubusercontent.com/torvalds/linux/master/fs/erofs/erofs_fs.h",
-   "filename": "erofs_fs.h"
+   "version": "linux master e87827da8c35 (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/torvalds/linux/e87827da8c35/fs/erofs/erofs_fs.h",
+   "filename": "erofs_fs.h",
+   "note": "MIT SPDX since upstream relicensing (2025-11). Retained because Z_EROFS_LI_HOLE exists only here."
   },
   {
    "id": "chromium-crx3-proto",
@@ -795,9 +796,10 @@
    "id": "erofs-utils-erofs-fs-h",
    "format": "erofs",
    "title": "erofs-utils include/erofs_fs.h (EROFS_SUPER_MAGIC_V1 etc.)",
-   "version": "erofs-utils master (fetched 2026-09)",
-   "url": "https://raw.githubusercontent.com/erofs/erofs-utils/master/include/erofs_fs.h",
-   "filename": "erofs_utils_fs.h"
+   "version": "erofs-utils dev da3be8c4135a (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/erofs/erofs-utils/da3be8c4135a/include/erofs_fs.h",
+   "filename": "erofs_utils_fs.h",
+   "note": "Canonical userspace on-disk header. SPDX-License-Identifier: MIT (relicensed upstream from GPL-2.0-only OR Apache-2.0 dual, e.g. v1.8.3). Re-fetch must keep MIT SPDX."
   },
   {
    "id": "el-torito-spec",
@@ -822,6 +824,86 @@
    "version": "FL36 (July 1989, revised February 1994)",
    "url": "https://preterhuman.net/macstuff/technotes/fl/fl_36.html",
    "filename": "apple_iso9660_fl36.html"
+  },
+  {
+   "id": "okumura-ar002-00README-txt",
+   "format": "lha",
+   "title": "ar002 — Okumura static-Huffman compressor/decompressor: ar002 readme — public-domain declaration",
+   "version": "ar002 (1991)",
+   "url": "https://okumuralab.org/~okumura/compression/ar002/00README.txt",
+   "filename": "ar002_00README.txt",
+   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装"
+  },
+  {
+   "id": "okumura-ar002-ar-h",
+   "format": "lha",
+   "title": "ar002 — Okumura static-Huffman compressor/decompressor: ar002 shared header — DICBIT/NP/PBIT parameters",
+   "version": "ar002 (1991)",
+   "url": "https://okumuralab.org/~okumura/compression/ar002/ar.h",
+   "filename": "ar002_ar.h",
+   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装"
+  },
+  {
+   "id": "okumura-ar002-decode-c",
+   "format": "lha",
+   "title": "ar002 — Okumura static-Huffman compressor/decompressor: ar002 top-level decode driver",
+   "version": "ar002 (1991)",
+   "url": "https://okumuralab.org/~okumura/compression/ar002/decode.c",
+   "filename": "ar002_decode.c",
+   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装"
+  },
+  {
+   "id": "okumura-ar002-huf-c",
+   "format": "lha",
+   "title": "ar002 — Okumura static-Huffman compressor/decompressor: ar002 static-Huffman block decode (st1 wire format)",
+   "version": "ar002 (1991)",
+   "url": "https://okumuralab.org/~okumura/compression/ar002/huf.c",
+   "filename": "ar002_huf.c",
+   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装"
+  },
+  {
+   "id": "okumura-ar002-maketbl-c",
+   "format": "lha",
+   "title": "ar002 — Okumura static-Huffman compressor/decompressor: ar002 canonical code table builder",
+   "version": "ar002 (1991)",
+   "url": "https://okumuralab.org/~okumura/compression/ar002/maketbl.c",
+   "filename": "ar002_maketbl.c",
+   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装"
+  },
+  {
+   "id": "okumura-ar002-compr-txt",
+   "format": "lha",
+   "title": "ar002 — Okumura static-Huffman compressor/decompressor: ar002 algorithm notes (English)",
+   "version": "ar002 (1991)",
+   "url": "https://okumuralab.org/~okumura/compression/ar002/compr.txt",
+   "filename": "ar002_compr.txt",
+   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装"
+  },
+  {
+   "id": "okumura-ar002-compr2-txt",
+   "format": "lha",
+   "title": "ar002 — Okumura static-Huffman compressor/decompressor: ar002 algorithm notes part 2 (English)",
+   "version": "ar002 (1991)",
+   "url": "https://okumuralab.org/~okumura/compression/ar002/compr2.txt",
+   "filename": "ar002_compr2.txt",
+   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装"
+  },
+  {
+   "id": "okumura-lzss-c",
+   "format": "lha",
+   "title": "lzss.c — Okumura LZSS encoder-decoder (original LZSS reference)",
+   "version": "1988-05-01",
+   "url": "https://okumuralab.org/~okumura/compression/lzss.c",
+   "filename": "lzss.c",
+   "note": "public domain (file header: 'Haruhiko Okumura; public domain')。奥村晴彦氏による -lzs- (LArc 採用の EI=11/EJ=4 インスタンス) の一次参照実装"
+  },
+  {
+   "id": "ms-rdpbcgr-pdf",
+   "format": "mppc",
+   "title": "[MS-RDPBCGR] Remote Desktop Protocol: Basic Connectivity and Graphics Remoting (RDP bulk compression section 3.1.8.4)",
+   "version": "rev 2025-04-07",
+   "url": "https://winprotocoldocs-bhdugrdyduf5h2e4.b02.azurefd.net/MS-RDPBCGR/%5bMS-RDPBCGR%5d-250407.pdf",
+   "filename": "ms-rdpbcgr_250407.pdf"
   }
  ],
  "no_url_available": [
@@ -851,9 +933,9 @@
    "format": "lzw",
    "title": "ncompress (compress42.c)",
    "version": "4.2.4",
-   "note": "正式な仕様書なし。Unix compress .Z フォーマットのデファクト標準。参照実装は sources/ncompress_4.2.4_compress42.c にスナップショット済み",
+   "note": "正式な仕様書なし。Unix compress .Z フォーマットのデファクト標準。参照実装は sources/ncompress_4.2.4_compress42.c にスナップショット済み。ncompress は Unlicense で公開",
    "reference_url": "https://github.com/vapier/ncompress",
-   "license": "public domain"
+   "license": "Unlicense (public domain 相当)"
   },
   {
    "id": "rzip-format",
@@ -994,20 +1076,20 @@
    "format": "arc",
    "title": "ARC 5.21 for Unix (Howard Chu port of SEA ARC)",
    "version": "5.21 patch level 6 / Debian arc 5.21q",
-   "note": "原典文言は「GPL の条項で」(SEA 1985-87、版番号未記入)。Debian copyright では GPL-2 (一部 GPL-2+) と整理。squeeze/crunch/squash の encode+decode 参照実装。同梱 Arcinfo が ARC 5.xx directory format を記述。Debian main の `arc`/`nomarch`/`unar` が interop oracle として利用可能",
+   "note": "原典文言は「GPL の条項で」(SEA 1985-87、版番号未記入 — 権利状態が不明瞭なため保守的に扱い、実装参照には使わない)。Debian copyright では GPL-2 (一部 GPL-2+) と整理されている。squeeze/crunch/crush/RLE90 の挙動確認 oracle および interop oracle 用途のみ (実装移植元は THIRD_PARTY_NOTICES arc 項の newtua_dos / XADMaster・compcol 系)。同梱 Arcinfo は ARC 5.xx directory format を記述する文書で、仕様文書として参照。",
    "reference_url": [
     "https://github.com/hyc/arc",
     "https://github.com/ani6al/arc",
     "https://sources.debian.org/src/arc/"
    ],
-   "license": "GPL-2.0"
+   "license": "GPL (版番号未記、Debian 整理上 GPL-2 系)"
   },
   {
    "id": "lhasa",
    "format": "lha",
    "title": "lhasa — free LHA/LZH decompression library",
    "version": "master (fragglet/lhasa)",
-   "note": "ISC。lh1-lh7 + LArc (-lzs-/-lz4-/-lz5-) + PMarc (-pm0-/-pm1-/-pm2-) + -lhx- + header level 0-3 の de facto 参照実装。Debian main の `lhasa` が decode oracle として利用可能。源流は Yoshizaki の lzhuf.c (コメント翻訳 Okumura; 明示的ライセンス供与なし)",
+   "note": "ISC。pmarc.rs (-pm1-/-pm2-) の port source、-lz5-/-lzs- (larc.rs) の format reference、st1 (-lh4-〜-lh7-) の de facto パラメタ + behaviour cross-check 参照。tests/fixtures/lha/ の大半は lhasa テストコーパス。Debian main の lhasa が decode oracle として 利用可能",
    "reference_url": [
     "https://github.com/fragglet/lhasa",
     "https://lhasa.soulsphere.org/"
@@ -1087,10 +1169,10 @@
   },
   {
    "id": "xadmaster",
-   "format": "lha",
+   "format": "arc/arj",
    "title": "XADMaster (The Unarchiver) — LZH handle sources",
    "version": "—",
-   "note": "LGPL-2.1-or-later。port source: lha/lzh_dyn.rs は XADLZHOldHandles.m の LhA_Decrunch (-lh2-) を transliterate、lha/lzh_st0.rs / compress::lzh/st1.rs は XADLZHOldHandles.m / XADLZHStaticHandle への adapted。newtua_dos 経由の arc/arj port も最終的には XADMaster 由来",
+   "note": "LGPL-2.1-or-later。port source は arc/arj の newtua_dos 経由 transliteration のみ (newtua_dos 項参照)。lha 由来の port (lzh_dyn/lzh_st0/st1 の adapted 記述) は -lh1-〜-lh3- 実装削除 + ar002 への参照張り替えにより解消済み",
    "reference_url": [
     "https://github.com/MacPaw/XADMaster"
    ],
@@ -1101,7 +1183,7 @@
    "format": "lha",
    "title": "LHa for UNIX 1.14i source (dhuf.c etc.)",
    "version": "1.14i (jca02266/lha)",
-   "note": "LHa 独自ライセンス (copyright notice 保持義務、非 OSI)。port source: lha/lzh_dyn.rs は dhuf.c の transliteration (上流 attribution はファイル内に verbatim 複写済み)。fixture 生成ツールとしても使用",
+   "note": "LHa 独自ライセンス (非 OSI: copyright 保持・binary-only 再配布禁止・商用主利用禁止・ネット外媒体は通知義務)。dhuf.c/shuf.c/huf.c 由来コードは -lh1-〜-lh3- 実装削除と st1 の ar002 張り替えにより除去済み。現在の用途は header.doc.md 書面参照 + fixture 生成ツールのみ",
    "reference_url": [
     "https://github.com/jca02266/lha"
    ],
@@ -1112,11 +1194,177 @@
    "format": "lha",
    "title": "deark — foreign/lzhuf.h (lzhuf.c port)",
    "version": "—",
-   "note": "MIT-style ライセンス (deark による修正は選択により public domain 扱いも可)。port source: lha/lzhuf.rs が foreign/lzhuf.h を参照 (元は Yoshizaki lzhuf.c の移植; 明示的ライセンス供与なし)",
+   "note": "MIT-style ライセンス。foreign/lzhuf.h 由来の lha/lzhuf.rs (-lh1-) は 明示的ライセンス供与なしの lzhuf.c 移植であり、権利上明確でないため 実装削除により除去済み。現行コードは deark を参照しない",
    "reference_url": [
     "https://github.com/jsummers/deark"
    ],
    "license": "MIT"
+  },
+  {
+   "id": "infozip-unzip",
+   "format": "zip",
+   "title": "Info-ZIP unzip (inflate.c / unshrink.c / unreduce.c / explode.c)",
+   "version": "unzip 6.0",
+   "note": "Deflate64 (method 9) ビット構造の de facto 定義源 (Info-ZIP APPNOTE additions)。zip method 1-6 decode の追加参照、Shrink/Implode/Deflate64 の decode oracle としても使用。コード取り込みなし",
+   "reference_url": [
+    "https://infozip.sourceforge.net/",
+    "https://github.com/madler/unzip"
+   ],
+   "license": "Info-ZIP license"
+  },
+  {
+   "id": "zlib-reference",
+   "format": "deflate",
+   "title": "zlib reference implementation (deflate/inflate)",
+   "version": "zlib 1.x",
+   "note": "deflate encoder の gen_bitlen / decoder の inflate_table 挙動の動作 oracle (THIRD_PARTY_NOTICES DEFLATE 項の Kraft-sum left-tracking 記述を参照)。コード取り込みなし",
+   "reference_url": [
+    "https://zlib.net/",
+    "https://github.com/madler/zlib"
+   ],
+   "license": "zlib"
+  },
+  {
+   "id": "xdelta3",
+   "format": "vcdiff",
+   "title": "xdelta3 (Joshua MacDonald)",
+   "version": "3.2.0",
+   "note": "tests/fixtures/vcdiff/*_xdelta3.vcd の生成元かつ local oracle。同一ツリーに xdelta1 (GPL-2.0) を含むが参照・実行したのは xdelta3 (Apache-2.0) のみ",
+   "reference_url": [
+    "https://github.com/jmacd/xdelta"
+   ],
+   "license": "Apache-2.0"
+  },
+  {
+   "id": "facebook-zstd",
+   "format": "zstd/zstd-seekable",
+   "title": "zstd reference implementation + contrib/seekable_format tools",
+   "version": "—",
+   "note": "zstd 動作 oracle。contrib/seekable_format の seekable_compression ツールは tests/fixtures/zstd/seekable_*.zst の生成元。2017 年に BSD+PATENTS から BSD-3-Clause OR GPLv2 dual へ再ライセンス済み (THIRD_PARTY_NOTICES zstd 項)",
+   "reference_url": [
+    "https://github.com/facebook/zstd"
+   ],
+   "license": "BSD-3-Clause OR GPL-2.0"
+  },
+  {
+   "id": "google-brotli",
+   "format": "brotli",
+   "title": "google/brotli reference implementation",
+   "version": "—",
+   "note": "RFC 7932 の参照実装。辞書 (dictionary.bin) 構造の参照 + system brotli oracle。コード取り込みなし (THIRD_PARTY_NOTICES §4 の辞書エントリを参照)",
+   "reference_url": [
+    "https://github.com/google/brotli"
+   ],
+   "license": "MIT"
+  },
+  {
+   "id": "cpython",
+   "format": "ascii85/binhex/uuencode/zip",
+   "title": "CPython (binascii / base64 / zipfile)",
+   "version": "3.x",
+   "note": "ascii85/binhex/uuencode の test-time oracle (binascii.crc_hqx, base64 等) と zip detect_sfx_prefix の stub-length heuristic 動作参照。コード取り込みなし",
+   "reference_url": [
+    "https://github.com/python/cpython"
+   ],
+   "license": "PSF-2.0"
+  },
+  {
+   "id": "freerdp",
+   "format": "mppc",
+   "title": "FreeRDP libfreerdp/codec mppc.c + TestFreeRDPCodecMppc.c",
+   "version": "—",
+   "note": "MPPC 動作セマンティクス参照。tests/fixtures/mppc/external_freerdp_* は FreeRDP テストソースのトークンストリーム定数を埋め込み (詳細: THIRD_PARTY_NOTICES MPPC 項)",
+   "reference_url": [
+    "https://github.com/FreeRDP/FreeRDP"
+   ],
+   "license": "Apache-2.0"
+  },
+  {
+   "id": "rdesktop",
+   "format": "mppc",
+   "title": "rdesktop mppc.c",
+   "version": "—",
+   "note": "MPPC の local decode oracle かつ動作セマンティクス参照。コード取り込みなし",
+   "reference_url": [
+    "https://github.com/rdesktop/rdesktop"
+   ],
+   "license": "GPL-3.0"
+  },
+  {
+   "id": "samba-compression",
+   "format": "xca",
+   "title": "Samba lib/compression test suite (RtlCompressBuffer fixtures)",
+   "version": "—",
+   "note": "tests/integration/xca.rs の known-answer vector バイト定数の出処 (バイト列テストデータのみ、コード取り込みなし; GPLv3 §13 により AGPLv3 との併合可 — THIRD_PARTY_NOTICES xca 項)",
+   "reference_url": [
+    "https://gitlab.com/samba-team/samba"
+   ],
+   "license": "GPL-3.0-or-later"
+  },
+  {
+   "id": "hyperion",
+   "format": "cmpsc",
+   "title": "SDL-Hercules-390/hyperion (CMPSC instruction emulation)",
+   "version": "—",
+   "note": "QPL。公開仕様 (SA22-7832 / SA22-7208) の解釈確認のみでコード取り込みなし",
+   "reference_url": [
+    "https://github.com/SDL-Hercules-390/hyperion"
+   ],
+   "license": "QPL-1.0"
+  },
+  {
+   "id": "libmspack-lzxd",
+   "format": "lzxd",
+   "title": "libmspack lzxd.c — LZXD decoder",
+   "version": "libmspack master",
+   "note": "LGPL-2.1。tests/integration/lzxd.rs の自作ストリームを両デコーダで一致確認する相互検証 oracle。コード取り込みなし",
+   "reference_url": [
+    "https://github.com/kyz/libmspack",
+    "https://www.cabextract.org.uk/libmspack/"
+   ],
+   "license": "LGPL-2.1"
+  },
+  {
+   "id": "lzfformat-doc",
+   "format": "lzf",
+   "title": "LZFFormat description (ning/compress wiki)",
+   "version": "—",
+   "note": "lzfP.h コメントと併用する LZF raw ストリームの書面仕様",
+   "reference_url": [
+    "https://github.com/ning/compress"
+   ],
+   "license": "Apache-2.0 (project license)"
+  },
+  {
+   "id": "rpm-lib-cpio",
+   "format": "rpm",
+   "title": "rpm lib/cpio.c (stripped 07070X cpio payload behavior)",
+   "note": "De facto reference for the stripped cpio payload details not covered by format_v6.html: 4-byte record alignment, trailer forms (stripped fx=0xffffffff and newc TRAILER!!!), file sizes via LONGFILESIZES/FILESIZES, names via BASENAMES/DIRNAMES/DIRINDEXES. Read only to confirm structural facts — no code was copied. rpm COPYING: GPL-2.0-or-later for the whole tree, LGPL-2.0-or-later alternative for lib/ and rpmio/.",
+   "reference_url": [
+    "https://github.com/rpm-software-management/rpm/blob/master/lib/cpio.cc",
+    "https://github.com/rpm-software-management/rpm/blob/master/COPYING"
+   ]
+  },
+  {
+   "id": "lrzip-source",
+   "format": "lrzip",
+   "title": "ckolivas/lrzip upstream source (stream.c / rzip.c token layer)",
+   "note": "magic.header.txt がカバーしない残余の de facto format facts (ctype 数値写像、stream-0 token encoding、可変幅 match offset、chunk sizing、生データフォールバック) の動作参照。format facts のみ、コード取り込みなし。GPL-2.0-or-later → GPL-3 → AGPL-13 の変換パスあり。",
+   "reference_url": [
+    "https://github.com/ckolivas/lrzip"
+   ],
+   "license": "GPL-2.0-or-later"
+  },
+  {
+   "id": "nomarch",
+   "format": "arc",
+   "title": "nomarch (Paul Russell / Russell Marks, ARC 展開ツール)",
+   "note": "method 8/9 (compress-LZW) および squeeze/crunch/crush の挙動確認 oracle として過去に参照。GPL-2.0-or-later (変換パスあり) だが、実装参照には使わず oracle/fixture 用途に限定。実装移植元は newtua_dos / XADMaster (LGPL) および compcol (MIT)。",
+   "reference_url": [
+    "https://zgedneil.nfshost.com/nomarch.html",
+    "https://sources.debian.org/src/nomarch/"
+   ],
+   "license": "GPL-2.0-or-later"
   }
  ]
 }

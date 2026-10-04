@@ -1,4 +1,6 @@
-//! Deflate64 (Enhanced Deflating) decompression per APPNOTE.TXT section 5.6.
+//! Deflate64 (Enhanced Deflating) decompression. APPNOTE.TXT registers
+//! method 9 only; the bit-level structure follows the de facto definition
+//! embodied in Info-ZIP `unzip`/`inflate.c` (see THIRD_PARTY_NOTICES).
 //!
 //! Differences from DEFLATE (RFC 1951):
 //! - 64KB sliding window (vs 32KB)

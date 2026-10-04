@@ -9,8 +9,9 @@
 //! passes through unchanged.
 //!
 //! This is the de-facto layout agreed upon by multiple independent
-//! implementations (The Unarchiver XADMaster Rle90, nomarch,
-//! compcol::rle90; cf. virtualdub.org/blog2 entry_345).
+//! implementations (The Unarchiver XADMaster Rle90,
+//! compcol::rle90; cf. virtualdub.org/blog2 entry_345). nomarch
+//! agrees and is used only as a test-time oracle.
 
 use alloc::vec::Vec;
 

@@ -2,8 +2,8 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | ARC file format description (System Enhancement Associates / wotsit "arc" entry、[fileformat.info mirror](https://www.fileformat.info/format/arc/corion.htm)、ローカルスナップショット: `docs/spec/sources/arc_format_corion.htm`)。併せて [hyc/arc](https://github.com/hyc/arc) 同梱の `Arcinfo` が ARC 5.xx directory format を記述する第二ソース |
-| 参照実装 | newtua_dos (LGPL-3.0-or-later、method 5-7/0xa/0xb の移植元)、compcol (MIT、squeeze の適応元)、ARC 5.21 for Unix / nomarch (動作参照)、Debian `arc` 5.21q (fixture)、arc/nomarch/unar/bsdtar/7z (oracle)。詳細: THIRD_PARTY_NOTICES arc 項・4a 節 |
+| 基準仕様 | ARC file format description (System Enhancement Associates / wotsit "arc" entry、[fileformat.info mirror](https://www.fileformat.info/format/arc/corion.htm)、ローカルスナップショット: `docs/spec/sources/arc_format_corion.htm`)。併せて `Arcinfo` (SEA 自身の文書、hyc/arc 配布物に同梱) が ARC 5.xx directory format を記述する第二ソース |
+| 参照実装 | newtua_dos (LGPL-3.0-or-later、method 5-7/0xa/0xb の移植元)、compcol (MIT、squeeze の適応元)、`compress::lzw` 共有コア (method 8/9 の LZW 層、de facto 源は ncompress `compress42.c` = public domain/Unlicense)。ARC 5.21 for Unix / nomarch は oracle のみ (実装参照ではない)、Debian `arc` 5.21q (fixture 生成)、arc/nomarch/unar/bsdtar/7z (oracle)。詳細: THIRD_PARTY_NOTICES arc 項・4a 節 |
 | 形式概要 | 各 member は `0x1A` + method byte で開始、method 0 で終端。name は 13B NUL 埋めの flat 名 (directory 概念なし) |
 | 実装範囲 | **method 1-9・0x0a・0x0b** の read、**method 1-9・0x0a・0x0b** の write。method 20-29・30-39 (ARC 6.0+ informational/control items) は header parse 後 skip。method 12-19・40+ の decode は intentional scope 外 |
 
@@ -14,12 +14,12 @@
 | method 1 (obsolete unpacked) | ARC spec (Arcinfo bytes 26-29 注記) | ✅ | ✅ | method 2 と同型の 25B ヘッダだが orig-length フィールドなし (stored size が orig size を兼ねる)。CRC-16 検証。decode/encode ともに arc/nomarch/unar で展開確認済み |
 | method 2 (stored) | ARC spec | ✅ | ✅ | CRC-16 検証 |
 | method 3 (packed = RLE90) | de facto (virtualdub/compcol/XADMaster 一致) | ✅ | ✅ | `0x90` run marker、`0x90 0x00` escape。ヘッダは method 2 と同じ 29B、CRC-16 は非圧縮データ |
-| method 4 (squeezed = RLE90 + static Huffman) | de facto (compcol/nomarch/XADMaster 一致) | ✅ | ✅ | 静的 Huffman (numnodes u16 + len/value 対列) で pack 後 RLE90 列を符号化、`SPEOF` 終端。nomarch/arc で展開確認済み |
-| method 5 (crunched, obsolete = quadratic-hash LZW) | de facto (XADMaster/nomarch/arc 一致) | ✅ | ✅ | MSB-first 12-bit code、hash テーブル (quadratic variant) LZW、RLE90 段なし。decode/encode ともに arc/nomarch で展開確認済み |
-| method 6 (crunched = quadratic-hash LZW + RLE90) | de facto (XADMaster/nomarch/arc 一致) | ✅ | ✅ | method 5 と同じ LZW、出力を RLE90 展開。decode/encode ともに arc/nomarch で展開確認済み |
+| method 4 (squeezed = RLE90 + static Huffman) | de facto (compcol/XADMaster 一致) | ✅ | ✅ | 静的 Huffman (numnodes u16 + len/value 対列) で pack 後 RLE90 列を符号化、`SPEOF` 終端。nomarch/arc で展開確認済み |
+| method 5 (crunched, obsolete = quadratic-hash LZW) | de facto (XADMaster、arc/nomarch oracle 検証) | ✅ | ✅ | MSB-first 12-bit code、hash テーブル (quadratic variant) LZW、RLE90 段なし。decode/encode ともに arc/nomarch で展開確認済み |
+| method 6 (crunched = quadratic-hash LZW + RLE90) | de facto (XADMaster、arc/nomarch oracle 検証) | ✅ | ✅ | method 5 と同じ LZW、出力を RLE90 展開。decode/encode ともに arc/nomarch で展開確認済み |
 | method 7 (crunched fast = multiplicative-hash LZW + RLE90) | de facto (XADMaster/arc 一致) | ✅ | ✅ | hash のみ multiplicative に差し替え。decode/encode ともに arc で展開確認済み (nomarch は method 7 非対応) |
-| method 8 (crunched = dynamic LZW + RLE90) | de facto (compcol/nomarch/hyc-arc 一致) | ✅ | ✅ | 先頭 1B が maxbits (実環境は 12)、compress 式 9→12bit 可変幅 LZW + block mode (0x100 reset) の出力を RLE90 展開。Debian `arc` 生成 fixture で decode 確認済み |
-| method 9 (squashed = dynamic LZW、RLE なし) | de facto (nomarch/newtua_dos 一致) | ✅ | ✅ | compress 式 9→13bit 可変幅 LZW + block mode、RLE90 段なし。compcol の「固定 13bit」記述は誤り (nomarch/newtua が一致)。Debian `arc` 生成 fixture で decode 確認済み |
+| method 8 (crunched = dynamic LZW + RLE90) | de facto (compcol + `compress::lzw`/compress42.c、arc/nomarch oracle 検証) | ✅ | ✅ | 先頭 1B が maxbits (実環境は 12)、compress 式 9→12bit 可変幅 LZW + block mode (0x100 reset) の出力を RLE90 展開。Debian `arc` 生成 fixture で decode 確認済み |
+| method 9 (squashed = dynamic LZW、RLE なし) | de facto (newtua_dos、`compress::lzw`/compress42.c、nomarch oracle 検証) | ✅ | ✅ | compress 式 9→13bit 可変幅 LZW + block mode、RLE90 段なし。compcol の「固定 13bit」記述は誤り (newtua_dos 側が nomarch と一致)。Debian `arc` 生成 fixture で decode 確認済み |
 | method 0x0a (crushed = adaptive LZW + RLE90) | de facto (XADMaster port / unar 一致) | ✅ | ✅ | LSB-first、literal-bit モード切替 + usage ベース置換の adaptive LZW、RLE90 段あり。decode/encode ともに unar・newtua (XADMaster port、リポジトリ外の相互検証) で展開確認済み (arc/nomarch は非対応) |
 | method 0x0b (distilled = LZSS + header Huffman) | de facto (XADMaster port) | ✅ | ✅ | 8KiB LZSS + ヘッダ内シリアライズ Huffman + 固定 offset prefix 表。現行 oracle (arc/nomarch/unar) は 0x0b を decode しないため、decode は XADMaster port 一致ベクタ、encode は自 decoder roundtrip + newtua decoder 相互検証 (リポジトリ外) のみ |
 | method 20-29 (informational items)・30-39 (control items) | ARC spec (SEA technical memo、ARC 6.0) | ⚠️ | ❌ | 通常 member と同一ヘッダで parse 後 payload を `length` バイト skip。file ではないため entry として surface しない (sub-type payload は解釈しない) |
