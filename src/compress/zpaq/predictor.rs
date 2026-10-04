@@ -1,1061 +1,591 @@
-//! Context-mixing predictor with 9 component types.
+//! Context-mixing predictor (upstream-compatible).
 //!
-//! The predictor maintains an array of components that each produce
-//! a probability prediction.  Components are chained: each can use
-//! the output of previous components and the context hashes from
-//! the ZPAQL VM.
+//! This is a port of `Predictor`, `Component`, and `StateTable` from
+//! upstream `libzpaq.cpp` (public domain). All arithmetic matches the
+//! reference implementation bit for bit, including 32-bit wraparound
+//! semantics, so that the compressed bitstream is identical.
+//!
+//! Components (upstream type ids): `0=NONE`, `1=CONST`, `2=CM`,
+//! `3=ICM`, `4=MATCH`, `5=AVG`, `6=MIX2`, `7=MIX`, `8=ISSE`, `9=SSE`.
 
-use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::Error;
 
-use super::zpaql::ZPAQL;
+use super::tables::{SDT, SDT2K, SNS, build_squasht, build_stretcht};
+use super::zpaql::{COMP_SIZE, Zpaql};
 
-// ── Squash / stretch tables ─────────────────────────────────────
+/// squash(x) = floor(32768 / (1 + exp(-x / 64))), clamped to
+/// `0..=32767`, for `x` in `-2048..=2047`.
+const SQUASHT: [u16; 4096] = build_squasht();
 
-/// Squash: convert a signed log probability (-2048..2047) to a
-/// probability (1..65534).  squash(x) = 1/(1 + exp(-x/64)) * 65536.
-fn squash(x: i32) -> u32 {
-    if x < -2047 {
-        return 1;
-    }
-    if x > 2047 {
-        return 65534;
-    }
-    // Piecewise linear approximation using a lookup table
-    let idx = (x + 2048) as usize;
-    SQUASH_TABLE[idx.min(SQUASH_TABLE.len() - 1)] as u32
+/// stretch(x) = round(64 * log((x + 0.5) / (32767.5 - x))) for
+/// `x` in `0..=32767` (inverse of `squash`).
+static STRETCHT: [i16; 32768] = build_stretcht();
+
+// Component type ids (upstream numbering).
+const CONST: u8 = 1;
+const CM: u8 = 2;
+const ICM: u8 = 3;
+const MATCH: u8 = 4;
+const AVG: u8 = 5;
+const MIX2: u8 = 6;
+const MIX: u8 = 7;
+const ISSE: u8 = 8;
+const SSE: u8 = 9;
+
+#[inline]
+fn squash(x: i32) -> i32 {
+    debug_assert!((-2048..=2047).contains(&x));
+    SQUASHT[(x + 2048).clamp(0, 4095) as usize] as i32
 }
 
-/// Stretch: inverse of squash. Convert probability (1..65534) to
-/// signed log probability (-2047..2047).
-fn stretch(p: u32) -> i32 {
-    STRETCH_TABLE[((p >> 6) as usize).min(STRETCH_TABLE.len() - 1)] as i32
+#[inline]
+fn stretch(x: i32) -> i32 {
+    debug_assert!((0..=32767).contains(&x));
+    STRETCHT[x.clamp(0, 32767) as usize] as i32
 }
 
-// ── State table ─────────────────────────────────────────────────
-
-/// State table: maps (state, bit) -> next state.
-/// States 0-255 represent the history of bits seen in a context.
-/// Each state encodes a count of 0s and 1s.
-fn next_state(state: u8, bit: u8) -> u8 {
-    STATE_TABLE[state as usize * 2 + bit as usize]
+#[inline]
+fn clamp2k(x: i32) -> i32 {
+    x.clamp(-2048, 2047)
 }
 
-/// Return the probability that the next bit is 1 given a state.
-fn state_prob(state: u8) -> i32 {
-    STATE_PROB_TABLE[state as usize] as i32
+#[inline]
+fn clamp512k(x: i32) -> i32 {
+    x.clamp(-(1 << 19), (1 << 19) - 1)
 }
 
-// ── Component types ─────────────────────────────────────────────
+/// Next state after coding bit `y` (0 or 1).
+#[inline]
+fn next_state(state: u8, y: u32) -> u8 {
+    SNS[state as usize * 4 + y as usize]
+}
 
-/// Component type identifiers.
-const CONS: u8 = 0;
-const CM: u8 = 1;
-const ICM: u8 = 2;
-const MATCH: u8 = 3;
-const AVG: u8 = 4;
-const MIX2: u8 = 5;
-const MIX: u8 = 6;
-const ISSE: u8 = 7;
-const SSE: u8 = 8;
+/// Initial probability of a 1 bit for a bit-history state, times 2^23.
+#[inline]
+fn cminit(state: u8) -> i32 {
+    let n0 = SNS[state as usize * 4 + 2] as i32;
+    let n1 = SNS[state as usize * 4 + 3] as i32;
+    ((n1 * 2 + 1) << 22) / (n0 + n1 + 1)
+}
 
-/// A single predictor component.
-pub(crate) struct Component {
+/// One predictor component, mirroring upstream `struct Component`.
+#[derive(Default)]
+struct Component {
+    /// Component type id and its COMP record parameter bytes.
     ctype: u8,
-    // Context hash index into z.h[]
-    context_index: usize,
-    // Component-specific memory
-    cm_table: Vec<u32>, // CM/ICM context table (maps context -> count/prediction)
-    state_table: Vec<u8>, // ICM/ISSE state table
-    match_buf: Vec<u8>, // MATCH buffer
-    match_pos: u32,     // MATCH current position
-    match_len: u32,     // MATCH current match length
-    match_ref: u32,     // MATCH reference position
-    match_bit: u8,      // MATCH expected bit
-    // Mixer weights
-    weights: Vec<i32>,
-    // Input component indices
-    inputs: Vec<usize>,
-    // Prediction output
-    pub prediction: i32,
-    // Table size mask
-    mask: u32,
-    // SSE/ISSE inner state
-    sse_table: Vec<u32>,
-    // Limit for CM update rate
-    cm_limit: u32,
+    params: [u8; 8],
+    /// Max count for CM/SSE; match position for MATCH.
+    limit: usize,
+    /// Saved context.
+    cxt: usize,
+    /// Multi-purpose: MATCH match length.
+    a: usize,
+    /// Multi-purpose: MATCH offset.
+    b: usize,
+    /// Multi-purpose: MATCH predicted bit; ICM/ISSE hash row base;
+    /// MIX/MIX2 table size (number of contexts).
+    c: usize,
+    /// `cm[cxt & (size-1)]`: packed prediction+count for CM/SSE,
+    /// adaptive counters for ICM, weight pairs for ISSE, weights for
+    /// MIX, context->position index for MATCH.
+    cm: Vec<u32>,
+    /// ICM/ISSE context hash table (rows of 16) or MATCH history buffer.
+    ht: Vec<u8>,
+    /// MIX2 16-bit weights.
+    a16: Vec<u16>,
 }
 
-impl Component {
-    const fn new() -> Self {
-        Self {
-            ctype: CONS,
-            context_index: 0,
-            cm_table: Vec::new(),
-            state_table: Vec::new(),
-            match_buf: Vec::new(),
-            match_pos: 0,
-            match_len: 0,
-            match_ref: 0,
-            match_bit: 0,
-            weights: Vec::new(),
-            inputs: Vec::new(),
-            prediction: 0,
-            mask: 0,
-            sse_table: Vec::new(),
-            cm_limit: 0,
-        }
-    }
+fn try_alloc_u32s(size: usize) -> Result<Vec<u32>, Error> {
+    let mut v = Vec::new();
+    v.try_reserve(size)
+        .map_err(|_| Error::InvalidData("zpaq: memory allocation failed"))?;
+    Ok(v)
 }
 
-/// The predictor manages a chain of components and the ZPAQL VM.
+fn try_alloc_u8s(size: usize) -> Result<Vec<u8>, Error> {
+    let mut v = Vec::new();
+    v.try_reserve(size)
+        .map_err(|_| Error::InvalidData("zpaq: memory allocation failed"))?;
+    Ok(v)
+}
+
+/// The ZPAQ context-mixing predictor.
 pub(crate) struct Predictor {
-    pub components: Vec<Component>,
-    pub z: ZPAQL,
-    bit_count: u32,
-    current_byte: u32,
+    z: Zpaql,
+    /// Partial byte `1, 1x, 1xx, ...` of bits coded so far.
+    c8: u32,
+    /// `c8` split into nibbles (9-bit value).
+    hmap4: u32,
+    /// Component outputs (logistic domain).
+    p: [i32; 256],
+    /// Unrolled copy of `z.h` (context hashes).
+    h: [u32; 256],
+    /// The component array, length `n` (0..255).
+    comp: Vec<Component>,
+    /// COMP record bytes, `n` records total (parsed in `init`).
+    comp_bytes: Vec<u8>,
 }
 
 impl Predictor {
-    /// Create a new predictor from a model configuration.
-    pub fn new(z: ZPAQL, config: &[u8]) -> Self {
-        let mut pred = Self {
-            components: Vec::new(),
+    /// Build and initialize a predictor from a parsed ZPAQL header.
+    ///
+    /// This mirrors upstream `Predictor::init`: it initializes the VM
+    /// with `hh`/`hm`, zeroes the context array and parses the COMP
+    /// section. Errors correspond to upstream `error()` conditions on
+    /// malformed component specifications.
+    pub fn new(z: Zpaql) -> Result<Self, Error> {
+        let mut pr = Self {
             z,
-            bit_count: 0,
-            current_byte: 1,
+            c8: 1,
+            hmap4: 1,
+            p: [0; 256],
+            h: [0; 256],
+            comp: Vec::new(),
+            comp_bytes: Vec::new(),
         };
-        pred.parse_config(config)
-            .expect("crate built-in ZPAQ model configs should be valid");
-        pred
+        pr.init()?;
+        Ok(pr)
     }
 
-    /// Create a predictor from an upstream model configuration, validating
-    /// that known component layouts are not truncated.
-    pub fn try_new(z: ZPAQL, config: &[u8]) -> Result<Self, Error> {
-        let mut pred = Self {
-            components: Vec::new(),
-            z,
-            bit_count: 0,
-            current_byte: 1,
-        };
-        pred.parse_config(config)?;
-        Ok(pred)
+    /// `true` if the model has at least one component (level 1).
+    /// An empty component array means uncompressed data (level 2).
+    pub(crate) fn is_modeled(&self) -> bool {
+        self.z.component_count() != 0
     }
 
-    /// Update the predictor with the actual bit (0 or 1) for built-in models.
-    pub fn update(&mut self, bit: u8) {
-        self.try_update(bit)
-            .expect("crate built-in ZPAQ HCOMP bytecode should terminate within the cycle limit");
-    }
+    fn init(&mut self) -> Result<(), Error> {
+        self.z.inith()?;
+        self.c8 = 1;
+        self.hmap4 = 1;
+        self.p = [0; 256];
+        self.h = [0; 256];
 
-    /// Update the predictor with the actual bit (0 or 1) for upstream models,
-    /// propagating HCOMP runtime failures.
-    pub fn try_update(&mut self, bit: u8) -> Result<(), Error> {
-        self.update_impl(bit)
-    }
-
-    fn parse_config(&mut self, config: &[u8]) -> Result<(), Error> {
-        const INCOMPLETE_CONFIG: Error =
-            Error::InvalidData("zpaq: incomplete component configuration");
-        const INVALID_SIZE: Error = Error::InvalidData("zpaq: invalid component size");
-        const INVALID_MIX_ARITY: Error = Error::InvalidData("zpaq: invalid mix arity");
-
-        fn next_byte(config: &[u8], pos: &mut usize) -> Result<u8, Error> {
-            let byte = *config.get(*pos).ok_or(Error::InvalidData(
-                "zpaq: incomplete component configuration",
-            ))?;
-            *pos += 1;
-            Ok(byte)
-        }
-
-        fn pow2_size(size_log: usize) -> Result<usize, Error> {
-            1usize
-                .checked_shl(size_log as u32)
-                .ok_or(Error::InvalidData("zpaq: invalid component size"))
-        }
-
-        const fn validate_input(input: usize, max_input: usize) -> Result<(), Error> {
-            if input >= max_input {
+        let n = self.z.component_count();
+        // COMP records start at header[7]; `comp()` returns the record
+        // bytes (the trailing 0 terminator excluded).
+        self.comp_bytes = self.z.comp().to_vec();
+        let comp_bytes = self.comp_bytes.clone();
+        let mut cp = 0usize;
+        self.comp.clear();
+        for i in 0..n {
+            if cp >= comp_bytes.len() {
                 return Err(Error::InvalidData(
-                    "zpaq: invalid component input reference",
+                    "zpaq: incomplete component configuration",
                 ));
             }
-            Ok(())
-        }
-
-        let mut pos = 0;
-
-        // Number of components
-        let n = next_byte(config, &mut pos)? as usize;
-
-        for _ in 0..n {
-            let ctype = next_byte(config, &mut pos)?;
-
-            let mut comp = Component::new();
-            comp.ctype = ctype;
-
+            let ctype = comp_bytes[cp];
+            let rec = &comp_bytes[cp..];
+            let mut cr = Component {
+                ctype,
+                ..Component::default()
+            };
+            let plen = rec.len().min(cr.params.len());
+            cr.params[..plen].copy_from_slice(&rec[..plen]);
+            let rec = &cr.params;
             match ctype {
-                CONS => {
-                    // Constant prediction: next byte is the prediction value
-                    comp.prediction = (next_byte(config, &mut pos)? as i32 - 128) * 16;
+                CONST => {
+                    // c
+                    self.p[i] = (rec[1] as i32 - 128) * 4;
                 }
                 CM => {
-                    // Context Model: size (log2), limit
-                    let size_log = next_byte(config, &mut pos)? as usize;
-                    let limit = next_byte(config, &mut pos)? as u32;
-                    let size = pow2_size(size_log)?;
-                    comp.cm_table = vec![1u32 << 15; size]; // initial p = 0.5
-                    comp.mask = (size - 1) as u32;
-                    comp.cm_limit = limit;
-                    comp.context_index = self.components.len();
+                    // sizebits limit
+                    let s = rec[1] as usize;
+                    if s > 32 {
+                        return Err(Error::InvalidData("zpaq: max size for CM is 32"));
+                    }
+                    let size = 1usize << s;
+                    cr.cm = try_alloc_u32s(size)?;
+                    cr.cm.resize(size, 0x8000_0000);
+                    cr.limit = rec[2] as usize * 4;
                 }
                 ICM => {
-                    // Indirect Context Model: size (log2)
-                    let size_log = next_byte(config, &mut pos)? as usize;
-                    let size = pow2_size(size_log.checked_add(8).ok_or(INVALID_SIZE)?)?;
-                    comp.state_table = vec![0u8; size];
-                    comp.cm_table = vec![1u32 << 15; 256]; // 256 state predictions
-                    comp.mask = (size - 1) as u32;
-                    comp.context_index = self.components.len();
+                    // sizebits
+                    let s = rec[1] as usize;
+                    if s > 26 {
+                        return Err(Error::InvalidData("zpaq: max size for ICM is 26"));
+                    }
+                    cr.limit = 1023;
+                    cr.cm = try_alloc_u32s(256)?;
+                    for j in 0..256usize {
+                        cr.cm.push(cminit(j as u8) as u32);
+                    }
+                    cr.ht = try_alloc_u8s(64usize << s)?;
+                    cr.ht.resize(64usize << s, 0);
                 }
                 MATCH => {
-                    // Match Model: buffer size (log2)
-                    let buf_log = next_byte(config, &mut pos)? as usize;
-                    let buf_size = pow2_size(buf_log)?;
-                    comp.match_buf = vec![0u8; buf_size];
-                    comp.mask = (buf_size - 1) as u32;
-                    comp.match_pos = 0;
-                    comp.match_len = 0;
-                    comp.match_ref = 0;
-                    comp.context_index = self.components.len();
-                    // Also need a hash table for finding matches
-                    comp.cm_table = vec![0u32; buf_size];
+                    // sizebits bufbits
+                    let s = rec[1] as usize;
+                    let b = rec[2] as usize;
+                    if s > 32 || b > 32 {
+                        return Err(Error::InvalidData("zpaq: max size for MATCH is 32 32"));
+                    }
+                    cr.cm = try_alloc_u32s(1usize << s)?; // index
+                    cr.cm.resize(1usize << s, 0);
+                    cr.ht = try_alloc_u8s(1usize << b)?; // buf
+                    cr.ht.resize(1usize << b, 0);
+                    cr.ht[0] = 1;
                 }
                 AVG => {
-                    // Average: two input indices + weight
-                    let i1 = next_byte(config, &mut pos)? as usize;
-                    let i2 = next_byte(config, &mut pos)? as usize;
-                    let w = next_byte(config, &mut pos)? as i32;
-                    validate_input(i1, self.components.len())?;
-                    validate_input(i2, self.components.len())?;
-                    comp.inputs = vec![i1, i2];
-                    comp.weights = vec![w];
+                    // j k wt
+                    if rec[1] as usize >= i || rec[2] as usize >= i {
+                        return Err(Error::InvalidData("zpaq: AVG j/k >= i"));
+                    }
                 }
                 MIX2 => {
-                    // 2-input adaptive mixer: size (log2), i1, i2, learning rate
-                    let size_log = next_byte(config, &mut pos)? as usize;
-                    let i1 = next_byte(config, &mut pos)? as usize;
-                    let i2 = next_byte(config, &mut pos)? as usize;
-                    let rate = next_byte(config, &mut pos)? as i32;
-                    validate_input(i1, self.components.len())?;
-                    validate_input(i2, self.components.len())?;
-                    let size = pow2_size(size_log)?;
-                    comp.cm_table = vec![1u32 << 15; size]; // weights initialized to 0.5
-                    comp.mask = (size - 1) as u32;
-                    comp.inputs = vec![i1, i2];
-                    comp.weights = vec![rate];
-                    comp.context_index = self.components.len();
+                    // sizebits j k rate mask
+                    let s = rec[1] as usize;
+                    if s > 32 {
+                        return Err(Error::InvalidData("zpaq: max size for MIX2 is 32"));
+                    }
+                    if rec[2] as usize >= i || rec[3] as usize >= i {
+                        return Err(Error::InvalidData("zpaq: MIX2 j/k >= i"));
+                    }
+                    cr.c = 1usize << s;
+                    let size = cr.c;
+                    let mut w = Vec::new();
+                    w.try_reserve(size)
+                        .map_err(|_| Error::InvalidData("zpaq: memory allocation failed"))?;
+                    w.resize(size, 32768u16);
+                    cr.a16 = w;
                 }
                 MIX => {
-                    // M-input adaptive mixer: size (log2), M, inputs..., learning rate
-                    let size_log = next_byte(config, &mut pos)? as usize;
-                    let m = next_byte(config, &mut pos)? as usize;
-                    if m == 0 {
-                        return Err(INVALID_MIX_ARITY);
+                    // sizebits j m rate mask
+                    let s = rec[1] as usize;
+                    if s > 32 {
+                        return Err(Error::InvalidData("zpaq: max size for MIX is 32"));
                     }
-                    let size = pow2_size(size_log)?;
-                    comp.mask = (size - 1) as u32;
-                    comp.inputs = Vec::with_capacity(m);
-                    for _ in 0..m {
-                        let input = next_byte(config, &mut pos)? as usize;
-                        validate_input(input, self.components.len())?;
-                        comp.inputs.push(input);
+                    let j = rec[2] as usize;
+                    let m = rec[3] as usize;
+                    if j >= i {
+                        return Err(Error::InvalidData("zpaq: MIX j >= i"));
                     }
-                    let _rate = next_byte(config, &mut pos)?;
-                    let weight_count = size.checked_mul(m).ok_or(INVALID_SIZE)?;
-                    comp.weights = vec![0i32; weight_count];
-                    // Initialize to equal weights
-                    for i in 0..size {
-                        for j in 0..m {
-                            comp.weights[i * m + j] = 65536 / m as i32;
-                        }
+                    if m < 1 || m > i - j {
+                        return Err(Error::InvalidData("zpaq: MIX m not in 1..i-j"));
                     }
-                    comp.context_index = self.components.len();
+                    cr.c = 1usize << s;
+                    cr.cm = try_alloc_u32s(cr.c * m)?;
+                    cr.cm.resize(cr.c * m, 65536 / m as u32);
                 }
                 ISSE => {
-                    // Indirect SSE: size (log2), input index
-                    let size_log = next_byte(config, &mut pos)? as usize;
-                    let input = next_byte(config, &mut pos)? as usize;
-                    validate_input(input, self.components.len())?;
-                    let size = pow2_size(size_log.checked_add(8).ok_or(INVALID_SIZE)?)?;
-                    comp.state_table = vec![0u8; size];
-                    comp.sse_table = vec![1u32 << 15; size]; // predictions
-                    comp.mask = (size - 1) as u32;
-                    comp.inputs = vec![input];
-                    comp.context_index = self.components.len();
+                    // sizebits j
+                    let s = rec[1] as usize;
+                    if s > 32 {
+                        return Err(Error::InvalidData("zpaq: max size for ISSE is 32"));
+                    }
+                    if rec[2] as usize >= i {
+                        return Err(Error::InvalidData("zpaq: ISSE j >= i"));
+                    }
+                    cr.ht = try_alloc_u8s(64usize << s)?;
+                    cr.ht.resize(64usize << s, 0);
+                    cr.cm = try_alloc_u32s(512)?;
+                    for j in 0..256usize {
+                        cr.cm.push(1 << 15);
+                        cr.cm
+                            .push(clamp512k(stretch(cminit(j as u8) >> 8) * 1024) as u32);
+                    }
                 }
                 SSE => {
-                    // Secondary Symbol Estimation: size (log2), input, start, end
-                    let size_log = next_byte(config, &mut pos)? as usize;
-                    let input = next_byte(config, &mut pos)? as usize;
-                    let _start = next_byte(config, &mut pos)?;
-                    let _end = next_byte(config, &mut pos)?;
-                    validate_input(input, self.components.len())?;
-                    let size = pow2_size(size_log)?;
-                    let table_len = size.checked_mul(64).ok_or(INVALID_SIZE)?;
-                    comp.sse_table = vec![1u32 << 15; table_len]; // 64 quantized probs
-                    comp.mask = (size - 1) as u32;
-                    comp.inputs = vec![input];
-                    comp.context_index = self.components.len();
+                    // sizebits j start limit
+                    let s = rec[1] as usize;
+                    if s > 32 {
+                        return Err(Error::InvalidData("zpaq: max size for SSE is 32"));
+                    }
+                    if rec[2] as usize >= i {
+                        return Err(Error::InvalidData("zpaq: SSE j >= i"));
+                    }
+                    let start = rec[3] as u32;
+                    let limit = rec[4] as usize * 4;
+                    if rec[3] as usize > rec[4] as usize * 4 {
+                        return Err(Error::InvalidData("zpaq: SSE start > limit*4"));
+                    }
+                    cr.cm = try_alloc_u32s(32usize << s)?;
+                    for j in 0..(32usize << s) {
+                        cr.cm
+                            .push(((squash((j as i32 & 31) * 64 - 992) as u32) << 17) | start);
+                    }
+                    cr.limit = limit;
                 }
                 _ => return Err(Error::InvalidData("zpaq: unknown component type")),
             }
-
-            self.components.push(comp);
-        }
-
-        if pos > config.len() {
-            return Err(INCOMPLETE_CONFIG);
+            let step = COMP_SIZE.get(ctype as usize).copied().unwrap_or(0) as usize;
+            if step == 0 {
+                return Err(Error::InvalidData("zpaq: unknown component type"));
+            }
+            cp += step;
+            self.comp.push(cr);
         }
         Ok(())
     }
 
-    /// Predict the next bit. Returns probability (1..65534) that the
-    /// bit is 1.
-    pub fn predict(&mut self) -> u32 {
-        let n = self.components.len();
-        if n == 0 {
-            return 1 << 15;
-        }
-
-        // Run each component to produce its prediction
+    /// Return the probability that the next bit is 1, as `0..=32767`.
+    /// Callers feed `predict() * 2 + 1` to the arithmetic coder.
+    pub fn predict(&mut self) -> i32 {
+        debug_assert!(self.is_modeled());
+        let n = self.comp.len();
         for i in 0..n {
-            let ctype = self.components[i].ctype;
+            let ctype = self.comp[i].ctype;
+            let rec = self.comp[i].params;
+            let rec = &rec;
             match ctype {
-                CONS => {
-                    // prediction already set
-                }
+                CONST => {} // prediction already set in init
                 CM => {
-                    let ci = self.components[i].context_index;
-                    let ctx = if ci < self.z.h.len() { self.z.h[ci] } else { 0 };
-                    let idx = (ctx & self.components[i].mask) as usize;
-                    if idx < self.components[i].cm_table.len() {
-                        let p = self.components[i].cm_table[idx];
-                        self.components[i].prediction = stretch(p);
-                    }
+                    // sizebits limit
+                    let cr = &mut self.comp[i];
+                    cr.cxt = (self.h[i] ^ self.hmap4) as usize;
+                    self.p[i] = stretch((cr.cm[cr.cxt & (cr.cm.len() - 1)] >> 17) as i32);
                 }
                 ICM => {
-                    let ci = self.components[i].context_index;
-                    let ctx = if ci < self.z.h.len() { self.z.h[ci] } else { 0 };
-                    let idx = (ctx & self.components[i].mask) as usize;
-                    if idx < self.components[i].state_table.len() {
-                        let state = self.components[i].state_table[idx];
-                        if (state as usize) < self.components[i].cm_table.len() {
-                            let p = self.components[i].cm_table[state as usize];
-                            self.components[i].prediction = stretch(p);
-                        }
+                    // sizebits
+                    if self.c8 == 1 || (self.c8 & 0xf0) == 16 {
+                        let ctx = self.h[i].wrapping_add(16 * self.c8);
+                        self.comp[i].c = self.find(rec[1] as usize + 2, ctx, i);
                     }
+                    let cr = &mut self.comp[i];
+                    cr.cxt = cr.ht[cr.c + (self.hmap4 as usize & 15)] as usize;
+                    self.p[i] = stretch((cr.cm[cr.cxt & 255] >> 8) as i32);
                 }
                 MATCH => {
-                    if self.components[i].match_len > 0 {
-                        let ref_pos = self.components[i].match_ref;
-                        let buf_mask = self.components[i].mask;
-                        let ref_byte = self.components[i].match_buf[(ref_pos & buf_mask) as usize];
-                        let bit_pos = 7 - (self.bit_count % 8);
-                        let expected = (ref_byte >> bit_pos) & 1;
-                        self.components[i].match_bit = expected;
-                        let len = self.components[i].match_len.min(255) as i32;
-                        self.components[i].prediction =
-                            if expected != 0 { len * 4 } else { -(len * 4) };
+                    // sizebits bufbits
+                    let cr = &mut self.comp[i];
+                    if cr.a == 0 {
+                        self.p[i] = 0;
                     } else {
-                        self.components[i].prediction = 0;
+                        cr.c = ((cr.ht[cr.limit.wrapping_sub(cr.b) & (cr.ht.len() - 1)]
+                            >> (7 - cr.cxt))
+                            & 1) as usize;
+                        self.p[i] = stretch(
+                            (SDT2K[cr.a] as i32).wrapping_mul(cr.c as i32 * -2 + 1) & 32767,
+                        );
                     }
                 }
                 AVG => {
-                    if self.components[i].inputs.len() >= 2
-                        && !self.components[i].weights.is_empty()
-                    {
-                        let i1 = self.components[i].inputs[0];
-                        let i2 = self.components[i].inputs[1];
-                        let w = self.components[i].weights[0];
-                        let p1 = if i1 < n {
-                            self.components[i1].prediction
-                        } else {
-                            0
-                        };
-                        let p2 = if i2 < n {
-                            self.components[i2].prediction
-                        } else {
-                            0
-                        };
-                        self.components[i].prediction = (p1 * (256 - w) + p2 * w) >> 8;
-                    }
+                    // j k wt
+                    let j = rec[1] as usize;
+                    let k = rec[2] as usize;
+                    let wt = rec[3] as i32;
+                    self.p[i] = (self.p[j] * wt + self.p[k] * (256 - wt)) >> 8;
                 }
                 MIX2 => {
-                    if self.components[i].inputs.len() >= 2 {
-                        let i1 = self.components[i].inputs[0];
-                        let i2 = self.components[i].inputs[1];
-                        let ci = self.components[i].context_index;
-                        let ctx = if ci < self.z.h.len() { self.z.h[ci] } else { 0 };
-                        let idx = (ctx & self.components[i].mask) as usize;
-                        let w = if idx < self.components[i].cm_table.len() {
-                            self.components[i].cm_table[idx]
-                        } else {
-                            1u32 << 15
-                        };
-                        let p1 = if i1 < n {
-                            self.components[i1].prediction
-                        } else {
-                            0
-                        };
-                        let p2 = if i2 < n {
-                            self.components[i2].prediction
-                        } else {
-                            0
-                        };
-                        self.components[i].prediction =
-                            ((p1 as i64 * (65536 - w as i64) + p2 as i64 * w as i64) >> 16) as i32;
-                    }
+                    // sizebits j k rate mask
+                    let cr = &mut self.comp[i];
+                    cr.cxt =
+                        (self.h[i].wrapping_add(self.c8 & rec[5] as u32) as usize) & (cr.c - 1);
+                    let w = cr.a16[cr.cxt] as i32;
+                    self.p[i] =
+                        (w * self.p[rec[2] as usize] + (65536 - w) * self.p[rec[3] as usize]) >> 16;
                 }
                 MIX => {
-                    let m = self.components[i].inputs.len();
-                    if m > 0 {
-                        let ci = self.components[i].context_index;
-                        let ctx = if ci < self.z.h.len() { self.z.h[ci] } else { 0 };
-                        let idx = (ctx & self.components[i].mask) as usize;
-                        let mut sum: i64 = 0;
-                        for j in 0..m {
-                            let inp = self.components[i].inputs[j];
-                            let p = if inp < n {
-                                self.components[inp].prediction
-                            } else {
-                                0
-                            };
-                            let w_idx = idx * m + j;
-                            let w = if w_idx < self.components[i].weights.len() {
-                                self.components[i].weights[w_idx]
-                            } else {
-                                0
-                            };
-                            sum += p as i64 * w as i64;
-                        }
-                        self.components[i].prediction = (sum >> 16) as i32;
+                    // sizebits j m rate mask
+                    let m = rec[3] as usize;
+                    let cr = &mut self.comp[i];
+                    cr.cxt =
+                        (self.h[i].wrapping_add(self.c8 & rec[5] as u32) as usize) & (cr.c - 1);
+                    cr.cxt *= m;
+                    let base = cr.cxt;
+                    let mut sum: i32 = 0;
+                    for j in 0..m {
+                        let w = cr.cm[base + j] as i32;
+                        sum = sum.wrapping_add((w >> 8).wrapping_mul(self.p[rec[2] as usize + j]));
                     }
+                    self.p[i] = clamp2k(sum >> 8);
                 }
                 ISSE => {
-                    if !self.components[i].inputs.is_empty() {
-                        let inp = self.components[i].inputs[0];
-                        let ci = self.components[i].context_index;
-                        let ctx = if ci < self.z.h.len() { self.z.h[ci] } else { 0 };
-                        let idx = (ctx & self.components[i].mask) as usize;
-                        let state = if idx < self.components[i].state_table.len() {
-                            self.components[i].state_table[idx]
-                        } else {
-                            0
-                        };
-                        let p_in = if inp < n {
-                            squash(self.components[inp].prediction) as i32
-                        } else {
-                            1 << 15
-                        };
-                        // Mix with state-based prediction
-                        let sp = state_prob(state);
-                        self.components[i].prediction = (p_in + sp) >> 1;
-                        self.components[i].prediction =
-                            stretch(self.components[i].prediction as u32);
+                    // sizebits j
+                    if self.c8 == 1 || (self.c8 & 0xf0) == 16 {
+                        let ctx = self.h[i].wrapping_add(16 * self.c8);
+                        self.comp[i].c = self.find(rec[1] as usize + 2, ctx, i);
                     }
+                    let cr = &mut self.comp[i];
+                    cr.cxt = cr.ht[cr.c + (self.hmap4 as usize & 15)] as usize;
+                    let wt0 = cr.cm[cr.cxt * 2] as i32;
+                    let wt1 = cr.cm[cr.cxt * 2 + 1] as i32;
+                    self.p[i] =
+                        clamp2k((wt0.wrapping_mul(self.p[rec[2] as usize]) + wt1 * 64) >> 16);
                 }
-                SSE if !self.components[i].inputs.is_empty() => {
-                    let inp = self.components[i].inputs[0];
-                    let ci = self.components[i].context_index;
-                    let ctx = if ci < self.z.h.len() { self.z.h[ci] } else { 0 };
-                    let idx = (ctx & self.components[i].mask) as usize;
-                    let p_in = if inp < n {
-                        squash(self.components[inp].prediction)
-                    } else {
-                        1u32 << 15
-                    };
-                    // Quantize input probability to 0..63
-                    let q = (p_in >> 10).min(63) as usize;
-                    let table_idx = idx * 64 + q;
-                    if table_idx < self.components[i].sse_table.len() {
-                        let p = self.components[i].sse_table[table_idx];
-                        self.components[i].prediction = stretch(p);
-                    }
+                SSE => {
+                    // sizebits j start limit
+                    let cr = &mut self.comp[i];
+                    cr.cxt = (self.h[i].wrapping_add(self.c8) as usize) * 32;
+                    let mut pq = self.p[rec[2] as usize] + 992;
+                    pq = pq.clamp(0, 1983);
+                    let wt = (pq & 63) as u32;
+                    pq >>= 6;
+                    cr.cxt += pq as usize;
+                    let cxt = cr.cxt;
+                    let v = ((cr.cm[cxt & (cr.cm.len() - 1)] >> 10) * (64 - wt)
+                        + (cr.cm[(cxt + 1) & (cr.cm.len() - 1)] >> 10) * wt)
+                        >> 13;
+                    self.p[i] = stretch(v as i32);
+                    cr.cxt += (wt >> 5) as usize;
                 }
-                _ => {}
+                _ => unreachable!("validated in init"),
             }
         }
-
-        // Return the last component's prediction, squashed to 1..65534
-        let p = self.components[n - 1].prediction;
-        squash(p)
+        squash(self.p[n - 1])
     }
 
-    fn update_impl(&mut self, bit: u8) -> Result<(), Error> {
-        let n = self.components.len();
-        let y = bit as u32;
-
-        // Update each component in reverse order
-        for i in (0..n).rev() {
-            let ctype = self.components[i].ctype;
+    /// Update the model after bit `y` (0 or 1) has been coded.
+    pub fn update(&mut self, y: u32) -> Result<(), Error> {
+        debug_assert!(y <= 1);
+        let n = self.comp.len();
+        for i in 0..n {
+            let ctype = self.comp[i].ctype;
+            let params = self.comp[i].params;
+            let rec = &params;
             match ctype {
-                CM => {
-                    let ci = self.components[i].context_index;
-                    let ctx = if ci < self.z.h.len() { self.z.h[ci] } else { 0 };
-                    let idx = (ctx & self.components[i].mask) as usize;
-                    if idx < self.components[i].cm_table.len() {
-                        let p = self.components[i].cm_table[idx];
-                        let limit = self.components[i].cm_limit;
-                        // Update towards the actual bit
-                        let error = ((y as i32) << 16) - p as i32;
-                        let rate = if limit > 0 { limit } else { 4 };
-                        let new_p = (p as i32 + error / rate as i32).clamp(1, 65534) as u32;
-                        self.components[i].cm_table[idx] = new_p;
-                    }
-                }
+                CONST | AVG => {}
+                CM | SSE => self.train(i, y),
                 ICM => {
-                    let ci = self.components[i].context_index;
-                    let ctx = if ci < self.z.h.len() { self.z.h[ci] } else { 0 };
-                    let idx = (ctx & self.components[i].mask) as usize;
-                    if idx < self.components[i].state_table.len() {
-                        let state = self.components[i].state_table[idx];
-                        // Update state
-                        self.components[i].state_table[idx] = next_state(state, bit);
-                        // Update CM entry for this state
-                        if (state as usize) < self.components[i].cm_table.len() {
-                            let p = self.components[i].cm_table[state as usize];
-                            let error = ((y as i32) << 16) - p as i32;
-                            let new_p = (p as i32 + error / 4).clamp(1, 65534) as u32;
-                            self.components[i].cm_table[state as usize] = new_p;
-                        }
-                    }
+                    let cr = &mut self.comp[i];
+                    let idx = cr.c + (self.hmap4 as usize & 15);
+                    cr.ht[idx] = next_state(cr.ht[idx], y);
+                    let pn = &mut cr.cm[cr.cxt & 255];
+                    let d = ((y * 32767).wrapping_sub(*pn >> 8)) as i32;
+                    *pn = pn.wrapping_add((d >> 2) as u32);
                 }
                 MATCH => {
-                    // Update match buffer
-                    let pos = self.components[i].match_pos;
-                    let buf_mask = self.components[i].mask;
-
-                    // On byte boundary, update match state
-                    if self.bit_count.is_multiple_of(8) {
-                        let byte = (self.current_byte & 0xFF) as u8;
-                        self.components[i].match_buf[(pos & buf_mask) as usize] = byte;
-
-                        // Check if match continues
-                        if self.components[i].match_len > 0 {
-                            let ref_byte = self.components[i].match_buf
-                                [(self.components[i].match_ref & buf_mask) as usize];
-                            if ref_byte == byte {
-                                self.components[i].match_ref =
-                                    self.components[i].match_ref.wrapping_add(1);
-                            } else {
-                                self.components[i].match_len = 0;
-                            }
-                        }
-
-                        // Try to find a new match if none active
-                        if self.components[i].match_len == 0 {
-                            let ci = self.components[i].context_index;
-                            let ctx = if ci < self.z.h.len() { self.z.h[ci] } else { 0 };
-                            let hash_idx = (ctx & buf_mask) as usize;
-                            if hash_idx < self.components[i].cm_table.len() {
-                                let candidate = self.components[i].cm_table[hash_idx];
-                                if candidate != pos {
-                                    self.components[i].match_ref = candidate;
-                                    self.components[i].match_len = 1;
+                    let bufmask = self.comp[i].ht.len() - 1;
+                    let cmask = self.comp[i].cm.len() - 1;
+                    let cr = &mut self.comp[i];
+                    if cr.c != y as usize {
+                        cr.a = 0; // mismatch
+                    }
+                    let li = cr.limit & bufmask;
+                    cr.ht[li] = cr.ht[li].wrapping_add(cr.ht[li]).wrapping_add(y as u8);
+                    cr.cxt += 1;
+                    if cr.cxt == 8 {
+                        cr.cxt = 0;
+                        cr.limit = cr.limit.wrapping_add(1) & bufmask;
+                        if cr.a == 0 {
+                            // look for a match
+                            cr.b = cr
+                                .limit
+                                .wrapping_sub(cr.cm[self.h[i] as usize & cmask] as usize);
+                            if cr.b & bufmask != 0 {
+                                while cr.a < 255
+                                    && cr.ht[cr.limit.wrapping_sub(cr.a).wrapping_sub(1) & bufmask]
+                                        == cr.ht[cr
+                                            .limit
+                                            .wrapping_sub(cr.a)
+                                            .wrapping_sub(cr.b)
+                                            .wrapping_sub(1)
+                                            & bufmask]
+                                {
+                                    cr.a += 1;
                                 }
-                                self.components[i].cm_table[hash_idx] = pos;
                             }
+                        } else {
+                            cr.a += usize::from(cr.a < 255);
                         }
-
-                        self.components[i].match_pos = pos.wrapping_add(1);
+                        cr.cm[self.h[i] as usize & cmask] = cr.limit as u32;
                     }
                 }
                 MIX2 => {
-                    if self.components[i].inputs.len() >= 2 {
-                        let ci = self.components[i].context_index;
-                        let ctx = if ci < self.z.h.len() { self.z.h[ci] } else { 0 };
-                        let idx = (ctx & self.components[i].mask) as usize;
-                        if idx < self.components[i].cm_table.len() {
-                            let rate = if !self.components[i].weights.is_empty() {
-                                self.components[i].weights[0].max(1)
-                            } else {
-                                4
-                            };
-                            let p = self.components[i].cm_table[idx];
-                            let error = ((y as i32) << 16) - p as i32;
-                            let new_p = (p as i32 + error / rate).clamp(1, 65534) as u32;
-                            self.components[i].cm_table[idx] = new_p;
-                        }
+                    let rate = rec[4] as i32;
+                    let j = rec[2] as usize;
+                    let k = rec[3] as usize;
+                    let err = ((y as i32 * 32767 - squash(self.p[i])) * rate) >> 5;
+                    let diff = self.p[j] - self.p[k];
+                    let cr = &mut self.comp[i];
+                    let mut w = cr.a16[cr.cxt] as i32;
+                    w += (err.wrapping_mul(diff) + (1 << 12)) >> 13;
+                    cr.a16[cr.cxt] = w.clamp(0, 65535) as u16;
+                }
+                MIX => {
+                    let m = rec[3] as usize;
+                    let rate = rec[4] as i32;
+                    let j0 = rec[2] as usize;
+                    let err = ((y as i32 * 32767 - squash(self.p[i])) * rate) >> 4;
+                    let cr = &mut self.comp[i];
+                    let base = cr.cxt;
+                    for j in 0..m {
+                        let w = cr.cm[base + j] as i32;
+                        let nw =
+                            w.wrapping_add((err.wrapping_mul(self.p[j0 + j]) + (1 << 12)) >> 13);
+                        cr.cm[base + j] = clamp512k(nw) as u32;
                     }
                 }
                 ISSE => {
-                    let ci = self.components[i].context_index;
-                    let ctx = if ci < self.z.h.len() { self.z.h[ci] } else { 0 };
-                    let idx = (ctx & self.components[i].mask) as usize;
-                    if idx < self.components[i].state_table.len() {
-                        let state = self.components[i].state_table[idx];
-                        self.components[i].state_table[idx] = next_state(state, bit);
-                    }
+                    let j = rec[2] as usize;
+                    let err = y as i32 * 32767 - squash(self.p[i]);
+                    let cr = &mut self.comp[i];
+                    let cxt = cr.cxt;
+                    let w0 = cr.cm[cxt * 2] as i32;
+                    let w1 = cr.cm[cxt * 2 + 1] as i32;
+                    cr.cm[cxt * 2] =
+                        clamp512k(w0.wrapping_add((err.wrapping_mul(self.p[j]) + (1 << 12)) >> 13))
+                            as u32;
+                    cr.cm[cxt * 2 + 1] = clamp512k(w1.wrapping_add((err + 16) >> 5)) as u32;
+                    let idx = cr.c + (self.hmap4 as usize & 15);
+                    cr.ht[idx] = next_state(cr.ht[idx], y);
                 }
-                SSE if !self.components[i].inputs.is_empty() => {
-                    let inp = self.components[i].inputs[0];
-                    let ci = self.components[i].context_index;
-                    let ctx = if ci < self.z.h.len() { self.z.h[ci] } else { 0 };
-                    let idx = (ctx & self.components[i].mask) as usize;
-                    let p_in = if inp < n {
-                        squash(self.components[inp].prediction)
-                    } else {
-                        1u32 << 15
-                    };
-                    let q = (p_in >> 10).min(63) as usize;
-                    let table_idx = idx * 64 + q;
-                    if table_idx < self.components[i].sse_table.len() {
-                        let p = self.components[i].sse_table[table_idx];
-                        let error = ((y as i32) << 16) - p as i32;
-                        let new_p = (p as i32 + error / 4).clamp(1, 65534) as u32;
-                        self.components[i].sse_table[table_idx] = new_p;
-                    }
-                }
-                _ => {}
+                _ => unreachable!("validated in init"),
             }
         }
 
-        // Update bit count and current byte
-        self.current_byte = (self.current_byte << 1) | y;
-        self.bit_count += 1;
-
-        // On byte boundary, run the ZPAQL VM
-        if self.bit_count.is_multiple_of(8) {
-            let byte = self.current_byte & 0xFF;
-            self.z.try_run(byte)?;
-            self.current_byte = 1;
+        // Save bit y in c8, hmap4; run HCOMP at each byte boundary.
+        self.c8 = self.c8 + self.c8 + y;
+        if self.c8 >= 256 {
+            self.z.run(self.c8 - 256)?;
+            self.hmap4 = 1;
+            self.c8 = 1;
+            for i in 0..n {
+                self.h[i] = self.z.hash_at(i);
+            }
+        } else if (16..32).contains(&self.c8) {
+            self.hmap4 = (self.hmap4 & 0xf) << 5 | y << 4 | 1;
+        } else {
+            self.hmap4 = (self.hmap4 & 0x1f0) | (((self.hmap4 & 0xf) * 2 + y) & 0xf);
         }
-
         Ok(())
     }
-}
 
-// ── Lookup tables ───────────────────────────────────────────────
+    /// Reduce prediction error in `cm` (CM and SSE components).
+    fn train(&mut self, i: usize, y: u32) {
+        let cr = &mut self.comp[i];
+        let idx = cr.cxt & (cr.cm.len() - 1);
+        let pn = &mut cr.cm[idx];
+        let count = (*pn & 0x3ff) as usize;
+        let error = y as i32 * 32767 - (*pn >> 17) as i32;
+        *pn = pn.wrapping_add(
+            ((error.wrapping_mul(SDT[count] as i32)) & !0x3ff) as u32 + u32::from(count < cr.limit),
+        );
+    }
 
-/// Squash lookup table: 4096 entries mapping -2048..2047 to 1..65534.
-/// Generated by: squash(x) = round(65536 / (1 + exp(-x/64)))
-static SQUASH_TABLE: [u16; 4096] = {
-    let mut table = [0u16; 4096];
-    let mut i = 0;
-    while i < 4096 {
-        let x = i as i32 - 2048;
-        // Piecewise linear approximation
-        let p = if x < -512 {
-            let t_signed = x + 2048;
-            let t = (if t_signed > 0 { t_signed } else { 0 }) as u32;
-            let v = t * 32 / 2048;
-            (if v < 65534 { v } else { 65534 }) as u16
-        } else if x > 512 {
-            let t_signed = 2047 - x;
-            let t = (if t_signed > 0 { t_signed } else { 0 }) as u32;
-            let v = 65534 - t * 32 / 2048;
-            (if v < 65534 { v } else { 65534 }) as u16
+    /// Find context row in an ICM/ISSE hash table. Each row is 16 bytes:
+    /// element 0 holds the next higher 8 context bits for collision
+    /// detection. After 3 adjacent misses, evict the row whose element
+    /// 1 is smallest.
+    fn find(&mut self, sizebits: usize, cxt: u32, i: usize) -> usize {
+        let chk = ((cxt >> sizebits) & 255) as u8;
+        // Upstream computes cxt*16 in 32 bits; keep the wrap.
+        let h0 = (cxt.wrapping_mul(16) as usize) & (self.comp[i].ht.len() - 16);
+        if self.comp[i].ht[h0] == chk {
+            return h0;
+        }
+        let h1 = h0 ^ 16;
+        if self.comp[i].ht[h1] == chk {
+            return h1;
+        }
+        let h2 = h0 ^ 32;
+        if self.comp[i].ht[h2] == chk {
+            return h2;
+        }
+        let evict = if self.comp[i].ht[h0 + 1] <= self.comp[i].ht[h1 + 1]
+            && self.comp[i].ht[h0 + 1] <= self.comp[i].ht[h2 + 1]
+        {
+            h0
+        } else if self.comp[i].ht[h1 + 1] < self.comp[i].ht[h2 + 1] {
+            h1
         } else {
-            // Linear region: map -512..512 to ~1024..64512
-            let t = (x + 512) as u32;
-            let v = 1024 + t * 62464 / 1024;
-            (if v < 65534 { v } else { 65534 }) as u16
+            h2
         };
-        table[i] = if p == 0 { 1 } else { p };
-        i += 1;
-    }
-    table
-};
-
-/// Stretch lookup table: 1024 entries mapping 0..65535 (>>6) to -2047..2047.
-/// Inverse of squash.
-static STRETCH_TABLE: [i16; 1024] = {
-    let mut table = [0i16; 1024];
-    let mut i = 0;
-    while i < 1024 {
-        let p = (i * 64) as u32;
-        let s = if p < 1024 {
-            -512 - ((1024 - p) as i32 * 1536 / 1024)
-        } else if p > 64512 {
-            512 + ((p - 64512) as i32 * 1536 / 1024)
-        } else {
-            (p as i32 - 32768) * 1024 / 62464
-        };
-        let clamped = if s < -2047 {
-            -2047
-        } else if s > 2047 {
-            2047
-        } else {
-            s
-        };
-        table[i] = clamped as i16;
-        i += 1;
-    }
-    table
-};
-
-/// State transition table: 512 entries for (state, bit) pairs.
-/// Simplified version: states encode a count of (n0, n1) bits.
-static STATE_TABLE: [u8; 512] = {
-    let mut table = [0u8; 512];
-    let mut s = 0u16;
-    while s < 256 {
-        // State s represents approximately (n0, n1) counts
-        // On bit 0: increment n0 count
-        // On bit 1: increment n1 count
-        let n0 = s & 0x0F;
-        let n1 = (s >> 4) & 0x0F;
-
-        // Transition on bit 0
-        let new_n0 = if n0 < 15 { n0 + 1 } else { 15 };
-        let new_n1_0 = if n1 > 1 { n1 - 1 } else { n1 };
-        table[s as usize * 2] = ((new_n1_0 << 4) | new_n0) as u8;
-
-        // Transition on bit 1
-        let new_n1 = if n1 < 15 { n1 + 1 } else { 15 };
-        let new_n0_1 = if n0 > 1 { n0 - 1 } else { n0 };
-        table[s as usize * 2 + 1] = ((new_n1 << 4) | new_n0_1) as u8;
-
-        s += 1;
-    }
-    table
-};
-
-/// State probability table: probability of bit 1 given state.
-static STATE_PROB_TABLE: [i16; 256] = {
-    let mut table = [0i16; 256];
-    let mut s = 0u16;
-    while s < 256 {
-        let n0 = (s & 0x0F) as i32 + 1;
-        let n1 = ((s >> 4) & 0x0F) as i32 + 1;
-        // Probability of 1 = n1 / (n0 + n1), scaled to 0..65536
-        let p = (n1 * 65536) / (n0 + n1);
-        let v = p - 32768;
-        let clamped = if v < -2047 {
-            -2047
-        } else if v > 2047 {
-            2047
-        } else {
-            v
-        };
-        table[s as usize] = clamped as i16;
-        s += 1;
-    }
-    table
-};
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn config_for_size_sweep(ctype: u8, size_log: u8) -> Vec<u8> {
-        match ctype {
-            CONS => vec![1, CONS, 128],
-            CM => vec![1, CM, size_log, 4],
-            ICM => vec![1, ICM, size_log],
-            MATCH => vec![1, MATCH, size_log],
-            AVG => vec![3, CONS, 128, CONS, 160, AVG, 0, 1, 64],
-            MIX2 => vec![3, CONS, 128, CONS, 160, MIX2, size_log, 0, 1, 4],
-            MIX => vec![3, CONS, 128, CONS, 160, MIX, size_log, 2, 0, 1, 4],
-            ISSE => vec![2, CONS, 160, ISSE, size_log, 0],
-            SSE => vec![2, CONS, 160, SSE, size_log, 0, 0, 255],
-            _ => unreachable!(),
+        for j in 0..16 {
+            self.comp[i].ht[evict + j] = 0;
         }
-    }
-
-    fn bounded_size_logs_for(ctype: u8) -> &'static [u8] {
-        match ctype {
-            CONS | AVG => &[0],
-            CM | MATCH | MIX2 | MIX | SSE => &[0, 1, 4, 8, 12, 16],
-            ICM | ISSE => &[0, 1, 4, 8, 12],
-            _ => &[],
-        }
-    }
-
-    #[test]
-    fn test_try_new_rejects_truncated_mix_config() {
-        let z = ZPAQL::new(0, 0, Vec::new());
-        let config = [2, CONS, 128, MIX, 0, 2, 0];
-        assert!(matches!(
-            Predictor::try_new(z, &config),
-            Err(Error::InvalidData(
-                "zpaq: incomplete component configuration"
-            ))
-        ));
-    }
-
-    #[test]
-    fn test_try_new_rejects_truncated_sse_config() {
-        let z = ZPAQL::new(0, 0, Vec::new());
-        let config = [1, SSE, 0, 0, 0];
-        assert!(matches!(
-            Predictor::try_new(z, &config),
-            Err(Error::InvalidData(
-                "zpaq: incomplete component configuration"
-            ))
-        ));
-    }
-
-    #[test]
-    fn test_try_new_rejects_unknown_component_type() {
-        let z = ZPAQL::new(0, 0, Vec::new());
-        assert!(matches!(
-            Predictor::try_new(z, &[1, 99]),
-            Err(Error::InvalidData("zpaq: unknown component type"))
-        ));
-    }
-
-    #[test]
-    fn test_try_new_rejects_invalid_component_input_reference() {
-        let z = ZPAQL::new(0, 0, Vec::new());
-        let config = [2, CONS, 128, AVG, 0, 1, 64];
-        assert!(matches!(
-            Predictor::try_new(z, &config),
-            Err(Error::InvalidData(
-                "zpaq: invalid component input reference"
-            ))
-        ));
-    }
-
-    #[test]
-    fn test_try_new_rejects_invalid_component_size() {
-        let z = ZPAQL::new(0, 0, Vec::new());
-        let config = [1, CM, u8::MAX, 4];
-        assert!(matches!(
-            Predictor::try_new(z, &config),
-            Err(Error::InvalidData("zpaq: invalid component size"))
-        ));
-    }
-
-    #[test]
-    fn test_try_new_rejects_zero_mix_arity() {
-        let z = ZPAQL::new(0, 0, Vec::new());
-        let config = [1, MIX, 0, 0, 4];
-        assert!(matches!(
-            Predictor::try_new(z, &config),
-            Err(Error::InvalidData("zpaq: invalid mix arity"))
-        ));
-    }
-
-    #[test]
-    fn test_try_new_accepts_match_component_config() {
-        let z = ZPAQL::new(0, 0, Vec::new());
-        let config = [1, MATCH, 4];
-        let pred = Predictor::try_new(z, &config).unwrap();
-        assert_eq!(pred.components.len(), 1);
-    }
-
-    #[test]
-    fn test_try_new_accepts_mix_component_config() {
-        let z = ZPAQL::new(0, 0, Vec::new());
-        let config = [4, CONS, 128, CONS, 64, CONS, 96, MIX, 0, 3, 0, 1, 2, 4];
-        let pred = Predictor::try_new(z, &config).unwrap();
-        assert_eq!(pred.components.len(), 4);
-    }
-
-    #[test]
-    fn test_try_new_accepts_sse_component_config() {
-        let z = ZPAQL::new(0, 0, Vec::new());
-        let config = [2, CM, 0, 4, SSE, 0, 0, 0, 255];
-        let pred = Predictor::try_new(z, &config).unwrap();
-        assert_eq!(pred.components.len(), 2);
-    }
-
-    #[test]
-    fn test_try_new_accepts_cons_component_config() {
-        let z = ZPAQL::new(0, 0, Vec::new());
-        let config = [1, CONS, 128];
-        let pred = Predictor::try_new(z, &config).unwrap();
-        assert_eq!(pred.components.len(), 1);
-    }
-
-    #[test]
-    fn test_try_new_accepts_icm_component_config() {
-        let z = ZPAQL::new(0, 0, Vec::new());
-        let config = [1, ICM, 4];
-        let pred = Predictor::try_new(z, &config).unwrap();
-        assert_eq!(pred.components.len(), 1);
-    }
-
-    #[test]
-    fn test_try_new_accepts_isse_component_config() {
-        let z = ZPAQL::new(0, 0, Vec::new());
-        let config = [2, CONS, 128, ISSE, 4, 0];
-        let pred = Predictor::try_new(z, &config).unwrap();
-        assert_eq!(pred.components.len(), 2);
-    }
-
-    #[test]
-    fn test_try_new_accepts_mix2_component_config() {
-        let z = ZPAQL::new(0, 0, Vec::new());
-        let config = [3, CONS, 128, CONS, 64, MIX2, 0, 0, 1, 4];
-        let pred = Predictor::try_new(z, &config).unwrap();
-        assert_eq!(pred.components.len(), 3);
-    }
-
-    #[test]
-    fn test_try_update_advances_cm_component_state() {
-        let z = ZPAQL::new(0, 0, vec![56]);
-        let mut pred = Predictor::try_new(z, &[1, CM, 0, 4]).unwrap();
-        let before = pred.components[0].cm_table[0];
-        let _ = pred.predict();
-        pred.try_update(1).unwrap();
-        assert!(pred.components[0].cm_table[0] > before);
-    }
-
-    #[test]
-    fn test_try_update_advances_icm_component_state() {
-        let z = ZPAQL::new(0, 0, vec![56]);
-        let mut pred = Predictor::try_new(z, &[1, ICM, 0]).unwrap();
-        let before = pred.components[0].cm_table[0];
-        let _ = pred.predict();
-        pred.try_update(1).unwrap();
-        assert_ne!(pred.components[0].state_table[0], 0);
-        assert!(pred.components[0].cm_table[0] > before);
-    }
-
-    #[test]
-    fn test_try_update_advances_match_component_and_runs_hcomp_at_byte_boundary() {
-        let z = ZPAQL::new(0, 0, vec![56]);
-        let mut pred = Predictor::try_new(z, &[1, MATCH, 2]).unwrap();
-        let bits = [1, 0, 1, 0, 0, 1, 0, 1, 0];
-        for bit in bits {
-            let _ = pred.predict();
-            pred.try_update(bit).unwrap();
-        }
-        assert_eq!(pred.components[0].match_pos, 2);
-        assert_eq!(pred.components[0].match_buf[0], 1);
-        assert_eq!(pred.components[0].match_buf[1], 1);
-        assert_eq!(pred.z.a, 0xA5);
-    }
-
-    #[test]
-    fn test_predict_and_try_update_exercise_mix_and_sse_components() {
-        let z = ZPAQL::new(0, 0, vec![56]);
-        let mut pred = Predictor::try_new(
-            z,
-            &[4, CONS, 128, CONS, 160, MIX2, 0, 0, 1, 4, SSE, 0, 2, 0, 255],
-        )
-        .unwrap();
-        let p = pred.predict();
-        assert!((1..65535).contains(&p));
-        pred.try_update(1).unwrap();
-        assert!(pred.components[2].cm_table.iter().any(|&v| v != (1 << 15)));
-        assert!(pred.components[3].sse_table.iter().any(|&v| v != (1 << 15)));
-    }
-
-    #[test]
-    fn test_predict_exercises_mix_component_output_path() {
-        let z = ZPAQL::new(0, 0, vec![56]);
-        let mut pred =
-            Predictor::try_new(z, &[3, CONS, 128, CONS, 160, MIX, 0, 2, 0, 1, 4]).unwrap();
-        let p = pred.predict();
-        assert!((1..65535).contains(&p));
-    }
-
-    #[test]
-    fn test_try_update_advances_isse_component_state() {
-        let z = ZPAQL::new(0, 0, vec![56]);
-        let mut pred = Predictor::try_new(z, &[2, CONS, 160, ISSE, 0, 0]).unwrap();
-        let _ = pred.predict();
-        pred.try_update(1).unwrap();
-        assert_ne!(pred.components[1].state_table[0], 0);
-    }
-
-    #[test]
-    fn test_try_new_accepts_representative_component_matrix() {
-        for ctype in [CONS, CM, ICM, MATCH, AVG, MIX2, MIX, ISSE, SSE] {
-            for size_log in [0u8, 4, 8] {
-                let z = ZPAQL::new(8, 8, vec![56]);
-                let config = config_for_size_sweep(ctype, size_log);
-                let pred = Predictor::try_new(z, &config).unwrap();
-                assert!(
-                    !pred.components.is_empty(),
-                    "ctype={ctype} size_log={size_log}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_try_new_accepts_bounded_component_size_sweep() {
-        for ctype in [CONS, CM, ICM, MATCH, AVG, MIX2, MIX, ISSE, SSE] {
-            for &size_log in bounded_size_logs_for(ctype) {
-                let z = ZPAQL::new(8, 8, vec![56]);
-                let config = config_for_size_sweep(ctype, size_log);
-                let pred = Predictor::try_new(z, &config).unwrap();
-                assert!(
-                    !pred.components.is_empty(),
-                    "ctype={ctype} size_log={size_log}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_try_new_rejects_extreme_component_sizes() {
-        for config in [
-            vec![1, CM, u8::MAX, 4],
-            vec![1, ICM, u8::MAX],
-            vec![1, MATCH, u8::MAX],
-            vec![3, CONS, 128, CONS, 160, MIX2, u8::MAX, 0, 1, 4],
-            vec![3, CONS, 128, CONS, 160, MIX, u8::MAX, 2, 0, 1, 4],
-            vec![2, CONS, 160, ISSE, u8::MAX, 0],
-            vec![2, CONS, 160, SSE, u8::MAX, 0, 0, 255],
-        ] {
-            let z = ZPAQL::new(8, 8, vec![56]);
-            assert!(matches!(
-                Predictor::try_new(z, &config),
-                Err(Error::InvalidData("zpaq: invalid component size"))
-            ));
-        }
-    }
-
-    #[test]
-    fn test_predict_and_try_update_exercise_deep_mix2_sse_chain() {
-        let z = ZPAQL::new(0, 0, vec![56]);
-        let config = [
-            5, CONS, 128, CM, 4, 4, ICM, 4, MIX2, 4, 1, 2, 4, SSE, 4, 3, 0, 255,
-        ];
-        let mut pred = Predictor::try_new(z, &config).unwrap();
-        let p = pred.predict();
-        assert!((1..65535).contains(&p));
-        pred.try_update(1).unwrap();
-        assert!(pred.components[3].cm_table.iter().any(|&v| v != (1 << 15)));
-        assert!(pred.components[4].sse_table.iter().any(|&v| v != (1 << 15)));
-    }
-
-    #[test]
-    fn test_predict_and_try_update_exercise_avg_isse_mix_chain() {
-        let z = ZPAQL::new(0, 0, vec![56]);
-        let config = [
-            5, CONS, 128, CONS, 160, AVG, 0, 1, 64, ISSE, 4, 2, MIX, 4, 2, 2, 3, 4,
-        ];
-        let mut pred = Predictor::try_new(z, &config).unwrap();
-        let p = pred.predict();
-        assert!((1..65535).contains(&p));
-        assert_ne!(pred.components[4].prediction, 0);
-        pred.try_update(1).unwrap();
-        assert_ne!(pred.components[3].state_table[0], 0);
-    }
-
-    #[test]
-    fn test_try_update_exercises_match_component_inside_deep_chain() {
-        let z = ZPAQL::new(0, 0, vec![56]);
-        let config = [4, MATCH, 4, CONS, 160, CONS, 96, MIX, 4, 3, 0, 1, 2, 4];
-        let mut pred = Predictor::try_new(z, &config).unwrap();
-        let bits = [1, 0, 1, 0, 0, 1, 0, 1, 0];
-        for bit in bits {
-            let _ = pred.predict();
-            pred.try_update(bit).unwrap();
-        }
-        assert_eq!(pred.components[0].match_pos, 2);
-        assert_eq!(pred.components[0].match_buf[0], 1);
-        assert_eq!(pred.components[0].match_buf[1], 1);
-        assert_eq!(pred.z.a, 0xA5);
+        self.comp[i].ht[evict] = chk;
+        evict
     }
 }

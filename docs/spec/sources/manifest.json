@@ -1113,7 +1113,7 @@
    "format": "zip",
    "title": "hwzip + 'Shrink, Reduce, and Implode: The Legacy Zip Compression Methods' (Hans Wennborg)",
    "version": "hwzip-2.4",
-   "note": "hwzip コードは Unlicense (public domain)。記事本文は © Hans Wennborg (別途許諾文なし、参照利用のみ)。ZIP method 1-6 (Shrink/Reduce/Implode) の encode/decode 双方を解説する記事 + 参照実装。decode 側は Info-ZIP unshrink.c/unreduce.c/explode.c も既存参照",
+   "note": "hwzip コードは Unlicense (public domain)。記事本文は © Hans Wennborg (別途許諾文なし、参照利用のみ)。ZIP method 1-6 (Shrink/Reduce/Implode) の encode/decode 双方を解説する記事 + 参照実装。decode 側は Info-ZIP unshrink.c/unreduce.c/explode.c も既存参照。Deflate64 (method 9) の de facto 記述も hwzip がカバー (docs/spec/zip #16 の 'Info-ZIP/hwzip de facto' を参照)",
    "reference_url": [
     "https://www.hanshq.net/zip2.html",
     "https://github.com/madler/unzip"
@@ -1365,6 +1365,137 @@
     "https://sources.debian.org/src/nomarch/"
    ],
    "license": "GPL-2.0-or-later"
+  },
+  {
+   "id": "liblzma-source",
+   "format": "xz/sevenz",
+   "title": "liblzma (xz-utils) simple/ and delta/ filter sources",
+   "version": "tukaani-project/xz master",
+   "note": "public domain。compress/bcj.rs (x86/PowerPC/IA64/SPARC/ARM/ARM-Thumb/ARM64/RISC-V BCJ filter) と compress/delta.rs の port source。system xz バイナリは test-time interop oracle。THIRD_PARTY_NOTICES BCJ filters / Delta filter 項を参照",
+   "reference_url": [
+    "https://github.com/tukaani-project/xz",
+    "https://tukaani.org/xz/"
+   ],
+   "license": "public domain (liblzma core)"
+  },
+  {
+   "id": "lzma-sdk-sources",
+   "format": "sevenz/lzma/util",
+   "title": "LZMA SDK C sources (Bcj2.c / Ppmd*.c / 7zIn.c / range coder)",
+   "version": "LZMA SDK 26.00 (ip7z/7zip)",
+   "note": "public domain。sevenz/bcj2.rs の port source (Bcj2.c)、PPMd コーデックの最終 upstream (Ppmd.h/Ppmd7*.c)、7z UINT64 varint の動作参照 (7zIn.c)、util/range_coder.rs の Subbotin carry-less 設計参照。書面文書 (7zFormat.txt/Methods.txt/lzma-specification.txt) は sources にピン済み",
+   "reference_url": [
+    "https://www.7-zip.org/sdk.html",
+    "https://github.com/ip7z/7zip"
+   ],
+   "license": "public domain"
+  },
+  {
+   "id": "ppmd-rust",
+   "format": "sevenz",
+   "title": "ppmd-rust crate (PPMd7/PPMdH Rust port)",
+   "version": "crates.io ppmd-rust",
+   "note": "CC0-1.0 OR MIT-0。compress/ppmd.rs + compress/ppmd/** の port source (最終 upstream は 7-Zip public-domain PPMd7)。全 6 ファイル冒頭に port 明記。THIRD_PARTY_NOTICES §3 PPMd 項を参照",
+   "reference_url": [
+    "https://crates.io/crates/ppmd-rust",
+    "https://docs.rs/ppmd-rust"
+   ],
+   "license": "CC0-1.0 OR MIT-0"
+  },
+  {
+   "id": "xxhash-reference",
+   "format": "util",
+   "title": "xxHash reference implementation + xxhash_spec.md (Yann Collet)",
+   "version": "xxHash dev",
+   "note": "BSD-2-Clause。util/xxhash.rs の de facto 仕様 (素数定数・アルゴリズム構造は specification material、コード移植なし)。docs/spec/util.md 参照仕様一覧の xxhash_spec.md",
+   "reference_url": [
+    "https://github.com/Cyan4973/xxHash",
+    "https://github.com/Cyan4973/xxHash/blob/dev/doc/xxhash_spec.md"
+   ],
+   "license": "BSD-2-Clause"
+  },
+  {
+   "id": "zlib-blast",
+   "format": "zip",
+   "title": "zlib contrib/blast blast.c (Mark Adler, PKWARE DCL Implode decoder)",
+   "version": "blast 1.3 (2013-08-24)",
+   "note": "zlib license。archive/zip/dcl_implode.rs (ZIP method 10) の port source — Huffman code table (litlen/lenlen/distlen) と decode 構造を移植。notice-retention のためライセンス文を THIRD_PARTY_NOTICES DCL Implode 項に再録済み",
+   "reference_url": [
+    "https://github.com/madler/zlib/tree/master/contrib/blast"
+   ],
+   "license": "zlib"
+  },
+  {
+   "id": "gnu-tar-sparse",
+   "format": "tar",
+   "title": "GNU tar src/sparse.c (GNU sparse handling)",
+   "version": "GNU tar 1.x",
+   "note": "GPL-3.0-or-later。旧式 'S' ヘッダ + sparse map と GNU.sparse.* PAX keys の実測準拠の動作参照。コード取り込みなし。system tar バイナリは test-time oracle (test_tar_*_system_compat / test_tar_gnu_sparse_oracle)",
+   "reference_url": [
+    "https://git.savannah.gnu.org/cgit/tar.git/tree/src/sparse.c",
+    "https://www.gnu.org/software/tar/"
+   ],
+   "license": "GPL-3.0-or-later"
+  },
+  {
+   "id": "lzsa-reference-impl",
+   "format": "lzsa",
+   "title": "lzsa reference implementation (emmanuel-marty/lzsa, expand_block_v*.c / shrink_block_v2.c)",
+   "version": "lzsa v1.4.1",
+   "note": "zlib license (src/matchfinder.c のみ CC0)。仕様文書の曖昧点 (拡張長マーカー値・LZSA2 オフセットモデル) の動作確認および tests/integration/lzsa.rs known-answer ベクタの生成元。コード取り込みなし。書面仕様 (StreamFormat.md / BlockFormat_*.md) は sources にピン済み",
+   "reference_url": [
+    "https://github.com/emmanuel-marty/lzsa"
+   ],
+   "license": "zlib (matchfinder.c: CC0)"
+  },
+  {
+   "id": "zx-reference-impls",
+   "format": "zx0/zx1/zx2/zx5",
+   "title": "ZX0/ZX1/ZX2/ZX5 reference implementations (dzx*.c / compress.c, Einar Saukas)",
+   "version": "ZX0 v2.2 / ZX1 v1.5 / ZX2 v1.1 / ZX5 v2.0",
+   "note": "BSD-3-Clause。フォーマット README の動作解析・曖昧点確認および tests/integration/{zx0,zx1,zx2,zx5}.rs known-answer ベクタの生成元 (参照コンプレッサをローカル実行)。コード取り込みなし。フォーマット README は sources にスナップショット済み",
+   "reference_url": [
+    "https://github.com/einar-saukas/ZX0",
+    "https://github.com/einar-saukas/ZX1",
+    "https://github.com/einar-saukas/ZX2",
+    "https://github.com/einar-saukas/ZX5"
+   ],
+   "license": "BSD-3-Clause"
+  },
+  {
+   "id": "libzpaq",
+   "format": "zpaq",
+   "title": "zpaq / libzpaq reference implementation (Matt Mahoney)",
+   "version": "zpaq v7.15",
+   "note": "public domain (同梱 libdivsufsort-lite は MIT、port 対象外)。predictor state table (sns)・squash/stretch テーブル・built-in level 1-3 model blob・arithmetic coder 意味論を移植 (zpaq206.pdf の該当箇所が抽出不能のため、IMPLEMENTATION_POLICY 例外として参照実装を一次参照に使用)。さらに oracle としてコンパイル (-DNOJIT) し双方向 interop を検証。upstream 生成 fixture は tests/fixtures/zpaq/ に収録、harness は .local/refs/libzpaq/ (gitignored)。upstream は 'not encumbered by any patents' と明言 (THIRD_PARTY_NOTICES §3 ZPAQ 項)",
+   "reference_url": [
+    "https://mattmahoney.net/dc/zpaq.html"
+   ],
+   "license": "public domain (bundled libdivsufsort-lite: MIT)"
+  },
+  {
+   "id": "libmspack-lzx",
+   "format": "mscab/lzxd",
+   "title": "libmspack lzx.c — LZX decoder + errata semantics",
+   "version": "libmspack master",
+   "note": "LGPL-2.1。compress/lzx.rs (mscab LZX folder と LZX DELTA の共有コア) の errata 挙動 (position slot 数・E8/intel_started 等) および mscab checksum tail packing の動作参照。コード取り込みなし。cabextract バイナリは統合テストの oracle",
+   "reference_url": [
+    "https://github.com/kyz/libmspack",
+    "https://www.cabextract.org.uk/libmspack/"
+   ],
+   "license": "LGPL-2.1"
+  },
+  {
+   "id": "libarchive",
+   "format": "mtree/rpm/mscab/iso9660",
+   "title": "libarchive / bsdtar (mtree dialect reference + interop oracle)",
+   "version": "libarchive 3.x",
+   "note": "BSD-2-Clause。mtree は archive_read_support_format_mtree.c の方言挙動を動作参照 (コード取り込みなし)。bsdtar バイナリは mscab/rpm/iso9660/lha/arj/arc/deb 等の writer 検証・展開 oracle としてテスト時のみ起動。リンク・同梱なし",
+   "reference_url": [
+    "https://github.com/libarchive/libarchive",
+    "https://www.libarchive.org/"
+   ],
+   "license": "BSD-2-Clause"
   }
  ]
 }

@@ -1,114 +1,181 @@
 //! Arithmetic encoder and decoder for ZPAQ.
 //!
-//! Uses a 32-bit range coder with carry propagation.  The probability
-//! `p` is in the range 0..65536 where 0 means the bit is certainly 0
-//! and 65535 means the bit is almost certainly 1.
+//! Port of the inclusive-range coder in upstream libzpaq
+//! (`Encoder::encode`/`Decoder::decode`).  The range is the closed
+//! interval `low..=high` initialized to `1..=0xFFFFFFFF`.  `p` is the
+//! 16-bit probability that the next bit is 1; the split point is
+//! `mid = low + ((high - low) * p >> 16)` computed with a 64-bit
+//! product.  Bit 1 selects `low..=mid`, bit 0 selects `mid+1..=high`.
+//!
+//! Normalization emits/discards identical leading bytes while
+//! `(high ^ low) < 0x01000000`, shifting in `0xFF` on `high` and `0`
+//! on `low`, with `low` incremented when it wraps to 0 so the encoder
+//! never emits four consecutive zero bytes inside the coded stream.
+//!
+//! For unmodeled (`n == 0`) streams the same objects are used in
+//! "stored" mode: the encoder buffers up to 64 KiB and writes
+//! `len(4, big-endian) || payload` blocks, and the decoder reads the
+//! counts directly.
 
 use alloc::vec::Vec;
 
-/// Arithmetic encoder.
+use crate::error::Error;
+
+/// Arithmetic encoder writing to an internal buffer.
 pub(crate) struct ArithEncoder {
-    x1: u32,
-    x2: u32,
+    /// Low end of the range (modeled) or buffered byte count (stored).
+    low: u32,
+    /// High end of the range (inclusive).
+    high: u32,
+    /// Compressed output bytes.
     output: Vec<u8>,
+    /// Stored-mode buffer (unmodeled streams only), 64 KiB.
+    buf: Vec<u8>,
 }
 
 impl ArithEncoder {
-    pub const fn new() -> Self {
+    /// Create an encoder in modeled mode (`low=1`, `high=0xFFFFFFFF`).
+    pub fn new() -> Self {
         Self {
-            x1: 0,
-            x2: 0xFFFFFFFF,
+            low: 1,
+            high: 0xFFFFFFFF,
             output: Vec::new(),
+            buf: Vec::new(),
         }
     }
 
-    /// Encode a single bit with the given probability (0..65536) that
-    /// the bit is 1.
-    pub fn encode(&mut self, bit: u8, prob: u32) {
-        let xmid = self.x1
-            + ((self.x2 - self.x1) >> 16) * prob
-            + ((((self.x2 - self.x1) & 0xFFFF) * prob) >> 16);
-        if bit != 0 {
-            self.x2 = xmid;
+    /// Switch to stored mode for unmodeled streams (`low` becomes the
+    /// buffered byte count).
+    pub fn init_stored(&mut self) {
+        self.low = 0;
+        self.buf = alloc::vec![0; 1 << 16];
+    }
+
+    /// Encode bit `y` (0/1) with 16-bit probability `p` of a 1.
+    pub fn encode(&mut self, y: u32, p: u32) {
+        debug_assert!(y <= 1 && p < 65536);
+        debug_assert!(self.high > self.low && self.low > 0);
+        let mid = self
+            .low
+            .wrapping_add(((u64::from(self.high - self.low) * u64::from(p)) >> 16) as u32);
+        if y != 0 {
+            self.high = mid;
         } else {
-            self.x1 = xmid + 1;
+            self.low = mid.wrapping_add(1);
         }
-        self.normalize();
-    }
-
-    fn normalize(&mut self) {
-        while ((self.x1 ^ self.x2) & 0xFF000000) == 0 {
-            self.output.push((self.x2 >> 24) as u8);
-            self.x1 <<= 8;
-            self.x2 = (self.x2 << 8) | 0xFF;
+        while (self.high ^ self.low) < 0x0100_0000 {
+            self.output.push((self.high >> 24) as u8);
+            self.high = (self.high << 8) | 0xFF;
+            self.low <<= 8;
+            self.low += u32::from(self.low == 0);
         }
     }
 
-    /// Flush remaining bytes and return the compressed output.
-    pub fn finish(mut self) -> Vec<u8> {
-        self.output.push((self.x1 >> 24) as u8);
-        self.output.push((self.x1 >> 16) as u8);
-        self.output.push((self.x1 >> 8) as u8);
-        self.output.push(self.x1 as u8);
-        self.output
+    /// Stored mode: append a byte (`c` 0..=255) or flush on `None`.
+    /// A full 64 KiB buffer is flushed automatically.
+    pub fn store(&mut self, c: Option<u8>) {
+        if self.low != 0 && (c.is_none() || self.low as usize == self.buf.len()) {
+            let n = self.low;
+            self.output.extend_from_slice(&n.to_be_bytes());
+            let n = n as usize;
+            self.output.extend_from_slice(&self.buf[..n]);
+            self.low = 0;
+        }
+        if let Some(b) = c {
+            self.buf[self.low as usize] = b;
+            self.low += 1;
+        }
+    }
+
+    /// Take the accumulated output bytes.
+    pub fn take(&mut self) -> Vec<u8> {
+        core::mem::take(&mut self.output)
     }
 }
 
-/// Arithmetic decoder.
+/// Arithmetic decoder reading from a byte slice.
 pub(crate) struct ArithDecoder<'a> {
-    x1: u32,
-    x2: u32,
-    x: u32,
-    data: &'a [u8],
+    /// Low end of the range (modeled), or a 32-bit down-counter of
+    /// bytes remaining in the current stored block.
+    pub(crate) low: u32,
+    /// High end of the inclusive range.
+    pub(crate) high: u32,
+    /// Current 4-byte window of coded input (modeled), or stored-mode
+    /// block counter as upstream reuses `curr`.
+    pub(crate) curr: u32,
+    input: &'a [u8],
     pos: usize,
 }
 
 impl<'a> ArithDecoder<'a> {
-    pub fn new(data: &'a [u8]) -> Self {
-        let mut dec = Self {
-            x1: 0,
-            x2: 0xFFFFFFFF,
-            x: 0,
-            data,
+    /// Create a decoder over `input` in modeled mode.
+    pub fn new(input: &'a [u8]) -> Self {
+        Self {
+            low: 1,
+            high: 0xFFFFFFFF,
+            curr: 0,
+            input,
             pos: 0,
-        };
-        // Read initial 4 bytes into x
-        for _ in 0..4 {
-            dec.x = (dec.x << 8) | dec.read_byte() as u32;
         }
-        dec
     }
 
-    fn read_byte(&mut self) -> u8 {
-        if self.pos < self.data.len() {
-            let b = self.data[self.pos];
+    /// Initialize for a segment: modeled streams reset the range;
+    /// unmodeled streams zero all state (upstream `Decoder::init`).
+    pub fn init(&mut self, modeled: bool) {
+        if modeled {
+            self.low = 1;
+            self.high = 0xFFFFFFFF;
+            self.curr = 0;
+        } else {
+            self.low = 0;
+            self.high = 0;
+            self.curr = 0;
+        }
+    }
+
+    /// Current read offset within `input`.
+    pub(crate) fn position(&self) -> usize {
+        self.pos
+    }
+
+    /// Read one raw byte, or -1 at end of input (upstream `get()`).
+    pub fn get(&mut self) -> i32 {
+        if self.pos < self.input.len() {
+            let b = self.input[self.pos];
             self.pos += 1;
-            b
+            i32::from(b)
         } else {
-            0
+            -1
         }
     }
 
-    /// Decode a single bit given probability (0..65536) that the bit is 1.
-    pub fn decode(&mut self, prob: u32) -> u8 {
-        let xmid = self.x1
-            + ((self.x2 - self.x1) >> 16) * prob
-            + ((((self.x2 - self.x1) & 0xFFFF) * prob) >> 16);
-        let bit = if self.x <= xmid { 1u8 } else { 0u8 };
-        if bit != 0 {
-            self.x2 = xmid;
+    /// Decode one bit with 16-bit probability `p` of a 1.
+    pub fn decode(&mut self, p: u32) -> Result<u32, Error> {
+        debug_assert!(p < 65536);
+        if self.curr < self.low || self.curr > self.high {
+            return Err(Error::InvalidData("zpaq: arithmetic state out of range"));
+        }
+        let mid = self
+            .low
+            .wrapping_add(((u64::from(self.high - self.low) * u64::from(p)) >> 16) as u32);
+        let y;
+        if self.curr <= mid {
+            y = 1;
+            self.high = mid;
         } else {
-            self.x1 = xmid + 1;
+            y = 0;
+            self.low = mid.wrapping_add(1);
         }
-        self.normalize();
-        bit
-    }
-
-    fn normalize(&mut self) {
-        while ((self.x1 ^ self.x2) & 0xFF000000) == 0 {
-            self.x1 <<= 8;
-            self.x2 = (self.x2 << 8) | 0xFF;
-            self.x = (self.x << 8) | self.read_byte() as u32;
+        while (self.high ^ self.low) < 0x0100_0000 {
+            self.high = (self.high << 8) | 0xFF;
+            self.low <<= 8;
+            self.low += u32::from(self.low == 0);
+            let c = self.get();
+            if c < 0 {
+                return Err(Error::InvalidData("zpaq: unexpected end of coded input"));
+            }
+            self.curr = (self.curr << 8) | (c as u32);
         }
+        Ok(y)
     }
 }

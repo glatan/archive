@@ -5,16 +5,25 @@
 //! composed of multiple component types (CM, ICM, MATCH, ISSE, SSE,
 //! MIX, MIX2, AVG).
 //!
-//! This module implements the low-level, single-payload ZPAQ codec. The public
-//! encoder exposes the crate's validated built-in model levels `1..=3` plus a
-//! validated `encode::CustomModel` surface, while the decoder accepts any
-//! upstream level byte whose parsed model/header is otherwise valid. The
-//! current bounded acceptance corpus covers all supported predictor component
-//! types, bounded size sweeps, deeper component chains, and mixed HCOMP program
-//! shapes. Known component-layout truncation and unsupported/truncated HCOMP
-//! bytecode are rejected before payload decode, and unknown component types are
-//! rejected instead of being treated as no-op components. HCOMP programs that
-//! exhaust the VM cycle limit are also rejected explicitly.
+//! This module implements the low-level ZPAQ codec and is wire-compatible
+//! with upstream ZPAQ/libzpaq: streams produced here decode with upstream
+//! tools, and upstream-produced streams (modeled levels 1-3, unmodeled
+//! `n = 0` stored streams, and PROG segments carrying PCOMP postprocessor
+//! programs) decode here. Compatibility is verified against committed
+//! upstream-generated fixtures under `tests/fixtures/zpaq/`.
+//!
+//! The public encoder exposes the built-in upstream model levels `1..=3`
+//! plus a validated `encode::CustomModel` surface for arbitrary
+//! predictor/HCOMP authoring. Emitted segments always select the PASS
+//! postprocessor; encoder-side PCOMP emission is not supported. As in
+//! upstream, the decoder accepts only level bytes 1 (modeled) and 2
+//! (unmodeled).
+//!
+//! The committed upstream-generated fixtures cover modeled levels 1-3,
+//! stored streams, and PROG/PCOMP segments. Malformed and truncated
+//! headers are rejected before payload decode, unknown component types
+//! are rejected instead of being treated as no-ops, and HCOMP programs
+//! that exhaust the VM cycle limit are rejected explicitly.
 //!
 //! It is suitable as a compression backend (for example inside `lrzip`), but it
 //! is not the crate's multi-entry archive layer with filename/comment metadata APIs.
@@ -45,6 +54,10 @@ pub(crate) mod predictor;
 
 /// Arithmetic encoder and decoder.
 pub(crate) mod arithmetic;
+
+/// Upstream libzpaq constant tables (state transitions, adaptation
+/// rates, squash/stretch).
+pub(crate) mod tables;
 
 /// Predefined model configurations for levels 1-3.
 pub(crate) mod models;

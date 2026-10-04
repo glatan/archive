@@ -54,7 +54,7 @@
 - 参照実装・外部 oracle・fixture を新たに利用した場合は、次を同一変更で同期する。
   - `docs/spec/<format>/README.md` の `参照実装` 行
   - `THIRD_PARTY_NOTICES` の該当フォーマットエントリ
-  - `docs/spec/sources/manifest.json` (fetch 可能な資料は `sources`、URL のない参照物は `no_url_available`)
+  - `docs/spec/sources/manifest.json` (fetch 可能な資料は `sources`、URL のない参照物は `no_url_available`)。manifest の対象はソースレベルの参照実装・oracle・仕様資料に限定し、純粋なバイナリツール (system コマンドの oracle) は TPN と fixtures README で記録する
 - 意図的な scope 制約を維持する場合は、「未対応」ではなく **intentional scope** と分かる書き方を優先する。
 - 他実装参照の原則禁止と例外条件 (実装ポリシー) の正本は `docs/IMPLEMENTATION_POLICY.md` を参照。
 

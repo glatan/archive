@@ -1,10 +1,14 @@
 //! zpaq archive encoding.
 
+use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::compress::zpaq::decode::{ParsedBlockHeader, decode_segment_at, parse_block_header};
-use crate::compress::zpaq::encode::{encode_segment, write_block_header};
-use crate::compress::zpaq::models::ModelConfig;
+use crate::compress::zpaq::decode::{
+    BlockDecoder, ParsedBlockHeader, parse_block_header, parse_block_header_at,
+};
+use crate::compress::zpaq::encode::BlockEncoder;
+use crate::compress::zpaq::models::model_zpaql;
+use crate::compress::zpaq::zpaql::Zpaql;
 use crate::error::Error;
 
 use super::decode::{
@@ -14,8 +18,8 @@ use super::decode::{
 
 /// Builder for creating zpaq archives with multiple entries.
 ///
-/// Supports both creating a fresh single-block archive and appending additional
-/// segments to an existing archive that uses the same simplified block layout.
+/// Supports both creating a fresh archive and appending additional blocks to
+/// an existing archive whose parsed model/header can be reused.
 ///
 /// # Examples
 ///
@@ -41,8 +45,8 @@ enum JournalOperation {
     Delete(Vec<u8>),
 }
 
-/// Builder for crate-local journaling transactions on top of the simplified
-/// single-block archive layout.
+/// Builder for crate-local journaling transactions on top of the
+/// multi-block archive layout.
 ///
 /// Each call to [`Self::finish`] or [`Self::append_transaction`] emits one
 /// committed transaction. The journal decoder applies only committed
@@ -56,10 +60,11 @@ pub struct ZpaqJournalEncoder {
 #[derive(Debug, Clone)]
 enum ArchiveEditorConfig {
     BuiltInLevel(u32),
-    Imported(ModelConfig),
+    Imported { zpaql: Box<Zpaql>, level: u8 },
 }
 
-/// Multi-step editor that materializes a final simplified zpaq archive view.
+/// Multi-step editor that materializes a final sequential-segment zpaq
+/// archive view.
 ///
 /// This workflow can import an existing plain archive or the latest committed
 /// journal view, apply `push`/`put`/`delete` operations, and then emit one
@@ -110,17 +115,20 @@ impl ZpaqEncoder {
     /// NUL-terminated strings.
     pub fn finish(self) -> Result<Vec<u8>, Error> {
         let mut output = Vec::new();
-        let config = write_block_header(&mut output, self.level);
-        encode_entries(&mut output, &config, &self.entries)?;
+        let mut enc = builtin_block_encoder(self.level)?;
+        enc.write_block_header(&mut output);
+        encode_entries(&mut output, &mut enc, &self.entries)?;
         output.push(0xFF);
         Ok(output)
     }
 
-    /// Append queued entries to an existing simplified zpaq archive.
+    /// Append queued entries to an existing zpaq archive.
     ///
     /// For non-empty input, the existing archive's parsed block header/model is
-    /// reused and this builder's `level` is ignored. The input must end exactly
-    /// at the archive terminator without trailing bytes.
+    /// reused for a newly appended block (upstream journals add blocks rather
+    /// than continuing a finished block, since predictor/arithmetic state would
+    /// otherwise need to be reconstructed). The input must end exactly at the
+    /// archive terminator without trailing bytes.
     pub fn append_to_archive(self, existing: &[u8]) -> Result<Vec<u8>, Error> {
         if existing.is_empty() {
             return self.finish();
@@ -129,8 +137,9 @@ impl ZpaqEncoder {
         let header = parse_block_header(existing)?;
         let archive_end = find_archive_end(existing, &header)?;
         let mut output = existing[..archive_end].to_vec();
-        let config = model_config_from_header(&header);
-        encode_entries(&mut output, &config, &self.entries)?;
+        let mut enc = BlockEncoder::new(header.zpaql.clone(), header.level)?;
+        enc.write_block_header(&mut output);
+        encode_entries(&mut output, &mut enc, &self.entries)?;
         output.push(0xFF);
         Ok(output)
     }
@@ -184,13 +193,18 @@ impl ZpaqJournalEncoder {
     /// Finish a new archive containing one committed journaling transaction.
     pub fn finish(self) -> Result<Vec<u8>, Error> {
         let mut output = Vec::new();
-        let config = write_block_header(&mut output, self.level);
-        encode_journal_operations(&mut output, &config, &self.operations)?;
+        let mut enc = builtin_block_encoder(self.level)?;
+        enc.write_block_header(&mut output);
+        encode_journal_operations(&mut output, &mut enc, &self.operations)?;
         output.push(0xFF);
         Ok(output)
     }
 
     /// Append one committed journaling transaction to an existing archive.
+    ///
+    /// The transaction is emitted as a new block using the existing
+    /// archive's parsed model, matching upstream journaling where each
+    /// update starts a fresh block.
     pub fn append_transaction(self, existing: &[u8]) -> Result<Vec<u8>, Error> {
         if existing.is_empty() {
             return self.finish();
@@ -199,8 +213,9 @@ impl ZpaqJournalEncoder {
         let header = parse_block_header(existing)?;
         let archive_end = find_archive_end(existing, &header)?;
         let mut output = existing[..archive_end].to_vec();
-        let config = model_config_from_header(&header);
-        encode_journal_operations(&mut output, &config, &self.operations)?;
+        let mut enc = BlockEncoder::new(header.zpaql.clone(), header.level)?;
+        enc.write_block_header(&mut output);
+        encode_journal_operations(&mut output, &mut enc, &self.operations)?;
         output.push(0xFF);
         Ok(output)
     }
@@ -221,7 +236,7 @@ impl ZpaqArchiveEditor {
         }
     }
 
-    /// Import an existing simplified archive and reuse its parsed header/model
+    /// Import an existing archive and reuse its parsed header/model
     /// when emitting the rewritten archive.
     pub fn from_archive(existing: &[u8]) -> Result<Self, Error> {
         if existing.is_empty() {
@@ -231,14 +246,17 @@ impl ZpaqArchiveEditor {
         let header = parse_block_header(existing)?;
         find_archive_end(existing, &header)?;
         Ok(Self {
-            config: ArchiveEditorConfig::Imported(model_config_from_header(&header)),
+            config: ArchiveEditorConfig::Imported {
+                zpaql: Box::new(header.zpaql.clone()),
+                level: header.level,
+            },
             entries: decode(existing)?,
         })
     }
 
     /// Import the latest committed view of a crate-local journal archive.
     ///
-    /// The rewritten output is emitted as a plain simplified archive.
+    /// The rewritten output is emitted as a plain sequential-segment archive.
     pub fn from_journal_latest(existing: &[u8]) -> Result<Self, Error> {
         if existing.is_empty() {
             return Ok(Self::new(1));
@@ -247,7 +265,10 @@ impl ZpaqArchiveEditor {
         let header = parse_block_header(existing)?;
         find_archive_end(existing, &header)?;
         Ok(Self {
-            config: ArchiveEditorConfig::Imported(model_config_from_header(&header)),
+            config: ArchiveEditorConfig::Imported {
+                zpaql: Box::new(header.zpaql.clone()),
+                level: header.level,
+            },
             entries: decode_journal_latest(existing)?,
         })
     }
@@ -303,17 +324,15 @@ impl ZpaqArchiveEditor {
         &self.entries
     }
 
-    /// Finish the editor and emit one simplified archive.
+    /// Finish the editor and emit one sequential-segment archive.
     pub fn finish(self) -> Result<Vec<u8>, Error> {
         let mut output = Vec::new();
-        let config = match self.config {
-            ArchiveEditorConfig::BuiltInLevel(level) => write_block_header(&mut output, level),
-            ArchiveEditorConfig::Imported(config) => {
-                write_block_header_from_config(&mut output, 1, &config);
-                config
-            }
+        let mut enc = match self.config {
+            ArchiveEditorConfig::BuiltInLevel(level) => builtin_block_encoder(level)?,
+            ArchiveEditorConfig::Imported { zpaql, level } => BlockEncoder::new(*zpaql, level)?,
         };
-        encode_entries(&mut output, &config, &self.entries)?;
+        enc.write_block_header(&mut output);
+        encode_entries(&mut output, &mut enc, &self.entries)?;
         output.push(0xFF);
         Ok(output)
     }
@@ -336,22 +355,28 @@ fn validate_metadata(value: &[u8], field: &'static str) -> Result<(), Error> {
     Ok(())
 }
 
+fn builtin_block_encoder(level: u32) -> Result<BlockEncoder, Error> {
+    let z = model_zpaql(level)?;
+    let wire_level = 1 + u8::from(z.component_count() == 0);
+    BlockEncoder::new(z, wire_level)
+}
+
 fn encode_entries(
     output: &mut Vec<u8>,
-    config: &ModelConfig,
+    enc: &mut BlockEncoder,
     entries: &[ZpaqEntry],
 ) -> Result<(), Error> {
     for entry in entries {
         validate_metadata(&entry.filename, "filename")?;
         validate_metadata(&entry.comment, "comment")?;
-        encode_segment(output, config, &entry.filename, &entry.comment, &entry.data);
+        enc.encode_segment(output, &entry.filename, &entry.comment, &entry.data)?;
     }
     Ok(())
 }
 
 fn encode_journal_operations(
     output: &mut Vec<u8>,
-    config: &ModelConfig,
+    enc: &mut BlockEncoder,
     operations: &[JournalOperation],
 ) -> Result<(), Error> {
     for operation in operations {
@@ -365,7 +390,7 @@ fn encode_journal_operations(
                 filename.extend_from_slice(&entry.filename);
                 let mut comment = journal_comment(b'P');
                 comment.extend_from_slice(&entry.comment);
-                encode_segment(output, config, &filename, &comment, &entry.data);
+                enc.encode_segment(output, &filename, &comment, &entry.data)?;
             }
             JournalOperation::Delete(filename) => {
                 validate_metadata(filename, "filename")?;
@@ -374,52 +399,38 @@ fn encode_journal_operations(
                 let mut encoded_filename = ZPAQ_JOURNAL_ENTRY_PREFIX.to_vec();
                 encoded_filename.extend_from_slice(filename);
                 let comment = journal_comment(b'D');
-                encode_segment(output, config, &encoded_filename, &comment, &[]);
+                enc.encode_segment(output, &encoded_filename, &comment, &[])?;
             }
         }
     }
 
-    encode_segment(
+    enc.encode_segment(
         output,
-        config,
         ZPAQ_JOURNAL_COMMIT_FILENAME,
         &journal_comment(b'C'),
         &[],
-    );
+    )?;
     Ok(())
 }
 
-fn model_config_from_header(header: &ParsedBlockHeader) -> ModelConfig {
-    ModelConfig {
-        comp_config: header.comp_config.clone(),
-        hcomp: header.hcomp.clone(),
-        hh: header.hh,
-        hm: header.hm,
-    }
-}
-
-fn write_block_header_from_config(output: &mut Vec<u8>, level_byte: u8, config: &ModelConfig) {
-    output.extend_from_slice(b"zPQ");
-    output.push(level_byte);
-    let hsize = config.comp_config.len() + config.hcomp.len() + 4;
-    output.extend_from_slice(&(hsize as u16).to_le_bytes());
-    output.push(config.hh as u8);
-    output.push(config.hm as u8);
-    output.push(config.comp_config[0]);
-    output.extend_from_slice(&config.comp_config[1..]);
-    output.extend_from_slice(&(config.hcomp.len() as u16).to_le_bytes());
-    output.extend_from_slice(&config.hcomp);
-}
-
+/// Decode every block of `input` and return the offset just past the
+/// last block terminator.  Fails when trailing bytes remain.
 fn find_archive_end(input: &[u8], header: &ParsedBlockHeader) -> Result<usize, Error> {
-    let mut pos = header.next_pos;
-    while let Some(segment) = decode_segment_at(input, pos, header)? {
-        pos = segment.next_pos;
+    let mut end = decode_one_block(input, header)?;
+    while let Some(next) = parse_block_header_at(input, end)? {
+        end = decode_one_block(input, &next)?;
     }
-    if pos + 1 != input.len() {
+    if end != input.len() {
         return Err(Error::InvalidData("zpaq: trailing bytes after archive end"));
     }
-    Ok(pos)
+    Ok(end)
+}
+
+/// Run one block to its `255` terminator; returns the offset just past it.
+fn decode_one_block(input: &[u8], header: &ParsedBlockHeader) -> Result<usize, Error> {
+    let mut dec = BlockDecoder::new(input, header, usize::MAX)?;
+    while dec.next_segment()?.is_some() {}
+    Ok(dec.end_pos())
 }
 
 fn reject_reserved_journal_filename(filename: &[u8]) -> Result<(), Error> {
@@ -491,8 +502,10 @@ mod tests {
         high.add_file("high.txt", b"payload");
         let high_archive = high.finish().unwrap();
 
-        assert_eq!(low_archive[3], 1);
-        assert_eq!(high_archive[3], 3);
+        assert_eq!(&low_archive[13..16], b"zPQ");
+        assert_eq!(low_archive[16], 1);
+        assert_eq!(high_archive[16], 1);
+        assert_ne!(low_archive, high_archive);
         assert_eq!(decode(&low_archive).unwrap()[0].data, b"payload");
         assert_eq!(decode(&high_archive).unwrap()[0].data, b"payload");
     }
@@ -507,7 +520,8 @@ mod tests {
         append.add_file_with_comment("extra.txt", "note", b"extra");
         let archive = append.append_to_archive(&existing).unwrap();
 
-        assert_eq!(archive[3], 1);
+        assert_eq!(&archive[13..16], b"zPQ");
+        assert_eq!(archive[16], 1);
         let entries = decode(&archive).unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].filename_utf8(), Some("base.txt"));

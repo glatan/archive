@@ -2,34 +2,36 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | [ZPAQ Level 1 and Level 2 specification (zpaq206.pdf, 2016-03-22)](https://mattmahoney.net/dc/zpaq206.pdf)。低レイヤ codec (ZPAQL VM・predictor component・block/model 構造) はこの仕様が根拠。**監査メモ: zpaq206.pdf は埋め込みフォントの関係でテキスト抽出が不完全 (断片のみ)。仕様記述の一次参照としては不完全であり、既存 spec の記述正確性の再検証は部分的** |
-| 参照実装 | zpaq/libzpaq (Matt Mahoney、public domain、format・context-mixing model・ZPAQL VM の動作参照。コード移植なし)。詳細: THIRD_PARTY_NOTICES ZPAQ 項 |
-| 仕様対象外の層 | crate-local の multi-entry archive 層・journaling transaction・archive editor は upstream 仕様 (v6.x journaling format) ではなく crate 独自のため bounded contract で管理 |
-| current scope | 単一 payload codec、basic multi-entry archive、crate-local journaling transaction helper、materialized archive editor を対象にする |
-| public encoder / archive writer | low-level encoder は built-in level `1..=3` と validated custom model、archive writer は basic writer / same-block append / journaling / materialized archive editor を持つ |
-| decoder acceptance | parsed model/header が妥当なら level byte 自体は固定値に制限しない |
+| 基準仕様 | [ZPAQ Level 1 and Level 2 specification (zpaq206.pdf, 2016-03-22)](https://mattmahoney.net/dc/zpaq206.pdf)。低レイヤ codec (ZPAQL VM・predictor component・block/model 構造) はこの仕様が根拠。**監査メモ: zpaq206.pdf は埋め込みフォントの関係でテキスト抽出が不完全 (断片のみ)。state table・coder 定数・block framing の byte レイアウトなど抽出不能な部分は、仕様自身の参照実装である libzpaq (public domain) を一次参照として補完した (IMPLEMENTATION_POLICY の例外条件: 書面仕様が実質不在 + 権利 clean)。実装は upstream との wire 互換を fixture + oracle で検証済み** |
+| 参照実装 | zpaq/libzpaq v7.15 (Matt Mahoney、public domain)。predictor state table (sns)・squash/stretch テーブル・built-in level 1-3 model blob・arithmetic coder 意味論を移植し、さらに oracle としてコンパイル (-DNOJIT) して双方向 interop を検証した。upstream 生成 fixture は `tests/fixtures/zpaq/` に収録。詳細: THIRD_PARTY_NOTICES ZPAQ 項 |
+| wire 互換性 | low-level codec は upstream と双方向互換: upstream libzpaq が生成した stream (modeled level 1-3・unmodeled `n=0` stored・PROG/PCOMP segment) を byte-exact に decode し、こちらが生成した stream は upstream が decode する |
+| 仕様対象外の層 | crate-local の multi-entry archive 層・journaling transaction・archive editor は upstream 仕様 (v6.x journaling format) ではなく crate 独自のため bounded contract で管理。upstream の config 言語 (zpaq CLI の compile 経路)・encoder 側 PCOMP emission・upstream journaling semantics (fragment dedup 等) も scope 外 |
+| current scope | upstream wire 互換な low-level codec、multi-entry sequential-segment archive、crate-local journaling transaction helper、materialized archive editor を対象にする |
+| public encoder / archive writer | low-level encoder は built-in level `1..=3` (upstream の min/mid/max model) と validated custom model、archive writer は basic writer / append-as-new-block / journaling / materialized archive editor を持つ。emit する segment の postprocessor は常に PASS (encoder 側 PCOMP emission は非対応) |
+| decoder acceptance | upstream と同じく level byte は 1 (modeled) / 2 (unmodeled) のみ受理し、それ以外は reject する。stored (n=0) / modeled / PASS / PROG segment を処理する |
 
 ### 現在の bounded contract と網羅状況
 
 | 軸 | 現在の bounded contract | 代表テスト/備考 |
 |----|-------------------------|----------------|
-| predictor component types | `CONS` / `CM` / `ICM` / `AVG` / `MATCH` / `MIX2` / `MIX` / `ISSE` / `SSE` | low-level fixture + `Predictor::try_new()` success tests |
-| size parameter sweep | `CM` / `MATCH` / `MIX2` / `MIX` / `SSE` は `0, 1, 4, 8, 12, 16`、`ICM` / `ISSE` は `0, 1, 4, 8, 12` の bounded sweep を回帰化し、極端値は `invalid component size` として reject | `test_try_new_accepts_bounded_component_size_sweep`, `test_try_new_rejects_extreme_component_sizes` |
-| dependency depth / chain shape | 代表的な deeper chain として `CM + ICM + MIX2 + SSE`, `AVG + ISSE + MIX`, `MATCH` を含む deep chain を回帰化 | predictor/decode の deep-chain tests |
-| HCOMP corpus | register/jump/arithmetic/logical/shift/memory/hash の representative family に加え、mixed memory/hash/arithmetic sequence、nested conditional branch shape、invalid absolute jump を回帰化 | `zpaql.rs` の extended tests |
-| block/model/archive surface | noncanonical level byte accept、multiple named segments、empty payload entries、metadata/truncation/corruption、multi-segment archive boundary、same-block append workflow、crate-local journaling transaction (committed latest view / version history / uncommitted tail ignore) を回帰化 | `decode.rs`, `archive::zpaq`, integration tests |
-| public writer parity | public writer が生成する built-in level `1..=3` surface については low-level/archive-level roundtrip、level clamp regression、parsed existing header を再利用する append writer regression、`ZpaqJournalEncoder` の commit/update/delete regression を回帰化 | `compress::zpaq::encode`, `archive::zpaq::encode`, integration tests |
-| custom authoring API | low-level `compress::zpaq::encode::CustomModel` は arbitrary validated predictor config / HCOMP / `hh` / `hm` / level byte を受け取り、`encode_with_model()` で emission 可能。validation は HCOMP bytecode と predictor component config を encode 前に通す | `test_encode_with_custom_model_roundtrip`, `test_custom_model_rejects_invalid_memory_size` |
-| decoder validation policy | parsed model/header を先に検証し、known component type の不完全 config、unsupported / truncated HCOMP instruction、unknown component type、VM cycle limit exhaustion を payload decode 前に reject する | `decode.rs`, `zpaql.rs` validation tests |
+| predictor component types | upstream component numbering の `CONST` / `CM` / `ICM` / `MATCH` / `AVG` / `MIX2` / `MIX` / `ISSE` / `SSE` 全種を実装。built-in level 1-3 model はそのうち `CONST` / `ICM` / `ISSE` / `MATCH` / `MIX` / `MIX2` / `SSE` を使い (upstream 生成 stream の byte-exact decode で回帰化)、built-in が使わない `CM` と `AVG` は `CustomModel` roundtrip で検証 | `decode_upstream_fixtures`, `custom_model_cm_avg_roundtrip` |
+| predictor / coder semantics | upstream libzpaq の `sns` state table・`squash`/`stretch` テーブル・`dt`/`dt2k`・coder 初期値 (`low=1`, split point, normalization) を移植し、upstream 生成 stream との byte-exact decode で検証 | `tables.rs`, `decode_upstream_fixtures` |
+| ZPAQL VM | upstream opcode 意味論 (register/jump/arithmetic/logical/memory/hash、`OUT`/`HASH`/`HASHD`/`HALT`) を実装し、HCOMP (context 計算) と PCOMP (postprocessing、`ph`/`pm` は block header 由来) の両経路で動作。cycle limit 超過は reject | `zpaql.rs`, PCOMP fixture tests |
+| malformed input handling | locator 非存在 (empty output)、header 途中 truncation、不正 level/type byte、不完全 COMP record、unknown component type、checksum 破損を reject/処理する | `decode_rejects_malformed_streams`, `custom_model_rejects_invalid_headers` |
+| upstream wire interop | upstream libzpaq 生成 stream の decode (level 1-3・empty/binary payload・stored `n=0`・identity PCOMP・非 identity PCOMP (a++ out halt)・EOS `run(-1)` の trailing byte・SHA-1 segment checksum) を committed fixture で回帰化。逆方向 (crate 出力を upstream が decode) は開発時に oracle で検証済み。再現手順は `tests/fixtures/README.md` | `decode_upstream_fixtures`, `tests/fixtures/zpaq/` |
+| block/model/archive surface | level byte 検証 (1/2 のみ受理)、multiple named segments、empty payload entries、metadata/truncation/corruption、multi-segment archive boundary、append-as-new-block workflow (upstream journaling と同様に既存 model を再利用した新 block を追加)、crate-local journaling transaction (committed latest view / version history / uncommitted tail ignore) を回帰化 | `decode.rs`, `archive::zpaq`, integration tests |
+| public writer parity | public writer が生成する built-in level `1..=3` surface については low-level/archive-level roundtrip、level clamp regression、upstream oracle による decode 検証 (modeled 全 level + stored + multi-segment)、parsed existing header を再利用する append writer regression、`ZpaqJournalEncoder` の commit/update/delete regression を回帰化 | `compress::zpaq::encode`, `archive::zpaq::encode`, integration tests |
+| custom authoring API | low-level `compress::zpaq::encode::CustomModel` は arbitrary validated predictor config / HCOMP / `hh` / `hm` / level byte を受け取り、`encode_with_model()` で emission 可能。validation は predictor component config と level/memory 範囲を encode 前に通す | `custom_model_rejects_invalid_headers`, `stored_mode_roundtrip` |
+| decoder validation policy | parsed model/header を先に検証し、known component type の不完全 config、unknown component type、VM cycle limit exhaustion を payload decode 前に reject する | `custom_model_rejects_invalid_headers`, header parse tests |
 | metadata 制約 | archive writer は filename/comment を NUL-terminated string として格納するため、metadata 内の NUL byte は reject する | archive writer contract |
 | journaling semantics | crate-local journaling helper は reserved metadata prefix 付き segment + commit marker を 1 transaction として扱い、`decode_journal_latest()` は committed transaction のみを適用して filename 単位で latest-visible policy を返す。`decode_journal_versions()` は commit ごとの snapshot history を返し、不完全 tail は ignore する | `test_decode_journal_latest_applies_put_update_and_delete`, `test_decode_journal_versions_ignores_uncommitted_tail`, `test_zpaq_journal_latest_view_roundtrip`, `test_zpaq_journal_delete_visibility` |
-| archive workflow expansion | `ZpaqArchiveEditor` は plain archive / latest journal view を import し、`push`/`put`/`delete` を staged に適用して 1 つの simplified archive に materialize できる。import 時は parsed existing header/model を再利用する | `test_archive_editor_from_archive_put_and_delete`, `test_archive_editor_from_journal_latest_materializes_plain_archive`, `test_zpaq_archive_editor_rewrites_imported_archive`, `test_zpaq_archive_editor_materializes_journal_latest_view` |
-| 未実装事項 | 現時点では open item なし。追加 scope を広げる場合は bounded contract を先に更新する | current contract status |
+| archive workflow expansion | `ZpaqArchiveEditor` は plain archive / latest journal view を import し、`push`/`put`/`delete` を staged に適用して 1 つの sequential-segment archive に materialize できる。import 時は parsed existing header/model を再利用する | `test_archive_editor_from_archive_put_and_delete`, `test_archive_editor_from_journal_latest_materializes_plain_archive`, `test_zpaq_archive_editor_rewrites_imported_archive`, `test_zpaq_archive_editor_materializes_journal_latest_view` |
+| 未実装事項 | encoder 側 PCOMP emission (emit は常に PASS selector)、upstream v6.x journaling format semantics、upstream config 言語コンパイル、JIT 実行。追加 scope を広げる場合は bounded contract を先に更新する | current contract status |
 
 
 ---
 
 ## 集計
 
-低レイヤ codec は公式仕様 (zpaq206.pdf) を根拠とするが、upstream との完全互換 (任意 ZPAQL プログラムの実行・upstream journaling format) は scope 外のため、crate がサポートする bounded contract 形式で管理している。
+低レイヤ codec は upstream ZPAQ/libzpaq と wire 互換であり、upstream 生成 fixture の byte-exact decode と oracle による逆方向検証で確認済み。archive/journal/editor 層と config 言語コンパイル・encoder PCOMP emission は crate 独自 scope として bounded contract で管理している。
 上記の各軸が current contract を構成し、すべてテスト回帰化済み。

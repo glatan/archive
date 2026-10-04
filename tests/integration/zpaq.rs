@@ -84,7 +84,8 @@ fn test_zpaq_archive_append_to_existing_roundtrip() {
     let archive = append.append_to_archive(&existing).unwrap();
     let entries = zpaq::decode::decode(&archive).unwrap();
 
-    assert_eq!(archive[3], 1);
+    assert_eq!(&archive[13..16], b"zPQ");
+    assert_eq!(archive[16], 1); // wire level byte (modeled stream)
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].filename_utf8(), Some("base.txt"));
     assert_eq!(entries[0].data, b"base payload");
