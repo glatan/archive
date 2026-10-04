@@ -14,8 +14,12 @@
 //!
 //! `-lz4-` is simply stored data (the `null` decoder), like `-lh0-`.
 //!
-//! De-facto format reference (behaviour-matched against): lhasa
-//! `lzs_decoder.c` / `lz5_decoder.c`.
+//! Format references: `-lzs-` is the `EI=11`/`EJ=4` instantiation
+//! of Haruhiko Okumura's `lzss.c` (1988, released to the public
+//! domain on the author's site; LArc adopted that bitstream
+//! verbatim). `-lz5-` is the LArc 4.x byte-oriented variant whose
+//! only rights-clear reference is lhasa `lz5_decoder.c` (ISC);
+//! behaviour cross-checked against lhasa `lzs_decoder.c` too.
 
 use alloc::vec;
 use alloc::vec::Vec;

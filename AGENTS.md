@@ -56,6 +56,7 @@
   - `THIRD_PARTY_NOTICES` の該当フォーマットエントリ
   - `docs/spec/sources/manifest.json` (fetch 可能な資料は `sources`、URL のない参照物は `no_url_available`)
 - 意図的な scope 制約を維持する場合は、「未対応」ではなく **intentional scope** と分かる書き方を優先する。
+- 他実装参照の原則禁止と例外条件 (実装ポリシー) の正本は `docs/IMPLEMENTATION_POLICY.md` を参照。
 
 ## 補足
 

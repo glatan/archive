@@ -16,9 +16,7 @@ use crate::compress::zstd;
 
 use super::crypto::{
     ZIP_AES_METHOD, ZipAesExtraField, decode_aes_payload, decode_traditional_payload,
-    decrypt_central_directory, decrypt_strong_encryption, parse_aes_extra_field,
-    parse_archive_decryption_header, parse_strong_encryption_data_header,
-    parse_strong_encryption_extra,
+    parse_aes_extra_field, parse_archive_decryption_header, parse_strong_encryption_extra,
 };
 use super::decode_metadata;
 
@@ -276,45 +274,29 @@ fn decode_impl(
 
     // Central Directory Encryption detection (APPNOTE §4.3.10, §7.5):
     // If the data at cd_offset does not start with a Central Directory header
-    // signature (0x02014B50), the Central Directory may be encrypted. In that
-    // case, an Archive Decryption Header (no signature) precedes the encrypted
-    // CD data. We parse the ADH, decrypt the CD, and then parse entries from
-    // the decrypted buffer.
-    let (cd_data, cd_is_encrypted) =
-        detect_and_decrypt_cd(input, cd_offset, eocd_offset, password)?;
+    // signature (0x02014B50), an Archive Decryption Header may precede
+    // encrypted CD data. CD decryption is intentionally not implemented: the
+    // PKWARE strong-encryption technology is patent-encumbered (APPNOTE
+    // §10.1 requires a separate license agreement; see THIRD_PARTY_NOTICES).
+    reject_encrypted_central_directory(input, cd_offset, eocd_offset)?;
 
-    let (mut records, effective_cd_offset) = if cd_is_encrypted {
-        // Parse CD entries from the decrypted buffer
-        let mut cursor = Cursor::new(&cd_data);
-        let mut records = Vec::new();
-        for _ in 0..total_entries {
-            records.push(parse_central_directory_record(&mut cursor, disk_map)?);
-        }
-        // When CD is decrypted, there's no meaningful "cd_offset" in the original
-        // input for determining entry boundaries. Use eocd_offset as the fallback
-        // boundary for the last entry.
-        (records, eocd_offset)
-    } else {
-        let mut cursor = Cursor::new(input);
-        cursor.set(cd_offset);
-        let mut records = Vec::new();
-        for _ in 0..total_entries {
-            records.push(parse_central_directory_record(&mut cursor, disk_map)?);
-        }
+    let mut cursor = Cursor::new(input);
+    cursor.set(cd_offset);
+    let mut records = Vec::new();
+    for _ in 0..total_entries {
+        records.push(parse_central_directory_record(&mut cursor, disk_map)?);
+    }
 
-        // Skip Digital Signature record (APPNOTE §4.3.13, signature 0x05054B50)
-        // if present after the Central Directory entries.
-        if cursor.position() + 4 <= input.len()
-            && read_u32_at(input, cursor.position())
-                .is_ok_and(|sig| sig == DIGITAL_SIGNATURE_SIGNATURE)
-        {
-            // Digital signature: signature(4) + size_of_data(2) + signature_data(size)
-            cursor.skip(4)?;
-            let sig_size = cursor.read_u16()? as usize;
-            cursor.skip(sig_size)?;
-        }
-        (records, cd_offset)
-    };
+    // Skip Digital Signature record (APPNOTE §4.3.13, signature 0x05054B50)
+    // if present after the Central Directory entries.
+    if cursor.position() + 4 <= input.len()
+        && read_u32_at(input, cursor.position()).is_ok_and(|sig| sig == DIGITAL_SIGNATURE_SIGNATURE)
+    {
+        // Digital signature: signature(4) + size_of_data(2) + signature_data(size)
+        cursor.skip(4)?;
+        let sig_size = cursor.read_u16()? as usize;
+        cursor.skip(sig_size)?;
+    }
 
     // Shift each entry's local header offset (recorded relative to the
     // archive start, APPNOTE §4.4.16) by the SFX stub length.
@@ -335,7 +317,7 @@ fn decode_impl(
         .map(|(index, _)| {
             records
                 .get(index + 1)
-                .map_or(effective_cd_offset, |next| next.local_header_offset)
+                .map_or(cd_offset, |next| next.local_header_offset)
         })
         .collect();
 
@@ -345,79 +327,48 @@ fn decode_impl(
             input,
             record,
             next_offset,
-            effective_cd_offset,
+            cd_offset,
             password,
         )?);
     }
     Ok(entries)
 }
 
-/// Detect Central Directory Encryption and decrypt if needed (APPNOTE §4.3.10, §7.5).
+/// Reject an encrypted Central Directory (APPNOTE §4.3.10, §7.5).
 ///
-/// Returns `(cd_data, is_encrypted)`:
-/// - If not encrypted: `cd_data` is empty (caller should use original input at cd_offset)
-/// - If encrypted: `cd_data` is the decrypted Central Directory bytes
-fn detect_and_decrypt_cd(
+/// If the data at cd_offset does not start with a Central Directory header
+/// signature (0x02014B50), an Archive Decryption Header (no signature) may
+/// precede encrypted CD data. Decryption is intentionally not implemented,
+/// so archives using it are reported as unsupported. Data that is neither a
+/// CD header nor a plausible ADH falls through to normal CD parsing, which
+/// produces a proper format error.
+fn reject_encrypted_central_directory(
     input: &[u8],
     cd_offset: usize,
     eocd_offset: usize,
-    password: Option<&[u8]>,
-) -> Result<(Vec<u8>, bool), Error> {
-    // Check if the data at cd_offset starts with a Central Directory header signature.
-    // If it does, no CD encryption is in effect.
+) -> Result<(), Error> {
     if cd_offset + 4 <= input.len()
         && read_u32_at(input, cd_offset).is_ok_and(|sig| sig == CENTRAL_DIRECTORY_HEADER_SIGNATURE)
     {
-        return Ok((Vec::new(), false));
+        return Ok(());
     }
-
-    // Also check for empty archive (0 entries) where cd_offset may equal eocd_offset.
+    // Empty archive (0 entries): cd_offset may equal eocd_offset.
     if cd_offset >= eocd_offset {
-        return Ok((Vec::new(), false));
+        return Ok(());
     }
 
-    // The data at cd_offset is not a CD header. Try to parse an Archive Decryption Header.
-    let adh_data = &input[cd_offset..];
-    let (adh, adh_size) = match parse_archive_decryption_header(adh_data) {
-        Ok(result) => result,
-        Err(_) => {
-            // Could not parse as ADH either. This might just be corrupt data.
-            // Return not-encrypted and let normal CD parsing produce a proper error.
-            return Ok((Vec::new(), false));
+    if let Ok((adh, _)) = parse_archive_decryption_header(&input[cd_offset..]) {
+        let is_known_alg = matches!(
+            adh.alg_id,
+            0x6601 | 0x6602 | 0x6603 | 0x6609 | 0x660E | 0x660F | 0x6610 | 0x6702 | 0x6801
+        );
+        if is_known_alg {
+            return Err(Error::Unsupported(
+                "zip: central directory encryption is not supported",
+            ));
         }
-    };
-
-    // Validate that the parsed ADH looks reasonable (known algorithm ID)
-    let is_known_alg = matches!(
-        adh.alg_id,
-        0x6601 | 0x6602 | 0x6603 | 0x6609 | 0x660E | 0x660F | 0x6610 | 0x6702 | 0x6801
-    );
-    if !is_known_alg {
-        // Unknown algorithm or the data isn't really an ADH.
-        // Let normal parsing handle it (will likely produce a clear error).
-        return Ok((Vec::new(), false));
     }
-
-    // We have a valid Archive Decryption Header. Require a password.
-    let password = password.ok_or(Error::Unsupported(
-        "zip: central directory is encrypted; password required",
-    ))?;
-
-    // The encrypted CD data follows the Archive Decryption Header
-    let encrypted_start = cd_offset + adh_size;
-    if encrypted_start >= eocd_offset {
-        return Err(Error::InvalidData(
-            "zip: archive decryption header extends past EOCD",
-        ));
-    }
-
-    // The encrypted CD extends from after the ADH to before the ZIP64 EOCD / EOCD structures.
-    // We use eocd_offset as the boundary (ZIP64 EOCD Locator is right before EOCD,
-    // and ZIP64 EOCD Record is before that, but the encrypted CD should end before those).
-    let encrypted_cd = &input[encrypted_start..eocd_offset];
-
-    let decrypted = decrypt_central_directory(password, encrypted_cd, &adh)?;
-    Ok((decrypted, true))
+    Ok(())
 }
 
 #[cfg(feature = "std")]
@@ -951,118 +902,19 @@ fn extract_entry(
         }
     }
 
-    // Bit 6: Strong Encryption (APPNOTE §7)
+    // Bit 6: Strong Encryption (APPNOTE §7). Decryption is intentionally
+    // not implemented: APPNOTE §10.1 states that implementing the
+    // strong-encryption technology requires a separate license agreement
+    // from PKWARE (see THIRD_PARTY_NOTICES for the patent note).
     if (flags & 0x0040) != 0 {
-        let data_header = parse_strong_encryption_data_header(compressed);
-
-        // Check if this is an algorithm we can decrypt (or identify for errors)
-        let alg_id = match &data_header {
-            Ok(dh) => Some(dh.alg_id),
-            Err(_) => record.strong_encryption.as_ref().map(|se| se.alg_id),
-        };
-
-        // Supported algorithms: AES, DES, 3DES, RC2, RC4
-        let is_supported = alg_id.is_some_and(|id| {
-            matches!(
-                id,
-                0x6601 | 0x6602 | 0x6603 | 0x6609 | 0x660E | 0x660F | 0x6610 | 0x6702 | 0x6801
-            )
-        });
-
-        if is_supported {
-            let algo_name = alg_id.map_or("Unknown", |id| match id {
-                0x6601 => "DES",
-                0x6602 | 0x6702 => "RC2",
-                0x6603 => "3DES 168",
-                0x6609 => "3DES 112",
-                0x660E => "AES-128",
-                0x660F => "AES-192",
-                0x6610 => "AES-256",
-                0x6801 => "RC4",
-                _ => "Unknown",
-            });
-            let password = password.ok_or(match algo_name {
-                "AES-128" | "AES-192" | "AES-256" => {
-                    Error::Unsupported("zip: strong encryption (AES) requires password")
-                }
-                _ => Error::Unsupported("zip: strong encryption requires password"),
-            })?;
-            let dh = data_header.map_err(|_| {
-                Error::InvalidData("zip: strong encryption data header parse failed")
-            })?;
-            let decrypted = decrypt_strong_encryption(password, &dh)?;
-            // Decompress the decrypted data through the normal method dispatch
-            let data = match record.actual_compression_method {
-                0 => decrypted,
-                8 => deflate::decode::decode(&decrypted)?,
-                _ => {
-                    return Err(Error::Unsupported(
-                        "zip: compression method with strong encryption",
-                    ));
-                }
-            };
-            if data.len() as u64 != effective_uncompressed_size {
-                return Err(Error::SizeMismatch {
-                    expected: effective_uncompressed_size as u32,
-                    actual: data.len() as u32,
-                });
-            }
-            let actual_crc32 = crc32::crc32(&data);
-            if actual_crc32 != effective_crc32 {
-                return Err(Error::ChecksumMismatch {
-                    expected: effective_crc32,
-                    actual: actual_crc32,
-                });
-            }
-            let local_extra = &[];
-            let local_ntfs = parse_ntfs_extra(local_extra);
-            let local_ext_ts = parse_extended_timestamp_extra(local_extra);
-            let local_unix = parse_unix_extra(local_extra);
-            let local_unicode_path = parse_unicode_path_extra(local_extra);
-            let local_unicode_comment = parse_unicode_comment_extra(local_extra);
-            return Ok(ZipEntry {
-                header: ZipHeader {
-                    flags,
-                    compression_method: record.actual_compression_method,
-                    deflate_option: 0,
-                    mod_time: record.mod_time,
-                    mod_date: record.mod_date,
-                    crc32: effective_crc32,
-                    compressed_size: effective_compressed_size,
-                    uncompressed_size: effective_uncompressed_size,
-                    comment: record.comment.clone(),
-                    internal_attributes: record.internal_attributes,
-                    external_attributes: record.external_attributes,
-                    ntfs_mtime: local_ntfs.mtime.or(record.ntfs_mtime),
-                    ntfs_atime: local_ntfs.atime.or(record.ntfs_atime),
-                    ntfs_ctime: local_ntfs.ctime.or(record.ntfs_ctime),
-                    unix_mtime: local_ext_ts.mtime.or(record.unix_mtime),
-                    unix_atime: local_ext_ts.atime.or(record.unix_atime),
-                    unix_uid: local_unix.uid.or(record.unix_uid),
-                    unix_gid: local_unix.gid.or(record.unix_gid),
-                    unicode_path: local_unicode_path.or(record.unicode_path.clone()),
-                    unicode_comment: local_unicode_comment.or(record.unicode_comment.clone()),
-                    host_system: record.host_system,
-                    version_needed: record.version_needed,
-                },
-                name: record.name.clone(),
-                data,
-            });
-        }
-
-        // Unsupported algorithms: Blowfish, Twofish, unknown
-        let algo_name = if let Ok(dh) = &data_header {
-            dh.algorithm_name()
-        } else if let Some(ref se) = record.strong_encryption {
-            se.algorithm_name()
-        } else {
-            "Unknown"
-        };
-        return Err(match algo_name {
-            "Blowfish" => Error::Unsupported("zip: strong encryption (Blowfish)"),
-            "Twofish" => Error::Unsupported("zip: strong encryption (Twofish)"),
-            _ => Error::Unsupported("zip: strong encryption (unknown algorithm)"),
-        });
+        let algo_name = record
+            .strong_encryption
+            .as_ref()
+            .map_or("Unknown", |se| se.algorithm_name());
+        return Err(Error::Unsupported(match algo_name {
+            "AES-128" | "AES-192" | "AES-256" => "zip: strong encryption (AES) is not supported",
+            _ => "zip: strong encryption is not supported",
+        }));
     }
 
     let effective_compressed = if (flags & 0x0001) != 0 {
@@ -1922,67 +1774,71 @@ mod tests {
     }
 
     #[test]
-    fn test_strong_encryption_header_parsed() {
-        // Build a ZIP where bit 6 (strong encryption) is set and extra field 0x0017
-        // contains AES-256 algorithm info. Without a password, AES strong encryption
-        // should return a password-required error.
-        let archive = build_strong_encryption_zip(0x6610, 256, "AES-256");
-        let result = decode(&archive);
+    fn test_strong_encryption_rejected_aes() {
+        // bit 6 (strong encryption) + extra field 0x0017 with AES-256 info.
+        // Decryption is intentionally not implemented (APPNOTE §10.1).
+        let archive = build_strong_encryption_zip(0x6610, 256);
         assert!(matches!(
-            result,
+            decode(&archive),
             Err(Error::Unsupported(
-                "zip: strong encryption (AES) requires password"
+                "zip: strong encryption (AES) is not supported"
             ))
         ));
     }
 
     #[test]
-    fn test_strong_encryption_header_parsed_3des() {
-        // 3DES is now supported; without a password it requires one
-        let archive = build_strong_encryption_zip(0x6603, 168, "3DES 168");
-        let result = decode(&archive);
-        assert!(matches!(
-            result,
-            Err(Error::Unsupported(
-                "zip: strong encryption requires password"
-            ))
-        ));
+    fn test_strong_encryption_rejected_other_algorithms() {
+        for (alg_id, bitlen) in [(0x6601, 64u16), (0x6603, 168), (0x6801, 128), (0x0000, 0)] {
+            let archive = build_strong_encryption_zip(alg_id, bitlen);
+            assert!(matches!(
+                decode(&archive),
+                Err(Error::Unsupported(
+                    "zip: strong encryption is not supported"
+                ))
+            ));
+        }
+    }
+
+    /// Build a synthetic ZIP whose central directory region opens with an
+    /// Archive Decryption Header (APPNOTE §4.3.10) instead of CD records:
+    /// the signature of Central Directory Encryption.
+    fn build_adh_cd_zip() -> Vec<u8> {
+        let archive = build_test_zip("a.txt", b"hi", 0, false, false, false);
+        let eocd_pos = archive.len() - 22;
+        let cd_offset =
+            u32::from_le_bytes(archive[eocd_pos + 16..eocd_pos + 20].try_into().unwrap()) as usize;
+
+        // Archive Decryption Header (no signature): format=2, alg=AES-256,
+        // bitlen=256, flags=password, ErdSize=8 + ERD, Reserved1, VSize=0, VCRC32.
+        let mut adh = Vec::new();
+        adh.extend_from_slice(&2u16.to_le_bytes());
+        adh.extend_from_slice(&0x6610u16.to_le_bytes());
+        adh.extend_from_slice(&256u16.to_le_bytes());
+        adh.extend_from_slice(&0x0001u16.to_le_bytes());
+        adh.extend_from_slice(&8u16.to_le_bytes());
+        adh.extend_from_slice(&[0xAA; 8]);
+        adh.extend_from_slice(&0u32.to_le_bytes());
+        adh.extend_from_slice(&0u16.to_le_bytes());
+        adh.extend_from_slice(&0x12345678u32.to_le_bytes());
+
+        let mut out = archive[..cd_offset].to_vec();
+        out.extend_from_slice(&adh);
+        out.extend_from_slice(&archive[cd_offset..eocd_pos]); // "encrypted" CD bytes
+        let mut eocd = archive[eocd_pos..].to_vec();
+        let new_cd_size = (out.len() - cd_offset) as u32;
+        eocd[12..16].copy_from_slice(&new_cd_size.to_le_bytes());
+        eocd[16..20].copy_from_slice(&(cd_offset as u32).to_le_bytes());
+        out.extend_from_slice(&eocd);
+        out
     }
 
     #[test]
-    fn test_strong_encryption_header_parsed_des() {
-        // DES is now supported; without a password it requires one
-        let archive = build_strong_encryption_zip(0x6601, 64, "DES");
-        let result = decode(&archive);
+    fn test_central_directory_encryption_rejected() {
+        let archive = build_adh_cd_zip();
         assert!(matches!(
-            result,
+            decode(&archive),
             Err(Error::Unsupported(
-                "zip: strong encryption requires password"
-            ))
-        ));
-    }
-
-    #[test]
-    fn test_strong_encryption_header_parsed_rc4() {
-        // RC4 is now supported; without a password it requires one
-        let archive = build_strong_encryption_zip(0x6801, 128, "RC4");
-        let result = decode(&archive);
-        assert!(matches!(
-            result,
-            Err(Error::Unsupported(
-                "zip: strong encryption requires password"
-            ))
-        ));
-    }
-
-    #[test]
-    fn test_strong_encryption_header_parsed_unknown() {
-        let archive = build_strong_encryption_zip(0x0000, 0, "Unknown");
-        let result = decode(&archive);
-        assert!(matches!(
-            result,
-            Err(Error::Unsupported(
-                "zip: strong encryption (unknown algorithm)"
+                "zip: central directory encryption is not supported"
             ))
         ));
     }
@@ -1992,13 +1848,12 @@ mod tests {
     /// The file data contains a fabricated strong encryption data header so the
     /// decoder can parse the AlgID from the file data. The Central Directory
     /// extra field includes 0x0017 with the same algorithm info.
-    fn build_strong_encryption_zip(alg_id: u16, bitlen: u16, _expected_name: &str) -> Vec<u8> {
+    fn build_strong_encryption_zip(alg_id: u16, bitlen: u16) -> Vec<u8> {
         let name = b"secret.txt";
         let plaintext = b"hello";
         let crc = crc32::crc32(plaintext);
 
         // Build a fake strong encryption data header as the "compressed" data.
-        // This allows parse_strong_encryption_data_header to identify the algorithm.
         let mut file_data = Vec::new();
         // IVSize (2B) = 16
         file_data.extend_from_slice(&16u16.to_le_bytes());
@@ -2423,483 +2278,6 @@ mod tests {
         );
         archive.extend_from_slice(&0u16.to_le_bytes());
         archive
-    }
-
-    /// Build a synthetic ZIP archive with Strong Encryption (bit 6) and AES
-    /// that can actually be decrypted with the given password.
-    fn build_decryptable_strong_encryption_zip(
-        password: &[u8],
-        plaintext: &[u8],
-        alg_id: u16,
-        key_size: usize,
-    ) -> Vec<u8> {
-        use crate::archive::zip::crypto::{
-            apply_pkcs7_padding, encrypt_aes_cbc_by_key_size, pbkdf2_hmac_sha1,
-        };
-        use crate::util::sha1::{Sha1, sha1};
-
-        let name = b"secret.txt";
-        let crc = crc32::crc32(plaintext);
-
-        // Use a deterministic IV
-        let iv = [0x11u8; 16];
-
-        // Step 1: Derive master key
-        let master_key = pbkdf2_hmac_sha1(password, &iv, 1000, key_size);
-
-        // Step 2: Encrypt ERD
-        let erd_plain = b"random_erd_data_for_test_padding!"; // 32 bytes
-        let erd_padded = apply_pkcs7_padding(erd_plain);
-        let erd_encrypted = encrypt_aes_cbc_by_key_size(&master_key, &erd_padded, &iv).unwrap();
-
-        // Step 3: Derive session key
-        let erd_hash = sha1(erd_plain);
-        let session_key = if key_size <= 20 {
-            erd_hash[..key_size].to_vec()
-        } else {
-            let mut key_material = alloc::vec::Vec::with_capacity(key_size);
-            key_material.extend_from_slice(&erd_hash);
-            let mut counter = 1u8;
-            while key_material.len() < key_size {
-                let mut hasher = Sha1::new();
-                hasher.update(erd_plain.as_slice());
-                hasher.update(&[counter]);
-                let extra = hasher.finish();
-                key_material.extend_from_slice(&extra);
-                counter = counter.wrapping_add(1);
-            }
-            key_material.truncate(key_size);
-            key_material
-        };
-
-        // Step 4: Encrypt file data (Store, no compression)
-        let data_iv = [0x22u8; 16];
-        let padded_plaintext = apply_pkcs7_padding(plaintext);
-        let encrypted_body =
-            encrypt_aes_cbc_by_key_size(&session_key, &padded_plaintext, &data_iv).unwrap();
-
-        // Build strong encryption data header as the "compressed" data
-        let mut file_data = Vec::new();
-        // IVSize (2B)
-        file_data.extend_from_slice(&16u16.to_le_bytes());
-        // IV (16B)
-        file_data.extend_from_slice(&iv);
-        // Size (4B)
-        file_data.extend_from_slice(&50u32.to_le_bytes());
-        // Format (2B)
-        file_data.extend_from_slice(&2u16.to_le_bytes());
-        // AlgID (2B)
-        file_data.extend_from_slice(&alg_id.to_le_bytes());
-        // Bitlen (2B)
-        file_data.extend_from_slice(&((key_size * 8) as u16).to_le_bytes());
-        // Flags (2B) = 0x0001 (password)
-        file_data.extend_from_slice(&0x0001u16.to_le_bytes());
-        // ErdSize (2B)
-        file_data.extend_from_slice(&(erd_encrypted.len() as u16).to_le_bytes());
-        // ErdData
-        file_data.extend_from_slice(&erd_encrypted);
-        // Reserved1 (4B)
-        file_data.extend_from_slice(&0u32.to_le_bytes());
-        // VSize (2B) = 0
-        file_data.extend_from_slice(&0u16.to_le_bytes());
-        // VCRC32 (4B)
-        file_data.extend_from_slice(&0u32.to_le_bytes());
-        // Encrypted data: data_iv + encrypted_body
-        file_data.extend_from_slice(&data_iv);
-        file_data.extend_from_slice(&encrypted_body);
-
-        // bit 0 (encrypted) + bit 6 (strong encryption) = 0x0041
-        let flags: u16 = 0x0041;
-
-        // Build extra field 0x0017 for Central Directory
-        let mut cd_extra = Vec::new();
-        cd_extra.extend_from_slice(&0x0017u16.to_le_bytes());
-        cd_extra.extend_from_slice(&8u16.to_le_bytes());
-        cd_extra.extend_from_slice(&2u16.to_le_bytes()); // Format
-        cd_extra.extend_from_slice(&alg_id.to_le_bytes());
-        cd_extra.extend_from_slice(&((key_size * 8) as u16).to_le_bytes());
-        cd_extra.extend_from_slice(&0x0001u16.to_le_bytes()); // Flags = password
-
-        // Local File Header
-        let mut local = Vec::new();
-        local.extend_from_slice(&LOCAL_FILE_HEADER_SIGNATURE.to_le_bytes());
-        local.extend_from_slice(&50u16.to_le_bytes()); // version needed
-        local.extend_from_slice(&flags.to_le_bytes());
-        local.extend_from_slice(&0u16.to_le_bytes()); // method = Store
-        local.extend_from_slice(&0u16.to_le_bytes()); // mod_time
-        local.extend_from_slice(&0u16.to_le_bytes()); // mod_date
-        local.extend_from_slice(&crc.to_le_bytes());
-        local.extend_from_slice(&(file_data.len() as u32).to_le_bytes());
-        local.extend_from_slice(&(plaintext.len() as u32).to_le_bytes());
-        local.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        local.extend_from_slice(&0u16.to_le_bytes()); // local extra field length = 0
-        local.extend_from_slice(name);
-        local.extend_from_slice(&file_data);
-
-        let central_offset = local.len();
-
-        // Central Directory Header
-        let mut cd = Vec::new();
-        cd.extend_from_slice(&CENTRAL_DIRECTORY_HEADER_SIGNATURE.to_le_bytes());
-        cd.extend_from_slice(&50u16.to_le_bytes()); // version made by
-        cd.extend_from_slice(&50u16.to_le_bytes()); // version needed
-        cd.extend_from_slice(&flags.to_le_bytes());
-        cd.extend_from_slice(&0u16.to_le_bytes()); // method = Store
-        cd.extend_from_slice(&0u16.to_le_bytes()); // mod_time
-        cd.extend_from_slice(&0u16.to_le_bytes()); // mod_date
-        cd.extend_from_slice(&crc.to_le_bytes());
-        cd.extend_from_slice(&(file_data.len() as u32).to_le_bytes());
-        cd.extend_from_slice(&(plaintext.len() as u32).to_le_bytes());
-        cd.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        cd.extend_from_slice(&(cd_extra.len() as u16).to_le_bytes());
-        cd.extend_from_slice(&0u16.to_le_bytes()); // comment length
-        cd.extend_from_slice(&0u16.to_le_bytes()); // disk number start
-        cd.extend_from_slice(&0u16.to_le_bytes()); // internal file attributes
-        cd.extend_from_slice(&0u32.to_le_bytes()); // external file attributes
-        cd.extend_from_slice(&0u32.to_le_bytes()); // local header offset
-        cd.extend_from_slice(name);
-        cd.extend_from_slice(&cd_extra);
-
-        let mut archive = local;
-        archive.extend_from_slice(&cd);
-
-        // EOCD
-        archive.extend_from_slice(&EOCD_SIGNATURE.to_le_bytes());
-        archive.extend_from_slice(&0u16.to_le_bytes());
-        archive.extend_from_slice(&0u16.to_le_bytes());
-        archive.extend_from_slice(&1u16.to_le_bytes());
-        archive.extend_from_slice(&1u16.to_le_bytes());
-        archive.extend_from_slice(&(cd.len() as u32).to_le_bytes());
-        archive.extend_from_slice(&(central_offset as u32).to_le_bytes());
-        archive.extend_from_slice(&0u16.to_le_bytes());
-
-        archive
-    }
-
-    #[test]
-    fn test_strong_encryption_aes256_full_decode() {
-        let password = b"strong_password";
-        let plaintext = b"Hello, Strong Encryption AES-256!";
-        let archive = build_decryptable_strong_encryption_zip(password, plaintext, 0x6610, 32);
-        let entries = decode_with_password_bytes(&archive, password).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "secret.txt");
-        assert_eq!(entries[0].data, plaintext);
-    }
-
-    #[test]
-    fn test_strong_encryption_aes192_full_decode() {
-        let password = b"strong_password";
-        let plaintext = b"Hello, Strong Encryption AES-192!";
-        let archive = build_decryptable_strong_encryption_zip(password, plaintext, 0x660F, 24);
-        let entries = decode_with_password_bytes(&archive, password).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].data, plaintext);
-    }
-
-    #[test]
-    fn test_strong_encryption_aes128_full_decode() {
-        let password = b"strong_password";
-        let plaintext = b"Hello, Strong Encryption AES-128!";
-        let archive = build_decryptable_strong_encryption_zip(password, plaintext, 0x660E, 16);
-        let entries = decode_with_password_bytes(&archive, password).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].data, plaintext);
-    }
-
-    #[test]
-    fn test_strong_encryption_wrong_password() {
-        let password = b"correct_password";
-        let plaintext = b"secret data";
-        let archive = build_decryptable_strong_encryption_zip(password, plaintext, 0x6610, 32);
-        let result = decode_with_password_bytes(&archive, b"wrong_password");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_strong_encryption_no_password() {
-        let password = b"password";
-        let plaintext = b"data";
-        let archive = build_decryptable_strong_encryption_zip(password, plaintext, 0x6610, 32);
-        let result = decode(&archive);
-        assert!(matches!(
-            result,
-            Err(Error::Unsupported(
-                "zip: strong encryption (AES) requires password"
-            ))
-        ));
-    }
-
-    // --- Central Directory Encryption tests (§4.3.10, §7.5) ---
-
-    /// Build a synthetic ZIP archive with an encrypted Central Directory.
-    ///
-    /// The archive contains one file entry. The Central Directory is encrypted
-    /// using AES-256 Strong Encryption. An Archive Decryption Header precedes
-    /// the encrypted CD data block, which is structured as a Strong Encryption
-    /// Data Header (same format as per-file encryption).
-    fn build_cd_encrypted_zip(password: &[u8], plaintext: &[u8]) -> Vec<u8> {
-        use crate::archive::zip::crypto::{
-            apply_pkcs7_padding, encrypt_aes_cbc_by_key_size, pbkdf2_hmac_sha1,
-        };
-        use crate::util::sha1::{Sha1, sha1};
-
-        let name = b"hello.txt";
-        let crc = crc32::crc32(plaintext);
-        let compressed = plaintext.to_vec(); // Store method
-
-        // --- Local File Header + file data ---
-        let mut local = Vec::new();
-        local.extend_from_slice(&LOCAL_FILE_HEADER_SIGNATURE.to_le_bytes());
-        local.extend_from_slice(&62u16.to_le_bytes()); // version needed (6.2 for CD encryption)
-        local.extend_from_slice(&0u16.to_le_bytes()); // flags (no per-file encryption)
-        local.extend_from_slice(&0u16.to_le_bytes()); // method = Store
-        local.extend_from_slice(&0x1234u16.to_le_bytes()); // mod_time
-        local.extend_from_slice(&0x5678u16.to_le_bytes()); // mod_date
-        local.extend_from_slice(&crc.to_le_bytes());
-        local.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
-        local.extend_from_slice(&(plaintext.len() as u32).to_le_bytes());
-        local.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        local.extend_from_slice(&0u16.to_le_bytes()); // extra len
-        local.extend_from_slice(name);
-        local.extend_from_slice(&compressed);
-
-        let central_offset = local.len();
-
-        // --- Build the Central Directory (plaintext, to be encrypted) ---
-        let mut cd = Vec::new();
-        cd.extend_from_slice(&CENTRAL_DIRECTORY_HEADER_SIGNATURE.to_le_bytes());
-        cd.extend_from_slice(&62u16.to_le_bytes()); // version made by
-        cd.extend_from_slice(&62u16.to_le_bytes()); // version needed
-        cd.extend_from_slice(&0u16.to_le_bytes()); // flags
-        cd.extend_from_slice(&0u16.to_le_bytes()); // method = Store
-        cd.extend_from_slice(&0x1234u16.to_le_bytes()); // mod_time
-        cd.extend_from_slice(&0x5678u16.to_le_bytes()); // mod_date
-        cd.extend_from_slice(&crc.to_le_bytes());
-        cd.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
-        cd.extend_from_slice(&(plaintext.len() as u32).to_le_bytes());
-        cd.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        cd.extend_from_slice(&0u16.to_le_bytes()); // extra len
-        cd.extend_from_slice(&0u16.to_le_bytes()); // comment len
-        cd.extend_from_slice(&0u16.to_le_bytes()); // disk start
-        cd.extend_from_slice(&0u16.to_le_bytes()); // internal attrs
-        cd.extend_from_slice(&0u32.to_le_bytes()); // external attrs
-        cd.extend_from_slice(&0u32.to_le_bytes()); // local header offset
-        cd.extend_from_slice(name);
-
-        // --- Encrypt the Central Directory using the Strong Encryption protocol ---
-        let key_size = 32usize; // AES-256
-        let alg_id: u16 = 0x6610;
-
-        // Use deterministic IV for testing
-        let iv = [0x33u8; 16];
-        let master_key = pbkdf2_hmac_sha1(password, &iv, 1000, key_size);
-
-        // Create ERD (Encrypted Random Data)
-        let erd_plain = b"random_erd_data_for_test_padding!"; // 32 bytes
-        let erd_padded = apply_pkcs7_padding(erd_plain);
-        let erd_encrypted = encrypt_aes_cbc_by_key_size(&master_key, &erd_padded, &iv).unwrap();
-
-        // Derive session key from decrypted ERD via SHA-1
-        let erd_hash = sha1(erd_plain);
-        let mut key_material = alloc::vec::Vec::with_capacity(key_size);
-        key_material.extend_from_slice(&erd_hash);
-        let mut counter = 1u8;
-        while key_material.len() < key_size {
-            let mut hasher = Sha1::new();
-            hasher.update(erd_plain.as_slice());
-            hasher.update(&[counter]);
-            let extra = hasher.finish();
-            key_material.extend_from_slice(&extra);
-            counter = counter.wrapping_add(1);
-        }
-        key_material.truncate(key_size);
-        let session_key = key_material;
-
-        // Encrypt the CD with AES-CBC using session key
-        let data_iv = [0x44u8; 16];
-        let cd_padded = apply_pkcs7_padding(&cd);
-        let encrypted_cd_body =
-            encrypt_aes_cbc_by_key_size(&session_key, &cd_padded, &data_iv).unwrap();
-
-        // --- Build the Archive Decryption Header (§4.3.10) ---
-        // This is the metadata header that identifies the algorithm.
-        let mut adh = Vec::new();
-        adh.extend_from_slice(&2u16.to_le_bytes()); // Format
-        adh.extend_from_slice(&alg_id.to_le_bytes()); // AlgID
-        adh.extend_from_slice(&((key_size * 8) as u16).to_le_bytes()); // Bitlen
-        adh.extend_from_slice(&0x0001u16.to_le_bytes()); // Flags = password
-        adh.extend_from_slice(&0u16.to_le_bytes()); // ErdSize = 0 (not used in ADH)
-        adh.extend_from_slice(&0u32.to_le_bytes()); // Reserved1
-        adh.extend_from_slice(&0u16.to_le_bytes()); // VSize = 0
-        adh.extend_from_slice(&0u32.to_le_bytes()); // VCRC32
-
-        // --- Build the encrypted CD block in Strong Encryption Data Header format ---
-        // This follows the ADH and contains the actual encrypted data.
-        let mut encrypted_block = Vec::new();
-        // IVSize (2B) + IV
-        encrypted_block.extend_from_slice(&(iv.len() as u16).to_le_bytes());
-        encrypted_block.extend_from_slice(&iv);
-        // Size (4B) + Format (2B) + AlgID (2B) + Bitlen (2B) + Flags (2B)
-        encrypted_block.extend_from_slice(&50u32.to_le_bytes()); // Size (arbitrary)
-        encrypted_block.extend_from_slice(&2u16.to_le_bytes()); // Format
-        encrypted_block.extend_from_slice(&alg_id.to_le_bytes());
-        encrypted_block.extend_from_slice(&((key_size * 8) as u16).to_le_bytes());
-        encrypted_block.extend_from_slice(&0x0001u16.to_le_bytes()); // Flags = password
-        // ErdSize + ErdData
-        encrypted_block.extend_from_slice(&(erd_encrypted.len() as u16).to_le_bytes());
-        encrypted_block.extend_from_slice(&erd_encrypted);
-        // Reserved1 (4B) + VSize (2B) + VCRC32 (4B)
-        encrypted_block.extend_from_slice(&0u32.to_le_bytes());
-        encrypted_block.extend_from_slice(&0u16.to_le_bytes());
-        encrypted_block.extend_from_slice(&0u32.to_le_bytes());
-        // Encrypted CD payload: data_iv + encrypted_body
-        encrypted_block.extend_from_slice(&data_iv);
-        encrypted_block.extend_from_slice(&encrypted_cd_body);
-
-        // --- Assemble archive ---
-        // The EOCD cd_offset should point to the ADH (which is before the encrypted CD block).
-        let adh_offset = central_offset;
-        let mut archive = local;
-        archive.extend_from_slice(&adh);
-        archive.extend_from_slice(&encrypted_block);
-
-        // EOCD
-        archive.extend_from_slice(&EOCD_SIGNATURE.to_le_bytes());
-        archive.extend_from_slice(&0u16.to_le_bytes()); // disk number
-        archive.extend_from_slice(&0u16.to_le_bytes()); // cd disk number
-        archive.extend_from_slice(&1u16.to_le_bytes()); // disk entries
-        archive.extend_from_slice(&1u16.to_le_bytes()); // total entries
-        archive.extend_from_slice(&(cd.len() as u32).to_le_bytes()); // cd size (original)
-        archive.extend_from_slice(&(adh_offset as u32).to_le_bytes()); // cd offset (points to ADH)
-        archive.extend_from_slice(&0u16.to_le_bytes()); // comment length
-
-        archive
-    }
-
-    #[test]
-    fn test_cd_encryption_aes256_decode() {
-        let password = b"cd_encryption_password";
-        let plaintext = b"Hello, CD Encryption!";
-        let archive = build_cd_encrypted_zip(password, plaintext);
-        let entries = decode_with_password_bytes(&archive, password).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "hello.txt");
-        assert_eq!(entries[0].data, plaintext);
-    }
-
-    #[test]
-    fn test_cd_encryption_no_password() {
-        let password = b"cd_encryption_password";
-        let plaintext = b"Hello, CD Encryption!";
-        let archive = build_cd_encrypted_zip(password, plaintext);
-        let result = decode(&archive);
-        assert!(matches!(
-            result,
-            Err(Error::Unsupported(
-                "zip: central directory is encrypted; password required"
-            ))
-        ));
-    }
-
-    #[test]
-    fn test_cd_encryption_wrong_password() {
-        let password = b"correct_password";
-        let plaintext = b"secret";
-        let archive = build_cd_encrypted_zip(password, plaintext);
-        let result = decode_with_password_bytes(&archive, b"wrong_password");
-        assert!(result.is_err());
-    }
-
-    // --- Bit 13 (CD field masking) tests (§4.4.4) ---
-
-    /// Build a synthetic ZIP archive with bit 13 set, where the CD entry has
-    /// zeroed CRC-32/sizes and the real values are in the Local File Header.
-    fn build_bit13_masked_zip(plaintext: &[u8]) -> Vec<u8> {
-        let name = b"masked.txt";
-        let crc = crc32::crc32(plaintext);
-        let compressed = plaintext.to_vec(); // Store
-
-        // --- Local File Header + file data ---
-        // Local header has the REAL values
-        let flags: u16 = 0x2000; // bit 13 set
-        let mut local = Vec::new();
-        local.extend_from_slice(&LOCAL_FILE_HEADER_SIGNATURE.to_le_bytes());
-        local.extend_from_slice(&20u16.to_le_bytes()); // version needed
-        local.extend_from_slice(&flags.to_le_bytes());
-        local.extend_from_slice(&0u16.to_le_bytes()); // method = Store
-        local.extend_from_slice(&0u16.to_le_bytes()); // mod_time
-        local.extend_from_slice(&0u16.to_le_bytes()); // mod_date
-        local.extend_from_slice(&crc.to_le_bytes()); // Real CRC
-        local.extend_from_slice(&(compressed.len() as u32).to_le_bytes()); // Real compressed
-        local.extend_from_slice(&(plaintext.len() as u32).to_le_bytes()); // Real uncompressed
-        local.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        local.extend_from_slice(&0u16.to_le_bytes()); // extra len
-        local.extend_from_slice(name);
-        local.extend_from_slice(&compressed);
-
-        let central_offset = local.len();
-
-        // --- Central Directory Header ---
-        // CD entry has MASKED (zeroed) CRC-32/sizes
-        let mut cd = Vec::new();
-        cd.extend_from_slice(&CENTRAL_DIRECTORY_HEADER_SIGNATURE.to_le_bytes());
-        cd.extend_from_slice(&20u16.to_le_bytes()); // version made by
-        cd.extend_from_slice(&20u16.to_le_bytes()); // version needed
-        cd.extend_from_slice(&flags.to_le_bytes());
-        cd.extend_from_slice(&0u16.to_le_bytes()); // method = Store
-        cd.extend_from_slice(&0u16.to_le_bytes()); // mod_time
-        cd.extend_from_slice(&0u16.to_le_bytes()); // mod_date
-        cd.extend_from_slice(&0u32.to_le_bytes()); // CRC = 0 (MASKED)
-        cd.extend_from_slice(&0u32.to_le_bytes()); // compressed = 0 (MASKED)
-        cd.extend_from_slice(&0u32.to_le_bytes()); // uncompressed = 0 (MASKED)
-        cd.extend_from_slice(&(name.len() as u16).to_le_bytes());
-        cd.extend_from_slice(&0u16.to_le_bytes()); // extra len
-        cd.extend_from_slice(&0u16.to_le_bytes()); // comment len
-        cd.extend_from_slice(&0u16.to_le_bytes()); // disk start
-        cd.extend_from_slice(&0u16.to_le_bytes()); // internal attrs
-        cd.extend_from_slice(&0u32.to_le_bytes()); // external attrs
-        cd.extend_from_slice(&0u32.to_le_bytes()); // local header offset
-        cd.extend_from_slice(name);
-
-        let mut archive = local;
-        archive.extend_from_slice(&cd);
-
-        // EOCD
-        archive.extend_from_slice(&EOCD_SIGNATURE.to_le_bytes());
-        archive.extend_from_slice(&0u16.to_le_bytes());
-        archive.extend_from_slice(&0u16.to_le_bytes());
-        archive.extend_from_slice(&1u16.to_le_bytes());
-        archive.extend_from_slice(&1u16.to_le_bytes());
-        archive.extend_from_slice(&(cd.len() as u32).to_le_bytes());
-        archive.extend_from_slice(&(central_offset as u32).to_le_bytes());
-        archive.extend_from_slice(&0u16.to_le_bytes());
-
-        archive
-    }
-
-    #[test]
-    fn test_cd_encryption_bit13_masking() {
-        let plaintext = b"Bit 13 masked data";
-        let archive = build_bit13_masked_zip(plaintext);
-        let entries = decode(&archive).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "masked.txt");
-        assert_eq!(entries[0].data, plaintext);
-        // Verify the effective values were resolved from the local header
-        assert_eq!(entries[0].header.crc32, crc32::crc32(plaintext));
-        assert_eq!(entries[0].header.compressed_size, plaintext.len() as u64);
-        assert_eq!(entries[0].header.uncompressed_size, plaintext.len() as u64);
-    }
-
-    #[test]
-    fn test_cd_encryption_bit13_masking_empty_file() {
-        let plaintext = b"";
-        let archive = build_bit13_masked_zip(plaintext);
-        let entries = decode(&archive).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].data, b"");
-        assert_eq!(entries[0].header.crc32, crc32::crc32(b""));
     }
 
     #[test]

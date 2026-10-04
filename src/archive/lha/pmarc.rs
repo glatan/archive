@@ -10,7 +10,9 @@
 //!
 //! Ported from lhasa
 //! `pm1_decoder.c`, `pm2_decoder.c`, `pma_common.c` — the latter
-//! originally reverse-engineered from PMarc/UNPMA10.
+//! originally reverse-engineered from PMarc/UNPMA10. lhasa is
+//! ISC-licensed (Copyright (c) 2011-2012, Simon Howard); the
+//! license text is reproduced verbatim in THIRD_PARTY_NOTICES.
 
 use alloc::vec;
 use alloc::vec::Vec;

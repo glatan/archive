@@ -8,8 +8,10 @@
 //! - Store/Deflate extraction/encoding, legacy methods (Shrunk, Reduced
 //!   factors 1-4, Imploded) and Deflate64 decode and encode
 //! - Traditional PKZIP and WinZip AES-128/192/256 encrypted entry read/write
-//! - Strong Encryption (AES/DES/3DES/RC2/RC4) decryption
-//! - Central Directory Encryption decryption (Archive Decryption Header, APPNOTE §4.3.10/§7.5)
+//! - Strong Encryption (APPNOTE §7) and Central Directory Encryption
+//!   (§4.3.10/§7.5) are detected and rejected as Unsupported: the APPNOTE
+//!   states that implementing them requires a separate PKWARE license
+//!   agreement (§10.1, see THIRD_PARTY_NOTICES)
 //! - Bit 13 Central Directory field masking (APPNOTE §4.4.4)
 //! - Data Descriptor validation on the read path
 //! - Data Descriptor emission on the write path, including encrypted entries

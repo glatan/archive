@@ -86,11 +86,11 @@ specifications or standards documents:
   in src/compress/mppc.rs is spec-informed, with no code copied.
   Test-time provenance: packet fixtures under tests/fixtures/mppc/ were
   produced by this crate's own encoder and cross-validated locally with
-  the MPPC decompressor in rdesktop (GPL-3.0, Matthew Chapman);
-  rdesktop was used only as a local decode oracle and no code was
-  copied. FreeRDP's mppc.c (Apache-2.0) and rdesktop's mppc.c were
-  consulted for behavioral semantics only (e.g. that uncompressed
-  packets do not update the history).
+  the MPPC decompressor in rdesktop (GPL-3.0-or-later, Matthew
+  Chapman); rdesktop was used only as a local decode oracle and no
+  code was copied. FreeRDP's mppc.c (Apache-2.0) was consulted for
+  behavioral semantics (e.g. that uncompressed packets do not update
+  the history); no code was copied.
   External-encoder fixture: tests/fixtures/mppc/external_freerdp_bells
   (.pkt/.expected) embeds the TEST_MPPC_BELLS plaintext and
   TEST_MPPC_BELLS_RDP4 compressed token stream constants from FreeRDP's
@@ -208,8 +208,9 @@ specifications or standards documents:
   the PKWARE APPNOTE.TXT method-16 container format. CMPSC test
   dictionaries in tests/integration/cmpsc.rs were hand-built from the
   z/Architecture POP Appendix D layouts. SDL-Hercules-390/hyperion
-  (QPL) was consulted only to confirm interpretation of the public
-  specification; no code was copied.
+  (QPL) was once consulted to confirm interpretation of the public
+  specification; it is not an implementation basis and no code was
+  copied.
   Patent note: the CMPSC facility and its base dictionary scheme date
   to 1990s ESA/390-era IBM technology. No specific patent covering
   CMPSC has been identified in this audit, and no formal patent search
@@ -251,9 +252,12 @@ specifications or standards documents:
   test-time tools; they are not linked or distributed.
 - rpm: rpm.org Package Format documentation (format_v6 / format_header /
   format_lead, https://rpm-software-management.github.io/rpm/manual/)
-  and rpm `lib/cpio.c` (GPL-2.0-only) stripped payload behavior notes;
+  and rpm `lib/cpio.c` stripped payload behavior notes;
   `lib/cpio.c` was read only to confirm structural facts — no code was
-  copied.
+  copied. rpm's COPYING distributes `lib/` sources under GPL-2.0-or-later
+  or, at the distributor's option, LGPL-2.0-or-later, so a conversion
+  path (LGPL-2.0 section 3 -> GPL-3.0 -> AGPL-3.0 section 13) exists
+  were any incorporation ever needed.
   The writer can emit the stripped `07070X` cpio variant
   (file list carried by BASENAMES/DIRNAMES/DIRINDEXES/FILESIZES or
   LONGFILESIZES header tags) matching the decode path.
@@ -317,6 +321,13 @@ specifications or standards documents:
   implemented subset (container + MSZIP via RFC 1951 deflate, plus
   LZX/Quantum techniques dating to 1995-1997) uses decades-old
   techniques.
+  Quantum-specific note (expired): Quantum was designed by David
+  Stafford (Cinematronics/Stac) and licensed to Microsoft in May
+  1994 (MS KB 124613). Community research (compcol's Quantum
+  decoder documentation, Matthew Russotto's quantumcomp notes)
+  reports the covering patents expired around 2007, and describes
+  Quantum's bit-plus-follow arithmetic coding as distinct from the
+  patented Q-coder family. No formal patent search was performed.
 - xca: [MS-XCA] Xpress Compression Algorithm documentation
   (Microsoft Open Specifications,
   https://learn.microsoft.com/openspecs/windows_protocols/ms-xca/).
@@ -356,36 +367,34 @@ specifications or standards documents:
   with GNU lha and documented at
   https://github.com/jca02266/lha/blob/master/apphead.txt.jp;
   header field facts only, no document text was copied.
-  Decoder provenance: `lzh_dyn.rs` (`-lh2-` dynamic Huffman) is a
-  transliteration of LHa for UNIX `dhuf.c` (LHa free-use license:
-  copyright retention + modification marking; this notice records the
-  attribution and the port status). `lzhuf.rs` ports the original
-  `lzhuf.c` (written by Haruyasu Yoshizaki 1988, comments translated
-  by Okumura; distributed without an explicit license grant) together
-  with the deark `foreign/lzhuf.h` port (deark by Jason Summers,
-  MIT-style license; deark's modifications are alternatively public
-  domain at the user's option). `pmarc.rs` ports lhasa's `pm1_decoder.c`,
-  `pm2_decoder.c`, and `pma_common.c` (ISC; lhasa by Simon Howard -
-  copyright/permission notice required in all copies, satisfied
-  here).
-  `larc.rs`, `lzh_st0.rs`, `compress::lzh::{bits,huf,st1}` are
-  behavior-matched/adapted against lhasa, LHa, and the XADMaster ports
-  `XADLZHOldHandles.m`/`XADLZHStaticHandle` (The Unarchiver,
-  LGPL-2.1-or-later; see section 4a). `compress::lzh::st1_enc` is a
-  crate-original encoder counterpart and carries no upstream
-  attribution. `larc_enc.rs` is likewise a crate-original encoder
-  counterpart to `larc.rs` (greedy hash-chain LZSS emitting absolute
-  decoder-ring positions); no upstream encoder was ported.
-  `lzh_dyn.rs` is additionally transliterated from
-  `XADLZHOldHandles.m`'s `LhA_Decrunch` for `-lh2-`. jLHA Notes
-  (Michel Ishizuka) is used as the level-3 header wire layout source.
+  Decoder provenance: `-lh4-` through `-lh7-`
+  (`compress::lzh::{bits,huf,st1}`) implement the static-Huffman
+  block format documented by Haruhiko Okumura's `ar002` reference
+  implementation (`huf.c`/`maketbl.c`/`decode.c`), which the author
+  released to the public domain; decoder behaviour is cross-checked
+  against lhasa `lh_new_decoder.c` (ISC). `-lzs-` (`larc.rs`) is the
+  `EI=11`/`EJ=4` instantiation of Okumura's `lzss.c` (1988, declared
+  public domain in the file header on the author's site); `-lz5-` is
+  behaviour-matched against lhasa `lz5_decoder.c` (ISC). `pmarc.rs`
+  ports lhasa's `pm1_decoder.c`, `pm2_decoder.c`, and `pma_common.c`
+  (ISC; lhasa by Simon Howard - copyright/permission notice required
+  in all copies, satisfied in section 4a). `compress::lzh::st1_enc`
+  and `larc_enc.rs` are crate-original encoder counterparts and carry
+  no upstream attribution.
+  `-lh1-`, `-lh2-`, and `-lh3-` are intentionally unsupported: their
+  only references are Yoshizaki's `lzhuf.c` (distributed without an
+  explicit license grant, formally all-rights-reserved) and LHa for
+  UNIX `dhuf.c`/`shuf.c` (non-OSI terms prohibiting binary-only
+  redistribution and primary commercial use), so no rights-clean
+  format reference exists; decoding these methods returns
+  `Error::Unsupported`. jLHA Notes (Michel Ishizuka) is used as the
+  level-3 header wire layout source.
   Test fixtures in `tests/fixtures/lha/`: most are the lhasa test
   corpus archives (program outputs of LHA 1.14i, LHA OS/2 2.08, LHarc
   1.13, LArc 3.33, PMarc, lhmelt, lha_amiga distributed under ISC with
-  lhasa) vendored unmodified as known-answer decode inputs; the lh2/
-  lh3/level-* fixtures are locally synthesized. LHa for UNIX uses its
-  own non-OSI license requiring preservation of copyright notices;
-  this notice satisfies the attribution requirement.
+  lhasa) vendored unmodified as known-answer decode inputs; the
+  `-lh1-`/`-lh2-`/`-lh3-` archives are retained as rejection-input
+  fixtures, and the level-* fixtures are locally synthesized.
   Joe Jared's lzhformat.html (level 0-2 layouts, multi-disk/spanning
   extended header 0x39) is additionally catalogued in
   `docs/spec/sources/` as a reference document.
@@ -405,9 +414,11 @@ specifications or standards documents:
   (LGPL-3.0-or-later -> incorporated under LGPL-3.0 section 2 /
   GPL-3.0, combined under AGPL-3.0 section 13). `squeeze.rs` is
   adapted from compcol's `arc_squeeze` documentation/strings (MIT);
-  `rle90.rs` is spec-informed. ARC 5.21 for Unix (hyc/arc, GPL-2-ish)
-  and nomarch (GPL-2.0) were consulted for behavior confirmation only
-  - no GPL code copied. `tests/fixtures/arc/fix8.arc`/`fix9.arc` are
+  `rle90.rs` is spec-informed. ARC 5.21 for Unix (hyc/arc,
+  GPL version unstated — Debian records GPL-2.0) and nomarch
+  (GPL-2.0-or-later) are used only as test-time oracles and
+  fixture generators — they are not implementation references.
+  `tests/fixtures/arc/fix8.arc`/`fix9.arc` are
   Debian arc 5.21q program outputs used as decode fixtures.
   Note: the lha/arj/arc sources above are community-maintained format
   documents rather than official vendor specifications, and are treated
@@ -428,7 +439,11 @@ specifications or standards documents:
   implementation; no code was copied. A Python reference
   implementation written independently from the spec text is used
   only as a local test-time interoperability oracle; it is not
-  linked or distributed.
+  linked or distributed. Patent/licensing note: the draft's own
+  "Protection and Copyright" section releases the yEncode encoding
+  method into the public domain and states that neither the
+  document nor the method may be patented, protected, or
+  restricted in any way; recorded here for completeness.
 - cramfs: Linux kernel cramfs documentation and uapi headers
   (cramfs.rst, fs/cramfs/README, include/uapi/linux/cramfs_fs.h;
   GPL-2.0 with Linux-syscall-note). Spec-informed implementation;
@@ -458,10 +473,16 @@ specifications or standards documents:
   Farkas) was built from source and used only to produce the
   checked-in test fixture `tests/fixtures/romfs/genromfs.romfs`;
   it is not linked or distributed.
-- erofs: Linux kernel erofs documentation and on-disk headers
-  (Documentation/filesystems/erofs.rst, fs/erofs/erofs_fs.h;
-  GPL-2.0 with Linux-syscall-note). Spec-informed implementation;
-  no code was copied. `erofs-utils` `mkfs.erofs`/`fsck.erofs`
+- erofs: Linux kernel erofs documentation
+  (Documentation/filesystems/erofs.rst; GPL-2.0 with
+  Linux-syscall-note) and the on-disk structure header
+  `erofs-utils/include/erofs_fs.h` (MIT SPDX, canonical
+  userspace copy — formerly GPL-2.0-only OR Apache-2.0 dual,
+  relicensed to MIT upstream). The kernel copy
+  `fs/erofs/erofs_fs.h` (likewise MIT SPDX since 2025-11) is
+  also pinned for `Z_EROFS_LI_HOLE`, which exists only there.
+  Spec-informed implementation; no code was copied.
+  `erofs-utils` `mkfs.erofs`/`fsck.erofs`
   (GPL-2.0+) were built from source and used only to produce and
   cross-validate the checked-in test fixture
   `tests/fixtures/erofs/mkfs.*.img` (uncompressed, lz4/zstd/
@@ -505,6 +526,27 @@ specifications or standards documents:
   `detect_sfx_prefix`/`detect_sfx_prefix_zip64` implement the
   stub-length heuristic also used by CPython `zipfile` (PSF
   License); behavioral reference only, no code was copied
+  Patent note: APPNOTE.TXT itself asserts patent coverage for two
+  mechanisms — section 7.0.1 states that portions of the Strong
+  Encryption technology "are covered under patents and pending
+  patent applications", and sections 4.5.8.3 and 10.1 state that
+  use or implementation of APPNOTE components pertaining to strong
+  encryption or patching requires a separate, executed license
+  agreement from PKWARE. A real patent family backs the
+  strong-encryption claim: US 6,879,988 (PKWARE, priority
+  2001-03-09, "Method and system for strongly encrypting .ZIP
+  files") with a continuation chain running through US 8,090,942,
+  US 8,225,108, US 9,098,721, and US 10,127,397 to US 11,461,487
+  (granted 2022); PKWARE's intellectual-property page lists these
+  numbers against PKZIP/SecureZIP. Because the chain proceeds by
+  continuation, individual family members carry different terms
+  and at least some members may still be in force. In response to
+  this license requirement, this crate does NOT implement the
+  strong-encryption technology: Strong Encryption (extra field
+  0x0017, section 7) and Central Directory Encryption (Archive
+  Decryption Header, sections 4.3.10/7.5) are detected and
+  rejected as unsupported, and the PKPatchMaker patching
+  mechanism (extra field 0x000f) is not implemented.
 - 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00).
   The writer's 7z UINT64 variable-length integer encoding was
   cross-checked against the LZMA SDK `7zIn.c` decoder (public domain);
@@ -665,7 +707,11 @@ against de facto reference behavior:
     part of the kernel tree, and lzop source (`lzop.h`, `p_lzo.c`,
     GPL-2.0-or-later, Markus Oberhumer) for the lzop file format
   - Repository scope: Rust implementation of LZO1X-1 block compression and
-    the lzop framing format; format facts only, no code was copied
+    the lzop framing format; format facts only, no code was copied.
+    lzop is GPL-2.0-or-later, so a conversion path (GPL-2.0-or-later ->
+    GPL-3.0 -> AGPL-3.0 section 13) exists were any incorporation ever
+    needed. The kernel documents are written format documentation
+    consulted as specification material
   - Patent note: LZO dates to 1994-era work by Markus Oberhumer. No
     specific patent covering LZO has been identified in this audit, and
     no formal patent search was performed.
@@ -673,7 +719,10 @@ against de facto reference behavior:
 - rzip
   - Reference: upstream `rzip.samba.org` `.rz` container and chunk semantics
     (Andrew Tridgell, GPL-2.0-or-later); the upstream source was read only
-    to confirm format facts — no GPL-licensed source is bundled or copied
+    to confirm format facts — no GPL-licensed source is bundled or copied.
+    rzip is GPL-2.0-or-later, so a conversion path (GPL-2.0-or-later ->
+    GPL-3.0 -> AGPL-3.0 section 13) exists were any incorporation ever
+    needed
   - Repository scope: Rust implementation of the upstream container shape and
     token/chunk behavior
   - Provenance note: the long-range matching and chunk logic are implemented in
@@ -683,7 +732,11 @@ against de facto reference behavior:
   - Reference: lrzip framing (Con Kolivas et al., GPL-2.0-or-later) plus
     the crate's upstream-faithful shared rzip token/chunk layer;
     upstream source was read only to confirm format facts — no
-    GPL-licensed source is bundled or copied
+    GPL-licensed source is bundled or copied. lrzip is
+    GPL-2.0-or-later, so a conversion path (GPL-2.0-or-later ->
+    GPL-3.0 -> AGPL-3.0 section 13) exists were any incorporation
+    ever needed. The container framing is additionally covered by the
+    written `doc/magic.header.txt` format document
   - Repository scope: Rust implementation of the crate's supported `.lrz`
     subset and backend wiring
 
@@ -762,7 +815,9 @@ against de facto reference behavior:
   - Provenance: RFC 7932 Appendix A static dictionary data and transform
     semantics, realized using the upstream Brotli (MIT license)
     dictionary structure; table values are specification material, not
-    copied source code
+    copied source code. `dictionary.bin` is byte-identical to the RFC
+    7932 Appendix A DICT array (122,784 bytes; CRC-32 0x5136cb04,
+    verified 2026-10 against the pinned rfc7932.txt)
   - Maintenance note: if these tables are ever regenerated or replaced, keep
     their provenance documented alongside the source update
 
@@ -780,12 +835,6 @@ against de facto reference behavior:
   - AES-128/192/256 (`aes256.rs`): clean-room Rust implementation of FIPS 197;
     includes CBC and CTR modes for ZIP and 7z encryption
   - MD5 (`md5.rs`): clean-room Rust implementation of RFC 1321
-  - DES / 3DES (`des.rs`): clean-room Rust implementation of FIPS 46-3;
-    includes CBC mode for ZIP Strong Encryption
-  - RC2 (`rc2.rs`): clean-room Rust implementation of RFC 2268;
-    includes CBC mode for ZIP Strong Encryption
-  - RC4 (`rc4.rs`): clean-room Rust implementation;
-    stream cipher for ZIP Strong Encryption
   - Base64 (`base64.rs`): clean-room Rust implementation of RFC 4648
     section 4 (canonical decoding); used by uuencode's Base64 mode
   - Adler-32 (`adler32.rs`): clean-room Rust
@@ -839,28 +888,36 @@ incorporation:
   Incorporated under LGPL-3.0 section 2 -> GPL-3.0, combined under
   AGPL-3.0 section 13.
 - XADMaster (The Unarchiver, LGPL-2.1-or-later): port source —
-  `lha/lzh_dyn.rs` transliterates the `LhA_Decrunch` (`-lh2-`) path of
-  `XADLZHOldHandles.m`, and `lha/lzh_st0.rs` / `compress::lzh/st1.rs`
-  are adapted against `XADLZHOldHandles.m` / `XADLZHStaticHandle`.
-  (The newtua_dos transliterations above also ultimately derive from
-  XADMaster handlers.) Incorporated under LGPL-2.1 section 3 ->
-  GPL-2.0-or-later -> GPL-3.0, combined under AGPL-3.0 section 13.
+  the newtua_dos transliterations above (arc/arj) ultimately derive
+  from XADMaster handlers. The former lha adaptations
+  (`lzh_st0.rs`/`lzh_dyn.rs`/`compress::lzh` against
+  `XADLZHOldHandles.m`/`XADLZHStaticHandle`) were removed together
+  with the `-lh1-`/`-lh2-`/`-lh3-` decoders; the st1 decoder is now
+  documented against Okumura's public-domain `ar002` instead.
+  Incorporated under LGPL-2.1 section 3 -> GPL-2.0-or-later ->
+  GPL-3.0, combined under AGPL-3.0 section 13.
 - ARC 5.21 for Unix (hyc/arc, SEA 1985-87 copyright, "under the terms of
   the General Public License" with version unstated — Debian copyright
   records GPL-2, some files GPL-2+; packaged as Debian `arc` 5.21q):
-  reference/oracle only. squeeze/crunch/squash encoder+decoder. Its
-  bundled `Arcinfo` document describes the ARC 5.xx directory format.
+  oracle/fixture only — not an implementation reference. The tool
+  itself implements ARC squeeze/crunch/squash encoder+decoder;
+  its bundled `Arcinfo` document (SEA's own write-up) describes
+  the ARC 5.xx directory format and is used as a written format
+  document.
   Debian `arc` 5.21q produced the `tests/fixtures/arc/fix*.arc`
   fixtures (program output); `arc`/`nomarch`/`unar` are used as interop
   oracles. No GPL code copied.
-- lhasa (fragglet, ISC): port source + fixtures — `lha/pmarc.rs` ports
-  its `pm1_decoder.c`/`pm2_decoder.c`/`pma_common.c` (the latter
-  originally reverse-engineered from PMarc/UNPMA10); `lha/larc.rs`,
-  `lha/lzh_st0.rs`, and `compress::lzh::{bits,huf,st1}` are
-  behavior-matched against
-  it. Most of `tests/fixtures/lha/` is the lhasa test corpus vendored
-  unmodified (ISC-licensed program outputs; ISC notice satisfied here).
-  Debian main's `lhasa` is usable as a decode oracle.
+- lhasa (fragglet, ISC): port source + format reference + fixtures —
+  `lha/pmarc.rs` ports its `pm1_decoder.c`/`pm2_decoder.c`/
+  `pma_common.c` (the latter originally reverse-engineered from
+  PMarc/UNPMA10); `lha/larc.rs` uses its `lz5_decoder.c` as the
+  `-lz5-` format reference and is behaviour cross-checked against
+  `lzs_decoder.c`; `compress::lzh` (st1, `-lh4-`/`-lh7-`) is
+  cross-checked against `lh_new_decoder.c` for de facto parameter
+  agreement. Most of `tests/fixtures/lha/` is the lhasa test corpus
+  vendored unmodified (ISC-licensed program outputs; ISC notice
+  satisfied here). Debian main's `lhasa` is usable as a decode
+  oracle.
 
   lhasa's ISC license text, reproduced verbatim to satisfy its notice
   requirement for the ported decoder files:
@@ -883,16 +940,27 @@ incorporation:
       NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
       CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 - LHA 2.11 source files (Haruyasu Yoshizaki, Vector fh002420
-  `lha211_s.lzh`) and LHa for UNIX 1.14i (jca02266/lha): port source —
-  `lha/lzh_dyn.rs` transliterates `dhuf.c`; `lzh_st0.rs` is
-  behavior-matched against `shuf.c`, and `compress::lzh` (st1) against
-  `huf.c`/`maketbl.c`.
-  LHA's own free-software terms: use/copy/redistribution free,
-  commercial use free with minor obligations; README.DOC states that
-  incorporating parts of the source into other programs is not
-  restricted, while redistribution requires bundling README.DOC (with
-  translation for overseas). Attribution and modification status are
-  recorded here and in the module docs.
+  `lha211_s.lzh`) and LHa for UNIX 1.14i (jca02266/lha): written
+  reference + fixture generation only — no code is derived from
+  these sources. The former `dhuf.c`/`shuf.c`/`huf.c`-derived
+  decoders (`-lh1-`/`-lh2-`/`-lh3-` and the st1 matching) were
+  removed or re-referenced to Okumura's public-domain `ar002`;
+  LHa for UNIX's own license is non-OSI (copyright retention,
+  binary-only redistribution prohibited, primary commercial use
+  prohibited, off-network media require notification), so its
+  source is not used as an implementation reference. `header.doc.md`
+  (apphead/lzh_note) remains a written header-layout reference, and
+  LHa 1.14i produced the `level*.lzh` fixture archives.
+- Okumura reference implementations (public domain): `ar002`
+  (https://okumuralab.org/~okumura/compression/ar002/, 00README.txt:
+  "written by Haruhiko Okumura and released to the public domain")
+  documents the static-Huffman block format decoded by
+  `compress::lzh::{huf,st1}` (`-lh4-`/`-lh7-`, and ARJ methods 1-3);
+  `lzss.c` (https://okumuralab.org/~okumura/compression/lzss.c, file
+  header: "Haruhiko Okumura; public domain") documents the LArc
+  `-lzs-` bitstream. Both are format references only — the Rust
+  implementations are written to their documented wire behaviour,
+  not transliterated.
 - libmspack `qtmd.c` (Stuart Caie, LGPL-2.1): port source — the de
   facto CAB Quantum decode reference; `mscab/quantum.rs` is a
   port/adaptation (LGPL-2.1 section 3 -> GPL-2.0-or-later -> GPL-3.0,

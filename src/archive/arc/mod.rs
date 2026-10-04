@@ -5,9 +5,11 @@
 //! Compression method internals follow the de-facto reference
 //! implementations: methods 5-7/0xa/0xb (`crunch`, `crush`, `distill`)
 //! are ported from the newtua_dos transliterations of XADMaster
-//! handlers, `squeeze` is adapted from compcol, and nomarch /
-//! XADMaster / hyc-arc sources were otherwise consulted for behaviour
-//! confirmation only.
+//! handlers, `squeeze` is adapted from compcol's MIT-licensed
+//! `arc_squeeze`, and methods 8/9 share the crate's `compress::lzw`
+//! core (de facto reference: ncompress `compress42.c`, public
+//! domain/Unlicense). nomarch and hyc-arc are used only as
+//! test-time oracles, not as implementation references.
 //! Supported scope:
 //!
 //! - reading: method 1 (obsolete unpacked), method 2

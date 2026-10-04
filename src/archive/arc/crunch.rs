@@ -12,8 +12,8 @@
 //! literal. A code that is not yet in the table takes the KwKwK
 //! expansion (previous string plus its own first byte).
 //!
-//! Ported from the newtua_dos transliteration of XADMaster `XADARCCrunchHandle` (LGPL-3.0-or-later). nomarch `readlzw.c` and hyc/arc `arclzw.c` (GPL-2)
-//! were consulted for behaviour confirmation only.
+//! Ported from the newtua_dos transliteration of XADMaster `XADARCCrunchHandle` (LGPL-3.0-or-later). nomarch and hyc-arc
+//! are used only as test-time oracles, not as implementation references.
 //!
 //! Licensing: incorporated under LGPL-3.0 section 2 (GPL-3.0) and
 //! combined with this AGPL-3.0 work via AGPL-3.0 section 13.

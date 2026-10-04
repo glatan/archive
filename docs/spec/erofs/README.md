@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 形式概要 | Linux 向け read-only ファイルシステムイメージ。1024B オフセットのスーパーブロック + `meta_blkaddr` 起点の inode メタデータ領域 (32B スロット) + ブロックアラインされたデータ領域 |
-| 基準仕様 | Linux kernel `Documentation/filesystems/erofs.rst`、`fs/erofs/erofs_fs.h` — いずれも `docs/spec/sources/` にスナップショット |
+| 基準仕様 | Linux kernel `Documentation/filesystems/erofs.rst` + **canonical on-disk 定義** erofs-utils `include/erofs_fs.h` (MIT、userspace 正本) — いずれも `docs/spec/sources/` にスナップショット。kernel `fs/erofs/erofs_fs.h` も MIT SPDX で pin 済み (`Z_EROFS_LI_HOLE` は kernel 版のみに存在するため併用)。以下 `erofs_fs.h` 引用は erofs-utils `include/erofs_fs.h` を指す |
 | 参照実装 | erofs-utils `mkfs.erofs`/`fsck.erofs` (GPL-2.0+、fixture 生成・交差検証 oracle)。詳細: THIRD_PARTY_NOTICES erofs 項 |
 | 実装 | `archive::archive::erofs::decode` (read のみ)。`erofs` feature 配下 |
 
@@ -24,7 +24,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 28 | z_erofs 圧縮 inode (datalayout 1/3: LZ4/MicroLZMA/DEFLATE/Zstandard pcluster) | erofs.rst "Data compression"、erofs_fs.h `z_erofs_*` | ✅ | `z.rs` の `read_compressed` が mapheader + noncompact/compact index + extent レコードを decode (HEAD1/HEAD2/NONHEAD/PLAIN・HOLE・partial-ref・`Z_EROFS_NULL_ADDR`・big pcluster・`ADVISE_INTERLACED_PCLUSTER` raw extent)。`compressed_*` / `rejects_*` 各テスト + mkfs.erofs 実 fixture (integration 6 件)。packed inode・fragment・tail-packing は #29 の intentional |
+| 28 | z_erofs 圧縮 inode (datalayout 1/3: LZ4/MicroLZMA/DEFLATE/Zstandard pcluster) | erofs.rst "Data compression"、kernel `fs/erofs/erofs_fs.h` `z_erofs_*`/`Z_EROFS_*` | ✅ | `z.rs` の `read_compressed` が mapheader + noncompact/compact index + extent レコードを decode (HEAD1/HEAD2/NONHEAD/PLAIN・HOLE (`Z_EROFS_LI_HOLE`)・partial-ref・big pcluster・`ADVISE_INTERLACED_PCLUSTER` raw extent)。`compressed_*` / `rejects_*` 各テスト + mkfs.erofs 実 fixture (integration 6 件)。packed inode・fragment・tail-packing は #29 の intentional |
 | 8 | inode offset = `meta_blkaddr * blksz + 32 * nid` (32B スロット) | erofs.rst inode space 図 | ✅ | 全テスト |
 | 9 | `i_format` bit0 で compact(32B)/extended(64B) を判別、bits1-3 で datalayout | erofs_fs.h `EROFS_I_VERSION_MASK`/`EROFS_I_DATALAYOUT_MASK` | ✅ | `decode_sample_tree` (compact)、`extended_inode` (extended) |
 | 10 | inline xattr ibody: `i_xattr_icount` が非 0 なら 12 + 4*(n-1) バイトをスキップ | erofs_fs.h `erofs_xattr_ibody_size` | ✅ | offset 計算で使用 (xattr 内容は intentional scope で未解釈) |

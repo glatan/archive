@@ -4,7 +4,7 @@
 |------|------|
 | 基準仕様 | [APPNOTE.TXT 6.3.10](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) (PKWARE, 2024、ローカルスナップショット: `docs/spec/sources/APPNOTE_6.3.10.txt`) |
 | 参照実装 | hwzip 2.4 (public domain、method 1-6 の移植元・fixture 生成)、Info-ZIP `unshrink.c`/`unreduce.c`/`explode.c` (decode 動作参照)、blast.c (zlib license、method 10 decode の移植元)、CPython `zipfile` (PSF、SFX 検出 heuristic の動作参照)、system `zip`/`unzip`/`unar` (テスト時 oracle)。詳細: THIRD_PARTY_NOTICES zip 項 |
-| current scope | split/spanned (multi-disk) を含む読み取り、compression method 0 (Store) / 1 (Shrunk) / 2-5 (Reduced) / 6 (Implode) / 8 (Deflate) / 9 (Deflate64) / 10 (DCL Implode, decode) / 12 (BZIP2) / 14 (LZMA) / 93 (Zstd) / 95 (XZ) / 98 (PPMd) / 16 (IBM z/OS CMPSC、`cmpsc` feature で decode のみ)、Traditional PKZIP encryption、WinZip AES-128/192/256、Strong Encryption 復号 (§7、DES/3DES/RC2/RC4/AES) と Central Directory Encryption (§7.5) の decode、extra field 0x000a/0x000d/0x5455/0x6375/0x7075、Archive Extra Data Record / Digital Signature / ZIP64 extensible data sector スキップ |
+| current scope | split/spanned (multi-disk) を含む読み取り、compression method 0 (Store) / 1 (Shrunk) / 2-5 (Reduced) / 6 (Implode) / 8 (Deflate) / 9 (Deflate64) / 10 (DCL Implode, decode) / 12 (BZIP2) / 14 (LZMA) / 93 (Zstd) / 95 (XZ) / 98 (PPMd) / 16 (IBM z/OS CMPSC、`cmpsc` feature で decode のみ)、Traditional PKZIP encryption、WinZip AES-128/192/256、extra field 0x000a/0x000d/0x5455/0x6375/0x7075、Archive Extra Data Record / Digital Signature / ZIP64 extensible data sector スキップ |
 | intentional exclusion | Certificate-based encryption (§7.2.4)、Method 7 (Tokenizing、仕様未公開)、IBM z/OS CMPSC Entropy Encoding 拡張 (Method 16 の拡張要素、特許状況未確認 — basic method の decode は対応済み)、JPEG (Method 96、WinZip 独自の JPEG 再圧縮で非公式文書のみ)、WavPack (Method 97、可逆圧縮コアの bit-level 仕様なし) |
 
 ## 対応バリアント・仕様版
@@ -21,7 +21,7 @@
 | ZIP64 (§4.3.14-15 EOCD+locator, §4.5.3 extra field) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ✅ | ✅ | auto-promotion 対応 |
 | Traditional PKZIP encryption (§6) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ✅ | ✅ | |
 | WinZip AES-128/192/256 (Method 99, extra field 0x9901) | [WinZip AE-x spec](https://www.winzip.com/en/support/aes-encryption/) | ✅ | ✅ | |
-| Strong Encryption (§7) / Central Directory Encryption (§7.5) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ✅ | ❌ | DES/3DES/RC2/RC4/AES 復号 + CD 復号に対応。encode は対象外 |
+| Strong Encryption (§7) / Central Directory Encryption (§7.5) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ❌ | ❌ | intentional non-support: §10.1 が実装に PKWARE との別途ライセンス契約を要求。bit 6 / extra 0x0017 / ADH は検出して `Unsupported` を返す |
 | マルチディスク (§8) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ✅ | ❌ | `decode_parts` で split/spanned archive を decode |
 
 状態マーカー: ✅ 実装+テスト済み / ⚠️ 部分実装 / ❌ 未実装

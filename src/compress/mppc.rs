@@ -17,7 +17,9 @@
 //! - `B` (FRONT, `0x4`): the sender wrapped its history write pointer back
 //!   to the front of the buffer.
 //! - `C` (COMPRESSED, `0x2`): the data is an LZ token stream; otherwise it
-//!   is uncompressed data (which still updates the history).
+//!   is uncompressed data (which does not update the history — the sender
+//!   must flush it and restart with FLUSHED; the RDP variant differs, see
+//!   below).
 //! - `D` (`0x1`): reserved, must be zero.
 //!
 //! The token stream is packed MSB-first (RFC 2118 section 4.2):

@@ -5,10 +5,12 @@
 //!
 //! - header levels 0, 1, 2, and 3 for reading;
 //! - methods `-lh0-` (stored), `-lhd-` (directory marker),
-//!   `-lh1-`/`-lh2-`/`-lh3-`, `-lh4-` through `-lh7-`,
-//!   LArc `-lzs-`/`-lz4-`/`-lz5-`, and PMarc
-//!   `-pm0-`/`-pm1-`/`-pm2-` for reading; other methods are rejected with
-//!   [Error::Unsupported];
+//!   `-lh4-` through `-lh7-` (Okumura "st1" static Huffman,
+//!   de facto 16/64/128 KiB rings), LArc `-lzs-`/`-lz4-`/`-lz5-`,
+//!   and PMarc `-pm0-`/`-pm1-`/`-pm2-` for reading; `-lh1-`,
+//!   `-lh2-`, and `-lh3-` are intentionally rejected because no
+//!   rights-clean format reference exists, and other methods are
+//!   rejected with [Error::Unsupported];
 //! - writing emits `-lh0-`/`-lhd-` entries at header level 0, 1, 2, or 3
 //!   (`LhaEncoder::with_level`), plus `-lz4-`/`-pm0-` stored-alias,
 //!   `-lh4-`/`-lh5-`/`-lh6-`/`-lh7-` static-Huffman, and LArc
@@ -197,9 +199,17 @@ fn decode_member_data(method: &[u8; 5], raw: &[u8], orig: usize) -> Result<Vec<u
             }
             Ok(raw.to_vec())
         }
-        b"-lh1-" => super::lzhuf::decode(raw, orig),
-        _ if super::lzh_dyn::supported(method) => super::lzh_dyn::decode(raw, orig),
-        _ if super::lzh_st0::supported(method) => super::lzh_st0::decode(raw, orig),
+        // `-lh1-` (lzhuf adaptive Huffman), `-lh2-` (LHa `dhuf.c`
+        // dynamic Huffman), and `-lh3-` (LHa `shuf.c` static
+        // Huffman "st0") are intentionally unsupported: their wire
+        // formats are documented only by implementation source
+        // (`lzhuf.c` carries no explicit license grant;
+        // `dhuf.c`/`shuf.c` sit under LHa for UNIX's non-OSI
+        // redistribution terms), so no clean reference exists to
+        // implement against.
+        b"-lh1-" | b"-lh2-" | b"-lh3-" => {
+            Err(Error::Unsupported("lha: method intentionally unsupported"))
+        }
         b"-lh4-" | b"-lh5-" => crate::compress::lzh::st1::decode(14, 4, raw, orig),
         b"-lh6-" => crate::compress::lzh::st1::decode(16, 5, raw, orig),
         b"-lh7-" => crate::compress::lzh::st1::decode(17, 5, raw, orig),
@@ -439,40 +449,6 @@ fn decode_level3(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Resul
         data,
     });
     Ok(data_start + take)
-}
-
-/// Wrap  in a level-0 member header for  and append
-/// the archive terminator. Test-only helper shared by the codec
-/// mirror-encoder tests.
-#[cfg(test)]
-pub(crate) fn level0_archive(
-    method: &[u8; 5],
-    name: &str,
-    payload: &[u8],
-    orig: usize,
-    data: &[u8],
-) -> Vec<u8> {
-    let namelen = name.len();
-    let hsize = (5 + 4 + 4 + 4 + 1 + 1 + 1 + namelen + 2) as u8;
-    let mut a = Vec::new();
-    a.push(hsize);
-    a.push(0); // checksum, filled below
-    a.extend_from_slice(method);
-    a.extend_from_slice(&(payload.len() as u32).to_le_bytes());
-    a.extend_from_slice(&(orig as u32).to_le_bytes());
-    a.extend_from_slice(&0x1234_5678u32.to_le_bytes()); // dos time
-    a.push(0x20); // attribute
-    a.push(0); // level
-    a.push(namelen as u8);
-    a.extend_from_slice(name.as_bytes());
-    a.extend_from_slice(&crate::util::crc16::crc16(data).to_le_bytes());
-    let cksum = a[2..2 + hsize as usize]
-        .iter()
-        .fold(0u8, |x, &b| x.wrapping_add(b));
-    a[1] = cksum;
-    a.extend_from_slice(payload);
-    a.push(0); // terminator
-    a
 }
 
 #[cfg(test)]

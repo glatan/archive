@@ -2,8 +2,8 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | rpm.org Package Format documentation ([`format_v6.html`](https://rpm-software-management.github.io/rpm/manual/format_v6.html) / [`format_header.html`](https://rpm-software-management.github.io/rpm/manual/format_header.html) / [`format_lead.html`](https://rpm-software-management.github.io/rpm/manual/format_lead.html)、ローカルスナップショット: `docs/spec/sources/rpm_format_*.html`) + rpm `lib/cpio.c` (stripped payload 挙動) |
-| 参照実装 | rpm `lib/cpio.c` (GPL-2.0-only、stripped payload 挙動の動作参照 — コード取り込みなし)、`bsdtar` (BSD-2-Clause、writer 出力の oracle)。詳細: THIRD_PARTY_NOTICES rpm 項 |
+| 基準仕様 | rpm.org Package Format documentation ([`format_v6.html`](https://rpm-software-management.github.io/rpm/manual/format_v6.html) / [`format_header.html`](https://rpm-software-management.github.io/rpm/manual/format_header.html) / [`format_lead.html`](https://rpm-software-management.github.io/rpm/manual/format_lead.html)、ローカルスナップショット: `docs/spec/sources/rpm_format_*.html`) + rpm `lib/cpio.c` (stripped payload 挙動 — magic `07070X`/8B hex index 以外の詳細: 4B 整列、trailer、tag 由来の size/名前解決) |
+| 参照実装 | rpm `lib/cpio.c` (rpm COPYING により GPL-2.0-or-later または `lib/` については LGPL-2.0-or-later 代替適用可 — LGPL-2.0 §3→GPL-3→AGPL-3 §13 の取り込みパスを持つが、実際は構造事実の確認のみでコード取り込みなし)、`bsdtar` (BSD-2-Clause、writer 出力の oracle)。詳細: THIRD_PARTY_NOTICES rpm 項 |
 | 形式概要 | 96B Lead + Signature header + 8B パディング + Header + 圧縮 payload (cpio `newc` / stripped `07070X`) |
 | 実装範囲 | **read/write** (署名検証は intentional scope 外) |
 
@@ -47,9 +47,9 @@
 | 14 | 未認識 compressor 名 → `Unsupported` | 同上 | ✅ | `rejects_unrecognized_payload_compressor` |
 | 15 | payload 伸張に output limit (bounded decode) を伝搬 | crate bounded-decode convention | ✅ | `bounded` ヘルパー |
 | 16 | v4/newc payload は `cpio` decoder で entry を公開 (newcrc `070702` も受理し CRC 検証は cpio 側に委譲) | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ✅ | `decodes_uncompressed_newc_payload` |
-| 17 | stripped payload: magic `07070X` + 8B hex file index、4B 整列、`fx == 0xffffffff` が trailer | rpm `lib/cpio.c` (rpm 独自形式、format_v6.html 参照) | ✅ | `parses_stripped_payload` |
+| 17 | stripped payload: magic `07070X` + 8B hex file index、4B 整列。trailer は stripped `fx == 0xffffffff` と newc `TRAILER!!!` レコードの 2 形式を受理 | rpm `lib/cpio.c` (rpm 独自形式、format_v6.html 参照) | ✅ | `parses_stripped_payload` |
 | 18 | stripped payload の file size は payload に含まれず `RPMTAG_LONGFILESIZES` (5008) → `RPMTAG_FILESIZES` (1028) から取得。tag 不在は reject | rpm `lib/cpio.c` | ✅ | `rejects_stripped_payload_without_sizes` |
-| 19 | stripped entry の名前は `BASENAMES`(1117) + `DIRNAMES`(1118) + `DIRINDEXES`(1116) で解決。不在時は hex index | rpm tag 定義 | ✅ | `resolve_stripped_name` |
+| 19 | stripped entry の名前は `BASENAMES`(1117) + `DIRNAMES`(1118) + `DIRINDEXES`(1116) で解決。不在時は hex index | rpm tag 定義 + rpm `lib/cpio.c` (stripped payload でこれら tag を使う挙動) | ✅ | `resolve_stripped_name` |
 
 ### write
 

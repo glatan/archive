@@ -22,12 +22,14 @@
 
 | コンポーネント | 準拠仕様 / 参照実装 | 備考 |
 |---|---|---|
-| LZMA | lzip manual / xz / 7z の LZMA property semantics | internal `compress::lzma` shared core として再利用 |
+| LZMA | LZMA SDK `lzma-specification.txt` + lzip manual / xz / 7z の LZMA property semantics | internal `compress::lzma` shared core として再利用 |
 | LZMA2 | xz `xz-file-format.txt` / 7z LZMA2 coder semantics | internal `compress::lzma2` shared core として再利用 |
 | BCJ (x86/PowerPC/IA64/SPARC/ARM/ARM-Thumb/ARM64/RISC-V) | xz / 7z 系 BCJ filter behavior | liblzma/7-Zip style branch conversion |
 | Delta | xz / 7z 系 Delta filter behavior | distance 1..=256 の byte-wise Delta |
 | PPMdH / PPMd7 | 7-Zip public-domain `Ppmd.h`, `Ppmd7.c`, `Ppmd7Dec.c`, `Ppmd7Enc.c` | 7z coder `0x030401` と shared core を実装 |
 | LZRW family framing | lzrw1/lzrw1-a/lzrw2/lzrw3/lzrw3-a.c の "DEFINITION OF COMPRESSED FILE FORMAT" 節 (Ross Williams, public domain) | 4B copy flag + 16bit control + ≤16 item グループの共通 frame / 検証を crate-private `compress::lzrw` に集約 |
+| Deflate64 | APPNOTE method-9 登録 + Info-ZIP `unzip`/`inflate.c` de facto 定義 | internal `compress::deflate64` shared core。要件・テスト網羅は zip README #16 / sevenz README #68b を参照 |
+| LZX | MS LZX Data Compression Format doc + cabextract `lzx.c` errata ([MS-PATCH] は LZX DELTA variant) | internal `compress::lzx` shared core — mscab CAB LZX と lzxd で共有 |
 
 → 詳細テスト: [util.md](util.md)
 
@@ -95,7 +97,7 @@
 | [zx2](zx2/README.md) | ZX2 README (BSD-3) | 22 | 0 | 0 | 22 |
 | [zx5](zx5/README.md) | ZX5 README (BSD-3) | 26 | 0 | 0 | 26 |
 | [vcdiff](vcdiff/README.md) | RFC 3284 | 30 | 0 | 0 | 30 |
-| [mppc](mppc/README.md) | RFC 2118 | 32 | 0 | 0 | 32 |
+| [mppc](mppc/README.md) | RFC 2118 + [MS-RDPBCGR] | 32 | 0 | 0 | 32 |
 | [lzs](lzs/README.md) | RFC 2395 (§2.2 = ANSI X3.241 informational 転記) | 26 | 0 | 0 | 26 |
 | [lzrw1](lzrw1/README.md) | lzrw1.c 参照実装 (public domain) | 21 | 0 | 0 | 21 |
 | [lzrw1a](lzrw1a/README.md) | lzrw1-a.c 参照実装 (public domain) | 20 | 0 | 0 | 20 |
@@ -106,7 +108,7 @@
 | [lzxd](lzxd/README.md) | [MS-PATCH] LZX DELTA (Microsoft Open Specifications) | 22 | 0 | 0 | 22 |
 | [cmpsc](cmpsc/README.md) | IBM z/Arch POP App.D / ESA/390 Data Compression + APPNOTE method 16 | 20 | 0 | 0 | 20 |
 | [rzip](rzip/README.md) | rzip `.rz` format (upstream 2.1) | 20 | 0 | 0 | 20 |
-| [lrzip](lrzip/README.md) | lrzip `.lrz` format (crate-local subset) | 41 | 0 | 1 | 42 |
+| [lrzip](lrzip/README.md) | magic.header.txt + upstream de facto facts (crate-local subset) | 41 | 0 | 1 | 42 |
 | [packbits](packbits/README.md) | Apple TN1023 + TIFF 6.0 §9 | 12 | 0 | 3 | 15 |
 | [xz](xz/README.md) | xz-file-format.txt 1.2.1 | 58 | 0 | 1 | 59 |
 | [ZPAQ](zpaq/README.md) | ZPAQ Level 1/2 specification (zpaq206.pdf) + crate bounded contract (archive 層) | — | — | — | bounded contract |
@@ -125,19 +127,19 @@
 | [mscfb](mscfb/README.md) | [MS-CFB] Compound File Binary File Format v20210625 | 19 | 2 | 3 | 24 |
 | [cramfs](cramfs/README.md) | Linux kernel cramfs.rst + fs/cramfs/README + cramfs_fs.h | 20 | 0 | 4 | 24 |
 | [romfs](romfs/README.md) | Linux kernel romfs.rst | 21 | 0 | 2 | 23 |
-| [erofs](erofs/README.md) | Linux kernel erofs.rst + erofs_fs.h (+ erofs-utils include/erofs_fs.h) | 32 | 0 | 2 | 34 |
+| [erofs](erofs/README.md) | Linux kernel erofs.rst + erofs-utils `include/erofs_fs.h` (MIT) | 32 | 0 | 2 | 34 |
 | [iso9660](iso9660/README.md) | ECMA-119 + SUSP 1.10 + RRIP 1.12 + Joliet + El Torito 1.0 / zisofs | 39 | 1 | 4 | 44 |
 | [crx3](crx3/README.md) | Chromium components/crx_file/crx3.proto | 14 | 0 | 3 | 17 |
 | [pea](pea/README.md) | PEA file format spec (pea_help.pdf) + PeaZip pea.pas/pea_utils.pas | 17 | 1 | 3 | 21 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 27 | 1 | 1 | 29 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
 | [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 30 | 0 | 1 | 31 |
-| [lha](lha/README.md) | lha header documentation + jLHA Notes + lzhformat.html + lhasa/compcol 参照実装 | 22 | 1 | 1 | 24 |
+| [lha](lha/README.md) | lha header documentation + jLHA Notes + lzhformat.html + 奥村氏 ar002/lzss.c (PD) + lhasa (ISC) | 22 | 1 | 1 | 24 |
 | [arj](arj/README.md) | ARJ technical note (ARJ 2.x) + UNARJ/newtua_dos 参照実装 | 22 | 1 | 2 | 25 |
 | [arc](arc/README.md) | SEA ARC file format description + hyc/arc `Arcinfo` | 24 | 0 | 1 | 30 |
 | [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 42 | 0 | 1 | 43 |
 | [xar](xar/README.md) | xarformat (mackyle/xar wiki) | 32 | 1 | 4 | 37 |
-| [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 155 | 0 | 2 | 158 |
+| [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 152 | 0 | 4 | 156 |
 | [7z](sevenz/README.md) | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) | 121 | 0 | 0 | 121 |
 
 ### エンコードフォーマット

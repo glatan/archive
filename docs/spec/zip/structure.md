@@ -137,9 +137,9 @@
 | 60 | Bit 3: Data Descriptor present | §4.4.4 | ✅ | `test_roundtrip_data_descriptor_single_file` |
 | 61 | Bit 4: Enhanced Deflating reserved | §4.4.4 | ✅ | reserved bit、読み飛ばし (正しい動作) |
 | 62 | Bit 5: Compressed patched data | §4.4.4 | ✅ | 未サポート機能、読み飛ばし (正しい動作) |
-| 63 | Bit 6: Strong encryption | §4.4.4 | ✅ | AES-128/192/256 復号対応。非 AES は識別して `Unsupported` を返す。`test_strong_encryption_header_parsed`, `test_strong_encryption_aes256_full_decode`, `test_strong_encryption_aes192_full_decode`, `test_strong_encryption_aes128_full_decode` |
+| 63 | Bit 6: Strong encryption | §4.4.4 | ✅ | 検出して `Unsupported` を返す。復号は intentional non-support (APPNOTE §10.1 が PKWARE との別途ライセンス契約を要求するため)。`test_strong_encryption_rejected_aes`, `test_strong_encryption_rejected_other_algorithms` |
 | 64 | Bit 11: Language Encoding Flag (UTF-8) | §4.4.4 | ✅ | `test_decode_cp437_name_and_comment`, `test_decode_invalid_utf8_metadata_rejected` |
-| 65 | Bit 13: Central Directory Encryption masking | §4.4.4 | ✅ | bit 13 検出時に CRC-32/圧縮サイズ/非圧縮サイズを Local File Header からフォールバック。`test_cd_encryption_bit13_masking`, `test_cd_encryption_bit13_masking_empty_file` |
+| 65 | Bit 13: Central Directory Encryption masking | §4.4.4 | ✅ | bit 13 検出時に CRC-32/圧縮サイズ/非圧縮サイズを Local File Header からフォールバック。CD 本体の暗号化 (ADH) は検出して `Unsupported` を返す |
 | 66 | Bit 6 set → version ≥ 50, bit 0 も set | §4.4.4 | ✅ | version < 50 と bit 0 未設定を reject |
 | 152 | Method 14 (LZMA): general purpose bit 1 = EOS marker 使用 | §4.4.4, §5.8.9 | ✅ | bit 1 set → `lzma_decode_with_props` (EOS marker)、unset → `lzma_decode_with_props_and_size` (サイズベース) |
 

@@ -115,8 +115,8 @@
   - LHa for UNIX 1.14i (jca02266/lha, `lha a -o1` / `-o2`) が生成した `-lh0-` (stored) アーカイブ
   - `level1`/`level2` は `f1.txt` (`hello level one`+改行) と `f2.txt` (`payload2`+改行) の 2 エントリ
   - `*_nested` は `dir/sub/deep.txt` (`nested content`+改行) を先頭に持ち、拡張ヘッダ `0x02` の生 `0xff` 区切りディレクトリを含む
-- `lh2.lzh`, `lh3.lzh`
-  - ローカルで合成した `-lh2-`/`-lh3-` アーカイブ (参照ツールとの byte-for-byte 照合済み、lhasa コーパスには非収録)
+- `lh1.lzh`, `lh1_lharc.lzh`, `lh2.lzh`, `lh3.lzh`
+  - `-lh1-`/`-lh2-`/`-lh3-` アーカイブ (`lh2`/`lh3` はローカルで合成、参照ツールとの byte-for-byte 照合済み)。これらのメソッドは権利クリーンな format 参照が存在しないため **意図的に非対応** であり、decode が `Error::Unsupported` を返すことの reject 入力として残置 (`test_lha_legacymethod_rejection`)
 - その他の 28 ファイル (`lh*.lzh`, `lz*.lzh`/`lz*.lzs`, `pm*.lzh`/`pm*.pma`, `h2_*`, `h3_*`, `long.*`, `lzs.lzh`, `mtcd.pma` 等)
   - lhasa (fragglet, ISC) のテストコーパスを無改変で vendor したもの
   - LHA 1.14i / LHA OS/2 2.08 / LHarc 1.13 / LArc 3.33 / PMarc / lhmelt / lha_amiga 等が生成したプログラム出力 (ISC ライセンス配布物)
@@ -146,6 +146,7 @@
   - 小さい `.lrz` sample archive
   - crate-local な lrzip container layout を目視確認・手元デバッグするときのサンプルとして保持している
   - system `lrzip` 完全互換を保証するための fixture ではない
+  - 生成元は未記録 (初回コミット由来のため crate 生成か system `lrzip` 生成か不明)。ライセンス上の懸念はなし
 
 ### `ar/`
 

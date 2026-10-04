@@ -2,10 +2,10 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | lha header documentation (apphead / lzh_note、GNU lha 系資料)。実参照: [LHa for UNIX `header.doc.md`](https://github.com/jca02266/lha/blob/master/header.doc.md) ([jca02266/lha](https://github.com/jca02266/lha)) + jLHA Notes (Michel Ishizuka、[Wayback index](https://web.archive.org/web/20080724142842/http://homepage1.nifty.com/dangan/en/Content/Program/Java/jLHA/Notes/Notes.html)) + Joe Jared `lzhformat.html` + [Just Solve Wiki: LHarc](http://justsolve.archiveteam.org/wiki/LHarc)。ローカルスナップショット: `docs/spec/sources/lha_header.doc.md`, `jlha_notes_*.html`, `lzhformat.html`。一次実装: [LHA 2.11 ソース (Vector fh002420)](https://www.vector.co.jp/download/file/dos/util/fh002420.html) |
-| 参照実装 | lhasa (ISC、移植元 + fixture vendor + oracle)、LHA 2.11 / LHa for UNIX 1.14i (LHa free-use license、移植元 / fixture 生成)、XADMaster (LGPL-2.1-or-later、移植元 / 動作参照)、deark (MIT-style、移植元)。system `lhasa` / `unar` / `lha` / `7z` / `bsdtar` は interop oracle。詳細: THIRD_PARTY_NOTICES lha 項・§4a |
+| 基準仕様 | lha header documentation (apphead / lzh_note、GNU lha 系資料)。実参照: [LHa for UNIX `header.doc.md`](https://github.com/jca02266/lha/blob/master/header.doc.md) ([jca02266/lha](https://github.com/jca02266/lha)) + jLHA Notes (Michel Ishizuka 氏、[Wayback index](https://web.archive.org/web/20080724142842/http://homepage1.nifty.com/dangan/en/Content/Program/Java/jLHA/Notes/Notes.html)) + Joe Jared `lzhformat.html` + [Just Solve Wiki: LHarc](http://justsolve.archiveteam.org/wiki/LHarc)。ローカルスナップショット: `docs/spec/sources/lha_header.doc.md`, `jlha_notes_*.html`, `lzhformat.html`, `ar002_*` (`ar002_00README.txt`/`ar002_ar.h`/`ar002_decode.c`/`ar002_huf.c`/`ar002_maketbl.c`/`ar002_compr.txt`/`ar002_compr2.txt`), `lzss.c`。一次実装: [LHA 2.11 ソース (Vector fh002420)](https://www.vector.co.jp/download/file/dos/util/fh002420.html) |
+| 参照実装 | 奥村晴彦氏の `ar002` (public domain、`-lh4-`〜`-lh7-` st1 形式の format reference、`sources/ar002_*`)、奥村氏の `lzss.c` (public domain、`-lzs-` の一次参照、`sources/lzss.c`)、lhasa (ISC、`-lz5-` format reference + `pmarc.rs` 移植元 + fixture vendor + oracle)。LHA 2.11 / LHa for UNIX 1.14i は `header.doc.md` 書面参照 + fixture 生成のみ (コード由来なし。LHa ライセンスは binary-only 再配布禁止・商用主利用禁止の非 OSI 条件)。XADMaster / deark 由来コードは `-lh1-`〜`-lh3-` 実装削除により除去済み。system `lhasa` / `unar` / `lha` / `7z` / `bsdtar` は interop oracle。詳細: THIRD_PARTY_NOTICES lha 項・§4a |
 | 形式概要 | `[u8/u16 header size][checksum?][method 5B][packed u32][orig u32][time u32][attr u8][level u8](level 別フィールド)[ext headers][data]` のエントリ列。終端は header size = 0 |
-| 実装範囲 | header level 0-3 の読み込み、`-lh0-` (stored) / `-lhd-` (dir) / `-lh1-`〜`-lh7-` / LArc `-lzs-`/`-lz4-`/`-lz5-` / PMarc `-pm0-`〜`-pm2-` のデコードに対応する。書き込みは header level 0-3 (`with_level`) と、圧縮メソッド `-lh0-`/`-lhd-`/`-lh4-`〜`-lh7-`、LArc `-lzs-`/`-lz5-`、および無圧縮エイリアス `-lz4-`/`-pm0-` (`with_method`) に対応する |
+| 実装範囲 | header level 0-3 の読み込み、`-lh0-` (stored) / `-lhd-` (dir) / `-lh4-`〜`-lh7-` / LArc `-lzs-`/`-lz4-`/`-lz5-` / PMarc `-pm0-`〜`-pm2-` のデコードに対応する。`-lh1-`〜`-lh3-` は権利クリーンな format 参照が存在しないため意図的に非対応 (`Error::Unsupported`)。書き込みは header level 0-3 (`with_level`) と、圧縮メソッド `-lh0-`/`-lhd-`/`-lh4-`〜`-lh7-`、LArc `-lzs-`/`-lz5-`、および無圧縮エイリアス `-lz4-`/`-pm0-` (`with_method`) に対応する |
 
 ## 対応バリアント・仕様版
 
@@ -15,7 +15,7 @@
 | header level 1 / 2 | lha header documentation + LHa for UNIX header.c 実測 | ✅ | ✅ | ext header (0x01 filename / 0x02 dir、raw 0xff 区切り) |
 | header level 3 | jLHA Notes Level3Header (`sources/jlha_notes_level3_header.html`) + lhasa (ISC) | ✅ | ✅ | `with_level(3)` で write 対応 (`emit_level3`)。32 バイト基本ヘッダ + u32 サイズ + u32 ext チェーン |
 | method `-lh0-` (stored) / `-lhd-` (dir) | lha header documentation | ✅ | `-lh0-` のみ ✅ | |
-| LZH 圧縮メソッド (`-lh1-`〜`-lh7-`, `-lzs-`/`-lz4-`/`-lz5-`, `-pm0-`〜`-pm2-`) | jLHA Notes CompressMethod + 一次実装 LHA 2.11/LHa 1.14i ソース + lhasa (ISC) が de facto decode 参照 | ✅ | ⚠️ | encode は st1 系 `-lh4-`〜`-lh7-` (`with_method` 経由で `compress::lzh::st1_enc`)、LArc `-lzs-`/`-lz5-` (`larc_enc::{encode_lzs,encode_lz5}`)、および無圧縮エイリアス `-lz4-`/`-pm0-` に対応する (`lzs_encode_roundtrip`, `lz5_encode_roundtrip`, `test_lha_lzs_lz5_bsdtar_interop`)。`-lh1-`〜`-lh3-` および `-pm1-`/`-pm2-` の圧縮 write は未対応。`-lhx-` (UNLHA32 独自) などの未実装メソッドは decode 側でも `Error::Unsupported` を返す |
+| LZH 圧縮メソッド (`-lh4-`〜`-lh7-`, `-lzs-`/`-lz4-`/`-lz5-`, `-pm0-`〜`-pm2-`) | `-lh4-`〜`-lh7-`: 奥村氏の `ar002` (public domain、`sources/ar002_*`)。`-lzs-`: 奥村氏の `lzss.c` (public domain、`sources/lzss.c`)。`-lz5-`/PMarc: lhasa (ISC) が権利クリーン参照。de facto パラメタは lhasa と一致 | ✅ | ⚠️ | encode は st1 系 `-lh4-`〜`-lh7-` (`with_method` 経由で `compress::lzh::st1_enc`)、LArc `-lzs-`/`-lz5-` (`larc_enc::{encode_lzs,encode_lz5}`)、および無圧縮エイリアス `-lz4-`/`-pm0-` に対応する (`lzs_encode_roundtrip`, `lz5_encode_roundtrip`, `test_lha_lzs_lz5_bsdtar_interop`)。`-pm1-`/`-pm2-` の圧縮 write は未対応。`-lh1-`〜`-lh3-`・`-lhx-` (UNLHA32 独自) などの非対応メソッドは decode 側でも `Error::Unsupported` を返す |
 
 ### ヘッダ構造
 
@@ -45,13 +45,13 @@
 | method | アルゴリズム | 履歴バッファ | 状態 | テスト/fixture |
 |---|---|---|---|---|
 | `-lh0-` | stored (無圧縮) | - | ✅ | `level0_roundtrip` |
-| `-lh1-` | 適応 Huffman + LZ77 (Yoshizaki lzhuf, Okumura 訳注) | 4 KiB | ✅ | `lh1.lzh, lh1_lharc.lzh` |
-| `-lh2-` | 動的 Huffman + LZ77 (LHa dhuf) | 8 KiB | ✅ | `lh2.lzh` |
-| `-lh3-` | 静的 Huffman st0 + LZ77 (LHa shuf) | 8 KiB | ✅ | `lh3.lzh` |
-| `-lh4-` | 静的 Huffman st1 + LZ77 | 16 KiB | ✅ | `lh4.lzh` |
-| `-lh5-` | 静的 Huffman st1 + LZ77 | 16 KiB | ✅ | `lh5.lzh, lh5_255e.lzh, h3_lh5.lzh` |
-| `-lh6-` | 静的 Huffman st1 + LZ77 | 64 KiB | ✅ | `lh6.lzh, h2_lh6.lzh` |
-| `-lh7-` | 静的 Huffman st1 + LZ77 | 128 KiB | ✅ | `lh7.lzh, h2_lh7.lzh` |
+| `-lh1-` | 適応 Huffman + LZ77 (吉崎氏の lzhuf、奥村氏訳注) | 4 KiB | ❌ | **意図的非対応**: `lzhuf.c` は明示的ライセンス供与なし。fixture `lh1.lzh, lh1_lharc.lzh` は reject 入力 (`test_lha_legacymethod_rejection`) |
+| `-lh2-` | 動的 Huffman + LZ77 (LHa dhuf) | 8 KiB | ❌ | **意図的非対応**: `dhuf.c` は LHa 独自ライセンス (binary-only 再配布禁止・商用主利用禁止、非 OSI)。fixture `lh2.lzh` は reject 入力 |
+| `-lh3-` | 静的 Huffman st0 + LZ77 (LHa shuf) | 8 KiB | ❌ | **意図的非対応**: `shuf.c` 同上。fixture `lh3.lzh` は reject 入力 |
+| `-lh4-` | 静的 Huffman st1 + LZ77 (ar002 形式) | 16 KiB (de facto) | ✅ | `lh4.lzh` |
+| `-lh5-` | 静的 Huffman st1 + LZ77 (ar002 形式) | 16 KiB (de facto) | ✅ | `lh5.lzh, lh5_255e.lzh, h3_lh5.lzh` |
+| `-lh6-` | 静的 Huffman st1 + LZ77 (ar002 拡張パラメタ) | 64 KiB (de facto) | ✅ | `lh6.lzh, h2_lh6.lzh` |
+| `-lh7-` | 静的 Huffman st1 + LZ77 (ar002 拡張パラメタ) | 128 KiB (de facto) | ✅ | `lh7.lzh, h2_lh7.lzh` |
 | `-lzs-` | LArc ビット指向 LZSS | 2 KiB | ✅ | `lzs.lzh` |
 | `-lz4-` | LArc stored (無圧縮) | - | ✅ | `lz4.lzh, lz4.lzs` |
 | `-lz5-` | LArc バイト指向 LZSS | 4 KiB | ✅ | `lz5.lzh, lz5.lzs, long.lzs` |
@@ -60,8 +60,8 @@
 | `-pm2-` | PMarc 動的木 + MTF + LZ | 8 KiB | ✅ | `pm2.lzh, pm2.pma, long.pma` |
 | `-lhd-` | directory marker (payload なし) | - | ✅ | `dir_entry` |
 
-fixture は全て `tests/fixtures/lha/` 配下。統合テスト: `test_lha_compressed_method_fixtures`, `test_lha_level3_fixtures`, `test_lha_fixture_oracle_extract`。
-decode 参照は lhasa (ISC) / XADMaster + LHa 1.14i 一次ソース (dhuf.c, shuf.c, huf.c, maketbl.c, lzhuf.c)。
+fixture は全て `tests/fixtures/lha/` 配下。統合テスト: `test_lha_compressed_method_fixtures`, `test_lha_level3_fixtures`, `test_lha_fixture_oracle_extract`, `test_lha_legacymethod_rejection`。
+decode の権利クリーン参照: `-lh4-`〜`-lh7-` は奥村氏の `ar002` (public domain、`sources/ar002_huf.c`/`ar002_maketbl.c`)、`-lzs-` は奥村氏の `lzss.c` (public domain)、`-lz5-`/`-pm1-`/`-pm2-` は lhasa (ISC)。`-lh1-`〜`-lh3-` は参照実装の権利状態が不確実なため非対応 (上表)。
 
 ### encode
 
@@ -91,7 +91,7 @@ decode 参照は lhasa (ISC) / XADMaster + LHa 1.14i 一次ソース (dhuf.c, sh
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 19 | 圧縮メソッドの write は st1 系および LArc `-lzs-`/`-lz5-` のみ対応 | ⚠️ | `with_method` は `-lh4-`〜`-lh7-`、`-lzs-`/`-lz5-`、および無圧縮エイリアス `-lz4-`/`-pm0-` を受理する (`larc_enc`)。`-lh1-`〜`-lh3-` および `-pm1-`/`-pm2-` の圧縮 write は未対応。`-lhx-` などの未実装メソッドの decode は `Error::Unsupported` を返す |
+| 19 | 圧縮メソッドの write は st1 系および LArc `-lzs-`/`-lz5-` のみ対応 | ⚠️ | `with_method` は `-lh4-`〜`-lh7-`、`-lzs-`/`-lz5-`、および無圧縮エイリアス `-lz4-`/`-pm0-` を受理する (`larc_enc`)。`-lh1-`〜`-lh3-` および `-pm1-`/`-pm2-` の圧縮 write は未対応。`-lh1-`〜`-lh3-` (権利クリーン参照不在)・`-lhx-` などの非対応メソッドの decode は `Error::Unsupported` を返す |
 | 20 | write の mtime は level 0/1 で DOS time、level 2 で UNIX time をそのまま格納。UNIX ext 0x50/0x51/0x54 は発行しない | ✅ | `level1_roundtrip`, `level2_roundtrip`, `level2_long_path`, `level_rejects_bad_level` |
 | 21 | マルチボリューム/リンク属性/OS 別属性の解釈は非対応 | ❌ | header level 3 は read/write 対応済み (`with_level(3)`)。multi-disk/spanning (ext header 0x39・SPAN mode) は `sources/lzhformat.html` が記述 |
 
@@ -103,7 +103,7 @@ LHA 系の「独自拡張」は出自が分散している。出典別に整理�
 
 | level | 出自 | 備考 |
 |---|---|---|
-| level 0 | オリジナル LHA (≤2.13、Yoshizaki) | DOS 時刻・基本ヘッダのみ |
+| level 0 | オリジナル LHA (≤2.13、吉崎氏) | DOS 時刻・基本ヘッダのみ |
 | level 1 | LHA 2.x (拡張ヘッダチェーン導入) | `header.doc` 記載 |
 | level 2 | LHA for UNIX 系 (UNIX 時刻・u16 総サイズ) | `header.doc` 記載 |
 | level 3 | LHA 2.67 / LHA for OS/2 / UNLHA32.DLL が試行的に使用 (LHA 3.0 構想は中断) | `header.doc` 未記載、jLHA Notes Level3Header が唯一の書面記述。32bit サイズ制限が残る設計問題あり |
@@ -112,10 +112,10 @@ LHA 系の「独自拡張」は出自が分散している。出典別に整理�
 
 | 系列 | method | 備考 |
 |---|---|---|
-| LArc (三木和彦) | `-lzs-` `-lz4-` `-lz5-` | `-lz4-` は stored。全 method decode 対応 |
-| LHA 本家 (吉崎) | `-lh0-`〜`-lh7-` | lh3 は試作 (静的 Huffman 版 lh2)。全 method decode 対応 |
+| LArc (三木和彦氏) | `-lzs-` `-lz4-` `-lz5-` | `-lz4-` は stored。全 method decode 対応 |
+| LHA 本家 (吉崎氏) | `-lh0-`〜`-lh7-` | lh3 は試作 (静的 Huffman 版 lh2)。`-lh1-`〜`-lh3-` は権利クリーン参照不在のため意図的非対応、`-lh0-`/`-lh4-`〜`-lh7-` は decode 対応 |
 | PMarc | `-pm0-` `-pm1-` `-pm2-` | 別ツール独自、`-pm0-` は stored。全 method decode 対応 |
-| UNLHA32 (Micco) | `-lhx-` | UNLHA32.DLL 独自。非対応 |
+| UNLHA32 (Micco 氏) | `-lhx-` | UNLHA32.DLL 独自。非対応 |
 
 **拡張ヘッダ identifier のカテゴリ** (LHA for OS/2 同梱 `header.tex` 由来の分類 + jLHA の細分化)
 
@@ -127,9 +127,10 @@ LHA 系の「独自拡張」は出自が分散している。出典別に整理�
 | 0x60-0x7F | その他 OS 依存 | 0x7D capsule (旧 0xFC、Mac 用)、0x7E OS/2 EA (旧 0xFD)、0x7F level-3 新属性 (1) |
 | 0x80-0xFF | reserved | 0xC4-0xC8 圧縮 comment、0xFF level-3 新属性 (2) |
 
-一次資料の所在: header.tex (LHA for OS/2 2.08、平松聡)、LHAHED15.ZIP (立花恵理子)、header.txt (UNLHA32.DLL、Micco)、jLHA Notes・lzhformat.html (ともにスナップショット済み)。
+一次資料の所在: header.tex (LHA for OS/2 2.08、平松聡氏)、LHAHED15.ZIP (立花恵理子氏)、header.txt (UNLHA32.DLL、Micco 氏)、jLHA Notes・lzhformat.html (ともにスナップショット済み)。
 
-- 履歴バッファ (window) サイズは **de facto (lhasa / LHa for UNIX 系) の st1 パラメタに従う**: `-lh4-`/`-lh5-` = 16 KiB (hist_bits 14)、`-lh6-` = 64 KiB (16)、`-lh7-` = 128 KiB (17)。初期 LHA 時代の記述 (jLHA Notes 等) では `-lh5-`=8 KiB / `-lh6-`=32 KiB / `-lh7-`=64 KiB とする一次記述もあり正典値が一意でない。現行主流実装は 16/64/128 KiB 系であり、wire 上は offset_bits が大きいだけで後方互換に decode されるため、本 crate は lhasa 系を採用する (実装: `st1.rs` の `hist_bits` 表)。
+- 履歴バッファ (window) サイズは **de facto (lhasa 系) の st1 パラメタに従う**: `-lh4-`/`-lh5-` = 16 KiB (hist_bits 14)、`-lh6-` = 64 KiB (16)、`-lh7-` = 128 KiB (17)。元祖 LHa for UNIX の定数 (`lha_macro.h`) は `-lh4-`=4 KiB (dicbit 12) / `-lh5-`=8 KiB (13) / `-lh6-`=32 KiB (15) / `-lh7-`=64 KiB (16) であり正典値が一意でない。lhasa は `-lh4-` と `-lh5-` を同一 decoder (14bit) で処理する。wire 上は offset code の range が広いだけで、旧来の小さい window で書かれたストリームは大きい ring で後方互換に decode されるため、本 crate は lhasa 値を採用する (実装: `st1.rs` の `hist_bits` 表)。bitstream 構造 (block 頭の 16bit command count + temp/main/offset 3 テーブル + alphabet 510 + `distance = (1<<(j-1)) + getbits(j-1)`) は奥村氏の `ar002` (PD) が一次定義。
+- **encoder window の既知制約**: `st1_enc` は `window = 1 << hist_bits` で greedy parse するため、`-lh5-` で最大 16383 の distance を出力しえる。元祖 LHa for UNIX 系 decoder (de jure 値: `-lh5-`=8 KiB ring、`-lh6-`=32 KiB、`-lh7-`=64 KiB) は自身の window を超える distance を正しく decode できない可能性があるため、本 crate が emit するアーカイブは **現代の decoder (lhasa 系 16/64/128 KiB、本 crate 自身) では正しいが、厳密な旧実装との相互運用は保証しない**。wire format 自体は ar002 の alphabet 範囲内で合法であり、現行挙動はこの割り切りを意図的に維持する (旧実装互換が必要になった場合は encoder window を de jure 値に制限する修正が必要)。
 
 ### 実装メモ
 
@@ -139,4 +140,4 @@ LHA 系の「独自拡張」は出自が分散している。出典別に整理�
 - dir エントリ (`-lhd-`) は filename 部を空にし、フルパスを ext `0x02` (level-0 は name field) に末尾区切り付きで書く。level-1/2 では OS id `U` を発行するが UNIX ext (0x50/0x51/0x54) は発行しない。
 - level 0/1 の mtime フィールドは DOS time、level 2/3 は UNIX time をそのまま格納する。
 - level-3 エンコーダは先頭 `u16 word_size=4` (固定) + u32 packed/orig + u32 ext チェーン (0x00 header-CRC → 0x01 filename → 0x02 dir の順、各エントリの u32 size は size フィールド自身 + type + payload を含む) を出力し、packed フィールドには実バイト数 (skip size ではない) を書く。
-- 圧縮メソッドエンコーダ (`with_method` の `-lh4-`〜`-lh7-`) は `compress::lzh::st1_enc` 共有実装 (greedy hash-chain + 頻度ベース Huffman、ARJ method 1-3 と共用)。stored alias `-lz4-`/`-pm0-` は wire 上 `-lh0-` と同型のためタグのみ付け替えて受理する。
+- 圧縮メソッドエンコーダ (`with_method` の `-lh4-`〜`-lh7-`) は `compress::lzh::st1_enc` 共有実装 (greedy hash-chain + 頻度ベース Huffman、ARJ method 1-3 と共用)。stored alias `-lz4-`/`-pm0-` は wire 上 `-lh0-` と同型のためタグのみ付け替えて受理する。encoder の window は de facto (lhasa) 値で動作し、元祖 LHa decoder の de jure window を超える distance を emit しえる点は上記「encoder window の既知制約」を参照。

@@ -3,7 +3,8 @@
 //! Implements the decompression algorithm used by PKWARE's Data Compression
 //! Library.  This is distinct from ZIP Method 6 (Imploding / APPNOTE SS5.3).
 //!
-//! The reference implementation is Mark Adler's `blast.c`.  The format uses:
+//! The reference implementation is Mark Adler's `blast.c` (zlib
+//! license); this file is a modified reimplementation.  The format uses:
 //! - A two-byte header: literal-tree flag (byte), dictionary-size parameter (byte)
 //! - Three Huffman code tables: literal (256 symbols), length (16 symbols),
 //!   distance (64 symbols)

@@ -5,13 +5,15 @@
 //!
 //! - header levels 0, 1, 2, and 3 for reading;
 //! - methods `-lh0-` (stored), `-lhd-` (directory marker, no data),
-//!   `-lh1-` (adaptive Huffman, 4 KiB ring), `-lh2-` (dynamic Huffman,
-//!   8 KiB ring), `-lh3-` (static Huffman "st0", 8 KiB ring),
-//!   `-lh4-` through `-lh7-` (static Huffman "st1", 16/64/128 KiB
-//!   rings), LArc `-lzs-`/`-lz4-`/`-lz5-`, and PMarc
-//!   `-pm0-`/`-pm1-`/`-pm2-`; `-lz4-` and `-pm0-` are stored
-//!   variants. Every other method (`-lhx-`, ...) is rejected with
-//!   [Error::Unsupported];
+//!   `-lh4-` through `-lh7-` (Okumura "st1" static Huffman, de
+//!   facto 16/64/128 KiB rings), LArc `-lzs-`/`-lz4-`/`-lz5-`,
+//!   and PMarc `-pm0-`/`-pm1-`/`-pm2-`; `-lz4-` and `-pm0-` are
+//!   stored variants. `-lh1-`/`-lh2-`/`-lh3-` are intentionally
+//!   unsupported (their only references are `lzhuf.c`, which
+//!   carries no explicit license grant, and LHa for UNIX
+//!   `dhuf.c`/`shuf.c`, which sit under non-OSI redistribution
+//!   terms). Every other method (`-lhx-`, ...) is likewise
+//!   rejected with [Error::Unsupported];
 //! - writing emits `-lh0-`/`-lhd-` entries at header level 0, 1, 2, or 3
 //!   (`LhaEncoder::with_level`), or `-lz4-`/`-pm0-` stored-alias and
 //!   static-Huffman `-lh4-`/`-lh5-`/`-lh6-`/`-lh7-` file entries via
@@ -44,9 +46,6 @@ pub mod decode;
 pub mod encode;
 mod larc;
 mod larc_enc;
-mod lzh_dyn;
-mod lzh_st0;
-mod lzhuf;
 mod pmarc;
 
 /// Codec struct for trait-based LHA decode operations.

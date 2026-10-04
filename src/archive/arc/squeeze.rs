@@ -18,9 +18,10 @@
 //! (same packing as method 3) that expands to the member data.
 //!
 //! De-facto format references for the CP/M `SQ`/`USQ` lineage:
-//! nomarch `readhuff.c`, XADMaster `XADSqueezeHandle` (observation
-//! only), and compcol `arc_squeeze` (MIT — wire-format documentation
-//! and decoder structure adapted; the encoder is crate-original).
+//! XADMaster `XADSqueezeHandle` (observation only) and compcol
+//! `arc_squeeze` (MIT — wire-format documentation and decoder
+//! structure adapted; the encoder is crate-original). nomarch is a
+//! test-time oracle only, not an implementation reference.
 
 use alloc::vec;
 use alloc::vec::Vec;

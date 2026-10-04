@@ -1,3 +1,6 @@
+// Ported from ppmd-rust (CC0-1.0 OR MIT-0); see the `compress::ppmd`
+// module docs and THIRD_PARTY_NOTICES section 3.
+
 #![allow(unsafe_op_in_unsafe_fn)]
 
 mod decoder;
