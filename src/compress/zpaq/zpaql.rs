@@ -27,9 +27,12 @@ use alloc::vec::Vec;
 
 use crate::error::Error;
 
-/// Instruction budget for a single `run` call. Upstream loops until
-/// HALT without a bound; a malformed program would hang the decoder.
-const MAX_CYCLES: u32 = 1 << 24;
+/// Instruction budget for a single `run` call. Upstream `ZPAQL::run`
+/// loops until HALT without a bound; a malformed program would hang
+/// the decoder. The largest legitimate program observed (a `zpaq -m3`
+/// PCOMP EOS flush) needed ~16.78M ops, so 256M leaves 15x headroom
+/// while still bounding hostile programs.
+const MAX_CYCLES: u32 = 1 << 28;
 
 /// In-memory gap between the COMP section and the program region.
 const HEADER_GAP: usize = 128;
@@ -262,6 +265,18 @@ impl Zpaql {
         z.hend = z.hbegin + program.len();
         z.header[z.hbegin..z.hend].copy_from_slice(program);
         Ok(z)
+    }
+
+    /// Set the `ph`/`pm` PCOMP memory-size fields of a built header
+    /// (encoder side; upstream `pz.initp()` reads these at decode).
+    pub(crate) fn set_pcomp_mem(&mut self, ph: u8, pm: u8) {
+        self.header[4] = ph;
+        self.header[5] = pm;
+    }
+
+    /// The `ph`/`pm` PCOMP memory-size fields.
+    pub(crate) fn pcomp_mem(&self) -> (u8, u8) {
+        (self.header[4], self.header[5])
     }
 
     /// Number of predictor components (`n` field).

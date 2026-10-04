@@ -50,6 +50,7 @@ pub(crate) const ZPAQ_TAG: [u8; 13] = [
 pub struct CustomModel {
     level_byte: u8,
     z: Zpaql,
+    pcomp: Option<Vec<u8>>,
 }
 
 impl CustomModel {
@@ -89,7 +90,42 @@ impl CustomModel {
         }
         // Exercise component allocation/table validation now.
         let _ = Predictor::new(z.clone())?;
-        Ok(Self { level_byte, z })
+        Ok(Self {
+            level_byte,
+            z,
+            pcomp: None,
+        })
+    }
+
+    /// Attach a PCOMP postprocessor program, matching upstream
+    /// `Compressor::postProcess` + `startBlock(config, args, pcomp)`:
+    /// the first segment of the block carries `1` + a 2-byte program
+    /// length + `pcomp`, and `ph`/`pm` are emitted in the block
+    /// header as the PCOMP memory sizes (each at most 32).
+    ///
+    /// The input to [`encode_with_model`] is the *preimage*: decoding
+    /// applies `pcomp` to the decompressed bytes, so callers must
+    /// supply data that `pcomp` transforms into the desired output
+    /// (upstream uses external preprocessors such as E8E9 for this).
+    /// The stored SHA-1 covers the postprocessed output, as upstream
+    /// `verify` mode computes it.
+    ///
+    /// The program is validated by running it through the PCOMP VM
+    /// once with bounded cycles; programs that fail to halt are
+    /// rejected.
+    pub fn with_pcomp(mut self, ph: u8, pm: u8, pcomp: Vec<u8>) -> Result<Self, Error> {
+        if ph > 32 || pm > 32 {
+            return Err(Error::InvalidData("zpaq: invalid PCOMP memory size"));
+        }
+        if pcomp.is_empty() || pcomp.len() > 0xFFFF {
+            return Err(Error::InvalidData("zpaq: invalid PCOMP length"));
+        }
+        let mut pz = Zpaql::set_pcomp_header(ph, pm, &pcomp)?;
+        pz.initp()?;
+        pz.run(0)?;
+        self.z.set_pcomp_mem(ph, pm);
+        self.pcomp = Some(pcomp);
+        Ok(self)
     }
 }
 
@@ -107,9 +143,17 @@ pub(crate) struct BlockEncoder {
     enc: ArithEncoder,
     /// Persistent predictor, created at the first segment.
     pred: Option<Predictor>,
-    /// Whether the first segment's `enc.init()`/PASS flag ran.
+    /// Whether the first segment's `enc.init()`/postprocessor
+    /// selector ran.
     started: bool,
-    /// SHA-1 of the current segment's input data.
+    /// PCOMP program emitted as a PROG selector on the first segment
+    /// (upstream `postProcess`).
+    pcomp: Option<Vec<u8>>,
+    /// PCOMP VM running over the compressed payload to hash the
+    /// postprocessed output (upstream `verify` mode: `pz.sha1`).
+    /// Persists across the block's segments.
+    pz: Option<Zpaql>,
+    /// SHA-1 of the current segment's postprocessed data.
     sha1: crate::util::sha1::Sha1,
 }
 
@@ -132,6 +176,8 @@ impl BlockEncoder {
             enc: ArithEncoder::new(),
             pred: None,
             started: false,
+            pcomp: None,
+            pz: None,
             sha1: crate::util::sha1::Sha1::new(),
         })
     }
@@ -165,23 +211,56 @@ impl BlockEncoder {
         out.push(0); // reserved byte
         if !self.started {
             // Upstream `postProcess`: initialize coder+predictor at the
-            // first segment, then arithmetic-code the PASS selector (0)
-            // meaning "no postprocessor program".
+            // first segment, then arithmetic-code the postprocessor
+            // selector (`0` = PASS, or `1` + 2-byte length + program
+            // for PROG). The selector appears only on a block's first
+            // segment; the loaded program applies to the whole block.
             let pred = Predictor::new(self.z.clone())?;
             if !pred.is_modeled() {
                 self.enc.init_stored();
             }
             self.pred = Some(pred);
             self.started = true;
-            self.compress_byte(0)?;
+            if let Some(prog) = self.pcomp.clone() {
+                self.compress_byte(1)?;
+                self.compress_byte((prog.len() & 0xff) as i32)?;
+                self.compress_byte(((prog.len() >> 8) & 0xff) as i32)?;
+                for &b in &prog {
+                    self.compress_byte(i32::from(b))?;
+                }
+                let (ph, pm) = self.z.pcomp_mem();
+                let mut pz = Zpaql::set_pcomp_header(ph, pm, &prog)?;
+                pz.initp()?;
+                self.pz = Some(pz);
+            } else {
+                self.compress_byte(0)?;
+            }
         }
+        // Upstream `verify` mode: the stored checksum covers the
+        // postprocessed output, so feed the payload through the PCOMP
+        // VM (including the end-of-segment run) when one is attached.
         self.sha1 = crate::util::sha1::Sha1::new();
-        self.sha1.update(data);
-        for &b in data {
-            self.compress_byte(i32::from(b))?;
+        if self.pz.is_some() {
+            let mut pz = self.pz.take().expect("checked");
+            let mut processed = Vec::with_capacity(data.len());
+            for &b in data {
+                self.compress_byte(i32::from(b))?;
+                pz.run(u32::from(b))?;
+                processed.extend_from_slice(&pz.take_output());
+            }
+            self.compress_byte(-1)?;
+            pz.run(u32::MAX)?;
+            processed.extend_from_slice(&pz.take_output());
+            self.sha1.update(&processed);
+            self.pz = Some(pz);
+        } else {
+            self.sha1.update(data);
+            for &b in data {
+                self.compress_byte(i32::from(b))?;
+            }
+            // EOS
+            self.compress_byte(-1)?;
         }
-        // EOS
-        self.compress_byte(-1)?;
         out.extend_from_slice(&self.enc.take());
         out.extend_from_slice(&[0, 0, 0, 0]);
         out.push(253);
@@ -251,6 +330,7 @@ pub fn encode(input: &[u8], level: u32) -> Vec<u8> {
 /// Compress data using a validated custom ZPAQ model.
 pub fn encode_with_model(input: &[u8], model: &CustomModel) -> Result<Vec<u8>, Error> {
     let mut block = BlockEncoder::new(model.z.clone(), model.level_byte)?;
+    block.pcomp = model.pcomp.clone();
     let mut output = Vec::new();
     block.write_block_header(&mut output);
     block.encode_segment(&mut output, b"", b"", input)?;

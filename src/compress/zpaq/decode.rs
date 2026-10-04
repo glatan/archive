@@ -590,6 +590,42 @@ mod tests {
         assert_eq!(decode(&enc).unwrap(), input);
     }
 
+    /// A CustomModel with a PCOMP postprocessor (`a++ out halt`):
+    /// the encoder compresses the preimage and the decoder applies
+    /// the program, so input minus one roundtrips to input plus the
+    /// end-of-segment output byte upstream also produces (0x00 for
+    /// this program).
+    #[test]
+    fn custom_model_pcomp_roundtrip() {
+        let input = include_bytes!("../../../tests/fixtures/zpaq/hello.txt");
+        // n=3: CONST(128), CM(sizebits=4, limit=100), AVG(j=0, k=1, wt=0).
+        let comp = vec![3, 1, 128, 2, 4, 100, 5, 0, 1, 0];
+        let model = crate::compress::zpaq::encode::CustomModel::new(1, 8, 8, comp, vec![56])
+            .expect("cm/avg model")
+            .with_pcomp(8, 8, vec![1, 57, 56])
+            .expect("pcomp");
+        let preimage: Vec<u8> = input.iter().map(|b| b.wrapping_sub(1)).collect();
+        let enc = crate::compress::zpaq::encode::encode_with_model(&preimage, &model).unwrap();
+        let mut expected = input.to_vec();
+        expected.push(0);
+        assert_eq!(decode(&enc).unwrap(), expected);
+    }
+
+    /// `with_pcomp` rejects invalid memory sizes, empty/oversized
+    /// programs, and programs that fail to halt.
+    #[test]
+    fn custom_model_pcomp_validation() {
+        use crate::compress::zpaq::encode::CustomModel;
+        let model = || CustomModel::new(2, 0, 0, vec![0], vec![56]).expect("model");
+        assert!(model().with_pcomp(33, 0, vec![56]).is_err());
+        assert!(model().with_pcomp(0, 33, vec![56]).is_err());
+        assert!(model().with_pcomp(0, 0, Vec::new()).is_err());
+        assert!(model().with_pcomp(0, 0, vec![0u8; 0x10000]).is_err());
+        // `a++` without HALT never terminates.
+        assert!(model().with_pcomp(0, 0, vec![1]).is_err());
+        assert!(model().with_pcomp(0, 0, vec![56]).is_ok());
+    }
+
     /// Dev-only interop helper: writes edge-case encoder output plus
     /// a multi-segment archive under /tmp for the upstream oracle.
     /// Run with ZPAQ_DUMP=1.
@@ -642,6 +678,20 @@ mod tests {
         enc.add_file("a.txt", b"alpha payload");
         enc.add_file_with_comment("b.txt", "note", b"beta payload!");
         std::fs::write("/tmp/zpaq_rust_multi.zpaq", enc.finish().unwrap()).unwrap();
+        // PROG stream: a++ out halt PCOMP over a minus-one preimage,
+        // so upstream decode must yield the original data + 0x00.
+        let input = b"hello, pcomp!";
+        let comp = vec![3, 1, 128, 2, 4, 100, 5, 0, 1, 0];
+        let model = crate::compress::zpaq::encode::CustomModel::new(1, 8, 8, comp, vec![56])
+            .unwrap()
+            .with_pcomp(8, 8, vec![1, 57, 56])
+            .unwrap();
+        let preimage: Vec<u8> = input.iter().map(|b| b.wrapping_sub(1)).collect();
+        std::fs::write(
+            "/tmp/zpaq_rust_pcomp.zpaq",
+            crate::compress::zpaq::encode::encode_with_model(&preimage, &model).unwrap(),
+        )
+        .unwrap();
     }
 
     /// Malformed/truncated inputs must fail cleanly; garbage without a

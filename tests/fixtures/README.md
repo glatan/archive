@@ -248,7 +248,11 @@
   - upstream decoder は EOS の `run(-1)` で OUT が 1 回多く実行されるため末尾に 0xFF が付く — その挙動も含めて検証する
 - `hello.upstream-pcomp-inc.zpaq` / `hello.upstream-pcomp-inc.bin`
   - 非 identity PCOMP (`a++; out; halt`) を載せた upstream stream と、upstream 自身の decode 出力
-- 生成手順: `.local/refs/libzpaq/` (gitignored) の `harness*.cpp` を upstream `libzpaq.cpp` と `-DNOJIT` でコンパイルした oracle を使用。逆方向 (crate 生成 → upstream decode) の検証は `ZPAQ_DUMP=1 cargo test` の dump helper + oracle で再現可能
+- `jidac-m3-heavy-pcomp.upstream.zpaq`
+  - upstream `zpaq` CLI v7.15 の `zpaq a fixture.zpaq s400.bin -m3 -threads 1` で生成した JIDAC journaling archive (内部 filename `s400.bin`、409,600 バイト)
+  - この archive の PCOMP は EOS (`run(-1)`) で 16,780,266 cycle を要し、旧 cycle limit (1<<24) を超過する — `original-compress` fuzz で検出した境界ケース (seed 1791135713545052870 iter 61) の回帰固定
+  - `decode_upstream_jidac_heavy_pcomp` が decode して SHA-1 で内容を検証
+- 生成手順: `.local/refs/libzpaq/` (gitignored) の `harness*.cpp` を upstream `libzpaq.cpp` と `-DNOJIT` でコンパイルした oracle、およびコンテナの upstream `zpaq` CLI (`pkg/zpaq`) を使用。逆方向 (crate 生成 → upstream decode) の検証は `ZPAQ_DUMP=1 cargo test` の dump helper + oracle、`ZPAQ_JIDAC_IN=<path>` 環境変数の JIDAC decode helper で再現可能
 
 ### `fuzz/`
 

@@ -384,22 +384,19 @@ pub fn decode_to_writer<R: std::io::Read, W: std::io::Write>(
         }
         let chunk_size = read_le_n_from_reader(&mut reader, chunk_bytes)?;
 
-        let mut stream_headers = [(0u8, 0u64, 0u64); NUM_STREAMS];
-        for header in &mut stream_headers {
+        // Upstream stream headers are placeholder entries
+        // (CTYPE_NONE + zero lengths); the real ctype lives in each block
+        // header. The header fields are consumed but not validated.
+        for _ in 0..NUM_STREAMS {
             let mut ctype = [0u8; 1];
             reader.read_exact(&mut ctype)?;
-            *header = (
-                ctype[0],
-                read_le_n_from_reader(&mut reader, chunk_bytes)?,
-                read_le_n_from_reader(&mut reader, chunk_bytes)?,
-            );
+            let _c_len = read_le_n_from_reader(&mut reader, chunk_bytes)?;
+            let _u_len = read_le_n_from_reader(&mut reader, chunk_bytes)?;
             let _last_head = read_le_n_from_reader(&mut reader, chunk_bytes)?;
         }
 
         let mut stream_data = [Vec::new(), Vec::new()];
-        for (stream_index, &(header_ctype, header_c_len, header_u_len)) in
-            stream_headers.iter().enumerate()
-        {
+        for slot in stream_data.iter_mut().take(NUM_STREAMS) {
             let mut ctype = [0u8; 1];
             reader.read_exact(&mut ctype)?;
             let block_ctype = ctype[0];
@@ -411,20 +408,11 @@ pub fn decode_to_writer<R: std::io::Read, W: std::io::Write>(
                     "lrzip: streaming decode does not support multi-block chunks",
                 )));
             }
-            if block_ctype != header_ctype
-                || (header_c_len != 0 && block_c_len != header_c_len)
-                || (header_u_len != 0 && block_u_len != header_u_len)
-            {
-                return Err(std::io::Error::from(Error::InvalidData(
-                    "lrzip: stream header/block header mismatch",
-                )));
-            }
 
             let mut block_data = vec![0u8; block_c_len as usize];
             reader.read_exact(&mut block_data)?;
-            stream_data[stream_index] =
-                decompress_block(&block_data, block_ctype, dict_size, lzma_props, block_u_len)
-                    .map_err(std::io::Error::from)?;
+            *slot = decompress_block(&block_data, block_ctype, dict_size, lzma_props, block_u_len)
+                .map_err(std::io::Error::from)?;
         }
 
         if chunk_size == 0 && stream_data[0].len() == 4 && stream_data[1].is_empty() {

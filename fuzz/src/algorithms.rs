@@ -715,7 +715,15 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
         Algorithm::Rzip => rzip::decode::decode(data),
         Algorithm::Zlib => zlib::decode::decode(data),
         Algorithm::Zpaq | Algorithm::ZpaqLevel2 | Algorithm::ZpaqLevel3 => {
-            zpaq::decode::decode(data)
+            // The upstream `zpaq` CLI produces JIDAC journaling
+            // archives whose metadata segments would pollute a raw
+            // payload decode; decode those at the journal layer and
+            // concatenate file contents (the oracle archives contain
+            // exactly one file).
+            match archive::archive::zpaq::jidac::decode_jidac(data) {
+                Ok(journal) => Ok(journal.files.into_iter().flat_map(|f| f.data).collect()),
+                Err(_) => zpaq::decode::decode(data),
+            }
         }
         Algorithm::Ar | Algorithm::ArBsd => {
             let entries = ar::decode::decode(data)?;
