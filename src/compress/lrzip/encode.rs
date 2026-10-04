@@ -222,13 +222,15 @@ fn write_chunk(output: &mut Vec<u8>, chunk: &[u8], is_last: bool, compression: C
     let s1_block_offset = data_start + block_header_size + s0_compressed.len();
 
     // ── Stream 0 header ─────────────────────────────────────────
-    output.push(s0_ctype);
+    // Upstream writes CTYPE_NONE + zero lengths in stream headers; the
+    // real ctype lives in the data block header (stream.c open_stream_out).
+    output.push(CTYPE_NONE);
     rzip::encode::write_le_n(output, 0u64, cb);
     rzip::encode::write_le_n(output, 0u64, cb);
     rzip::encode::write_le_n(output, s0_block_offset as u64, cb);
 
     // ── Stream 1 header ─────────────────────────────────────────
-    output.push(s1_ctype);
+    output.push(CTYPE_NONE);
     rzip::encode::write_le_n(output, 0u64, cb);
     rzip::encode::write_le_n(output, 0u64, cb);
     rzip::encode::write_le_n(output, s1_block_offset as u64, cb);
@@ -306,6 +308,9 @@ fn write_empty_chunk(output: &mut Vec<u8>) {
     let crc = rzip::legacy_crc32(&[]);
     let mut stream0 = Vec::new();
     stream0.extend_from_slice(&crc.to_le_bytes());
+    // Upstream emits a zero-length literal token after the CRC even for
+    // empty input; without it the upstream token parser runs out of stream.
+    stream0.extend_from_slice(&[0, 0, 0]);
     let stream_header_size = 1 + 3 * cb;
     let data_start = NUM_STREAMS * stream_header_size;
 
@@ -648,6 +653,61 @@ mod tests {
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0], (4, CHUNK_MULTIPLE, false));
         assert_eq!(chunks[1], (1, 64, true));
+    }
+
+    /// Upstream wire layout: stream headers are CTYPE_NONE placeholders;
+    /// the real ctype lives in each data block header (stream.c
+    /// open_stream_out). Writing the backend ctype into stream headers
+    /// made system `lrzip -d` reject our files with "Unexpected initial
+    /// tag".
+    #[test]
+    fn test_stream_headers_emit_ctype_none_upstream_layout() {
+        fn le_n(bytes: &[u8]) -> usize {
+            bytes
+                .iter()
+                .rev()
+                .fold(0usize, |acc, b| (acc << 8) | *b as usize)
+        }
+        // Sequential printable data compresses stream1 with the backend.
+        let mut data = Vec::new();
+        for b in 0..=255u8 {
+            data.extend_from_slice(b.to_string().as_bytes());
+            data.push(b' ');
+        }
+        let compressed = encode_with(&data, CompressionType::Zpaq);
+        // Chunk starts at offset 24 (after the magic header).
+        let base = 24usize;
+        let cb = compressed[base] as usize;
+        assert_eq!(compressed[base + 1], 1); // eof
+        let s0 = base + 2 + cb; // cb + eof + chunk_len(cb)
+        let s1 = s0 + 1 + 3 * cb;
+        assert_eq!(compressed[s0], CTYPE_NONE);
+        assert_eq!(compressed[s1], CTYPE_NONE);
+        // Stream-1 header last_head -> block header must carry CTYPE_ZPAQ.
+        let lh = le_n(&compressed[s1 + 1 + 2 * cb..s1 + 1 + 3 * cb]);
+        let block = s0 + lh;
+        assert_eq!(compressed[block], CTYPE_ZPAQ);
+        assert_eq!(super::super::decode::decode(&compressed).unwrap(), data);
+    }
+
+    /// Upstream emits a zero-length literal token after the CRC in an
+    /// empty stream0; without it system `lrzip -d` reports "Stream ran
+    /// out prematurely".
+    #[test]
+    fn test_empty_input_stream0_matches_upstream_layout() {
+        let compressed = encode_with(&[], CompressionType::Zpaq);
+        let base = 24usize;
+        let cb = compressed[base] as usize;
+        assert_eq!(cb, 1);
+        let s0 = base + 2 + cb;
+        let lh = compressed[s0 + 1 + 2 * cb] as usize;
+        let block = s0 + lh;
+        // s0 block: CTYPE_NONE, c_len = u_len = 7 (crc + 3-byte token).
+        assert_eq!(compressed[block], CTYPE_NONE);
+        assert_eq!(compressed[block + 1], 7);
+        assert_eq!(compressed[block + 2], 7);
+        assert_eq!(compressed[block + 3], 0);
+        assert_eq!(super::super::decode::decode(&compressed).unwrap(), b"");
     }
 
     #[test]
