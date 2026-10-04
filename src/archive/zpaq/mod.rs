@@ -9,7 +9,7 @@
 //!
 //! Current scope includes:
 //! - basic multi-entry archives via `ZpaqEncoder`
-//! - same-block append workflows that reuse an existing parsed header/model
+//! - append-as-new-block workflows that reuse an existing parsed header/model
 //! - crate-local journaling transactions via `ZpaqJournalEncoder`
 //!   together with `decode_journal_latest` / `decode_journal_versions`
 //! - materialized archive editing via `ZpaqArchiveEditor`, including

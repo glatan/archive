@@ -230,6 +230,26 @@
 - `payload.bin`
   - 上記 fixture の入力データ (crate 提供)
 
+### `zpaq/`
+
+- `hello.txt`
+  - 元データは ASCII 文字列 (68 バイト)
+- `hello.upstream-l1.zpaq` / `hello.upstream-l2.zpaq` / `hello.upstream-l3.zpaq`
+  - `hello.txt` を upstream libzpaq v7.15 (`Compressor::startBlock(level)`) で圧縮したもの
+  - wire 互換の正方向 (upstream 生成 → crate decode) 回帰用
+- `empty.upstream-l1.zpaq`
+  - 空入力を upstream level 1 で圧縮したもの
+- `bin.upstream-l1.zpaq` / `bin.bin`
+  - 4,864 バイトのバイナリデータ (全 byte 値を含む) を upstream level 1 で圧縮したものと元データ
+- `hello.upstream-stored.zpaq`
+  - `n=0` の unmodeled header (HCOMP = HALT のみ) で stored-mode 出力したもの
+- `hello.upstream-pcomp-id.zpaq`
+  - PROG segment に identity PCOMP (`out; halt`) を載せた upstream stream
+  - upstream decoder は EOS の `run(-1)` で OUT が 1 回多く実行されるため末尾に 0xFF が付く — その挙動も含めて検証する
+- `hello.upstream-pcomp-inc.zpaq` / `hello.upstream-pcomp-inc.bin`
+  - 非 identity PCOMP (`a++; out; halt`) を載せた upstream stream と、upstream 自身の decode 出力
+- 生成手順: `.local/refs/libzpaq/` (gitignored) の `harness*.cpp` を upstream `libzpaq.cpp` と `-DNOJIT` でコンパイルした oracle を使用。逆方向 (crate 生成 → upstream decode) の検証は `ZPAQ_DUMP=1 cargo test` の dump helper + oracle で再現可能
+
 ### `fuzz/`
 
 このディレクトリのフィクスチャは、ファズテストで検出された不具合を再現するための最小化入力である。

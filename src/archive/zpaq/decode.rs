@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use crate::compress::zpaq::decode::{decode_segment_at, parse_block_header};
+use crate::compress::zpaq::decode::{BlockDecoder, DecodedSegment, parse_block_header_at};
 use crate::error::Error;
 
 pub(crate) const ZPAQ_JOURNAL_ENTRY_PREFIX: &[u8] = b"@zpaqj1:";
@@ -68,20 +68,37 @@ pub struct ZpaqJournalVersion {
 /// assert_eq!(entries[1].comment_utf8(), Some("note"));
 /// ```
 pub fn decode(input: &[u8]) -> Result<Vec<ZpaqEntry>, Error> {
-    let header = parse_block_header(input)?;
-    let mut pos = header.next_pos;
     let mut entries = Vec::new();
-
-    while let Some(segment) = decode_segment_at(input, pos, &header)? {
+    for_each_segment(input, |segment| {
         entries.push(ZpaqEntry {
-            filename: segment.filename,
-            comment: segment.comment,
-            data: segment.data,
+            filename: segment.filename.clone(),
+            comment: segment.comment.clone(),
+            data: segment.data.clone(),
         });
-        pos = segment.next_pos;
-    }
-
+        Ok(())
+    })?;
     Ok(entries)
+}
+
+/// Run `f` over every segment of every block in `input`, in stream
+/// order. Predictor/arithmetic state is shared across the segments of
+/// each block exactly like upstream `Decompresser`.
+fn for_each_segment(
+    input: &[u8],
+    mut f: impl FnMut(&DecodedSegment) -> Result<(), Error>,
+) -> Result<(), Error> {
+    let mut start = 0;
+    while let Some(header) = parse_block_header_at(input, start)? {
+        let mut block = BlockDecoder::new(input, &header, usize::MAX)?;
+        while let Some(segment) = block.next_segment()? {
+            f(&segment)?;
+        }
+        start = block.end_pos();
+    }
+    if start == 0 {
+        return Err(Error::InvalidData("zpaq: no block locator found"));
+    }
+    Ok(())
 }
 
 /// Decode the latest visible view of a crate-local journaling archive.
@@ -97,21 +114,14 @@ pub fn decode_journal_latest(input: &[u8]) -> Result<Vec<ZpaqEntry>, Error> {
 
 /// Decode all committed journaling snapshots in commit order.
 pub fn decode_journal_versions(input: &[u8]) -> Result<Vec<ZpaqJournalVersion>, Error> {
-    let header = parse_block_header(input)?;
-    let mut pos = header.next_pos;
     let mut visible = Vec::new();
     let mut pending = Vec::new();
     let mut versions = Vec::new();
 
-    loop {
-        let segment = match decode_segment_at(input, pos, &header) {
-            Ok(Some(segment)) => segment,
-            Ok(None) => break,
-            Err(Error::UnexpectedEof) => break,
-            Err(err) => return Err(err),
-        };
-        pos = segment.next_pos;
-        match parse_journal_segment(&segment)? {
+    let mut saw_segment = false;
+    let result = for_each_segment(input, |segment| {
+        saw_segment = true;
+        match parse_journal_segment(segment)? {
             JournalSegment::Ordinary(entry) => {
                 if !pending.is_empty() {
                     return Err(Error::InvalidData(
@@ -137,6 +147,14 @@ pub fn decode_journal_versions(input: &[u8]) -> Result<Vec<ZpaqJournalVersion>, 
                 });
             }
         }
+        Ok(())
+    });
+    match result {
+        Ok(()) => {}
+        // A truncated tail (e.g. an interrupted append) leaves the last
+        // committed versions readable, matching prior behavior.
+        Err(Error::UnexpectedEof) if saw_segment => {}
+        Err(err) => return Err(err),
     }
 
     Ok(versions)
@@ -294,17 +312,19 @@ mod tests {
         journal.put_file("alpha.txt", b"one");
         let mut archive = journal.finish().unwrap();
 
+        // Build a second block holding one journal put without its
+        // commit segment: take the tail archive's first segment and
+        // terminate its block immediately.
         let mut tail = ZpaqJournalEncoder::new(1);
         tail.put_file("beta.txt", b"two");
         let tail_archive = tail.finish().unwrap();
-        let tail_header = parse_block_header(&tail_archive).unwrap();
-        let first_tail_segment =
-            decode_segment_at(&tail_archive, tail_header.next_pos, &tail_header)
-                .unwrap()
-                .unwrap();
-        archive.pop();
-        archive.extend_from_slice(&tail_archive[tail_header.next_pos..first_tail_segment.next_pos]);
-        archive.push(0xFF);
+        let tail_header = crate::compress::zpaq::decode::parse_block_header(&tail_archive).unwrap();
+        let mut tail_dec = BlockDecoder::new(&tail_archive, &tail_header, usize::MAX).unwrap();
+        assert!(tail_dec.next_segment().unwrap().is_some());
+        let first_seg_end = tail_dec.end_pos();
+        let mut tail_block = tail_archive[..first_seg_end].to_vec();
+        tail_block.push(0xFF);
+        archive.extend_from_slice(&tail_block);
 
         let versions = decode_journal_versions(&archive).unwrap();
         assert_eq!(versions.len(), 1);

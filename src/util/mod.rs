@@ -53,13 +53,14 @@ pub(crate) mod crc64;
 pub(crate) mod sha256;
 
 /// SHA-1 for ZIP AES key derivation, git pack object IDs/checksums,
-/// WARC digests, and PEA integrity tags.
+/// WARC digests, PEA integrity tags, and ZPAQ segment checksums.
 #[cfg(any(
     feature = "zip",
     feature = "git-pack",
     feature = "xar",
     feature = "warc",
-    feature = "pea"
+    feature = "pea",
+    feature = "zpaq"
 ))]
 pub(crate) mod sha1;
 
