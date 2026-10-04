@@ -32,6 +32,12 @@ enum ArchiveSpec {
         format_args: &'static [&'static str],
     },
     Cpio,
+    /// Upstream `zpaq` CLI (file-based JIDAC archiver). `method` is the
+    /// `-mN` compression-level flag (0..5) selecting upstream model
+    /// configs.
+    Zpaq {
+        method: &'static str,
+    },
 }
 
 const EXTERNAL_TOOL_TIMEOUT_SECS: u64 = 30;
@@ -242,7 +248,9 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
         Algorithm::Snappy => None,
         Algorithm::Rzip => None,
         Algorithm::Zlib => None,
-        Algorithm::Zpaq | Algorithm::ZpaqLevel2 | Algorithm::ZpaqLevel3 => None,
+        Algorithm::Zpaq => Some(ExternalSpec::Archive(ArchiveSpec::Zpaq { method: "-m1" })),
+        Algorithm::ZpaqLevel2 => Some(ExternalSpec::Archive(ArchiveSpec::Zpaq { method: "-m3" })),
+        Algorithm::ZpaqLevel3 => Some(ExternalSpec::Archive(ArchiveSpec::Zpaq { method: "-m5" })),
         Algorithm::Ar | Algorithm::ArBsd => Some(ExternalSpec::Archive(ArchiveSpec::Ar)),
         Algorithm::Deb => None,
         Algorithm::Rpm => None,
@@ -342,6 +350,7 @@ fn is_available(algo: Algorithm) -> bool {
         Some(ExternalSpec::Archive(ArchiveSpec::SevenZ { .. })) => sevenz_binary().is_some(),
         Some(ExternalSpec::Archive(ArchiveSpec::Tar { .. })) => which_exists("tar"),
         Some(ExternalSpec::Archive(ArchiveSpec::Cpio)) => which_exists("cpio"),
+        Some(ExternalSpec::Archive(ArchiveSpec::Zpaq { .. })) => which_exists("zpaq"),
         None => false,
     }
 }
@@ -519,6 +528,7 @@ fn run_archive_compress(spec: ArchiveSpec, data: &[u8]) -> Result<Vec<u8>, Strin
         ArchiveSpec::SevenZ { .. } => temp.path().join("sample.7z"),
         ArchiveSpec::Tar { .. } => temp.path().join("sample.tar"),
         ArchiveSpec::Cpio => temp.path().join("sample.cpio"),
+        ArchiveSpec::Zpaq { .. } => temp.path().join("sample.zpaq"),
     };
 
     let archive_name = archive_path.file_name().unwrap().to_str().unwrap();
@@ -559,6 +569,14 @@ fn run_archive_compress(spec: ArchiveSpec, data: &[u8]) -> Result<Vec<u8>, Strin
             );
             run_command_in_dir("sh", &["-c", &shell_cmd], temp.path())?
         }
+        ArchiveSpec::Zpaq { method } => {
+            // -threads 1 for deterministic single-block output.
+            run_command_in_dir(
+                "zpaq",
+                &["a", archive_name, input_name, method, "-threads", "1"],
+                temp.path(),
+            )?
+        }
     }
 
     fs::read(archive_path).map_err(|e| format!("read temp archive failed: {e}"))
@@ -572,6 +590,7 @@ fn run_archive_decompress(spec: ArchiveSpec, data: &[u8]) -> Result<Vec<u8>, Str
         ArchiveSpec::SevenZ { .. } => temp.path().join("sample.7z"),
         ArchiveSpec::Tar { .. } => temp.path().join("sample.tar"),
         ArchiveSpec::Cpio => temp.path().join("sample.cpio"),
+        ArchiveSpec::Zpaq { .. } => temp.path().join("sample.zpaq"),
     };
     fs::write(&archive_path, data).map_err(|e| format!("write temp archive failed: {e}"))?;
 
@@ -606,6 +625,11 @@ fn run_archive_decompress(spec: ArchiveSpec, data: &[u8]) -> Result<Vec<u8>, Str
                 archive_str,
             );
             run_command_capture("sh", &["-c", &shell_cmd], temp.path())
+        }
+        ArchiveSpec::Zpaq { .. } => {
+            run_command_in_dir("zpaq", &["x", archive_str, "-threads", "1"], temp.path())?;
+            fs::read(temp.path().join("sample"))
+                .map_err(|e| format!("read extracted file failed: {e}"))
         }
     }
 }

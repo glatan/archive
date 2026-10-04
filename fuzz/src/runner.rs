@@ -124,9 +124,6 @@ pub fn run(config: &RunConfig) -> Stats {
             Algorithm::Deflate
             | Algorithm::GzipStore
             | Algorithm::Zlib
-            | Algorithm::Zpaq
-            | Algorithm::ZpaqLevel2
-            | Algorithm::ZpaqLevel3
             | Algorithm::Lz4SmallBlock
             | Algorithm::Snappy
             | Algorithm::Rzip
@@ -747,9 +744,6 @@ fn get_patterns(
         Algorithm::Deflate
             | Algorithm::GzipStore
             | Algorithm::Zlib
-            | Algorithm::Zpaq
-            | Algorithm::ZpaqLevel2
-            | Algorithm::ZpaqLevel3
             | Algorithm::Lz4SmallBlock
             | Algorithm::Snappy
             | Algorithm::Rzip
