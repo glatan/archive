@@ -320,8 +320,8 @@ specifications or standards documents:
   port/adaptation of libmspack `qtmd.c` (LGPL-2.1, Stuart Caie), with
   compcol's MIT-licensed port consulted as an intermediate reference.
   Incorporation path: LGPL-2.1 section 3 permits relicensing under
-  GPL-2.0-or-later -> GPL-3.0, combined with this AGPL-3.0 work under
-  AGPL-3.0 section 13.
+  the GPL, including GPL-3.0 directly, combined with this AGPL-3.0
+  work under AGPL-3.0 section 13.
   Test fixtures `tests/fixtures/mscab/lzx_mixed.cab`,
   `lzx_large.cab`, and `quantum_flush.cab` are derived from the
   LZX/Quantum folders of cabextract's test files (libmspack repository
@@ -861,12 +861,25 @@ against de facto reference behavior:
     and multi-segment archives. Upstream-generated fixtures are committed
     under `tests/fixtures/zpaq/`; the oracle harness lives under
     `.local/refs/libzpaq/` (gitignored).
+  - JIDAC journaling support (`src/archive/zpaq/jidac.rs`) was written
+    against the journaling code in upstream `zpaq.cpp` v7.15 (block
+    naming `jDC<date><type><num>`, transaction layout c/d/h/i, global
+    fragment table, deletion records). The upstream `zpaq` CLI (v7.15,
+    installed in the test container via `pkg/zpaq`) was used as a
+    bidirectional oracle: it decodes this crate's JIDAC output
+    (`zpaq l`/`zpaq x`/`zpaq a` append) and this crate decodes
+    CLI-produced multi-transaction archives including deletions and
+    fragment-dedup reuse. The same CLI also serves as the file-based
+    fuzz oracle (`ArchiveSpec::Zpaq`) for `original-compress` and
+    `original-decompress` patterns.
   - Patent note: upstream explicitly states the format is "not encumbered
     by any patents or pending patents" and that all past versions were
     published to establish prior art (zpaq.html)
-  - Repository scope: wire-compatible low-level codec plus a multi-entry
-    archive layer with crate-local journaling; upstream v6.x journaling
-    format semantics and encoder-side PCOMP emission are not claimed
+  - Repository scope: wire-compatible low-level codec (including
+    optional encoder-side PCOMP/PROG emission via CustomModel), a
+    multi-entry archive layer with crate-local journaling, and upstream
+    JIDAC journaling streams (decode plus single-transaction emit;
+    write-side fragment dedup and incremental append are not claimed)
 
 
 4. Bundled tables and static assets
@@ -958,8 +971,8 @@ incorporation:
   `XADLZHOldHandles.m`/`XADLZHStaticHandle`) were removed together
   with the `-lh1-`/`-lh2-`/`-lh3-` decoders; the st1 decoder is now
   documented against Okumura's public-domain `ar002` instead.
-  Incorporated under LGPL-2.1 section 3 -> GPL-2.0-or-later ->
-  GPL-3.0, combined under AGPL-3.0 section 13.
+  Incorporated under GPL-3.0 via LGPL-2.1 section 3, combined
+  under AGPL-3.0 section 13.
 - ARC 5.21 for Unix (hyc/arc, SEA 1985-87 copyright, "under the terms of
   the General Public License" with version unstated — Debian copyright
   records GPL-2, some files GPL-2+; packaged as Debian `arc` 5.21q):
@@ -1027,8 +1040,8 @@ incorporation:
   not transliterated.
 - libmspack `qtmd.c` (Stuart Caie, LGPL-2.1): port source — the de
   facto CAB Quantum decode reference; `mscab/quantum.rs` is a
-  port/adaptation (LGPL-2.1 section 3 -> GPL-2.0-or-later -> GPL-3.0,
-  combined under AGPL-3.0 section 13). No public Quantum encoder is
+  port/adaptation (LGPL-2.1 section 3 -> GPL-3.0, combined under
+  AGPL-3.0 section 13). No public Quantum encoder is
   known to exist.
 - UNARJ 2.41 (Robert K Jung, restricted freeware — NOT freely usable):
   reference/oracle only. Official ARJ decoder for methods 1-4;
