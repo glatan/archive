@@ -4,8 +4,8 @@
 |------|------|
 | 形式概要 | Linux 向け read-only ファイルシステムイメージ。1024B オフセットのスーパーブロック + `meta_blkaddr` 起点の inode メタデータ領域 (32B スロット) + ブロックアラインされたデータ領域 |
 | 基準仕様 | Linux kernel `Documentation/filesystems/erofs.rst` + **canonical on-disk 定義** erofs-utils `include/erofs_fs.h` (MIT、userspace 正本) — いずれも `docs/spec/sources/` にスナップショット。kernel `fs/erofs/erofs_fs.h` も MIT SPDX で pin 済み (`Z_EROFS_LI_HOLE` は kernel 版のみに存在するため併用)。以下 `erofs_fs.h` 引用は erofs-utils `include/erofs_fs.h` を指す |
-| 参照実装 | erofs-utils `mkfs.erofs`/`fsck.erofs` (GPL-2.0+、fixture 生成・交差検証 oracle)。詳細: THIRD_PARTY_NOTICES erofs 項 |
-| 実装 | `archive::archive::erofs::decode` (read のみ)。`erofs` feature 配下 |
+| 参照実装 | erofs-utils `mkfs.erofs`/`fsck.erofs` (GPL-2.0+、fixture 生成・交差検証・encoder 出力検証 oracle + encoder layout の behavioral reference)。詳細: THIRD_PARTY_NOTICES erofs 項 |
+| 実装 | `archive::archive::erofs::{decode, encode::ErofsEncoder, ErofsArchiveEncoder}` (read/write。write は非圧縮 flat layout のみ)。`erofs` feature 配下 |
 
 ## スーパーブロック層
 
@@ -15,7 +15,7 @@
 | 2 | `blkszbits` は 9..=16、`blksz = 1 << blkszbits` | erofs_fs.h `blkszbits`、erofs-utils の検証 | ✅ | decode 時検証 |
 | 3 | `sb_extslots`: superblock size = 128 + slots*16 | erofs_fs.h `EROFS_SB_EXTSLOT_SIZE` | ✅ | decode 時検証 |
 | 4 | `EROFS_FEATURE_COMPAT_SB_CHKSUM`: `blksz - 1024` バイトの CRC32C (checksum フィールド zero、seed ~0、final complement なし) | erofs-utils `erofs_superblock_csum_verify` | ✅ | `test_erofs_rejects_bad_superblock_checksum`、実 mkfs fixture (compat `sb_csum` 付き) で検証 |
-| 5 | `feature_incompat`: 受理側は LZ4_0PADDING(0x01)/COMPR_CFGS(0x02)/COMPR_HEAD2(0x08)/ZTAILPACKING(0x10)/FRAGMENTS・DEDUPE(0x20)/XATTR_PREFIXES(0x40)/48BIT(0x80)。拒否は METABOX(0x100) と `extra_devices≠0` のみ | erofs_fs.h `EROFS_FEATURE_INCOMPAT_*` | ✅ | decode 時検証 (METABOX / extra_devices → `Error::Unsupported`) |
+| 5 | `feature_incompat`: 受理側は LZ4_0PADDING(0x01)/COMPR_CFGS(0x02)/COMPR_HEAD2(0x08)/ZTAILPACKING(0x10)/FRAGMENTS・DEDUPE(0x20)/XATTR_PREFIXES(0x40)/48BIT(0x80)/METABOX(0x100)。拒否は `extra_devices≠0` のみ | erofs_fs.h `EROFS_FEATURE_INCOMPAT_*` | ✅ | decode 時検証 (extra_devices → `Error::Unsupported`) |
 | 6 | `INCOMPAT_48BIT` 時は `rootnid_8b`(offset 112) / `blocks = blocks_lo | blocks_hi<<32` | erofs_fs.h rb union / `rootnid_8b` | ✅ | decode 時分岐 (48bit image は合成されないため小規模イメージでは 16bit 経路) |
 | 7 | `meta_blkaddr`、`xattr_blkaddr`、`volume_name`、`epoch`、`fixed_nsec` の解釈 | erofs_fs.h `erofs_super_block` | ✅ | 全テスト |
 | 33 | sb uuid / build_time / xattr filter 等の付随フィールドの意味解釈 | erofs_fs.h `erofs_super_block` | ✅ | `ErofsImage.superblock` (`ErofsSuperblock`: feature_compat/incompat, inos, blocks, meta/xattr_blkaddr, uuid, epoch, fixed_nsec, build_time, xattr_prefix_count/start, packed_nid, ishare_xattr_prefix_id) + COMPAT_* const 公開。xattr filter 本体は lookup 加速用途のみで解釈不要。`superblock_metadata_fields`, `test_erofs_mkfs_image_superblock` |
@@ -53,19 +53,19 @@
 | 32 | `dirblkbits ≠ 0` の sub-page directory block: dir file を `1<<dirblkbits` 単位で再分割して走査 | erofs_fs.h `dirblkbits` (sb offset 90) | ✅ | 非ゼロ時は sub-page 分割、不正値は `InvalidData`。`dirblksz_subpage_directory`, `rejects_dirblkbits_out_of_range` |
 | 34 | z_erofs tail-packing: `Z_EROFS_ADVISE_INLINE_PCLUSTER` (ZTAILPACKING feature) の inline 末尾データ、`ADVISE_FRAGMENT_PCLUSTER` / `FRAGMENT_INODE_BIT` (FRAGMENTS feature) の packed inode 参照 | erofs_fs.h `z_erofs_map_header` union (`h_idata_size`/`h_fragmentoff`)、erofs.rst | ✅ | feature bit 未設定の wire マーカーは reject。mkfs.erofs `-Eztailpacking`/`-Efragments` fixture 4 件。`ztailpacking_inline_*`, `fragment_*`, `test_erofs_ztailpacking`, `test_erofs_fragments`, `test_erofs_all_fragments`, `test_erofs_ztailpacking_fragments` |
 | 31 | xattr 解釈 (inline/shared/long prefix) | erofs_fs.h `erofs_xattr_ibody_header`/`erofs_xattr_entry`/`erofs_xattr_long_prefix`、erofs.rst | ✅ | `ErofsEntry::xattrs: Vec<ErofsXattr>`。inline entry + shared xattr (xattr_blkaddr 経由) + long prefix (xattr_prefix_start)。metabox 内 shared/long prefix は graceful skip。`xattr_inline_entries`, `xattr_shared_entry`, `rejects_*xattr*` |
+| 30 | erofs write | erofs_fs.h | ✅ | `ErofsEncoder`/`ErofsArchiveEncoder` で非圧縮 flat layout image を生成 (compact/extended inode、INLINE/PLAIN tail、superblock CRC32C、uid/gid/mode)。xattr/ACL、z_erofs 圧縮・chunk・fragment・metabox・multi-device、special file (device/fifo/socket/hardlink) の出力は encoder の scope 外。`roundtrip_*` 各テスト + `test_erofs_encode_fsck_extract` (fsck.erofs oracle) |
 
 ## 意図的な scope 制約
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 29 | METABOX / DEVICE_TABLE (`extra_devices != 0`) / DEDUPE イメージ | ❌ intentional scope | METABOX はメタデータ全体の別アドレッシング、DEVICE_TABLE は外部 blob 参照で単一 `&[u8]` 入力モデルと不整合。METABOX bit (0x100) と `extra_devices != 0` で早期拒否。DEDUPE (0x20) は FRAGMENTS と共用ビットのため受理するが、DEDUPE 固有データは未解釈 |
-| 30 | erofs write | ❌ intentional scope | mkfs.erofs の領域。read が主用途 |
+| 29 | METABOX / DEVICE_TABLE (`extra_devices != 0`) / DEDUPE イメージ | ⚠️ | METABOX (0x100) は decode 対応: `metabox_nid` が指す metabox inode の blob を decode し、dirent nid bit63 付き inode のメタデータと `COMPAT_SHARED_EA_IN_METABOX` の共有 xattr を metabox 空間で解決。`extra_devices != 0` (DEVICE_TABLE) は外部 blob 参照で単一 `&[u8]` 入力モデルと不整合のため `Error::Unsupported` (intentional scope)。DEDUPE (0x20) は受理するが DEDUPE 固有データは未解釈。`metabox_inode_decodes`, `metabox_shared_xattr`, `rejects_metabox_*` 等 |
 
 ## 集計
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 32 |
-| ⚠️ 部分対応  | 0 |
+| ✅ 実装+テスト済み  | 33 |
+| ⚠️ 部分対応  | 1 |
 | ❌ 未対応  | 0 |
 | **合計** | **34** |

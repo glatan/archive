@@ -1,7 +1,9 @@
 //! ARJ archive reading: stored, LZH-static (methods 1-3), and
-//! "fastest" (method 4) members, garbled (password) entries, and
-//! multi-volume archives via [`decode_parts`] (with `std`,
-//! `volume_paths` discovers the `.arj`/`.aNN` sibling volumes).
+//! "fastest" (method 4) members, ARJ32 no-data pseudo-methods
+//! 8/9, chapter labels (file type 5), garbled (password)
+//! entries, and multi-volume archives via [`decode_parts`](crate::archive::arj::decode::decode_parts)
+//! (with `std`, `volume_paths` discovers the `.arj`/`.aNN`
+//! sibling volumes).
 //!
 //! Reference: ARJ technical note (ARJ 2.x file format description).
 //!
@@ -39,9 +41,11 @@ pub(crate) const BASIC_HDR_SIZE: usize = 30;
 pub struct ArjEntry {
     /// File or directory name.
     pub name: String,
-    /// Compression method byte (0 stored, 1-3 LZH-static, 4 fastest).
+    /// Compression method byte (0 stored, 1-3 LZH-static, 4 fastest,
+    /// 8-9 ARJ32 no-data pseudo-methods).
     pub method: u8,
-    /// ARJ file type: 0 = binary, 1 = text, 3 = directory, 4 = label.
+    /// ARJ file type: 0 = binary, 1 = text, 3 = directory,
+    /// 4 = volume label, 5 = chapter label.
     pub file_type: u8,
     /// `true` for directory entries (file type 3).
     pub is_dir: bool,
@@ -49,7 +53,8 @@ pub struct ArjEntry {
     pub mtime: u32,
     /// CRC-32 of the uncompressed file data.
     pub crc32: u32,
-    /// Entry payload (empty for directories and labels).
+    /// Entry payload (empty for directories, labels, and
+    /// no-data members).
     pub data: Vec<u8>,
 }
 
@@ -228,6 +233,17 @@ fn decode_member(f: &Frag, packed: &[u8], password: Option<&[u8]>) -> Result<Vec
         }
         1..=3 => crate::compress::lzh::st1::decode(15, 5, packed, f.orig)?,
         4 => super::method4::decode(packed, f.orig)?,
+        // ARJ32 "no data, no CRC": payload-less member whose CRC
+        // field is not meaningful, so the CRC check is skipped.
+        8 => {
+            if f.orig != 0 || !packed.is_empty() {
+                return Err(Error::InvalidData("arj: no-data entry with payload"));
+            }
+            return Ok(Vec::new());
+        }
+        // ARJ32 "no data": payload-less member; the shared checks
+        // verify orig == 0 and the CRC of the empty payload.
+        9 => Vec::new(),
         _ => return Err(Error::Unsupported("arj: unsupported method")),
     };
     if data.len() != f.orig {
@@ -265,7 +281,9 @@ fn decode_parts_impl(parts: &[&[u8]], password: Option<&[u8]>) -> Result<Vec<Arj
             for (_, d) in &pending {
                 blob.extend_from_slice(d);
             }
-            let is_meta = head.file_type == 3 || head.file_type == 4;
+            // Directories, volume labels, and chapter labels
+            // (file types 3-5) carry no decodable payload.
+            let is_meta = matches!(head.file_type, 3..=5);
             let data = if is_meta {
                 Vec::new()
             } else {
@@ -392,15 +410,72 @@ mod tests {
         4 + h1 + 4 + 2
     }
 
-    #[test]
-    fn rejects_unsupported_method() {
-        let mut a = crate::archive::arj::encode::encode(&[("f", b"x")]).unwrap();
-        let second = second_header_off(&a);
-        a[second + 4 + 5] = 9; // method 9: never existed
+    /// Patch the fixed fields of the second (first file) header
+    /// and rewrite its header CRC.
+    fn patch_second(a: &mut [u8], patch: impl Fn(&mut [u8])) {
+        let second = second_header_off(a);
+        patch(&mut a[second + 4..second + 4 + BASIC_HDR_SIZE]);
         let bsize = u16le(&a[second + 2..]) as usize;
         let crc = crate::util::crc32::crc32(&a[second + 4..second + 4 + bsize]);
         a[second + 4 + bsize..second + 8 + bsize].copy_from_slice(&crc.to_le_bytes());
-        assert!(matches!(decode(&a), Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn rejects_unsupported_method() {
+        // Methods 5-7 were never assigned; 10+ are reserved.
+        for method in [5u8, 6, 7, 10, u8::MAX] {
+            let mut a = crate::archive::arj::encode::encode(&[("f", b"x")]).unwrap();
+            patch_second(&mut a, |h| h[5] = method);
+            assert!(matches!(decode(&a), Err(Error::Unsupported(_))));
+        }
+    }
+
+    #[test]
+    fn test_arj_method8_9_no_data() {
+        // ARJ32 pseudo-methods on payload-less members:
+        // 8 = "no data, no CRC" (CRC field ignored),
+        // 9 = "no data" (CRC covers the empty payload).
+        let mut a = crate::archive::arj::encode::encode(&[("empty", b"")]).unwrap();
+        patch_second(&mut a, |h| {
+            h[5] = 8;
+            h[20..24].copy_from_slice(&0xDEAD_BEEFu32.to_le_bytes());
+        });
+        let e = decode(&a).unwrap();
+        assert_eq!(e[0].method, 8);
+        assert!(e[0].data.is_empty());
+
+        let mut a = crate::archive::arj::encode::encode(&[("empty", b"")]).unwrap();
+        patch_second(&mut a, |h| h[5] = 9);
+        let e = decode(&a).unwrap();
+        assert_eq!(e[0].method, 9);
+        assert!(e[0].data.is_empty());
+
+        // Method 9 still verifies the empty payload's CRC.
+        let mut a = crate::archive::arj::encode::encode(&[("empty", b"")]).unwrap();
+        patch_second(&mut a, |h| {
+            h[5] = 9;
+            h[20..24].copy_from_slice(&1u32.to_le_bytes());
+        });
+        assert!(matches!(decode(&a), Err(Error::InvalidData(_))));
+
+        // A payload-bearing member tagged method 8 is rejected.
+        let mut a = crate::archive::arj::encode::encode(&[("f", b"x")]).unwrap();
+        patch_second(&mut a, |h| h[5] = 8);
+        assert!(matches!(decode(&a), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn test_arj_chapter_label() {
+        // file_type 5 is a chapter label: a non-file header
+        // conventionally named <<<NNN>>>, carrying no payload.
+        let mut a = crate::archive::arj::encode::encode(&[("<<<001>>>", b"")]).unwrap();
+        patch_second(&mut a, |h| h[6] = 5);
+        let e = decode(&a).unwrap();
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].name, "<<<001>>>");
+        assert_eq!(e[0].file_type, 5);
+        assert!(!e[0].is_dir);
+        assert!(e[0].data.is_empty());
     }
 
     #[test]
@@ -468,11 +543,7 @@ mod tests {
     #[test]
     fn rejects_garbled_without_password() {
         let mut a = crate::archive::arj::encode::encode(&[("f", b"x")]).unwrap();
-        let second = second_header_off(&a);
-        a[second + 4 + 4] |= 0x01; // garbled flag
-        let bsize = u16le(&a[second + 2..]) as usize;
-        let crc = crate::util::crc32::crc32(&a[second + 4..second + 4 + bsize]);
-        a[second + 4 + bsize..second + 8 + bsize].copy_from_slice(&crc.to_le_bytes());
+        patch_second(&mut a, |h| h[4] |= 0x01); // garbled flag
         assert!(matches!(decode(&a), Err(Error::Unsupported(_))));
     }
 

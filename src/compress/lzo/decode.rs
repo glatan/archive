@@ -242,6 +242,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 /// - M3: 0x20..0x3F: 3-byte match, offset 1..=16384, len 3+
 /// - M4: 0x10..0x1F: 3-byte match, offset 16385..=49151, len 3+ (or end marker)
 /// - Literal run: 0x00..0x0F (state == 0): literal copy
+/// - v1 only: M4 with distance 0xbfff encodes a run of zeros (LZO-RLE)
 ///
 /// The LE16 offset bytes encode S (trailing literal count) in the low 2 bits.
 /// M3: `((offset - 1) << 2) | S`, M4: `(base << 2) | S` where base is
@@ -251,18 +252,28 @@ pub(crate) fn decompress_lzo1x(src: &[u8], expected_len: usize) -> Result<Vec<u8
     let mut sp = 0usize;
     #[allow(unused_assignments)]
     let mut state: usize = 0;
+    let mut rle = false;
 
     if sp >= src.len() {
         return Ok(dst);
     }
 
-    let t = src[sp] as usize;
-
-    // First byte 17 marks the v1 (LZO-RLE) bitstream, which this decoder does
-    // not support (kernel lzo.rst: "v0 cannot read v1 data").
-    if t == 17 {
-        return Err(Error::Unsupported("lzo: v1/RLE bitstream not supported"));
+    // First byte 17 marks a versioned bitstream when the stream is at least
+    // 5 bytes long (the shortest possible versioned bitstream): the second
+    // byte is the bitstream version (kernel lzo.rst, "Byte sequences").
+    // Version 1 (LZO-RLE) adds a zero-run encoding to the M4 instruction.
+    // A leading 17 in a shorter stream is a regular M4 instruction byte in
+    // version 0, not a version header.
+    if src[sp] == 17 && src.len() >= 5 {
+        let version = src[sp + 1];
+        if version > 1 {
+            return Err(Error::Unsupported("lzo: unsupported bitstream version"));
+        }
+        rle = version == 1;
+        sp += 2;
     }
+
+    let t = src[sp] as usize;
 
     // Initial literal run
     if t > 17 {
@@ -347,6 +358,28 @@ pub(crate) fn decompress_lzo1x(src: &[u8], expected_len: usize) -> Result<Vec<u8
             // else: length = LLL + 2
             // offset = 16384 + (H << 14) + base
             // End-of-stream when offset == 16384 and length == 3
+            //
+            // Version 1 only (LZO-RLE): H = 1 with the LE16 D bits all set
+            // (distance 0xbfff) encodes a run of zeros followed by a fourth
+            // byte X: run length = ((X << 3) | LLL) + 4. The run form is
+            // detected on the raw LE16 before the VLE parse, so a zero run
+            // never carries a VLE length even when LLL == 0 (kernel lzo.rst).
+            if rle && (inst & 0x08) != 0 && sp + 2 <= src.len() {
+                let le16 = (src[sp] as usize) | ((src[sp + 1] as usize) << 8);
+                if le16 >> 2 == 0x3FFF {
+                    sp += 2;
+                    let s = le16 & 3;
+                    let x = src.get(sp).copied().ok_or(Error::UnexpectedEof)? as usize;
+                    sp += 1;
+                    let run_len = ((x << 3) | (inst & 0x07)) + 4;
+                    dst.resize(dst.len() + run_len, 0);
+                    if s > 0 {
+                        copy_literals(src, &mut sp, &mut dst, s)?;
+                    }
+                    state = s;
+                    continue;
+                }
+            }
             let mut match_len = inst & 0x07;
             if match_len == 0 {
                 match_len = 7 + read_vle(src, &mut sp)?;
@@ -603,12 +636,72 @@ mod tests {
     }
 
     #[test]
-    fn test_v1_bitstream_first_byte_rejected() {
-        // Bitstream version byte 17 marks the v1 (LZO-RLE) format; the v0
-        // decoder must reject it instead of misinterpreting it as an M4
-        // instruction (kernel lzo.rst: "v0 cannot read v1 data").
-        let result = decompress_lzo1x(&[17, 0, 0], 10);
-        assert!(matches!(result, Err(Error::Unsupported(_))));
+    fn test_v1_bitstream_short_stream_is_v0() {
+        // A leading byte 17 in a stream shorter than 5 bytes is not a
+        // version header: the stream stays v0 and 17 is a regular M4
+        // instruction byte (kernel lzo.rst, "Byte sequences"). Here it is
+        // the canonical end-of-stream marker (H=0, LLL=1, distance 0).
+        assert!(decompress_lzo1x(&[17, 0, 0], 0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_v1_bitstream_version_byte() {
+        // First byte 17 in a stream of at least 5 bytes is a version
+        // header: the second byte gives the bitstream version (kernel
+        // lzo.rst, "Byte sequences"). A v1 stream without zero runs decodes
+        // with v0 instruction semantics.
+        let src = [17, 1, 20, b'a', b'b', b'c', 0x11, 0x00, 0x00];
+        assert_eq!(decompress_lzo1x(&src, 3).unwrap(), b"abc");
+
+        // Version byte 0 selects v0 instruction semantics after the header.
+        let src = [17, 0, 20, b'a', b'b', b'c', 0x11, 0x00, 0x00];
+        assert_eq!(decompress_lzo1x(&src, 3).unwrap(), b"abc");
+
+        // Unknown bitstream versions are rejected.
+        let src = [17, 2, 20, b'a', b'b', b'c', 0x11, 0x00, 0x00];
+        assert!(matches!(
+            decompress_lzo1x(&src, 3),
+            Err(Error::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn test_v1_zero_run_decode() {
+        // v1 zero run: an M4 instruction with H=1 and the LE16 D bits all
+        // set (distance 0xbfff) is followed by a fourth byte X and encodes a
+        // run of zeros, run length = ((X << 3) | LLL) + 4 (kernel lzo.rst).
+        // Here: 2 literals, then LLL=6, X=0, S=0 gives a run of 10 zeros.
+        let src = [
+            17, 1, 19, b'a', b'b', 0x1E, 0xFC, 0xFF, 0x00, 0x11, 0x00, 0x00,
+        ];
+        let mut expected = b"ab".to_vec();
+        expected.resize(12, 0);
+        assert_eq!(decompress_lzo1x(&src, 12).unwrap(), expected);
+
+        // LLL == 0 zero runs take their length from X alone and do not
+        // carry a VLE length field: run length = (2 << 3) + 4 = 20 zeros.
+        let src = [
+            17, 1, 19, b'a', b'b', 0x18, 0xFC, 0xFF, 0x02, 0x11, 0x00, 0x00,
+        ];
+        let mut expected = b"ab".to_vec();
+        expected.resize(22, 0);
+        assert_eq!(decompress_lzo1x(&src, 22).unwrap(), expected);
+
+        // S literals still trail a zero run.
+        let src = [
+            17, 1, 19, b'a', b'b', 0x1E, 0xFE, 0xFF, 0x00, b'c', b'd', 0x11, 0x00, 0x00,
+        ];
+        let mut expected = b"ab".to_vec();
+        expected.resize(12, 0);
+        expected.extend_from_slice(b"cd");
+        assert_eq!(decompress_lzo1x(&src, 14).unwrap(), expected);
+
+        // A zero run missing its fourth byte is rejected.
+        let src = [17, 1, 19, b'a', b'b', 0x1E, 0xFC, 0xFF];
+        assert!(matches!(
+            decompress_lzo1x(&src, 12),
+            Err(Error::UnexpectedEof)
+        ));
     }
 
     #[test]

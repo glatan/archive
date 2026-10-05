@@ -5,7 +5,7 @@
 | 基準仕様 | lha header documentation (apphead / lzh_note、GNU lha 系資料)。実参照: [LHa for UNIX `header.doc.md`](https://github.com/jca02266/lha/blob/master/header.doc.md) ([jca02266/lha](https://github.com/jca02266/lha)) + jLHA Notes (Michel Ishizuka 氏、[Wayback index](https://web.archive.org/web/20080724142842/http://homepage1.nifty.com/dangan/en/Content/Program/Java/jLHA/Notes/Notes.html)) + Joe Jared `lzhformat.html` + [Just Solve Wiki: LHarc](http://justsolve.archiveteam.org/wiki/LHarc)。ローカルスナップショット: `docs/spec/sources/lha_header.doc.md`, `jlha_notes_*.html`, `lzhformat.html`, `ar002_*` (`ar002_00README.txt`/`ar002_ar.h`/`ar002_decode.c`/`ar002_huf.c`/`ar002_maketbl.c`/`ar002_compr.txt`/`ar002_compr2.txt`), `lzss.c`。一次実装: [LHA 2.11 ソース (Vector fh002420)](https://www.vector.co.jp/download/file/dos/util/fh002420.html) |
 | 参照実装 | 奥村晴彦氏の `ar002` (public domain、`-lh4-`〜`-lh7-` st1 形式の format reference、`sources/ar002_*`)、奥村氏の `lzss.c` (public domain、`-lzs-` の一次参照、`sources/lzss.c`)、lhasa (ISC、`-lz5-` format reference + `pmarc.rs` 移植元 + fixture vendor + oracle)。LHA 2.11 / LHa for UNIX 1.14i は `header.doc.md` 書面参照 + fixture 生成のみ (コード由来なし。LHa ライセンスは binary-only 再配布禁止・商用主利用禁止の非 OSI 条件)。XADMaster / deark 由来コードは `-lh1-`〜`-lh3-` 実装削除により除去済み。system `lhasa` / `unar` / `lha` / `7z` / `bsdtar` は interop oracle。詳細: THIRD_PARTY_NOTICES lha 項・§4a |
 | 形式概要 | `[u8/u16 header size][checksum?][method 5B][packed u32][orig u32][time u32][attr u8][level u8](level 別フィールド)[ext headers][data]` のエントリ列。終端は header size = 0 |
-| 実装範囲 | header level 0-3 の読み込み、`-lh0-` (stored) / `-lhd-` (dir) / `-lh4-`〜`-lh7-` / LArc `-lzs-`/`-lz4-`/`-lz5-` / PMarc `-pm0-`〜`-pm2-` のデコードに対応する。`-lh1-`〜`-lh3-` は権利クリーンな format 参照が存在しないため意図的に非対応 (`Error::Unsupported`)。書き込みは header level 0-3 (`with_level`) と、圧縮メソッド `-lh0-`/`-lhd-`/`-lh4-`〜`-lh7-`、LArc `-lzs-`/`-lz5-`、および無圧縮エイリアス `-lz4-`/`-pm0-` (`with_method`) に対応する |
+| 実装範囲 | header level 0-3 の読み込み、`-lh0-` (stored) / `-lhd-` (dir) / `-lh4-`〜`-lh7-` / LArc `-lzs-`/`-lz4-`/`-lz5-` / PMarc `-pm0-`〜`-pm2-` のデコードに対応する。`-lh1-`〜`-lh3-` は権利クリーンな format 参照が存在しないため意図的に非対応 (`Error::Unsupported`)。書き込みは header level 0-3 (`with_level`) と、圧縮メソッド `-lh0-`/`-lhd-`/`-lh4-`〜`-lh7-`、LArc `-lzs-`/`-lz5-`、無圧縮エイリアス `-lz4-`/`-pm0-`、および PMarc `-pm1-`/`-pm2-` (literal-only の `pmarc_enc`) (`with_method`) に対応する |
 
 ## 対応バリアント・仕様版
 
@@ -15,7 +15,7 @@
 | header level 1 / 2 | lha header documentation + LHa for UNIX header.c 実測 | ✅ | ✅ | ext header (0x01 filename / 0x02 dir、raw 0xff 区切り) |
 | header level 3 | jLHA Notes Level3Header (`sources/jlha_notes_level3_header.html`) + lhasa (ISC) | ✅ | ✅ | `with_level(3)` で write 対応 (`emit_level3`)。32 バイト基本ヘッダ + u32 サイズ + u32 ext チェーン |
 | method `-lh0-` (stored) / `-lhd-` (dir) | lha header documentation | ✅ | `-lh0-` のみ ✅ | |
-| LZH 圧縮メソッド (`-lh4-`〜`-lh7-`, `-lzs-`/`-lz4-`/`-lz5-`, `-pm0-`〜`-pm2-`) | `-lh4-`〜`-lh7-`: 奥村氏の `ar002` (public domain、`sources/ar002_*`)。`-lzs-`: 奥村氏の `lzss.c` (public domain、`sources/lzss.c`)。`-lz5-`/PMarc: lhasa (ISC) が権利クリーン参照。de facto パラメタは lhasa と一致 | ✅ | ⚠️ | encode は st1 系 `-lh4-`〜`-lh7-` (`with_method` 経由で `compress::lzh::st1_enc`)、LArc `-lzs-`/`-lz5-` (`larc_enc::{encode_lzs,encode_lz5}`)、および無圧縮エイリアス `-lz4-`/`-pm0-` に対応する (`lzs_encode_roundtrip`, `lz5_encode_roundtrip`, `test_lha_lzs_lz5_bsdtar_interop`)。`-pm1-`/`-pm2-` の圧縮 write は未対応。`-lh1-`〜`-lh3-`・`-lhx-` (UNLHA32 独自) などの非対応メソッドは decode 側でも `Error::Unsupported` を返す |
+| LZH 圧縮メソッド (`-lh4-`〜`-lh7-`, `-lzs-`/`-lz4-`/`-lz5-`, `-pm0-`〜`-pm2-`) | `-lh4-`〜`-lh7-`: 奥村氏の `ar002` (public domain、`sources/ar002_*`)。`-lzs-`: 奥村氏の `lzss.c` (public domain、`sources/lzss.c`)。`-lz5-`/PMarc: lhasa (ISC) が権利クリーン参照。de facto パラメタは lhasa と一致 | ✅ | ⚠️ | encode は st1 系 `-lh4-`〜`-lh7-` (`with_method` 経由で `compress::lzh::st1_enc`)、LArc `-lzs-`/`-lz5-` (`larc_enc::{encode_lzs,encode_lz5}`)、および無圧縮エイリアス `-lz4-`/`-pm0-` に対応する (`lzs_encode_roundtrip`, `lz5_encode_roundtrip`, `test_lha_lzs_lz5_bsdtar_interop`)。`-pm1-`/`-pm2-` は literal-only encoder (`pmarc_enc::{encode_pm1,encode_pm2}`) で write 対応 (最適圧縮ではないが合法ストリームを emit)。`-lh1-`〜`-lh3-`・`-lhx-` (UNLHA32 独自) などの非対応メソッドは decode 側でも `Error::Unsupported` を返す |
 
 ### ヘッダ構造
 
@@ -91,9 +91,9 @@ decode の権利クリーン参照: `-lh4-`〜`-lh7-` は奥村氏の `ar002` (p
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 19 | 圧縮メソッドの write は st1 系および LArc `-lzs-`/`-lz5-` のみ対応 | ⚠️ | `with_method` は `-lh4-`〜`-lh7-`、`-lzs-`/`-lz5-`、および無圧縮エイリアス `-lz4-`/`-pm0-` を受理する (`larc_enc`)。`-lh1-`〜`-lh3-` および `-pm1-`/`-pm2-` の圧縮 write は未対応。`-lh1-`〜`-lh3-` (権利クリーン参照不在)・`-lhx-` などの非対応メソッドの decode は `Error::Unsupported` を返す |
+| 19 | 圧縮メソッドの write は st1 系・LArc `-lzs-`/`-lz5-`・PMarc literal のみ対応 | ⚠️ | `with_method` は `-lh4-`〜`-lh7-`、`-lzs-`/`-lz5-`、無圧縮エイリアス `-lz4-`/`-pm0-`、および `-pm1-`/`-pm2-` (literal-only の `pmarc_enc`) を受理する (`lzs_encode_roundtrip`, `lz5_encode_roundtrip`, `pm1_encode_roundtrip`, `pm2_encode_roundtrip`, `pm1_pm2_archive_roundtrip`)。`-lh1-`〜`-lh3-` の圧縮 write は権利クリーン参照不在のため未対応。`-lhx-` などの非対応メソッドの decode は `Error::Unsupported` を返す |
 | 20 | write の mtime は level 0/1 で DOS time、level 2 で UNIX time をそのまま格納。UNIX ext 0x50/0x51/0x54 は発行しない | ✅ | `level1_roundtrip`, `level2_roundtrip`, `level2_long_path`, `level_rejects_bad_level` |
-| 21 | マルチボリューム/リンク属性/OS 別属性の解釈は非対応 | ❌ | header level 3 は read/write 対応済み (`with_level(3)`)。multi-disk/spanning (ext header 0x39・SPAN mode) は `sources/lzhformat.html` が記述 |
+| 21 | OS 別属性・マルチボリューム構造の公開 (リンク属性は非対応) | ⚠️ | OS 別属性は ext header を parse して `LhaEntry` で公開: `dos_attr` (0x40)、`unix_mode` (0x50)、`unix_uid`/`unix_gid` (0x51)、`unix_mtime` (0x54)。multi-disk は ext 0x39 を `LhaSpan` (`LhaEntry::span`) で公開し、各ボリュームのデータはそのまま返す (自動結合は呼び出し側責務)。`level1_unix_ext_attrs`, `dos_attr_from_basic_header`, `span_header_exposed`。header level 3 は read/write 対応済み (`with_level(3)`) |
 
 ### vendor 別拡張・拡張ヘッダの整理
 

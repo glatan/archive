@@ -615,4 +615,85 @@ mod tests {
         assert_eq!(img.entries.len(), 1);
         assert_eq!(img.entries[0].data(), b"shifted");
     }
+    /// Locate the block-pointer array of the first leaf inode.
+    fn file_ptr_base(f: &[u8]) -> usize {
+        // First inode record starts at 76; word2 = namelen | offset<<6.
+        ((u32le(f, 76 + 8) >> 6) * 4) as usize
+    }
+
+    fn set_flag(f: &mut [u8], flag: u32) {
+        let v = u32le(f, 8) | flag;
+        f[8..12].copy_from_slice(&v.to_le_bytes());
+    }
+
+    #[test]
+    fn hole_block_reads_zeros() {
+        let data: Vec<u8> = (0..5000u32).map(|i| (i % 251) as u8).collect();
+        let mut f = build(&[("hole.bin", S_IFREG | 0o644, &data)]);
+        let base = file_ptr_base(&f);
+        // Second block pointer = 0 -> the tail reads as NUL bytes.
+        f[base + 4..base + 8].copy_from_slice(&0u32.to_le_bytes());
+        let img = decode(&f).unwrap();
+        assert_eq!(img.entries[0].data().len(), 5000);
+        assert_eq!(&img.entries[0].data()[..4096], &data[..4096]);
+        assert!(img.entries[0].data()[4096..].iter().all(|&b| b == 0));
+        // First pointer zeroed too -> the whole file is NUL.
+        f[base..base + 4].copy_from_slice(&0u32.to_le_bytes());
+        let img = decode(&f).unwrap();
+        assert!(img.entries[0].data().iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn ext_block_ptr_uncompressed_contiguous() {
+        let data = b"rawblock-contig".to_vec();
+        let mut f = build(&[("raw.bin", S_IFREG | 0o644, &data)]);
+        set_flag(&mut f, FLAG_EXT_BLOCK_PTRS);
+        let base = file_ptr_base(&f);
+        // UNCOMPRESSED (no DIRECT): payload sits contiguously at blk_start.
+        f[base..base + 4].copy_from_slice(&BLK_UNCOMPRESSED.to_le_bytes());
+        f[base + 4..base + 4 + data.len()].copy_from_slice(&data);
+        let img = decode(&f).unwrap();
+        assert_eq!(img.entries[0].data(), &data[..]);
+    }
+
+    #[test]
+    fn ext_block_ptr_direct_uncompressed() {
+        let data = b"direct-ptr-payload!".to_vec();
+        let mut f = build(&[("d.bin", S_IFREG | 0o644, &data)]);
+        set_flag(&mut f, FLAG_EXT_BLOCK_PTRS);
+        // Append the raw payload at a 4-aligned offset and point at it.
+        while !f.len().is_multiple_of(4) {
+            f.push(0);
+        }
+        let off = f.len();
+        f.extend_from_slice(&data);
+        let total = f.len() as u32;
+        f[4..8].copy_from_slice(&total.to_le_bytes());
+        let base = file_ptr_base(&f);
+        let ptr = BLK_DIRECT_PTR | BLK_UNCOMPRESSED | (off as u32 / 4);
+        f[base..base + 4].copy_from_slice(&ptr.to_le_bytes());
+        let img = decode(&f).unwrap();
+        assert_eq!(img.entries[0].data(), &data[..]);
+    }
+
+    #[test]
+    fn ext_block_ptr_direct_compressed() {
+        let data: Vec<u8> = (0..300u32).map(|i| (i * 7 % 256) as u8).collect();
+        let mut f = build(&[("c.bin", S_IFREG | 0o644, &data)]);
+        set_flag(&mut f, FLAG_EXT_BLOCK_PTRS);
+        while !f.len().is_multiple_of(4) {
+            f.push(0);
+        }
+        let off = f.len();
+        let comp = crate::compress::zlib::encode::encode(&data);
+        f.extend_from_slice(&(comp.len() as u16).to_le_bytes());
+        f.extend_from_slice(&comp);
+        let total = f.len() as u32;
+        f[4..8].copy_from_slice(&total.to_le_bytes());
+        let base = file_ptr_base(&f);
+        let ptr = BLK_DIRECT_PTR | (off as u32 / 4);
+        f[base..base + 4].copy_from_slice(&ptr.to_le_bytes());
+        let img = decode(&f).unwrap();
+        assert_eq!(img.entries[0].data(), &data[..]);
+    }
 }

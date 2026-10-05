@@ -8,10 +8,11 @@
 //! `application/x-gzip` = zlib-compressed).
 //!
 //! Decode verifies the header TOC checksum (none/SHA-1/MD5 and
-//! `cksum_alg=3` names "sha1"/"md5"), the uncompressed TOC length, and
-//! each file's `extracted-checksum` when it uses sha1/md5. Extended
-//! attributes (`<ea>`), signatures, and encoding styles beyond
-//! none/gzip/bzip2/xz/lzma are out of scope.
+//! `cksum_alg=3` named digests "sha1"/"md5"/"sha256"/"sha512"), the
+//! uncompressed TOC length, and each file's `extracted-checksum` when
+//! it uses a supported digest. Extended attributes (`<ea>`) are
+//! exposed as opaque name/data blobs; signatures and encoding styles
+//! beyond none/gzip/bzip2/xz/lzma are out of scope.
 
 use alloc::vec::Vec;
 

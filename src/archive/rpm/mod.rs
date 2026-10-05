@@ -11,7 +11,8 @@
 //! [`decode`] reads Lead/Signature/Header plus gzip/bzip2/lzma/xz/zstd/
 //! uncompressed `newc` or stripped payloads. [`encode`] writes packages
 //! (`newc` or stripped `07070X` payload, all six compressors).
-//! Cryptographic signature verification is intentionally out of scope.
+//! OpenPGP signature verification is intentionally out of scope; digest
+//! tags can be checked opt-in via RpmPackage::verify_digests.
 
 use alloc::vec::Vec;
 
@@ -24,8 +25,8 @@ pub mod decode;
 pub mod encode;
 
 pub use decode::{
-    RpmCompression, RpmHeaderSection, RpmLead, RpmPackage, RpmPackageType, RpmPayloadEntry,
-    RpmTagEntry, RpmTagType, decode,
+    RpmCompression, RpmDigestAlgorithm, RpmDigestCheck, RpmDigestTarget, RpmHeaderSection, RpmLead,
+    RpmPackage, RpmPackageType, RpmPayloadEntry, RpmTagEntry, RpmTagType, decode,
 };
 
 /// Codec struct for trait-based `.rpm` decode operations.

@@ -83,20 +83,20 @@
 //! | `rpm` (default) | RPM package (`.rpm`) read/write support |
 //! | `squashfs` (default) | SquashFS image read/write support |
 //! | `mscab` (default) | Microsoft Cabinet (`.cab`) read/write support (stored/MSZIP write; Quantum/LZX read) |
-//! | `mscfb` (default) | Microsoft Compound File Binary (OLE2) read support |
-//! | `cramfs` (default) | Linux cramfs read-only filesystem image |
-//! | `romfs` (default) | Linux romfs read-only filesystem image |
-//! | `erofs` (default) | Linux erofs read-only filesystem image (incl. z_erofs LZ4/MicroLZMA/DEFLATE/Zstd) |
-//! | `iso9660` (default) | ISO 9660 CD-ROM image (Rock Ridge / Joliet) |
-//! | `crx3` (default) | Chrome extension package (CRX3) read support |
-//! | `pea` (default) | PEA (Pack, Encrypt, Authenticate) archive read/write support (stored/PCOMPRESS2 deflate write) |
+//! | `mscfb` (default) | Microsoft Compound File Binary (OLE2) read/write support |
+//! | `cramfs` (default) | Linux cramfs filesystem image read/write |
+//! | `romfs` (default) | Linux romfs filesystem image read/write |
+//! | `erofs` (default) | Linux erofs filesystem image read (incl. z_erofs LZ4/MicroLZMA/DEFLATE/Zstd, metabox) / uncompressed flat-layout write |
+//! | `iso9660` (default) | ISO 9660 CD-ROM image read/write (write: Rock Ridge; read: Rock Ridge / Joliet / XA) |
+//! | `crx3` (default) | Chrome extension package (CRX3/CRX2) read support |
+//! | `pea` (default) | PEA (Pack, Encrypt, Authenticate) archive read/write support (stored/PCOMPRESS2 deflate write; AES encrypted-stream decode; multi-volume join) |
 //! | `zim` (default) | ZIM archive (`.zim`) read/write support (v5/v6 write) |
 //! | `mtree` (default) | mtree(5) manifest read/write support |
 //! | `warc` (default) | WARC (`.warc`) record read/write support |
 //! | `git-pack` (default) | Git pack (`pack-*.pack`/`pack-*.idx`) read/write support |
 //! | `xar` (default) | XAR (`.xar`) archive read/write support |
-//! | `lha` (default) | LHA/LZH archive support (header levels 0-3 read/write; lh0-lh7/LArc/PMarc decode, lh0/lz4/pm0/lh4-lh7 write) |
-//! | `arj` (default) | ARJ archive support (stored + methods 1-4 decode incl. garbled/multi-volume, methods 0-4 write incl. multi-volume) |
+//! | `lha` (default) | LHA/LZH archive support (header levels 0-3 read/write; lh0-lh7/LArc/PMarc decode, lh0/lz4/pm0/lh4-lh7/lzs/lz5 write + pm1/pm2 literal) |
+//! | `arj` (default) | ARJ archive support (stored + methods 1-4 + no-data 8/9 decode incl. garbled/multi-volume, methods 0-4 write incl. multi-volume) |
 //! | `arc` (default) | SEA ARC archive support (method 1-9/0xa/0xb read/write; ARC 6.0+ info/control items skipped on read) |
 //! | `zip` | ZIP archive format |
 //! | `sevenz` | 7z archive format |

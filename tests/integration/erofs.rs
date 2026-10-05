@@ -394,3 +394,165 @@ fn test_erofs_ztailpacking_fragments() {
     check_fixture_tree(&img);
     check_fixture_xattrs(&img);
 }
+
+// ============================================================
+// erofs encoder tests (ErofsEncoder -> decode roundtrip and
+// fsck.erofs extract interop)
+// ============================================================
+
+/// Build a small uncompressed image with our encoder.
+fn encoded_image() -> Vec<u8> {
+    let mut enc = erofs::encode::ErofsEncoder::new();
+    enc.set_volume_name("rustfs");
+    enc.add_dir("dir1/sub");
+    enc.add_file("hello.txt", b"hello erofs encoder");
+    enc.add_file("dir1/file.bin", b"nested data");
+    enc.add_file("empty.txt", b"");
+    let big: Vec<u8> = (0..9000u32).map(|i| (i % 251) as u8).collect();
+    enc.add_file("dir1/sub/big.dat", &big);
+    enc.add_symlink("alink", "dir1/file.bin");
+    enc.finish().unwrap()
+}
+
+#[test]
+fn test_erofs_encode_decode_roundtrip() {
+    let image = encoded_image();
+    let img = erofs::decode::decode(&image).unwrap();
+    assert_eq!(img.volume_name, "rustfs");
+    assert_eq!(img.block_size, 4096);
+    // The encoder emits EROFS_FEATURE_COMPAT_SB_CHKSUM by default;
+    // decode() already verified the CRC32C at this point.
+    assert_ne!(
+        img.superblock.feature_compat & erofs::decode::COMPAT_SB_CHKSUM,
+        0
+    );
+    let mut names: Vec<&str> = img.entries.iter().map(|e| e.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        [
+            "alink",
+            "dir1",
+            "dir1/file.bin",
+            "dir1/sub",
+            "dir1/sub/big.dat",
+            "empty.txt",
+            "hello.txt"
+        ]
+    );
+    assert_eq!(find(&img, "hello.txt").data, b"hello erofs encoder");
+    assert_eq!(find(&img, "empty.txt").data, b"");
+    assert_eq!(
+        find(&img, "dir1/sub/big.dat").data,
+        (0..9000u32).map(|i| (i % 251) as u8).collect::<Vec<u8>>()
+    );
+    assert_eq!(find(&img, "alink").kind, erofs::decode::ErofsKind::Symlink);
+    assert_eq!(find(&img, "alink").data, b"dir1/file.bin");
+}
+
+#[test]
+fn test_erofs_mkfs_image_reencode_roundtrip() {
+    // Decode the committed mkfs.erofs fixture, re-encode every entry
+    // with our encoder, and require an identical decoded view.
+    let img = erofs::decode::decode(FIXTURE).unwrap();
+    let mut enc = erofs::encode::ErofsEncoder::new();
+    for e in &img.entries {
+        let opts = erofs::encode::ErofsEntryOptions {
+            mode: e.mode & 0o7777,
+            uid: e.uid,
+            gid: e.gid,
+            mtime: e.mtime,
+            mtime_nsec: e.mtime_nsec,
+        };
+        match e.kind {
+            erofs::decode::ErofsKind::File => {
+                enc.add_file_with_options(&e.name, &e.data, &opts);
+            }
+            erofs::decode::ErofsKind::Directory => {
+                enc.add_dir_with_options(&e.name, &opts);
+            }
+            erofs::decode::ErofsKind::Symlink => {
+                enc.add_symlink_with_options(
+                    &e.name,
+                    core::str::from_utf8(&e.data).unwrap(),
+                    &opts,
+                );
+            }
+            _ => {}
+        }
+    }
+    let image2 = enc.finish().unwrap();
+    let img2 = erofs::decode::decode(&image2).unwrap();
+    assert_eq!(img.entries.len(), img2.entries.len());
+    let mut names1: Vec<&str> = img.entries.iter().map(|e| e.name.as_str()).collect();
+    let mut names2: Vec<&str> = img2.entries.iter().map(|e| e.name.as_str()).collect();
+    names1.sort_unstable();
+    names2.sort_unstable();
+    assert_eq!(names1, names2);
+    for name in names1 {
+        let a = find(&img, name);
+        let b = find(&img2, name);
+        assert_eq!(a.kind, b.kind, "{name}");
+        assert_eq!(a.mode, b.mode, "{name}");
+        assert_eq!(a.data, b.data, "{name}");
+    }
+}
+
+#[test]
+fn test_erofs_encode_fsck_extract() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    // Optional upstream interop: the real checker validates the
+    // superblock checksum and extracts the whole tree.
+    if Command::new("fsck.erofs")
+        .arg("--help")
+        .output()
+        .map(|o| !o.status.success() && o.stderr.is_empty())
+        .unwrap_or(true)
+    {
+        eprintln!("fsck.erofs not available; skipping");
+        return;
+    }
+    let image = encoded_image();
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_erofs_enc_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let img_path = dir.join("enc.erofs");
+    std::fs::write(&img_path, &image).unwrap();
+    let ext = dir.join("ext");
+    let out = Command::new("fsck.erofs")
+        .arg(format!("--extract={}", ext.display()))
+        .arg(&img_path)
+        .output()
+        .expect("fsck.erofs");
+    assert!(
+        out.status.success(),
+        "fsck.erofs rejected our image: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        std::fs::read(ext.join("hello.txt")).unwrap(),
+        b"hello erofs encoder"
+    );
+    assert_eq!(
+        std::fs::read(ext.join("dir1/file.bin")).unwrap(),
+        b"nested data"
+    );
+    assert_eq!(std::fs::read(ext.join("empty.txt")).unwrap(), b"");
+    assert_eq!(
+        std::fs::read(ext.join("dir1/sub/big.dat")).unwrap(),
+        (0..9000u32).map(|i| (i % 251) as u8).collect::<Vec<u8>>()
+    );
+    assert_eq!(
+        std::fs::read_link(ext.join("alink"))
+            .unwrap()
+            .as_os_str()
+            .as_encoded_bytes(),
+        b"dir1/file.bin"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

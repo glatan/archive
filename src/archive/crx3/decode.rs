@@ -1,9 +1,15 @@
-//! CRX3 container decoding.
+//! CRX container decoding (versions 2 and 3).
 //!
-//! Layout reference: `components/crx_file/crx3.proto` (snapshot in
+//! CRX3 layout reference: `components/crx_file/crx3.proto` (snapshot in
 //! `docs/spec/sources/crx3.proto`). The file is `Cr24` magic, a
 //! little-endian version (3), a little-endian header length N, an
 //! N-octet protobuf `CrxFileHeader`, then a ZIP archive.
+//!
+//! CRX2 layout reference: Chromium `components/crx_file/crx_file.h`
+//! `CrxFileHeader`. The file is `Cr24` magic, a little-endian version
+//! (2), a little-endian public-key length, a little-endian signature
+//! length, the public key, the signature, then a ZIP archive — a fixed
+//! layout with no protobuf header.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -13,9 +19,14 @@ use crate::error::Error;
 
 const MAGIC: &[u8; 4] = b"Cr24";
 const VERSION: u32 = 3;
+/// CRX2 wire version: fixed-layout header, no protobuf.
+const VERSION_CRX2: u32 = 2;
 /// Upper bound on the protobuf header length; the spec tells clients
 /// to reject an N too large to safely hold in memory.
 const MAX_HEADER_LEN: usize = 16 * 1024 * 1024;
+/// Upper bound on a CRX2 public key or signature; Chromium's
+/// `crx_verifier.cc` accepts at most 64 KiB each.
+const MAX_CRX2_PROOF_LEN: usize = 64 * 1024;
 
 // CrxFileHeader field numbers.
 const F_RSA_PROOF: u32 = 2;
@@ -28,17 +39,22 @@ const F_PUBLIC_KEY: u32 = 1;
 const F_SIGNATURE: u32 = 2;
 const F_CRX_ID: u32 = 1;
 
-/// Signing algorithm of an [`AsymmetricKeyProof`].
+/// Signing algorithm of an `AsymmetricKeyProof`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProofAlgorithm {
     /// `sha256_with_rsa` — RSA-PSS, X.509 SubjectPublicKeyInfo key.
     Sha256WithRsa,
     /// `sha256_with_ecdsa` — NIST P-256, named-curve public key.
     Sha256WithEcdsa,
+    /// CRX2 header proof — RSA PKCS#1 signature. The CRX2 wire format
+    /// carries no algorithm id; Chromium's verifier accepts the
+    /// SHA-1 / SHA-256 RSA PKCS#1 v1.5 variants.
+    RsaPkcs1,
 }
 
-/// A parsed `AsymmetricKeyProof` message. The signature is **not**
-/// verified by this decoder.
+/// A parsed `AsymmetricKeyProof` message — also used to carry the
+/// raw public key + signature pair of a CRX2 fixed header. The
+/// signature is **not** verified by this decoder.
 #[derive(Debug, Clone)]
 pub struct Crx3Proof {
     /// Signing algorithm the proof claims.
@@ -69,10 +85,13 @@ impl crate::traits::ArchiveEntry for Crx3Entry {
     }
 }
 
-/// Decoded CRX3 file.
+/// Decoded CRX file (container version 2 or 3).
 #[derive(Debug)]
 pub struct Crx3Image {
+    /// Container version from the wire header (2 or 3).
+    pub version: u32,
     /// 16-byte extension id from `SignedData.crx_id`, if present.
+    /// Always `None` for version 2 files, which carry no `SignedData`.
     pub crx_id: Option<[u8; 16]>,
     /// Signing proofs carried by the header (unverified).
     pub proofs: Vec<Crx3Proof>,
@@ -207,12 +226,58 @@ fn parse_signed_data(b: &[u8]) -> Result<Option<[u8; 16]>, Error> {
     Ok(id)
 }
 
-/// Decode a CRX3 file into header metadata + ZIP member entries.
+fn zip_entries(archive: &[u8]) -> Result<Vec<Crx3Entry>, Error> {
+    Ok(zip::decode::decode(archive)?
+        .into_iter()
+        .map(|e| Crx3Entry {
+            name: e.name,
+            data: e.data,
+        })
+        .collect())
+}
+
+/// Decode the fixed-layout CRX2 header (`crx_file.h` `CrxFileHeader`):
+/// u32 public-key length, u32 signature length, public key, signature,
+/// then the ZIP archive. The RSA PKCS#1 signature is exposed, not
+/// verified.
+fn decode_crx2(input: &[u8]) -> Result<Crx3Image, Error> {
+    let fixed = input.get(..16).ok_or(Error::UnexpectedEof)?;
+    let key_len = u32::from_le_bytes(fixed[8..12].try_into().unwrap()) as usize;
+    let sig_len = u32::from_le_bytes(fixed[12..16].try_into().unwrap()) as usize;
+    if key_len > MAX_CRX2_PROOF_LEN || sig_len > MAX_CRX2_PROOF_LEN {
+        return Err(Error::InvalidData("crx2 proof field too large"));
+    }
+    let key_end = 16usize.checked_add(key_len).ok_or(Error::UnexpectedEof)?;
+    let sig_end = key_end.checked_add(sig_len).ok_or(Error::UnexpectedEof)?;
+    let public_key = input.get(16..key_end).ok_or(Error::UnexpectedEof)?;
+    let signature = input.get(key_end..sig_end).ok_or(Error::UnexpectedEof)?;
+    if public_key.is_empty() && signature.is_empty() {
+        return Err(Error::InvalidData("crx2 empty proof"));
+    }
+    let archive = input.get(sig_end..).ok_or(Error::UnexpectedEof)?;
+    Ok(Crx3Image {
+        version: VERSION_CRX2,
+        crx_id: None,
+        proofs: alloc::vec![Crx3Proof {
+            algorithm: ProofAlgorithm::RsaPkcs1,
+            public_key: public_key.to_vec(),
+            signature: signature.to_vec(),
+        }],
+        verified_contents: None,
+        entries: zip_entries(archive)?,
+    })
+}
+
+/// Decode a CRX file (version 2 or 3) into header metadata + ZIP
+/// member entries.
 pub fn decode(input: &[u8]) -> Result<Crx3Image, Error> {
     if input.len() < 12 || &input[..4] != MAGIC {
         return Err(Error::InvalidData("not a crx3 file"));
     }
     let version = u32::from_le_bytes(input[4..8].try_into().unwrap());
+    if version == VERSION_CRX2 {
+        return decode_crx2(input);
+    }
     if version != VERSION {
         return Err(Error::InvalidData("crx3 unsupported version"));
     }
@@ -242,14 +307,9 @@ pub fn decode(input: &[u8]) -> Result<Crx3Image, Error> {
         None => None,
     };
 
-    let entries = zip::decode::decode(archive)?
-        .into_iter()
-        .map(|e| Crx3Entry {
-            name: e.name,
-            data: e.data,
-        })
-        .collect();
+    let entries = zip_entries(archive)?;
     Ok(Crx3Image {
+        version: VERSION,
         crx_id,
         proofs,
         verified_contents,
@@ -309,6 +369,57 @@ mod tests {
         e.add_file("manifest.json", b"{}");
         e.add_file("content.js", b"console.log(1)");
         e.finish().unwrap()
+    }
+
+    fn build_crx2(key: &[u8], sig: &[u8], zip: &[u8]) -> Vec<u8> {
+        let mut f = Vec::new();
+        f.extend_from_slice(MAGIC);
+        f.extend_from_slice(&VERSION_CRX2.to_le_bytes());
+        f.extend_from_slice(&(key.len() as u32).to_le_bytes());
+        f.extend_from_slice(&(sig.len() as u32).to_le_bytes());
+        f.extend_from_slice(key);
+        f.extend_from_slice(sig);
+        f.extend_from_slice(zip);
+        f
+    }
+
+    #[test]
+    fn decodes_crx2() {
+        let img = decode(&build_crx2(b"RSAPUB2", b"RSASIG2", &zip_bytes())).unwrap();
+        assert_eq!(img.version, 2);
+        assert_eq!(img.crx_id, None);
+        assert_eq!(img.verified_contents, None);
+        assert_eq!(img.proofs.len(), 1);
+        assert_eq!(img.proofs[0].algorithm, ProofAlgorithm::RsaPkcs1);
+        assert_eq!(img.proofs[0].public_key, b"RSAPUB2");
+        assert_eq!(img.proofs[0].signature, b"RSASIG2");
+        assert_eq!(img.entries.len(), 2);
+        assert_eq!(img.entries[0].name, "manifest.json");
+        assert_eq!(img.entries[0].data, b"{}");
+        assert_eq!(img.entries[1].data, b"console.log(1)");
+    }
+
+    #[test]
+    fn rejects_truncated_crx2_header() {
+        let z = zip_bytes();
+        // fixed header shorter than the 16-byte CrxFileHeader
+        let mut f = Vec::new();
+        f.extend_from_slice(MAGIC);
+        f.extend_from_slice(&VERSION_CRX2.to_le_bytes());
+        f.extend_from_slice(&[0u8; 3]);
+        assert!(decode(&f).is_err());
+        // public key length past end of input
+        let mut f = build_crx2(b"K", b"S", &z);
+        f[8..12].copy_from_slice(&99999u32.to_le_bytes());
+        assert!(decode(&f).is_err());
+        // signature length past end of input
+        let mut f = build_crx2(b"K", b"S", &z);
+        f[12..16].copy_from_slice(&99999u32.to_le_bytes());
+        assert!(decode(&f).is_err());
+        // proof fields parse but the ZIP tail is cut short
+        let mut f = build_crx2(b"K", b"S", &z);
+        f.truncate(f.len() - 2);
+        assert!(decode(&f).is_err());
     }
 
     #[test]

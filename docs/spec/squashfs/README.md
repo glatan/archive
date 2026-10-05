@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [SquashFS binary format documentation](https://dr-emann.github.io/squashfs/squashfs.html) (SquashFS 4.0、コミュニティ逆解析文書 = de facto 仕様、ローカルスナップショット: `docs/spec/sources/squashfs_4.0.html`) |
-| 参照実装 | squashfs-tools (`mksquashfs` / `unsquashfs`、GPL-2.0-only、fixture 生成 / writer 出力検証の oracle)。詳細: THIRD_PARTY_NOTICES squashfs 項 |
+| 参照実装 | squashfs-tools (`mksquashfs` / `unsquashfs` は fixture 生成 / writer 出力検証の oracle、`lzma_wrapper.c` は compressor id 2 のワイヤ形式参照、GPL-2.0-or-later)。詳細: THIRD_PARTY_NOTICES squashfs 項 |
 | 形式概要 | 96B superblock + metadata block 列 (inode/dir table) + lookup table (fragment/ID/xattr を実読み、export は境界計算のみ) + data block |
 | 実装範囲 | read + write (write は SquashFS 4.0 / regular file + symlink + device/IPC + directory tree、任意で fragment table・複数 UID/GID・export table・xattr table・directory index (ext dir inode)・sparse block 自動検出) |
 
@@ -15,7 +15,7 @@
 |---|---|---|---|---|
 | SquashFS 4.0 | [SquashFS binary format doc](https://dr-emann.github.io/squashfs/squashfs.html) | ✅ | ✅ | write は files+dirs の最小 subset |
 | compressor gzip / xz / lz4 / zstd / lzo | [SquashFS binary format doc](https://dr-emann.github.io/squashfs/squashfs.html) | ✅ | ✅ | 各 compressor module へディスパッチ |
-| compressor lzma1 | [SquashFS binary format doc](https://dr-emann.github.io/squashfs/squashfs.html) | ❌ | ❌ | `Unsupported` |
+| compressor lzma1 | [SquashFS binary format doc](https://dr-emann.github.io/squashfs/squashfs.html) + squashfs-tools `lzma_wrapper.c` | ✅ | ❌ | decode のみ。`.lzma`-alone payload (5B props + 8B LE size + raw LZMA1) を `lzma1_decode` で伸張 |
 
 mksquashfs 生成イメージの decode、`unsquashfs` による本 writer 出力の展開はテストで確認済み。
 
@@ -41,6 +41,7 @@ mksquashfs 生成イメージの decode、`unsquashfs` による本 writer 出�
 | 11 | ID 3 lzo = LZO1X raw → `compress::lzo` | §2.4 | ✅ | 同上 (lzo) |
 | 13 | 圧縮が入力を超える場合の非圧縮格納 (data block bit24 / metadata MSB) | §2.1/§2.2 | ✅ | `parses_compressed_metadata_and_data` ほか |
 | 14 | metadata/data block の伸張上限 (8KiB / block_size) を強制 | §2.1/§2.2 | ✅ | bounded decompress |
+| 38 | LZMA1 (compressor id 2) payload の伸張 | §2.4 + squashfs-tools `lzma_wrapper.c` (`sources/lzma_wrapper.c`) | ✅ | `.lzma`-alone 形式 (5B props / 8B LE unpacked size / raw LZMA1) を decode (known-size fast path + EOS fallback、出力上限を強制)。`lzma1_image_roundtrip`, `lzma1_known_size_no_eos`, `lzma1_blocks_bounded`。encode 側の LZMA 出力は対象外 (upstream も deprecated) |
 
 ### write
 
@@ -98,5 +99,4 @@ mksquashfs 生成イメージの decode、`unsquashfs` による本 writer 出�
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 38 | LZMA1 (compressor id 2) payload の伸張 | §2.4 | ❌ | upstream deprecated。`compressor_dispatch` で `Unsupported` を返す (intentional) |
 | 40 | filesystem セマンティクス (デバイス node 作成、パーミッション適用) | crate-local | ❌ | 抽出は name/content 列挙まで (intentional) |

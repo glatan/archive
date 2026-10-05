@@ -76,9 +76,9 @@
 | 37 | lzop header: optional name field (name_length + name bytes) | lzop source | ✅ | ヘッダーでパース |
 | 38 | F_CRC32_D / F_CRC32_C と F_ADLER32_D / F_ADLER32_C は排他 | lzop source | ✅ | デコーダーで対応 |
 | 39 | Decompressed output size 検証 (uncompressed_len と一致) | lzop block structure | ✅ | デコーダーで検証 |
-| 40 | 命令形式 `0 0 0 0 D D S S` の state==4 形式 (offset 2049-3072, len 3) | Linux kernel lzo.rst: Instruction encoding | ✅ | `decode.rs:384-402` で実装 |
+| 40 | 命令形式 `0 0 0 0 D D S S` の state==4 形式 (offset 2049-3072, len 3) | Linux kernel lzo.rst: Instruction encoding | ✅ | `decode.rs:423-439` で実装 |
 | 41 | lzop `version < 0x0940` の拒否 | lzop source | ✅ | `decode.rs:77`、`test_old_version_rejected` |
-| 42 | bitstream version byte 17 (v1 / LZO-RLE) と v1 専用ゼロラン命令 | Linux kernel lzo.rst | ❌ | intentional scope。v0 デコーダーのみを対象とする (カーネル文書: "v0 cannot read v1 data")。先頭バイト 17 (v1) は `Error::Unsupported` として明示的に拒絶する (`test_v1_bitstream_first_byte_rejected`) |
+| 42 | bitstream version byte 17 (v1 / LZO-RLE) と v1 専用ゼロラン命令 | Linux kernel lzo.rst | ✅ | 先頭 17 + version byte (0/1) の versioned bitstream を受理 (version > 1 は `Error::Unsupported`)。v1 では M4 distance 0xbfff のゼロラン命令 (LZO-RLE) を decode。5 バイト未満の入力は先頭 17 を v0 命令バイトとして解釈。`test_v1_bitstream_version_byte`, `test_v1_zero_run_decode`, `test_v1_bitstream_short_stream_is_v0` |
 
 
 ---
@@ -87,6 +87,5 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 41 |
-| ❌ 未実装 | 1 (intentional scope) |
+| ✅ 実装+テスト済み  | 42 |
 | **合計** | **42** |

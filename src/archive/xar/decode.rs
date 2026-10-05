@@ -2,7 +2,8 @@
 //!
 //! Parses the binary header, inflates and parses the XML table of
 //! contents, verifies the TOC checksum stored at the start of the
-//! heap, and extracts file data from the heap (stored or
+//! heap, and extracts file data and `<ea>` extended attributes from
+//! the heap (stored or
 //! compressed via `application/x-gzip`, `application/x-bzip2`,
 //! `application/x-xz`, or `application/x-lzma`), verifying per-file
 //! `extracted-checksum` values when present, and
@@ -43,6 +44,19 @@ pub struct XarEntry {
     pub mtime: Option<String>,
     /// Link target for `symlink`/`hardlink` entries (`<link>` text).
     pub link: Option<String>,
+    /// Extended attributes (`<ea>` elements) as opaque name/data
+    /// pairs; macOS-specific semantics are not interpreted.
+    pub extended_attributes: Vec<XarEa>,
+}
+
+/// One extended attribute (`<ea>` element) attached to a XAR entry.
+#[derive(Debug, Clone)]
+pub struct XarEa {
+    /// Attribute name (the `<ea>` element's `<name>`), e.g.
+    /// "com.apple.ResourceFork".
+    pub name: String,
+    /// Extracted attribute payload.
+    pub data: Vec<u8>,
 }
 
 impl crate::traits::ArchiveEntry for XarEntry {
@@ -100,6 +114,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<XarEntry>, Error> {
                 "sha1" => Some("sha1"),
                 "md5" => Some("md5"),
                 "sha256" => Some("sha256"),
+                "sha512" => Some("sha512"),
                 _ => return Err(Error::Unsupported("xar: unsupported digest algorithm")),
             }
         }
@@ -166,8 +181,75 @@ fn digest(kind: &str, data: &[u8]) -> Result<Vec<u8>, Error> {
         "sha1" => crate::util::sha1::sha1(data).to_vec(),
         "md5" => crate::util::md5::md5(data).to_vec(),
         "sha256" => crate::util::sha256::sha256(data).to_vec(),
+        "sha512" => crate::util::sha512::sha512(data).to_vec(),
         _ => return Err(Error::Unsupported("xar: unsupported digest")),
     })
+}
+
+/// Decode one heap-run element (`<data>` or `<ea>`): offset/length
+/// bounds check, `archived-checksum` over the stored bytes, encoding
+/// decode, `size` check, and `extracted-checksum` verification.
+fn decode_heap_run(node: &xml::Node, heap: &[u8]) -> Result<Vec<u8>, Error> {
+    let offset = parse_u64(node.child_text("offset"), "xar: bad data offset")? as usize;
+    let length = parse_u64(node.child_text("length"), "xar: bad data length")? as usize;
+    let end = offset
+        .checked_add(length)
+        .filter(|&end| end <= heap.len())
+        .ok_or_else(|| invalid("xar: data out of heap bounds"))?;
+    let stored = &heap[offset..end];
+    // Verify archived-checksum over the stored bytes before
+    // decompression; unknown digest styles are not verified.
+    if let Some(cs) = node.child("archived-checksum")
+        && let Some(style) = cs.attr("style")
+    {
+        let expected =
+            hex_bytes(cs.text.trim()).ok_or_else(|| invalid("xar: bad archived-checksum"))?;
+        if let "sha1" | "md5" | "sha256" | "sha512" = style
+            && digest(style, stored)?[..] != expected[..]
+        {
+            return Err(invalid("xar: archived-checksum mismatch"));
+        }
+    }
+    let encoding = node
+        .child("encoding")
+        .and_then(|e| e.attr("style"))
+        .unwrap_or("none");
+    let data = match encoding {
+        "none" | "application/octet-stream" => stored.to_vec(),
+        "application/x-gzip" => crate::compress::zlib::decode::decode(stored)
+            .map_err(|_| invalid("xar: corrupt file data"))?,
+        "application/x-bzip2" => crate::compress::bzip2::decode::decode(stored)
+            .map_err(|_| invalid("xar: corrupt file data"))?,
+        "application/x-xz" => crate::compress::xz::decode::decode(stored)
+            .map_err(|_| invalid("xar: corrupt file data"))?,
+        // libxar writes LZMA_Alone streams (5 props + u64le size).
+        "application/x-lzma" => crate::compress::lzma_alone::decode::decode(stored)
+            .map_err(|_| invalid("xar: corrupt file data"))?,
+        _ => {
+            return Err(Error::Unsupported("xar: unsupported data encoding"));
+        }
+    };
+    // Verify declared extracted size if present.
+    if let Some(size_text) = node.child_text("size")
+        && let Ok(size) = size_text.trim().parse::<usize>()
+        && size != data.len()
+    {
+        return Err(invalid("xar: extracted size mismatch"));
+    }
+    // Verify extracted-checksum when its style is supported.
+    if let Some(cs) = node.child("extracted-checksum")
+        && let Some(style) = cs.attr("style")
+    {
+        let expected =
+            hex_bytes(cs.text.trim()).ok_or_else(|| invalid("xar: bad extracted-checksum"))?;
+        // Unknown digest styles are not verified.
+        if let "sha1" | "md5" | "sha256" | "sha512" = style
+            && digest(style, &data)?[..] != expected[..]
+        {
+            return Err(invalid("xar: extracted-checksum mismatch"));
+        }
+    }
+    Ok(data)
 }
 
 fn walk_file(
@@ -192,70 +274,23 @@ fn walk_file(
 
     let mut data = Vec::new();
     if let Some(d) = node.child("data") {
-        let offset = parse_u64(d.child_text("offset"), "xar: bad data offset")? as usize;
-        let length = parse_u64(d.child_text("length"), "xar: bad data length")? as usize;
-        let end = offset
-            .checked_add(length)
-            .filter(|&end| end <= heap.len())
-            .ok_or_else(|| invalid("xar: data out of heap bounds"))?;
-        let stored = &heap[offset..end];
-        // Verify archived-checksum over the stored bytes before
-        // decompression; unknown digest styles are not verified.
-        if let Some(cs) = d.child("archived-checksum")
-            && let Some(style) = cs.attr("style")
-        {
-            let expected =
-                hex_bytes(cs.text.trim()).ok_or_else(|| invalid("xar: bad archived-checksum"))?;
-            if let "sha1" | "md5" | "sha256" = style
-                && digest(style, stored)?[..] != expected[..]
-            {
-                return Err(invalid("xar: archived-checksum mismatch"));
-            }
-        }
-        let encoding = d
-            .child("encoding")
-            .and_then(|e| e.attr("style"))
-            .unwrap_or("none");
-        data = match encoding {
-            "none" | "application/octet-stream" => stored.to_vec(),
-            "application/x-gzip" => crate::compress::zlib::decode::decode(stored)
-                .map_err(|_| invalid("xar: corrupt file data"))?,
-            "application/x-bzip2" => crate::compress::bzip2::decode::decode(stored)
-                .map_err(|_| invalid("xar: corrupt file data"))?,
-            "application/x-xz" => crate::compress::xz::decode::decode(stored)
-                .map_err(|_| invalid("xar: corrupt file data"))?,
-            // libxar writes LZMA_Alone streams (5 props + u64le size).
-            "application/x-lzma" => crate::compress::lzma_alone::decode::decode(stored)
-                .map_err(|_| invalid("xar: corrupt file data"))?,
-            _ => {
-                return Err(Error::Unsupported("xar: unsupported data encoding"));
-            }
-        };
-        // Verify declared extracted size if present.
-        if let Some(size_text) = d.child_text("size")
-            && let Ok(size) = size_text.trim().parse::<usize>()
-            && size != data.len()
-        {
-            return Err(invalid("xar: extracted size mismatch"));
-        }
-        // Verify extracted-checksum when its style is supported.
-        if let Some(cs) = d.child("extracted-checksum")
-            && let Some(style) = cs.attr("style")
-        {
-            let expected =
-                hex_bytes(cs.text.trim()).ok_or_else(|| invalid("xar: bad extracted-checksum"))?;
-            // Unknown digest styles are not verified.
-            if let "sha1" | "md5" | "sha256" = style
-                && digest(style, &data)?[..] != expected[..]
-            {
-                return Err(invalid("xar: extracted-checksum mismatch"));
-            }
-        }
+        data = decode_heap_run(d, heap)?;
+    }
+    let mut extended_attributes = Vec::new();
+    for ea in node.children_named("ea") {
+        extended_attributes.push(XarEa {
+            name: ea
+                .child_text("name")
+                .ok_or_else(|| invalid("xar: ea without <name>"))?
+                .to_string(),
+            data: decode_heap_run(ea, heap)?,
+        });
     }
     let link = node.child("link").map(|l| l.text.trim().to_string());
     out.push(XarEntry {
         name: path.clone(),
         data,
+        extended_attributes,
         file_type,
         is_dir,
         mode: node.child_text("mode").map(ToString::to_string),
@@ -285,6 +320,7 @@ mod tests {
     use super::*;
     use crate::util::sha1::sha1;
     use crate::util::sha256::sha256;
+    use crate::util::sha512::sha512;
 
     fn hex_lower(data: &[u8]) -> String {
         use core::fmt::Write;
@@ -397,10 +433,174 @@ mod tests {
     }
 
     #[test]
+    fn test_cksum_alg3_sha512() {
+        // cksum_alg=3 with the digest named "sha512": the TOC
+        // checksum and the per-file archived/extracted checksums
+        // all verify via SHA-512.
+        let cksum = hex_lower(&sha512(b"hello"));
+        let toc = alloc::format!(
+            concat!(
+                "<?xml version='1.0'?><xar><toc>",
+                "<checksum style='sha512'><offset>0</offset><size>64</size></checksum>",
+                "<file id='1'><name>f.txt</name><type>file</type>",
+                "<data><offset>64</offset><size>5</size><length>5</length>",
+                "<archived-checksum style='sha512'>{}</archived-checksum>",
+                "<extracted-checksum style='sha512'>{}</extracted-checksum>",
+                "<encoding style='none'/></data></file></toc></xar>"
+            ),
+            cksum,
+            cksum,
+        );
+        let toc_comp = crate::compress::zlib::encode::encode(toc.as_bytes());
+        let mut heap = sha512(&toc_comp).to_vec();
+        heap.extend_from_slice(b"hello");
+        let x = make_xar_cksum3("sha512", &heap, &toc);
+        let entries = decode(&x).unwrap();
+        assert_eq!(entries[0].name, "f.txt");
+        assert_eq!(entries[0].data, b"hello");
+    }
+
+    #[test]
+    fn test_cksum_alg3_sha512_mismatch() {
+        // A corrupted sha512 TOC checksum and a tampered file byte
+        // (caught by the sha512 archived-checksum) are rejected.
+        let cksum = hex_lower(&sha512(b"hello"));
+        let toc = alloc::format!(
+            concat!(
+                "<?xml version='1.0'?><xar><toc>",
+                "<checksum style='sha512'><offset>0</offset><size>64</size></checksum>",
+                "<file id='1'><name>f.txt</name><type>file</type>",
+                "<data><offset>64</offset><size>5</size><length>5</length>",
+                "<archived-checksum style='sha512'>{}</archived-checksum>",
+                "<encoding style='none'/></data></file></toc></xar>"
+            ),
+            cksum,
+        );
+        let toc_comp = crate::compress::zlib::encode::encode(toc.as_bytes());
+
+        // Corrupt the stored TOC checksum in the heap.
+        let mut heap = sha512(&toc_comp).to_vec();
+        heap.extend_from_slice(b"hello");
+        heap[0] ^= 0xFF;
+        let x = make_xar_cksum3("sha512", &heap, &toc);
+        assert!(matches!(decode(&x), Err(Error::InvalidData(_))));
+
+        // Corrupt the stored file bytes: sha512 mismatch.
+        let mut heap = sha512(&toc_comp).to_vec();
+        heap.extend_from_slice(b"jello");
+        let x = make_xar_cksum3("sha512", &heap, &toc);
+        assert!(matches!(decode(&x), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
     fn test_cksum_alg3_unknown_digest_rejected() {
-        // Digest names without a util implementation (sha512 etc.)
+        // Digest names without a util implementation (sha384 etc.)
         // remain Unsupported.
-        let x = make_xar_cksum3("sha512", &[], "<xar><toc/></xar>");
+        let x = make_xar_cksum3("sha384", &[], "<xar><toc/></xar>");
         assert!(matches!(decode(&x), Err(Error::Unsupported(_))));
+    }
+
+    fn make_xar_no_cksum(heap: &[u8], toc_xml: &str) -> Vec<u8> {
+        // cksum_alg=0 header: magic, size=28, version, toc lengths.
+        let toc_comp = crate::compress::zlib::encode::encode(toc_xml.as_bytes());
+        let mut out = Vec::new();
+        out.extend_from_slice(&MAGIC);
+        out.extend_from_slice(&28u16.to_be_bytes());
+        out.extend_from_slice(&1u16.to_be_bytes());
+        out.extend_from_slice(&(toc_comp.len() as u64).to_be_bytes());
+        out.extend_from_slice(&(toc_xml.len() as u64).to_be_bytes());
+        out.extend_from_slice(&0u32.to_be_bytes());
+        out.extend_from_slice(&toc_comp);
+        out.extend_from_slice(heap);
+        out
+    }
+
+    #[test]
+    fn decode_ea_entries() {
+        // `<ea>` elements share the `<data>` heap-run structure
+        // (offset/length/size/encoding) plus a `<name>`; payloads are
+        // exposed as opaque blobs.
+        let toc = concat!(
+            "<?xml version='1.0'?><xar><toc>",
+            "<file id='1'><name>f.txt</name><type>file</type>",
+            "<data><offset>0</offset><size>5</size><length>5</length>",
+            "<encoding style='none'/></data>",
+            "<ea><name>com.apple.quarantine</name>",
+            "<offset>5</offset><size>3</size><length>3</length>",
+            "<encoding style='none'/></ea>",
+            "<ea><name>com.apple.ResourceFork</name>",
+            "<offset>8</offset><size>2</size><length>2</length>",
+            "<encoding style='none'/></ea>",
+            "</file></toc></xar>"
+        );
+        let mut heap = Vec::new();
+        heap.extend_from_slice(b"hello");
+        heap.extend_from_slice(b"abc");
+        heap.extend_from_slice(b"xy");
+        let entries = decode(&make_xar_no_cksum(&heap, toc)).unwrap();
+        assert_eq!(entries[0].data, b"hello");
+        assert_eq!(entries[0].extended_attributes.len(), 2);
+        assert_eq!(
+            entries[0].extended_attributes[0].name,
+            "com.apple.quarantine"
+        );
+        assert_eq!(entries[0].extended_attributes[0].data, b"abc");
+        assert_eq!(
+            entries[0].extended_attributes[1].name,
+            "com.apple.ResourceFork"
+        );
+        assert_eq!(entries[0].extended_attributes[1].data, b"xy");
+    }
+
+    #[test]
+    fn ea_checksum_mismatch() {
+        // The ea archived-checksum digests the stored heap bytes; a
+        // mismatch is rejected just like for `<data>`.
+        let toc = alloc::format!(
+            concat!(
+                "<?xml version='1.0'?><xar><toc>",
+                "<file id='1'><name>f.txt</name><type>file</type>",
+                "<ea><name>attr</name><offset>0</offset><size>3</size><length>3</length>",
+                "<archived-checksum style='sha1'>{}</archived-checksum>",
+                "<encoding style='none'/></ea>",
+                "</file></toc></xar>"
+            ),
+            hex_lower(&sha1(b"abc")),
+        );
+        let x = make_xar_no_cksum(b"abc", &toc);
+        assert!(decode(&x).is_ok());
+        // Tampered heap bytes fail the ea archived-checksum.
+        let x = make_xar_no_cksum(b"abd", &toc);
+        assert!(matches!(decode(&x), Err(Error::InvalidData(_))));
+        // An ea without <name> is rejected.
+        let toc = concat!(
+            "<?xml version='1.0'?><xar><toc>",
+            "<file id='1'><name>f.txt</name><type>file</type>",
+            "<ea><offset>0</offset><size>3</size><length>3</length>",
+            "<encoding style='none'/></ea>",
+            "</file></toc></xar>"
+        );
+        let x = make_xar_no_cksum(b"abc", toc);
+        assert!(matches!(decode(&x), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn ea_encoding_gzip() {
+        // ea payloads honour the encoding element like <data>.
+        let stored = crate::compress::zlib::encode::encode(b"attribute payload");
+        let toc = alloc::format!(
+            concat!(
+                "<?xml version='1.0'?><xar><toc>",
+                "<file id='1'><name>f.txt</name><type>file</type>",
+                "<ea><name>attr</name><offset>0</offset><size>17</size><length>{}</length>",
+                "<extracted-checksum style='sha1'>{}</extracted-checksum>",
+                "<encoding style='application/x-gzip'/></ea>",
+                "</file></toc></xar>"
+            ),
+            stored.len(),
+            hex_lower(&sha1(b"attribute payload")),
+        );
+        let entries = decode(&make_xar_no_cksum(&stored, &toc)).unwrap();
+        assert_eq!(entries[0].extended_attributes[0].data, b"attribute payload");
     }
 }

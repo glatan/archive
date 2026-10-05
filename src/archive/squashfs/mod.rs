@@ -3,8 +3,8 @@
 //! SquashFS 4.0 is a compressed read-only filesystem image: a 96-byte
 //! superblock, compressed metadata block runs (inode and directory tables),
 //! lookup tables (fragment / ID / export / xattr), and per-file data blocks.
-//! Supported compressors: zlib ("gzip"), LZO, xz, LZ4, zstd. LZMA 1
-//! (compressor id 2, deprecated upstream) is rejected.
+//! The decoder supports all six compressor IDs (zlib "gzip", LZMA 1, LZO,
+//! xz, LZ4, zstd); the encoder rejects the deprecated LZMA 1 (id 2).
 //!
 //! The `encode` module writes an image (regular files, symlinks,
 //! implicit directories, one compressor, optional fragment table and

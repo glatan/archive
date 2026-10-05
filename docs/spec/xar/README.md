@@ -31,6 +31,7 @@
 | 13 | cksum_alg と `<checksum style>` の一致を検証 | 同上 (style 名と digest 名の一致要件) | ✅ | `decode_real` 経由 (style 照合実装) |
 | 14 | `<file>` 要素は再帰的にネスト可能。directory の `<file>` 子要素は `親名/名前` のパスを構成 | §TOC example (nested `<file>`) | ✅ | `decode_real` (sub/nested.txt) |
 | 15 | `<file>` の `<name>` `<type>` は必須 | 同上 | ✅ | `decode_real`; 欠落時 InvalidData |
+| 36 | cksum_alg=3 の "sha1"/"md5" 以外の digest 名 | OpenSSL digest 名 | ⚠️ | `"sha256"`/`"sha512"` を `digest()` および archived/extracted-checksum のガードで検証 (`util::sha512` 新規実装)。`test_cksum_alg3_sha256`, `test_cksum_alg3_sha256_mismatch`, `test_cksum_alg3_sha512`, `test_cksum_alg3_sha512_mismatch`。他の OpenSSL ダイジェスト名は引き続き `Error::Unsupported` (`test_cksum_alg3_unknown_digest_rejected`) |
 
 ## Heap / ファイルデータ
 
@@ -44,6 +45,7 @@
 | 21 | `<size>` があれば伸張後サイズと一致必須 | 同上 | ✅ | 実装 + `decode_real` 経由 |
 | 22 | `<extracted-checksum style="sha1|md5">` は伸張後データの digest。不一致は reject。未知 style は検証しない | 同上 | ✅ | `bad_extracted_checksum`, `decode_md5_checksums` |
 | 23 | `<archived-checksum>` は格納バイト列の digest。伸張前に検証、不一致は reject。未知 style は検証しない | 同上 | ✅ | `archived_checksum_catches_tampered_heap`, `archived_checksum_verified_on_valid_archive` |
+| 33 | `<ea>` 拡張属性データの抽出 | xarformat `<ea>`/heap-run | ✅ | `XarEntry::extended_attributes` (`XarEa`: name + 抽出 payload) で heap-run `<ea>` をエントリ化。`decode_ea_entries`, `ea_checksum_mismatch`, `ea_encoding_gzip` |
 
 ## エントリモデル / encode
 
@@ -68,8 +70,6 @@
 
 | # | 項目 | 理由 |
 |---|------|------|
-| 33 | `<ea>` 拡張属性データの抽出 | — | ❌ intentional scope | macOS 固有 (ResourceFork/quarantine 等)。heap 内データの存在は許容するがエントリ化しない |
 | 34 | `<signature>` / xar 署名検証 | — | ❌ intentional scope | OpenSSL/CMS 署名で crate スコープ外 |
-| 36 | cksum_alg=3 の "sha1"/"md5" 以外の digest 名 | — | ⚠️ | `"sha256"` を `digest()` および archived/extracted-checksum のガードに追加 (`test_cksum_alg3_sha256`, `test_cksum_alg3_sha256_mismatch`)。sha512 など他の OpenSSL ダイジェスト名はハッシュ計算機構を crate 内に持たないため、引き続き `Error::Unsupported` とする |
 | 37 | hardlink/character/block special の実データ展開 | — | ❌ intentional scope | TOC メタデータは保持するが特殊ファイル生成は対象外 |
 | 38 | heap 内エントリのストリーミング順序要件 (ea を data より先に置き per-file でグループ化する推奨) | — | ❌ intentional scope | 本実装は heap 全体をランダムアクセスで読むため順序制約は不要 |

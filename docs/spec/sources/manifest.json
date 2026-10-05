@@ -195,6 +195,16 @@
    "filename": "squashfs_4.0.html"
   },
   {
+   "id": "squashfs-tools-lzma-wrap",
+   "format": "squashfs",
+   "title": "squashfs-tools lzma_wrapper.c (compressor id 2 wire format)",
+   "version": "squashfs-tools 4.5.1 (lzma removed in later releases)",
+   "url": "https://raw.githubusercontent.com/plougher/squashfs-tools/4.5.1/squashfs-tools/lzma_wrapper.c",
+   "filename": "lzma_wrapper.c",
+   "note": "LZMA1 block = .lzma-alone payload (5B props + 8B LE unpacked size + raw stream) のワイヤ形式参照。spec-informed、コード取り込みなし",
+   "license": "GPL-2.0-or-later"
+  },
+  {
    "id": "warc-1.1",
    "format": "warc",
    "title": "The WARC File Format (ISO 28500) Version 1.1",
@@ -744,6 +754,86 @@
    "note": "pea_utils.pas fetched from the same directory; used as wire-format reference only, no code copied"
   },
   {
+   "id": "peazip-fcrypta",
+   "format": "pea",
+   "title": "PeaZip/Ehrhardt fcrypta.pas — FCA AES-128 CTR+HMAC-SHA1 key layout & PBKDF2-SHA1 init",
+   "version": "PeaZip sources branch (fetched 2026-10)",
+   "url": "https://raw.githubusercontent.com/peazip/PeaZip/sources/peazip-sources/dev/fcrypta.pas",
+   "filename": "fcrypta.pas",
+   "note": "crypto 参照実装 (decode 側 KDF/暗号/認証動作のワイヤ参照 — spec-informed、コード取り込みなし)。upstream ヘッダ記述: \"inspired from Gladman's fileenc\" (参照実装自身の provenance; src/ への取り込みなし)",
+   "license": "Wolfgang Ehrhardt; zlib-style permissive notice in-file"
+  },
+  {
+   "id": "peazip-fcaes256",
+   "format": "pea",
+   "title": "PeaZip/Ehrhardt fcaes256.pas — FCA256 AES-256 EAX key layout & PBKDF2-Whirlpool init",
+   "version": "PeaZip sources branch (fetched 2026-10)",
+   "url": "https://raw.githubusercontent.com/peazip/PeaZip/sources/peazip-sources/dev/fcaes256.pas",
+   "filename": "fcaes256.pas",
+   "note": "crypto 参照実装 (decode 側 KDF/暗号/認証動作のワイヤ参照 — spec-informed、コード取り込みなし)",
+   "license": "Wolfgang Ehrhardt, Giorgio Tani; zlib-style permissive notice in-file"
+  },
+  {
+   "id": "peazip-aes-eax",
+   "format": "pea",
+   "title": "PeaZip/Ehrhardt aes_eax.pas — EAX mode reference",
+   "version": "PeaZip sources branch (fetched 2026-10)",
+   "url": "https://raw.githubusercontent.com/peazip/PeaZip/sources/peazip-sources/dev/aes_eax.pas",
+   "filename": "aes_eax.pas",
+   "note": "crypto 参照実装 (decode 側 KDF/暗号/認証動作のワイヤ参照 — spec-informed、コード取り込みなし)",
+   "license": "Wolfgang Ehrhardt; zlib-style permissive notice in-file"
+  },
+  {
+   "id": "peazip-aes-omac",
+   "format": "pea",
+   "title": "PeaZip/Ehrhardt aes_omac.pas — AES OMAC1/CMAC reference",
+   "version": "PeaZip sources branch (fetched 2026-10)",
+   "url": "https://raw.githubusercontent.com/peazip/PeaZip/sources/peazip-sources/dev/aes_omac.pas",
+   "filename": "aes_omac.pas",
+   "note": "crypto 参照実装 (decode 側 KDF/暗号/認証動作のワイヤ参照 — spec-informed、コード取り込みなし)",
+   "license": "Wolfgang Ehrhardt; zlib-style permissive notice in-file"
+  },
+  {
+   "id": "peazip-aes-ctr",
+   "format": "pea",
+   "title": "PeaZip/Ehrhardt aes_ctr.pas — AES CTR big-endian counter reference",
+   "version": "PeaZip sources branch (fetched 2026-10)",
+   "url": "https://raw.githubusercontent.com/peazip/PeaZip/sources/peazip-sources/dev/aes_ctr.pas",
+   "filename": "aes_ctr.pas",
+   "note": "crypto 参照実装 (decode 側 KDF/暗号/認証動作のワイヤ参照 — spec-informed、コード取り込みなし)",
+   "license": "Wolfgang Ehrhardt; zlib-style permissive notice in-file"
+  },
+  {
+   "id": "peazip-aes-type",
+   "format": "pea",
+   "title": "PeaZip/Ehrhardt aes_type.pas — AES context/types shared by the units above",
+   "version": "PeaZip sources branch (fetched 2026-10)",
+   "url": "https://raw.githubusercontent.com/peazip/PeaZip/sources/peazip-sources/dev/aes_type.pas",
+   "filename": "aes_type.pas",
+   "note": "crypto 参照実装 (decode 側 KDF/暗号/認証動作のワイヤ参照 — spec-informed、コード取り込みなし)",
+   "license": "Wolfgang Ehrhardt; zlib-style permissive notice in-file"
+  },
+  {
+   "id": "peazip-kdf",
+   "format": "pea",
+   "title": "PeaZip/Ehrhardt kdf.pas — PBKDF2 over arbitrary hash reference",
+   "version": "PeaZip sources branch (fetched 2026-10)",
+   "url": "https://raw.githubusercontent.com/peazip/PeaZip/sources/peazip-sources/dev/kdf.pas",
+   "filename": "kdf.pas",
+   "note": "crypto 参照実装 (decode 側 KDF/暗号/認証動作のワイヤ参照 — spec-informed、コード取り込みなし)",
+   "license": "Wolfgang Ehrhardt; zlib-style permissive notice in-file"
+  },
+  {
+   "id": "peazip-whirl512",
+   "format": "pea",
+   "title": "PeaZip/Ehrhardt whirl512.pas — Whirlpool-2003 reference",
+   "version": "PeaZip sources branch (fetched 2026-10)",
+   "url": "https://raw.githubusercontent.com/peazip/PeaZip/sources/peazip-sources/dev/whirl512.pas",
+   "filename": "whirl512.pas",
+   "note": "crypto 参照実装 (decode 側 KDF/暗号/認証動作のワイヤ参照 — spec-informed、コード取り込みなし)",
+   "license": "Wolfgang Ehrhardt; zlib-style permissive notice in-file"
+  },
+  {
    "id": "ecma-119",
    "format": "iso9660",
    "title": "ECMA-119 Volume and File Structure of CDROM for Information Interchange (= ISO 9660)",
@@ -1151,6 +1241,7 @@
    "note": "write 側参照: cfb crate (MIT, Rust read/write)、Apache POI POIFS (Apache-2.0)、libgsf (LGPL-2.1)。[MS-CFB] spec 内に write 要件は完結",
    "reference_url": [
     "https://github.com/mdsteele/rust-cfb",
+    "https://github.com/apache/poi",
     "https://gitlab.gnome.org/GNOME/libgsf"
    ],
    "license": "cfb: MIT / Apache POI: Apache-2.0 / libgsf: LGPL-2.1"
@@ -1160,7 +1251,7 @@
    "format": "pea",
    "title": "PEA crypto primitives 参照仕様",
    "version": "—",
-   "note": "pea#18 の crypto ストリームは各アルゴリズム仕様が公開済み: EAX (Bellare-Rogaway-Wagner 論文、OCB の patent-free 代替として設計)、Twofish (作者が特許申請なし・完全フリーと明言)、Serpent (作者が public domain 宣言 — 最適化実装コードのみ GPL のためコード参照時注意)、Whirlpool (作者による非特許・自由利用宣言、ISO/IEC 10118-3)、HMAC RFC 2104。いずれも patent-free 宣言あり。block cipher + AEAD 実装が前提となるため crypto 領域として intentional scope 維持",
+   "note": "pea#18 の crypto ストリーム: AES 系コード 48 (AES-128-CTR+HMAC-SHA1-128), 49 (AES-128 EAX), 65 (AES-256 EAX) の decode を実装済み (参照: PeaZip/Ehrhardt crypto units — manifest sources の peazip-fcrypta 他を参照)。Twofish/Serpent EAX (50,51,66,67)、トリプルカスケード (68-76)、scrypt 系は intentional scope。各アルゴリズム仕様: EAX (Bellare-Rogaway-Wagner 論文、patent-free)、Whirlpool (非特許・自由利用宣言、ISO/IEC 10118-3)、HMAC RFC 2104、PBKDF2 RFC 2898",
    "reference_url": [
     "https://web.cs.ucdavis.edu/~rogaway/papers/eax.pdf",
     "https://www.schneier.com/academic/twofish/"
@@ -1183,7 +1274,7 @@
    "format": "lha",
    "title": "LHa for UNIX 1.14i source (dhuf.c etc.)",
    "version": "1.14i (jca02266/lha)",
-   "note": "LHa 独自ライセンス (非 OSI: copyright 保持・binary-only 再配布禁止・商用主利用禁止・ネット外媒体は通知義務)。dhuf.c/shuf.c/huf.c 由来コードは -lh1-〜-lh3- 実装削除と st1 の ar002 張り替えにより除去済み。現在の用途は header.doc.md 書面参照 + fixture 生成ツールのみ",
+   "note": "LHa 独自ライセンス (非 OSI: copyright 保持・binary-only 再配布禁止・商用主利用禁止・ネット外媒体は通知義務)。dhuf.c/shuf.c/huf.c 由来コードは -lh1-〜-lh3- 実装削除と st1 の ar002 張り替えにより除去済み。現在の用途は header.doc.md 書面参照 + fixture 生成 + `lha` バイナリの test-time oracle",
    "reference_url": [
     "https://github.com/jca02266/lha"
    ],
@@ -1343,7 +1434,8 @@
    "reference_url": [
     "https://github.com/rpm-software-management/rpm/blob/master/lib/cpio.cc",
     "https://github.com/rpm-software-management/rpm/blob/master/COPYING"
-   ]
+   ],
+   "license": "GPL-2.0-or-later OR LGPL-2.0-or-later (rpm COPYING; lib/ 系は LGPL 代替適用可)"
   },
   {
    "id": "lrzip-source",
@@ -1496,6 +1588,52 @@
     "https://www.libarchive.org/"
    ],
    "license": "BSD-2-Clause"
+  },
+  {
+   "id": "chromium-crx-file-headers",
+   "format": "crx3",
+   "title": "Chromium components/crx_file headers (CRX2 fixed layout)",
+   "version": "chromium main",
+   "note": "CRX2 固定ヘッダ layout・64KiB ヘッダ上限・RSA PKCS#1 受理の書面参照 (crx_file.h / crx_verifier.cc)。コード取り込みなし",
+   "reference_url": [
+    "https://github.com/chromium/chromium/blob/main/components/crx_file/crx_file.h",
+    "https://github.com/chromium/chromium/blob/main/components/crx_file/crx_verifier.cc"
+   ],
+   "license": "BSD-3-Clause"
+  },
+  {
+   "id": "rpm-rpmtag-h",
+   "format": "rpm",
+   "title": "rpm include/rpm/rpmtag.h (tag 定数)",
+   "version": "rpm master",
+   "note": "digest/signature 検証の tag 定数 (269/272/273/1004/5092/5093/5097) の書面参照。数値定数のみ、コード取り込みなし",
+   "reference_url": [
+    "https://github.com/rpm-software-management/rpm/blob/master/include/rpm/rpmtag.h"
+   ],
+   "license": "GPL-2.0-or-later OR LGPL-2.0-or-later (rpm COPYING)"
+  },
+  {
+   "id": "olefile",
+   "format": "mscfb",
+   "title": "olefile Python package (MS-CFB parser oracle)",
+   "version": "olefile 0.47+",
+   "note": "`CfbEncoder` 出力を parse するテスト時 oracle。リンク・同梱なし",
+   "reference_url": [
+    "https://github.com/decalage2/olefile"
+   ],
+   "license": "BSD-style"
+  },
+  {
+   "id": "pea-crypto-test-vectors",
+   "format": "pea",
+   "title": "EAX/PBKDF2 テストベクター出典",
+   "version": "—",
+   "note": "src/util/eax.rs のテストベクター: libtomcrypt eax_test.c (public domain) と Brian Gladman AES vector set (permissive) 由来。src/util/pbkdf2.rs: RFC 6070/2202 + OpenSSL (Apache-2.0) で交差検証",
+   "reference_url": [
+    "https://github.com/libtom/libtomcrypt",
+    "https://github.com/openssl/openssl"
+   ],
+   "license": "public domain / permissive / Apache-2.0"
   }
  ]
 }

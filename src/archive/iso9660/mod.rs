@@ -1,4 +1,4 @@
-//! ISO 9660 (ECMA-119) CD-ROM filesystem image read support.
+//! ISO 9660 (ECMA-119) CD-ROM filesystem image read/write support.
 //!
 //! Decoder for the volume/directory record format described in
 //! ECMA-119 (= ISO 9660; snapshot in `docs/spec/sources/ecma119.pdf`)
@@ -28,15 +28,29 @@
 //! plus the four 17-byte volume timestamps (ECMA-119 §8.4.5,
 //! §8.4.19-8.4.29) — is exposed via `IsoImage::meta` (primary) and
 //! `IsoImage::joliet_meta` (supplementary).
+//! Extended attribute records (ECMA-119 §9.5) are parsed into
+//! `IsoEntry::xa` and act as a fallback for owner/group/mode/
+//! mtime when Rock Ridge fields are absent. The remaining SUSP
+//! surface is decoded too: `PX` file serials (`IsoEntry::ino`),
+//! `SF` sparse parameters, `ER`/`ES` extension references
+//! (`IsoEntry::susp_ext`), and Apple `AA`/`BA` records
+//! (`IsoEntry::apple`); `PD` padding is skipped per SUSP.
 //!
-//! Extended attribute record content, non-`pz` `ZF` compression
-//! algorithms, and writing ISO images are intentionally out of
-//! scope.
+//! The `encode` module writes primary-volume images: plain
+//! ISO9660 level 1/2 identifiers with L and M path tables, or
+//! SUSP/Rock Ridge (`SP`/`ER`, `NM`, `PX`, `TF`, `SL`) when
+//! enabled. It does not emit Joliet SVDs, El Torito records,
+//! multi-extent files or interleaved recording.
+//!
+//! Sparse (`SF`) payload decoding and non-`pz` `ZF` compression
+//! algorithms are intentionally out of scope for the decoder.
 
 use crate::error::Error;
 
 /// ISO 9660 filesystem image decoding.
 pub mod decode;
+/// ISO 9660 filesystem image encoding.
+pub mod encode;
 
 /// Codec struct for trait-based ISO 9660 decode operations.
 pub struct Iso9660Codec;
@@ -46,5 +60,38 @@ impl crate::traits::ArchiveDecode for Iso9660Codec {
 
     fn decode(&self, input: &[u8]) -> Result<alloc::vec::Vec<Self::Entry>, Error> {
         decode::decode(input).map(|img| img.entries)
+    }
+}
+
+/// Encoder struct for trait-based ISO 9660 encode operations.
+///
+/// Produces a plain ISO9660 image (level-2 identifiers); use
+/// [`encode::IsoEncoder`] for Rock Ridge output or level control.
+pub struct Iso9660ArchiveEncoder {
+    inner: encode::IsoEncoder,
+}
+
+impl Iso9660ArchiveEncoder {
+    /// Create a new trait-based ISO 9660 encoder (plain image).
+    pub const fn new() -> Self {
+        Self {
+            inner: encode::IsoEncoder::new(),
+        }
+    }
+}
+
+impl Default for Iso9660ArchiveEncoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl crate::traits::ArchiveEncode for Iso9660ArchiveEncoder {
+    fn add_file(&mut self, name: &str, data: &[u8]) {
+        self.inner.add_file(name, data);
+    }
+
+    fn finish(self) -> Result<alloc::vec::Vec<u8>, Error> {
+        self.inner.finish()
     }
 }

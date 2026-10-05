@@ -50,7 +50,7 @@ pub mod pea;
 #[cfg(feature = "romfs")]
 pub mod romfs;
 
-/// Linux erofs read-only filesystem image read support.
+/// Linux erofs read-only filesystem image read/write support.
 #[cfg(feature = "erofs")]
 pub mod erofs;
 

@@ -31,8 +31,9 @@ struct Member<'a> {
 
 /// Encoder for LHA archives at header level 0, 1, 2, or 3, storing
 /// file entries by default or compressing them with the
-/// static-Huffman methods `-lh4-` through `-lh7-` or the LArc LZSS
-/// methods `-lzs-`/`-lz5-` (see [LhaEncoder::with_method]).
+/// static-Huffman methods `-lh4-` through `-lh7-`, the LArc LZSS
+/// methods `-lzs-`/`-lz5-`, or the PMarc methods `-pm1-`/`-pm2-`
+/// (see [LhaEncoder::with_method]).
 pub struct LhaEncoder {
     out: Vec<u8>,
     level: u8,
@@ -82,9 +83,10 @@ impl LhaEncoder {
     /// `-lh0-` (stored, the default), the stored-alias tags `-lz4-`
     /// and `-pm0-`, one of the static-Huffman "st1" methods
     /// `-lh4-`, `-lh5-`, `-lh6-`, `-lh7-` (window sizes
-    /// 16/16/64/128 KiB), or the LArc LZSS methods `-lzs-` (bit
+    /// 16/16/64/128 KiB), the LArc LZSS methods `-lzs-` (bit
     /// oriented, 2 KiB ring) and `-lz5-` (byte oriented, 4 KiB
-    /// ring). Other methods are rejected with
+    /// ring), or the PMarc methods `-pm1-`/`-pm2-` (literal-block
+    /// streams). Other methods are rejected with
     /// [Error::Unsupported]. Entries whose compressed stream is not
     /// smaller than the input are written `-lh0-` instead, as real
     /// LHA does. Directory entries always use `-lhd-`.
@@ -97,7 +99,7 @@ impl LhaEncoder {
     pub fn with_method(mut self, method: &[u8; 5]) -> Result<Self, Error> {
         match method {
             b"-lh0-" | b"-lz4-" | b"-pm0-" | b"-lh4-" | b"-lh5-" | b"-lh6-" | b"-lh7-"
-            | b"-lzs-" | b"-lz5-" => {
+            | b"-lzs-" | b"-lz5-" | b"-pm1-" | b"-pm2-" => {
                 self.method = *method;
             }
             _ => return Err(Error::Unsupported("lha: unsupported write method")),
@@ -119,6 +121,8 @@ impl LhaEncoder {
             b"-lh7-" => Some(crate::compress::lzh::st1_enc::encode(17, 5, data)),
             b"-lzs-" => Some(super::larc_enc::encode_lzs(data)),
             b"-lz5-" => Some(super::larc_enc::encode_lz5(data)),
+            b"-pm1-" => Some(super::pmarc_enc::encode_pm1(data)),
+            b"-pm2-" => Some(super::pmarc_enc::encode_pm2(data)),
             _ => None,
         };
         // Compress when a compressing method is selected, but keep

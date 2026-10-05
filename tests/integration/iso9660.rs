@@ -223,3 +223,93 @@ fn test_iso9660_eltorito_image() {
     assert_eq!(e.image.len(), 2048);
     assert!(e.image.starts_with(b"BOOTPAYLOAD"));
 }
+
+// ============================================================
+// ISO 9660 encoder tests
+// ============================================================
+
+#[test]
+fn test_iso9660_encoder_roundtrip() {
+    let mut enc = iso9660::encode::IsoEncoder::new().with_volume_name("encvol");
+    enc.add_file("hello.txt", b"hello encoder");
+    enc.add_file("sub/deep/two.dat", b"xy");
+    enc.add_directory("empty");
+    let img = enc.finish().unwrap();
+    let dec = iso9660::decode::decode(&img).unwrap();
+    assert_eq!(dec.volume_id, "ENCVOL");
+    assert!(!dec.has_rock_ridge);
+    assert_eq!(find(&dec, "HELLO.TXT").data, b"hello encoder");
+    assert_eq!(find(&dec, "SUB/DEEP/TWO.DAT").data, b"xy");
+    assert_eq!(dec.path_table.len(), 4);
+}
+
+#[test]
+fn test_iso9660_encoder_rockridge() {
+    let mut enc = iso9660::encode::IsoEncoder::new().with_rock_ridge();
+    enc.add_file("iso-tree/hello.txt", b"hello iso9660\n");
+    enc.add_symlink("iso-tree/link.txt", "hello.txt");
+    let img = enc.finish().unwrap();
+    let dec = iso9660::decode::decode(&img).unwrap();
+    assert!(dec.has_rock_ridge);
+    assert_eq!(find(&dec, "iso-tree/hello.txt").data, b"hello iso9660\n");
+    let link = find(&dec, "iso-tree/link.txt");
+    assert_eq!(link.kind, iso9660::decode::IsoKind::Symlink);
+    assert_eq!(link.data, b"hello.txt");
+}
+
+#[test]
+fn test_iso9660_encoder_trait() {
+    use archive::traits::{ArchiveDecode, ArchiveEncode, ArchiveEntry};
+    let mut enc = iso9660::Iso9660ArchiveEncoder::new();
+    enc.add_file("t.txt", b"trait");
+    let img = enc.finish().unwrap();
+    let entries = iso9660::Iso9660Codec.decode(&img).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name(), "T.TXT");
+    assert_eq!(entries[0].data(), b"trait");
+}
+
+/// bsdtar (libarchive ISO9660 reader) lists a Rock Ridge image the
+/// encoder produced; skipped when the tool is not installed.
+#[test]
+fn test_iso9660_encoder_bsdtar_oracle() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    if Command::new("bsdtar").arg("--version").output().is_err() {
+        return;
+    }
+    let mut enc = iso9660::encode::IsoEncoder::new().with_rock_ridge();
+    enc.add_file("iso-tree/hello.txt", b"hello iso9660\n");
+    enc.add_file("iso-tree/sub/deep/two.dat", b"2");
+    enc.add_symlink("iso-tree/link.txt", "hello.txt");
+    let img = enc.finish().unwrap();
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_iso9660_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let image_path = dir.join("enc.iso");
+    std::fs::write(&image_path, &img).unwrap();
+    let output = Command::new("bsdtar")
+        .arg("-tf")
+        .arg(&image_path)
+        .output()
+        .unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        output.status.success(),
+        "bsdtar rejected encoder output: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let list = String::from_utf8_lossy(&output.stdout);
+    for name in [
+        "iso-tree/hello.txt",
+        "iso-tree/sub/deep/two.dat",
+        "iso-tree/link.txt",
+    ] {
+        assert!(list.contains(name), "missing {name} in bsdtar -tf: {list}");
+    }
+}

@@ -29,7 +29,7 @@
 | 3 | flags bit0/bit1 (prev/next cabinet) の ASCIIZ 文字列を skip して解釈 | MS-CAB §2.1 | ✅ | `parses_cabinet_with_prev_next_names` |
 | 4 | flags bit2 (RESERVE_PRESENT): cbCFHeader/cbCFFolder/cbCFData による reserved 領域 skip | MS-CAB §2.1 | ✅ | `parses_cabinet_with_nonzero_reserve` |
 | 5 | CFFOLDER: coffCabStart / cCFDATA / typeCompress (type は下位バイト) | MS-CAB §2.2 | ✅ | `Folder` |
-| 6 | CFFILE: cbFile / uoffFolderStart / iFolder / attribs / ASCIIZ 名。date / time は読み飛ばし | MS-CAB §2.3 | ✅ | `FileRec` |
+| 6 | CFFILE: cbFile / uoffFolderStart / iFolder / attribs / date / time / ASCIIZ 名 | MS-CAB §2.3 | ✅ | `MscabEntry::{attribs,date,time}` で生値を公開 (`FileRec`) |
 | 7 | CFDATA: csum / cbData / cbUncomp + データ (cbCFData reserve 対応) | MS-CAB §2.4 | ✅ | `decompress_folder` |
 | 8 | csum 非ゼロ時は CFDATA チェックサム (cbData|cbUncomp<<16 シード + LE u32 ワード XOR) を検証 | MS-CAB §2.4 | ✅ | `rejects_checksum_mismatch`, `checksum_covers_cfdata_reserve` (シード欠落・abReserve 未包含を修正済み) |
 
@@ -74,12 +74,10 @@
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-
 | 25 | multi-cabinet set (.set / disk spanning) read | MS-CAB §2.1, §2.3 | ✅ | `decode_parts` が iCabinet 順の member 列を受理 (index/setID 不一致は reject)。iFolder 0xFFFD/0xFFFE/0xFFFF と cbUncomp==0 CFDATA 分割を解決 (continued entry の dedup は name+cbFile 一致で判定、CFHEADER の PREV/NEXT flag 自体は内容を解決に使わないため未検証)。`decode_parts_split_file`, `decode_parts_cfdata_block_split`, `decode_parts_set_id_mismatch`, `decode_parts_index_mismatch`, `decode_parts_missing_earlier_member`, `decode_parts_rejects_empty` |
 
 ### Intentional scope (実装対象外)
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-
-| 26 | 属性 / 日時のファイルシステム復元 | MS-CAB §2.3 | ⚠️ | 生の値は `MscabEntry::date` / `time` / `attribs` で公開する (`exposes_cffile_date_time_attribs`)。ファイルシステムへの属性復元はアーカイブ抽出層の責務として intentional scope 外とする。encode 側は date/time/attribs を 0 で出力する |
+| 26 | 属性 / 日時のファイルシステム復元 | MS-CAB §2.3 | ⚠️ | 生の値は `MscabEntry::date` / `time` / `attribs` で公開する (`exposes_cffile_date_time_attribs`)。ファイルシステムへの属性復元はアーカイブ抽出層の責務として intentional scope 外とする。encode 側は date/time/attribs を 0 で出力する。attribs bit0x80 (`_A_NAME_IS_UTF`) は flag 有無に関わらず名を常に `from_utf8_lossy` で解釈する方針 (ASCII は UTF-8 に含まれるため安全側) |

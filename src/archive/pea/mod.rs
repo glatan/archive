@@ -11,12 +11,20 @@
 //!
 //! Integrity tags (Adler-32, CRC-32, CRC-64, MD5, SHA-1, SHA-256) are
 //! verified when the algorithm is one this crate implements; other
-//! hash algorithms are parsed and skipped unverified. Authenticated-
-//! encryption streams (EAX/Twofish/Serpent/HMAC and cascades) and
-//! multi-volume spanning are intentionally out of scope. The
-//! encoder emits single-stream archives with PCOMPRESS0 (stored)
-//! or PCOMPRESS2 (zlib deflate) file data and integrity tags for
-//! the algorithms this crate implements.
+//! hash algorithms are parsed and skipped unverified. Multi-volume
+//! (split) archives are read via `decode::decode_parts`, which
+//! verifies and strips each volume's trailing control tag before
+//! decoding the concatenated bodies.
+//!
+//! Authenticated-encryption streams are decoded via
+//! `decode::decode_with_password` for the AES-based algorithms:
+//! AES-128 CTR + HMAC-SHA1-128 (48), AES-128 EAX (49), and
+//! AES-256 EAX (65). The Twofish/Serpent EAX modes (50, 51, 66,
+//! 67) and the triple-cascade modes (68-76) remain intentionally
+//! out of scope. The encoder emits single-stream archives with
+//! PCOMPRESS0 (stored) or PCOMPRESS2 (zlib deflate) file data
+//! and integrity tags for the algorithms this crate implements;
+//! encrypted writing is not supported.
 
 use crate::error::Error;
 

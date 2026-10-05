@@ -28,6 +28,12 @@ use super::registry::FilterRegistry;
 /// xz stream magic bytes.
 const STREAM_MAGIC: [u8; 6] = [0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00];
 
+/// Maximum size of the Index field: 16 GiB (2^34).
+///
+/// xz-file-format.txt §2.1. Backward Size stores (index_size / 4) - 1
+/// as a u32, so 2^34 is also the largest Index size encodable on the wire.
+const MAX_INDEX_SIZE: u64 = 16 * 1024 * 1024 * 1024;
+
 /// Check type constants.
 const CHECK_NONE: u8 = 0x00;
 const CHECK_CRC32: u8 = 0x01;
@@ -360,8 +366,12 @@ fn decode_stream(
         input[footer_start + 6],
         input[footer_start + 7],
     ]);
-    let index_size = ((backward_size_raw as usize) + 1) * 4;
-    if index_size != footer_start - index_start {
+    // u64 math keeps the max stored value (2^34) valid on 32-bit usize.
+    let index_size = (u64::from(backward_size_raw) + 1) * 4;
+    if index_size > MAX_INDEX_SIZE {
+        return Err(Error::InvalidData("xz: Index exceeds 16 GiB limit"));
+    }
+    if index_size != (footer_start - index_start) as u64 {
         return Err(Error::InvalidData(
             "xz: footer backward size does not match Index",
         ));
@@ -387,7 +397,7 @@ fn verify_index(
     let (num_records, consumed) = decode_vli(&input[ipos..])?;
     ipos += consumed;
 
-    if num_records as usize != block_records.len() {
+    if num_records != block_records.len() as u64 {
         return Err(Error::InvalidData(
             "xz: Index record count does not match block count",
         ));
@@ -434,6 +444,11 @@ fn verify_index(
             expected: expected_index_crc,
             actual: index_crc,
         });
+    }
+
+    let index_size = (ipos + 4 - index_start) as u64;
+    if index_size > MAX_INDEX_SIZE {
+        return Err(Error::InvalidData("xz: Index exceeds 16 GiB limit"));
     }
 
     Ok(ipos + 4)
@@ -1020,6 +1035,52 @@ mod tests {
         assert!(
             result.is_err(),
             "expected Index verification error, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_backward_size_max_implies_index_limit() {
+        // §2.1.2.2: real_backward_size = (stored + 1) * 4, so the largest
+        // stored value maps to exactly the §2.1 Index field limit (16 GiB).
+        assert_eq!(MAX_INDEX_SIZE, 16 * 1024 * 1024 * 1024);
+        assert_eq!((u64::from(u32::MAX) + 1) * 4, MAX_INDEX_SIZE);
+
+        // A footer claiming the maximum Backward Size while the real Index
+        // is only a few bytes is a mismatch and must be rejected.
+        let mut data = super::super::encode::encode(b"hello");
+        let footer_start = data.len() - 12;
+        data[footer_start + 4..footer_start + 8].copy_from_slice(&u32::MAX.to_le_bytes());
+        fix_stream_footer_crc(&mut data);
+
+        let result = decode(&data);
+        assert!(
+            matches!(
+                result,
+                Err(Error::InvalidData(
+                    "xz: footer backward size does not match Index"
+                ))
+            ),
+            "expected backward size mismatch, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_index_max_vli_record_count_rejected() {
+        // A Number of Records far above the decoded block count must be
+        // rejected via u64 comparison; this VLI encodes 2^63 - 1.
+        let mut index = vec![0x00]; // Index indicator
+        index.extend_from_slice(&[0xFF; 8]);
+        index.push(0x7F);
+
+        let result = verify_index(&index, 0, &[]);
+        assert!(
+            matches!(
+                result,
+                Err(Error::InvalidData(
+                    "xz: Index record count does not match block count"
+                ))
+            ),
+            "expected record count mismatch, got {result:?}"
         );
     }
 

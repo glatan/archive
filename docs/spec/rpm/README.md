@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | rpm.org Package Format documentation ([`format_v6.html`](https://rpm-software-management.github.io/rpm/manual/format_v6.html) / [`format_header.html`](https://rpm-software-management.github.io/rpm/manual/format_header.html) / [`format_lead.html`](https://rpm-software-management.github.io/rpm/manual/format_lead.html)、ローカルスナップショット: `docs/spec/sources/rpm_format_*.html`) + rpm `lib/cpio.c` (stripped payload 挙動 — magic `07070X`/8B hex index 以外の詳細: 4B 整列、trailer、tag 由来の size/名前解決) |
-| 参照実装 | rpm `lib/cpio.c` (rpm COPYING により GPL-2.0-or-later または `lib/` については LGPL-2.0-or-later 代替適用可 — LGPL-2.0 §3→GPL-3→AGPL-3 §13 の取り込みパスを持つが、実際は構造事実の確認のみでコード取り込みなし)、`bsdtar` (BSD-2-Clause、writer 出力の oracle)。詳細: THIRD_PARTY_NOTICES rpm 項 |
+| 参照実装 | rpm `lib/cpio.c` + `include/rpm/rpmtag.h` (digest tag 定数の書面参照。rpm COPYING により GPL-2.0-or-later または `lib/` については LGPL-2.0-or-later 代替適用可 — LGPL-2.0 §3→GPL-3→AGPL-3 §13 の取り込みパスを持つが、実際は構造事実の確認のみでコード取り込みなし)、`bsdtar` (BSD-2-Clause、writer 出力の oracle)。詳細: THIRD_PARTY_NOTICES rpm 項 |
 | 形式概要 | 96B Lead + Signature header + 8B パディング + Header + 圧縮 payload (cpio `newc` / stripped `07070X`) |
 | 実装範囲 | **read/write** (署名検証は intentional scope 外) |
 
@@ -84,5 +84,5 @@
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 38 | OpenPGP 署名検証・payload/header digest 検証 | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ❌ | 暗号検証はコンテナレイヤの責務外 (intentional)。tag 値は API 経由で参照可能 |
+| 38 | OpenPGP 署名検証・payload/header digest 検証 | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ⚠️ | digest 検証は `RpmPackage::verify_digests` で opt-in 実装 (Signature/Header digest タグ、payload digest 5092/5097 を含む。MD5/SHA1/SHA256/SHA512)。`verifies_md5_sha1_digests`, `rejects_tampered_payload_digest`, `detects_tampered_header_digest`。OpenPGP/GPG 署名検証は暗号レイヤの責務外 (intentional)。tag 値は API 経由で参照可能。v6 必須の SHA3_256 digest (Sig tag 279) と v6 新設 payload digest tag 5121-5124 は対象外 (SHA3 実装を持たないため intentional scope) |
 | 39 | RPMTAG のパッケージ管理セマンティクス (依存関係・scriptlet・ファイル属性の install 意味) | rpm tags | ❌ | パッケージマネージャ層の責務 (intentional)。生 tag は `header.get_*` で取得可能 |

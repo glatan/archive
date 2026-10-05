@@ -3,13 +3,13 @@
 //! Parses the SquashFS 4.0 on-disk format: superblock, metadata block runs
 //! (inode / directory tables), lookup tables (fragment / ID / xattr),
 //! extended-directory index entries (section 6.1), and data/fragment blocks.
-//! All six compressor IDs are recognized; LZMA 1 (id 2, deprecated upstream)
-//! is rejected as unsupported.
+//! All six compressor IDs are recognized; LZMA 1 blocks (id 2, deprecated
+//! upstream) carry `.lzma`-alone payloads.
 
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::compress::{lz4, lzo, xz, zlib, zstd};
+use crate::compress::{lz4, lzma, lzo, xz, zlib, zstd};
 use crate::error::Error;
 
 const SUPERBLOCK_SIZE: usize = 96;
@@ -50,7 +50,7 @@ const TYPE_EXT_SOCKET: u16 = 14;
 pub enum SquashfsCompression {
     /// ID 1: zlib streams ("gzip" in upstream naming).
     Gzip,
-    /// ID 2: LZMA 1 (deprecated upstream, unsupported here).
+    /// ID 2: LZMA 1 (deprecated upstream); blocks are `.lzma`-alone payloads.
     Lzma,
     /// ID 3: LZO1X.
     Lzo,
@@ -90,15 +90,67 @@ impl SquashfsCompression {
     fn decompress(&self, data: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
         match self {
             Self::Gzip => zlib::decode::decode_bounded(data, max_output),
-            Self::Lzma => Err(Error::Unsupported(
-                "squashfs: LZMA1 compressor is deprecated and unsupported",
-            )),
+            Self::Lzma => lzma1_decode(data, max_output),
             Self::Lzo => lzo::decode::decompress_lzo1x(data, max_output),
             Self::Xz => xz::decode::decode_bounded(data, max_output),
             Self::Lz4 => lz4::decode::decode_block(data, max_output),
             Self::Zstd => zstd::decode::decode_bounded(data, max_output),
         }
     }
+}
+
+/// Decode one LZMA1 (compressor id 2) block. Upstream mksquashfs writes a
+/// `.lzma`-alone payload per block: `[5B props][8B LE unpacked size][raw
+/// LZMA1 stream]`. Both upstream variants are accepted: the SDK form ends
+/// exactly at the declared size without an end-of-payload marker, while the
+/// liblzma form appends one. The range decoder may leave up to 2 flush
+/// bytes unread; anything more is rejected as trailing data.
+fn lzma1_decode(data: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
+    const HEADER: usize = 13;
+    const SLACK: usize = 2;
+    if data.len() < HEADER {
+        return Err(Error::UnexpectedEof);
+    }
+    let props = lzma::LzmaProperties::from_props_byte(data[0])
+        .map_err(|_| Error::InvalidData("squashfs: lzma invalid properties byte"))?;
+    let dict_size = u32::from_le_bytes([data[1], data[2], data[3], data[4]]);
+    if dict_size == 0 {
+        return Err(Error::InvalidData(
+            "squashfs: lzma dictionary size must be non-zero",
+        ));
+    }
+    let unpacked_size = u64::from_le_bytes(data[5..13].try_into().unwrap());
+    let stream = &data[HEADER..];
+    if stream.is_empty() {
+        return Err(Error::UnexpectedEof);
+    }
+    let decoded = if unpacked_size == u64::MAX {
+        let (decoded, consumed) = lzma::lzma_decode_with_props(stream, dict_size, props)?;
+        if stream.len() - consumed > SLACK {
+            return Err(Error::InvalidData("squashfs: lzma trailing data"));
+        }
+        decoded
+    } else {
+        let expected = usize::try_from(unpacked_size)
+            .map_err(|_| Error::InvalidData("squashfs: lzma unpacked size overflows"))?;
+        let (decoded, consumed) =
+            lzma::lzma_decode_with_props_and_size(stream, dict_size, props, expected)?;
+        if stream.len() - consumed <= SLACK {
+            decoded
+        } else {
+            // Declared size plus an end-of-payload marker (liblzma variant).
+            let (decoded, consumed) = lzma::lzma_decode_with_props(stream, dict_size, props)
+                .map_err(|_| Error::InvalidData("squashfs: lzma trailing data"))?;
+            if decoded.len() != expected || stream.len() - consumed > SLACK {
+                return Err(Error::InvalidData("squashfs: lzma trailing data"));
+            }
+            decoded
+        }
+    };
+    if decoded.len() > max_output {
+        return Err(Error::OutputLimitExceeded { limit: max_output });
+    }
+    Ok(decoded)
 }
 
 /// Parsed superblock fields.
@@ -1078,10 +1130,11 @@ fn read_file(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compress::zlib;
+    use crate::compress::{lzma, zlib};
     use alloc::vec;
 
     const COMPRESS_ID: u16 = 1; // zlib ("gzip" upstream)
+    const COMPRESS_ID_LZMA: u16 = 2;
 
     /// Node for the test image builder.
     enum Node {
@@ -1115,6 +1168,11 @@ mod tests {
         fragment_offsets: Vec<u32>, // per-frag offset within fragment_payload
         frag_block_start: u64,
         compress: bool,
+        /// When set, blocks are emitted as compressor-id-2 LZMA1 `.lzma`
+        /// payloads instead of zlib: `true` appends the end-of-payload
+        /// marker (liblzma variant), `false` ends at the declared size
+        /// (SDK variant).
+        lzma_eos: Option<bool>,
         block_size: u32,
         next_inode: u32,
         /// Emit directories as extended directory inodes (TYPE_EXT_DIR).
@@ -1136,6 +1194,7 @@ mod tests {
                 fragment_offsets: Vec::new(),
                 frag_block_start: 0,
                 compress,
+                lzma_eos: None,
                 block_size: 4096,
                 next_inode: 1,
                 ext_dirs: false,
@@ -1145,19 +1204,39 @@ mod tests {
         }
 
         fn pack_flag(&self, raw: &[u8]) -> (Vec<u8>, bool) {
-            if self.compress {
+            if self.lzma_eos.is_some() {
+                (self.lzma1_pack(raw), false)
+            } else if self.compress {
                 (zlib::encode::encode(raw), false)
             } else {
                 (raw.to_vec(), true)
             }
         }
 
+        /// `.lzma`-alone payload: props byte 0x5D (lc3/lp0/pb2), dictionary
+        /// size = image block_size, 8-byte little-endian uncompressed size,
+        /// raw LZMA1 stream.
+        fn lzma1_pack(&self, raw: &[u8]) -> Vec<u8> {
+            let props = lzma::LzmaProperties::LZIP;
+            let stream = if self.lzma_eos == Some(true) {
+                lzma::lzma_encode_with_props(raw, self.block_size, props)
+            } else {
+                lzma::lzma_encode_with_props_no_eos(raw, self.block_size, props)
+            };
+            let mut out = Vec::with_capacity(13 + stream.len());
+            out.push(props.to_props_byte());
+            out.extend_from_slice(&self.block_size.to_le_bytes());
+            out.extend_from_slice(&(raw.len() as u64).to_le_bytes());
+            out.extend_from_slice(&stream);
+            out
+        }
+
         /// Append `raw` to `stream` as metadata blocks (8 KiB chunks), each
         /// preceded by the 16-bit size header.
         fn emit_meta_run(&self, out: &mut Vec<u8>, stream: &[u8]) {
             for chunk in stream.chunks(META_BLOCK_SIZE) {
-                if self.compress {
-                    let packed = zlib::encode::encode(chunk);
+                if self.compress || self.lzma_eos.is_some() {
+                    let packed = self.pack_flag(chunk).0;
                     let (body, flag) = if packed.len() < chunk.len() {
                         (packed, 0u16)
                     } else {
@@ -1432,7 +1511,12 @@ mod tests {
             img[8..12].copy_from_slice(&0u32.to_le_bytes()); // mkfs_time
             img[12..16].copy_from_slice(&self.block_size.to_le_bytes());
             img[16..20].copy_from_slice(&frag_count.to_le_bytes());
-            img[20..22].copy_from_slice(&COMPRESS_ID.to_le_bytes());
+            let compress_id = if self.lzma_eos.is_some() {
+                COMPRESS_ID_LZMA
+            } else {
+                COMPRESS_ID
+            };
+            img[20..22].copy_from_slice(&compress_id.to_le_bytes());
             img[22..24].copy_from_slice(&12u16.to_le_bytes()); // block_log
             img[24..26].copy_from_slice(&0u16.to_le_bytes()); // flags
             img[26..28].copy_from_slice(&1u16.to_le_bytes()); // id_count
@@ -1483,6 +1567,74 @@ mod tests {
         let file = &image.entries[1];
         assert_eq!(file.name, "big.bin");
         assert_eq!(file.data, content);
+    }
+
+    /// spec #38: compressor id 2 (LZMA1 `.lzma`-alone payloads) end-to-end,
+    /// liblzma variant with an end-of-payload marker after the declared size.
+    #[test]
+    fn lzma1_image_roundtrip() {
+        let content: Vec<u8> = (0..9000u32).map(|i| (i % 97) as u8).collect();
+        let content: &'static [u8] = Box::leak(content.into_boxed_slice());
+        let mut b = Builder::new(false);
+        b.lzma_eos = Some(true);
+        let img = b.build(vec![
+            Node::File("lzma.bin", content, false),
+            Node::File("tail.bin", b"tail-lzma", true),
+            Node::Symlink("ln", "lzma.bin"),
+        ]);
+        let image = decode(&img).unwrap();
+        assert_eq!(image.superblock.compression, SquashfsCompression::Lzma);
+        let names: Vec<_> = image.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, [".", "lzma.bin", "tail.bin", "ln"]);
+        assert_eq!(image.entries[1].data, content);
+        assert_eq!(image.entries[2].data, b"tail-lzma");
+        assert_eq!(image.entries[3].data, b"lzma.bin");
+    }
+
+    /// spec #38: SDK variant — declared unpacked size, no end-of-payload
+    /// marker in the stream.
+    #[test]
+    fn lzma1_known_size_no_eos() {
+        let content: Vec<u8> = (0..5000u32).map(|i| (i % 61) as u8).collect();
+        let content: &'static [u8] = Box::leak(content.into_boxed_slice());
+        let mut b = Builder::new(false);
+        b.lzma_eos = Some(false);
+        let img = b.build(vec![Node::File("sdk.bin", content, false)]);
+        let image = decode(&img).unwrap();
+        assert_eq!(image.entries[1].data, content);
+    }
+
+    /// spec #38: the per-block output bound rejects an LZMA1 payload that
+    /// expands past the expected size, at the dispatch level and inside
+    /// image decode.
+    #[test]
+    fn lzma1_blocks_bounded() {
+        let raw: Vec<u8> = (0..300u32).map(|i| (i % 41) as u8).collect();
+        let payload = Builder::new(false).lzma1_pack(&raw);
+        assert!(matches!(
+            SquashfsCompression::Lzma.decompress(&payload, raw.len() - 1),
+            Err(Error::OutputLimitExceeded { .. })
+        ));
+        assert_eq!(
+            SquashfsCompression::Lzma
+                .decompress(&payload, raw.len())
+                .unwrap(),
+            raw
+        );
+
+        // Image level: a file inode declaring a file_size smaller than the
+        // block's decoded length fails through the same bound.
+        let mut b = Builder::new(false);
+        b.lzma_eos = Some(true);
+        let mut body = Vec::new();
+        body.extend_from_slice(&(SUPERBLOCK_SIZE as u32).to_le_bytes()); // blocks_start
+        body.extend_from_slice(&NO_INDEX.to_le_bytes()); // frag_index
+        body.extend_from_slice(&0u32.to_le_bytes()); // frag_offset
+        body.extend_from_slice(&50u32.to_le_bytes()); // file_size < 300
+        body.extend_from_slice(&(payload.len() as u32).to_le_bytes()); // block_sizes[0]
+        b.data_region.extend_from_slice(&payload);
+        let img = b.build(vec![Node::Raw("over.bin", TYPE_BASIC_FILE, 0o644, body)]);
+        assert!(decode(&img).is_err());
     }
 
     #[test]

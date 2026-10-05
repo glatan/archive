@@ -8,13 +8,16 @@
 //! explicit hard links, and directory children reached through
 //! `spec.info`.
 //!
-//! Writing romfs images is intentionally out of scope (genromfs is
-//! the reference producer).
+//! The `encode` module writes genromfs-compatible images: regular
+//! files, directories (with `.`/`..` helper headers and implicit
+//! parents), symlinks, hard links, and block/char/socket/fifo nodes.
 
 use crate::error::Error;
 
 /// Linux romfs filesystem image decoding.
 pub mod decode;
+/// Linux romfs filesystem image encoding.
+pub mod encode;
 
 /// Codec struct for trait-based romfs decode operations.
 pub struct RomfsCodec;
@@ -24,5 +27,35 @@ impl crate::traits::ArchiveDecode for RomfsCodec {
 
     fn decode(&self, input: &[u8]) -> Result<alloc::vec::Vec<Self::Entry>, Error> {
         decode::decode(input).map(|img| img.entries)
+    }
+}
+
+/// Encoder struct for trait-based romfs encode operations.
+pub struct RomfsArchiveEncoder {
+    inner: encode::RomfsEncoder,
+}
+
+impl RomfsArchiveEncoder {
+    /// Create a new trait-based romfs encoder (empty volume name).
+    pub const fn new() -> Self {
+        Self {
+            inner: encode::RomfsEncoder::new(),
+        }
+    }
+}
+
+impl Default for RomfsArchiveEncoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl crate::traits::ArchiveEncode for RomfsArchiveEncoder {
+    fn add_file(&mut self, name: &str, data: &[u8]) {
+        self.inner.add_file(name, data);
+    }
+
+    fn finish(self) -> Result<alloc::vec::Vec<u8>, Error> {
+        self.inner.finish()
     }
 }
