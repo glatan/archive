@@ -85,6 +85,6 @@ MSB-first でパックされる (RFC 2118 §4.2)。
 - PPP カプセル化 (protocol `0x00FD`、CCP、Reset-Request/Ack) はリンク層の責任として対象外。
 - RFC 2118 の in-band 2B ヘッダ経路 (8KiB 履歴) に加え、MS-RDPBCGR §3.1.8.4 の外部 flags/type byte 経路 (`RdpDecoder`/`RdpEncoder`、RDP4 8KiB / RDP5 64KiB) を対応済み。RDP6/6.1 bulk compression は別 codec のため対象外。なお RFC 2118 パスと異なり、RDP variant では非圧縮パケットも履歴に供給する (MS-RDPBCGR §3.1.8.4 / FreeRDP 挙動)。
 - エンコーダは greedy 単一ハッシュのベースライン品質 (圧縮率最適化は意図しない)。
-- RFC 2118 §1.1 の licensing statement (MPPC は PPP 実装製品かつ相互運用目的でのみ使用可、というフィールドオブユース制限) を記録する。本 crate は PPP 非実装の汎用ライブラリとして codec を単体公開しており、透明性のため THIRD_PARTY_NOTICES にも明記 (法的助言ではない)。
+- RFC 2118 §1.1 の licensing statement (MPPC は PPP 実装製品かつ相互運用目的でのみ使用可、というフィールドオブユース制限) を記録する。本 crate は PPP 非実装の汎用ライブラリとして codec を単体公開しており、透明性のため THIRD_PARTY_NOTICES にも明記 (法的助言ではない)。この文言の実効的根拠だった Stac 特許群は失効済みで inert とみなす判断は `docs/IMPLEMENTATION_POLICY.md` の「仕様文書中の field-of-use 文言の扱い」節を参照。
 - `decode(input)` は入力全体を 1 パケットとして扱う。パケット長フィールドが wire 上に存在しないため、連接ストリームの split は仕様上不可能 (パケット境界はリンク層情報)。
 - fuzz ハーネスは MPPC の 1 パケット上限に合わせて入力を 8192 バイトに丸める (`fuzz/src/runner.rs` の `Algorithm::Mppc` 特例)。

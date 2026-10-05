@@ -33,6 +33,25 @@
 - `docs/spec/sources/manifest.json` (`sources` または `no_url_available`)
 - 該当 module doc / doc comment
 
+## 仕様文書中の field-of-use 文言の扱い
+
+書面仕様そのものに使用目的の制限文言が含まれる場合がある
+(例: RFC 2118 §1.1 は MPPC を「PPP 実装製品において相互運用目的
+でのみ使用可」と規定する)。この種の文言は、その実効的根拠が
+関連特許の存続に依存するかを確認した上で扱う。
+
+MPPC の場合、§1.1 は Stac Electronics のライセンス申し出の一部で
+あり、実効的根拠だった Stac 特許群は全件失効している
+(THIRD_PARTY_NOTICES Stac LZS 項に各特許の失効を個別確認済み)。
+したがって同文言は **inert な記述** (法的に空転する記述) と
+みなし、汎用 codec としての提供を妨げない。判断材料は
+THIRD_PARTY_NOTICES の MPPC 項に透明記録する。これはライセンス
+監査上の位置付けメモであり、法的助言ではない。
+
+同種の文言を持つ新規仕様を扱う場合は、同じく「実効的根拠
+(特許・契約) が存続しているか」を確認し、結論と根拠を
+THIRD_PARTY_NOTICES に記録する。
+
 ## 非対応の原則
 
 例外条件を満たせない variant / メソッドは実装しない (`Error::Unsupported` で拒否) ことを原則とし、「未対応」ではなく **intentional scope** として記録する。

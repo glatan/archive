@@ -127,6 +127,9 @@ specifications or standards documents:
   (section 1.1 directs licensees to Stac), whose practical basis was
   the Stac patent portfolio documented as expired in the Stac LZS
   entry below; RFC 2118 is Informational and is not itself a license.
+  Per docs/IMPLEMENTATION_POLICY.md (field-of-use clause handling),
+  the clause is treated as inert because its practical basis (the
+  Stac patents) has expired.
   Patent note: rdesktop's comments additionally reference the separate
   Stac/Hi/fn LZS patent family (now expired); MPPC's LZ77 token format
   is distinct from Stac LZS.
