@@ -248,6 +248,9 @@
   - upstream decoder は EOS の `run(-1)` で OUT が 1 回多く実行されるため末尾に 0xFF が付く — その挙動も含めて検証する
 - `hello.upstream-pcomp-inc.zpaq` / `hello.upstream-pcomp-inc.bin`
   - 非 identity PCOMP (`a++; out; halt`) を載せた upstream stream と、upstream 自身の decode 出力
+- `jidac-appended-mixed.zpaq`
+  - crate `encode_jidac` (2 files) + `JidacAppender` (1 file) + upstream `zpaq a -m1` (1 file) の 3-version JIDAC chain
+  - `decode_jidac_appended_mixed` が全 version view と file 内容を検証
 - `jidac-m3-heavy-pcomp.upstream.zpaq`
   - upstream `zpaq` CLI v7.15 の `zpaq a fixture.zpaq s400.bin -m3 -threads 1` で生成した JIDAC journaling archive (内部 filename `s400.bin`、409,600 バイト)
   - この archive の PCOMP は EOS (`run(-1)`) で 16,780,266 cycle を要し、旧 cycle limit (1<<24) を超過する — `original-compress` fuzz で検出した境界ケース (seed 1791135713545052870 iter 61) の回帰固定

@@ -26,10 +26,11 @@
 //! view applies all `i` blocks in order; deletion entries remove the
 //! filename.
 //!
-//! This module provides read support ([`decode_jidac`]) and
-//! single-transaction write support ([`encode_jidac`]); fragment
-//! deduplication on write is out of scope — each stored entry becomes
-//! one fragment.
+//! Read support is [`decode_jidac`]. [`encode_jidac`] writes a fresh
+//! single-transaction archive; [`JidacAppender`] appends new
+//! transactions to an existing archive with upstream content-defined
+//! fragmenting and SHA-1 fragment deduplication, and [`JidacAppender::delete`]
+//! emits deletion records.
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
@@ -163,18 +164,23 @@ fn snapshot(
     Ok(files)
 }
 
-/// Decode an upstream JIDAC journaling archive.
-///
-/// Returns the committed versions and the latest file view. Streams
-/// that mix JIDAC and plain segments, contain malformed JIDAC
-/// metadata, or reference missing fragments are rejected. A trailing
-/// incomplete transaction (`jmp < 0`) is ignored like upstream does.
-pub fn decode_jidac(input: &[u8]) -> Result<JidacJournal, Error> {
+struct JidacState {
+    frags: Vec<Vec<u8>>,
+    dt: BTreeMap<Vec<u8>, FileRecord>,
+    versions: Vec<JidacVersion>,
+    /// Byte offset where committed data ends: the start of a trailing
+    /// incomplete transaction, or `input.len()` when the stream ends
+    /// cleanly.
+    committed_len: usize,
+}
+
+fn decode_state(input: &[u8]) -> Result<JidacState, Error> {
     let mut frags: Vec<Vec<u8>> = Vec::new();
     let mut dt: BTreeMap<Vec<u8>, FileRecord> = BTreeMap::new();
     let mut versions: Vec<JidacVersion> = Vec::new();
     let mut saw_jidac = false;
     let mut incomplete = false;
+    let mut committed_len = input.len();
 
     let mut start = 0;
     while !incomplete {
@@ -202,6 +208,7 @@ pub fn decode_jidac(input: &[u8]) -> Result<JidacJournal, Error> {
                     let jmp = btol(payload)?;
                     if jmp < 0 {
                         incomplete = true;
+                        committed_len = start;
                         break;
                     }
                     versions.push(JidacVersion {
@@ -344,8 +351,27 @@ pub fn decode_jidac(input: &[u8]) -> Result<JidacJournal, Error> {
     if !saw_jidac {
         return Err(Error::InvalidData("zpaq jidac: not a journaling archive"));
     }
-    let files = snapshot(&dt, &frags)?;
-    Ok(JidacJournal { versions, files })
+    Ok(JidacState {
+        frags,
+        dt,
+        versions,
+        committed_len,
+    })
+}
+
+/// Decode an upstream JIDAC journaling archive.
+///
+/// Returns the committed versions and the latest file view. Streams
+/// that mix JIDAC and plain segments, contain malformed JIDAC
+/// metadata, or reference missing fragments are rejected. A trailing
+/// incomplete transaction (`jmp < 0`) is ignored like upstream does.
+pub fn decode_jidac(input: &[u8]) -> Result<JidacJournal, Error> {
+    let state = decode_state(input)?;
+    let files = snapshot(&state.dt, &state.frags)?;
+    Ok(JidacJournal {
+        versions: state.versions,
+        files,
+    })
 }
 
 /// One file to store in a JIDAC transaction.
@@ -502,6 +528,300 @@ pub fn encode_jidac(entries: &[JidacInput], date: i64, level: u8) -> Result<Vec<
     Ok(out)
 }
 
+/// Split `data` into content-defined fragments the way upstream
+/// `zpaq add` does (zpaq.cpp): a rolling hash `h` is updated per byte
+/// (`h=(h+c+1)*314159265` when the byte equals its order-1 context
+/// prediction, `*271828182` otherwise) and a boundary is taken when
+/// `h < 2^(22-frag)` after at least `64<<frag` bytes, with a hard cap
+/// of `8128<<frag` bytes. `frag` is the upstream `-fragment` argument
+/// (default 6: ~4KiB min, ~64KiB average, ~508KiB max). Upstream
+/// additionally clamps the fragment cap to `blocksize-12` for small
+/// `-blocksize` settings; the writer here is unbounded, which is
+/// wire-compatible but can produce fragments larger than a
+/// constrained upstream run would.
+fn split_fragments(data: &[u8], frag: u32) -> Vec<&[u8]> {
+    let max = if frag > 19 {
+        usize::MAX
+    } else {
+        8128usize << frag
+    };
+    let min = if frag > 25 {
+        max
+    } else {
+        (64usize << frag).min(max)
+    };
+    let bound = if frag <= 22 { 1u32 << (22 - frag) } else { 0 };
+    let mut out = Vec::new();
+    let mut o1 = [0u8; 256];
+    let mut prev = 0u8;
+    let mut h = 0u32;
+    let mut start = 0usize;
+    for (i, &c) in data.iter().enumerate() {
+        if c == o1[prev as usize] {
+            h = h.wrapping_add(u32::from(c) + 1).wrapping_mul(314159265);
+        } else {
+            h = h.wrapping_add(u32::from(c) + 1).wrapping_mul(271828182);
+        }
+        o1[prev as usize] = c;
+        prev = c;
+        let sz = i - start + 1;
+        if sz >= max || (h < bound && sz >= min) {
+            out.push(&data[start..=i]);
+            start = i + 1;
+            h = 0;
+            o1 = [0; 256];
+            prev = 0;
+        }
+    }
+    if start < data.len() {
+        out.push(&data[start..]);
+    }
+    out
+}
+
+/// Incremental appender for JIDAC archives: the write side of
+/// upstream `zpaq add` semantics. [`JidacAppender::open`] decodes an
+/// existing archive to rebuild the fragment and file tables, `add`
+/// splits new data into content-defined fragments and reuses existing
+/// fragment ids by SHA-1 (upstream dedup), `delete` records
+/// deletion entries, and `commit` returns the `c`/`d`/`h`/`i`
+/// transaction bytes to append to the archive.
+///
+/// Unlike upstream (which writes `jmp = -1` then rewrites in place),
+/// committed transactions are emitted directly with a positive `jmp`;
+/// readers accept both forms. Each commit emits at most one `d` and
+/// `h` block rather than splitting at the upstream blocksize limit.
+pub struct JidacAppender {
+    /// sha1(fragment) -> fragment id over all existing + new fragments.
+    frag_ids: BTreeMap<[u8; 20], u32>,
+    /// Latest file table (filename -> record) for delete/skip checks.
+    dt: BTreeMap<Vec<u8>, FileRecord>,
+    /// Next fragment id (`htsize`, including upstream's reserved id 0).
+    frag_count: u32,
+    /// Offset past which `open` input was an ignored incomplete
+    /// transaction; callers should truncate the archive here before
+    /// appending `commit` output.
+    committed_len: usize,
+    /// `-fragment` equivalent, default 6.
+    frag_bits: u32,
+    /// New fragments staged for the next commit.
+    new_frags: Vec<Vec<u8>>,
+    /// Staged adds: (date, filename, attr, fragment ptrs).
+    adds: Vec<(i64, Vec<u8>, u64, Vec<u32>)>,
+    /// Staged deletions.
+    deletes: Vec<Vec<u8>>,
+}
+
+impl JidacAppender {
+    /// Open an existing JIDAC archive for appending. The archive must
+    /// decode as a valid JIDAC stream (`decode_jidac` rules).
+    pub fn open(existing: &[u8]) -> Result<Self, Error> {
+        let state = decode_state(existing)?;
+        let mut frag_ids = BTreeMap::new();
+        for (i, frag) in state.frags.iter().enumerate().skip(1) {
+            frag_ids.insert(sha1(frag), i as u32);
+        }
+        Ok(Self {
+            frag_ids,
+            dt: state.dt,
+            frag_count: state.frags.len() as u32,
+            committed_len: state.committed_len,
+            frag_bits: 6,
+            new_frags: Vec::new(),
+            adds: Vec::new(),
+            deletes: Vec::new(),
+        })
+    }
+
+    /// Byte offset where committed data in the `open` input ends.
+    /// If the archive ended with an incomplete transaction, truncate
+    /// the archive to this length before appending [`Self::commit`]
+    /// output, like upstream `zpaq add` does.
+    pub fn committed_len(&self) -> usize {
+        self.committed_len
+    }
+
+    /// Override the fragment-size parameter (upstream `-fragment`,
+    /// default 6). Clamped to `0..=18` so `8128 << frag_bits` stays
+    /// below `u32::MAX`. Must be set before `add` calls to affect
+    /// them.
+    pub fn set_fragment_bits(&mut self, bits: u32) {
+        self.frag_bits = bits.min(18);
+    }
+
+    /// Stage `input` for addition. Content is split into fragments and
+    /// existing fragments are reused by SHA-1. If an identical file
+    /// (same resolved fragments, date, and attributes) is already
+    /// present, no index entry is emitted — matching upstream's
+    /// unchanged-file skip.
+    pub fn add(&mut self, input: &JidacInput) -> Result<(), Error> {
+        if input.filename.contains(&0) {
+            return Err(Error::InvalidData("zpaq jidac: NUL in filename"));
+        }
+        let mut ptrs = Vec::new();
+        for frag in split_fragments(input.data, self.frag_bits) {
+            let sum = sha1(frag);
+            let id = match self.frag_ids.get(&sum) {
+                Some(&id) => id,
+                None => {
+                    let id = self.frag_count;
+                    self.frag_count += 1;
+                    self.frag_ids.insert(sum, id);
+                    self.new_frags.push(frag.to_vec());
+                    id
+                }
+            };
+            ptrs.push(id);
+        }
+        let name = input.filename.to_vec();
+        self.deletes.retain(|d| *d != name);
+        if let Some(rec) = self.dt.get(&name) {
+            let fdate = if input.date == 0 {
+                rec.date
+            } else {
+                input.date
+            };
+            if rec.ptrs == ptrs && rec.date == fdate && rec.attr == input.attr {
+                return Ok(());
+            }
+        }
+        self.adds.push((input.date, name, input.attr, ptrs));
+        Ok(())
+    }
+
+    /// Stage `filename` for deletion. Mirrors upstream: a record is
+    /// emitted only for a file present in the archive's file table.
+    /// Staging an `add` for the same name cancels a pending delete.
+    pub fn delete(&mut self, filename: &[u8]) {
+        if self.dt.contains_key(filename) && !self.deletes.iter().any(|d| d.as_slice() == filename)
+        {
+            self.deletes.push(filename.to_vec());
+        }
+        self.dt.remove(filename);
+    }
+
+    /// Emit the staged transaction (`c`/`d`/`h`/`i` blocks) and return
+    /// the bytes to append to the archive. `date` is the
+    /// `yyyymmddhhmmss` transaction timestamp; `level` is the model
+    /// level `1..=3` used for the `d` block (metadata blocks are
+    /// emitted at level 1 like upstream). Returns an empty vector when
+    /// nothing is staged.
+    pub fn commit(&mut self, date: i64, level: u8) -> Result<Vec<u8>, Error> {
+        if !(1..=3).contains(&level) {
+            return Err(Error::InvalidData("zpaq jidac: level must be 1..=3"));
+        }
+        if self.adds.is_empty() && self.deletes.is_empty() && self.new_frags.is_empty() {
+            return Ok(Vec::new());
+        }
+        let first_id = self.frag_count - self.new_frags.len() as u32;
+
+        // d block: new fragment data + sizes + 0 + count.
+        let mut dpayload = Vec::new();
+        for frag in &self.new_frags {
+            dpayload.extend_from_slice(frag);
+        }
+        for frag in &self.new_frags {
+            dpayload.extend_from_slice(&(frag.len() as u32).to_le_bytes());
+        }
+        dpayload.extend_from_slice(&0u32.to_le_bytes());
+        dpayload.extend_from_slice(&(self.new_frags.len() as u32).to_le_bytes());
+        let mut dblock = Vec::new();
+        if !self.new_frags.is_empty() {
+            emit_block(
+                &mut dblock,
+                level,
+                &jidac_name(date, b'd', first_id)?,
+                &jidac_comment(dpayload.len()),
+                &dpayload,
+            )?;
+        }
+
+        let mut out = Vec::new();
+        // c block: jmp = compressed size of the d blocks; num = htsize.
+        emit_block(
+            &mut out,
+            1,
+            &jidac_name(date, b'c', self.frag_count)?,
+            &jidac_comment(8),
+            &(dblock.len() as i64).to_le_bytes(),
+        )?;
+        out.extend_from_slice(&dblock);
+
+        // h block: bsize + sha1[20] usize[4] per new fragment.
+        if !self.new_frags.is_empty() {
+            let mut hpayload = Vec::new();
+            hpayload.extend_from_slice(&(dblock.len() as u32).to_le_bytes());
+            for frag in &self.new_frags {
+                hpayload.extend_from_slice(&sha1(frag));
+                hpayload.extend_from_slice(&(frag.len() as u32).to_le_bytes());
+            }
+            emit_block(
+                &mut out,
+                1,
+                &jidac_name(date, b'h', first_id)?,
+                &jidac_comment(hpayload.len()),
+                &hpayload,
+            )?;
+        }
+
+        // i block: delete records first (upstream order), then adds.
+        let mut ipayload = Vec::new();
+        for name in &self.deletes {
+            ipayload.extend_from_slice(&0i64.to_le_bytes());
+            ipayload.extend_from_slice(name);
+            ipayload.push(0);
+        }
+        for (edate, name, attr, ptrs) in &self.adds {
+            let fdate = if *edate == 0 { date } else { *edate };
+            ipayload.extend_from_slice(&fdate.to_le_bytes());
+            ipayload.extend_from_slice(name);
+            ipayload.push(0);
+            if *attr == 0 {
+                ipayload.extend_from_slice(&0u32.to_le_bytes());
+            } else if (*attr & 0xFF) == u64::from(b'u') {
+                ipayload.extend_from_slice(&3u32.to_le_bytes());
+                ipayload.extend_from_slice(&(*attr as u32).to_le_bytes()[..3]);
+            } else if (*attr & 0xFF) == u64::from(b'w') {
+                ipayload.extend_from_slice(&5u32.to_le_bytes());
+                ipayload.extend_from_slice(&(*attr as u32).to_le_bytes()[..4]);
+                ipayload.push((attr >> 32) as u8);
+            } else {
+                ipayload.extend_from_slice(&0u32.to_le_bytes());
+            }
+            ipayload.extend_from_slice(&(ptrs.len() as u32).to_le_bytes());
+            for &p in ptrs {
+                ipayload.extend_from_slice(&p.to_le_bytes());
+            }
+        }
+        emit_block(
+            &mut out,
+            1,
+            &jidac_name(date, b'i', 1)?,
+            &jidac_comment(ipayload.len()),
+            &ipayload,
+        )?;
+
+        // Reflect the committed state so a subsequent commit on the
+        // same appender sees the updated file table.
+        for name in self.deletes.drain(..) {
+            self.dt.remove(&name);
+        }
+        for (edate, name, attr, ptrs) in self.adds.drain(..) {
+            let fdate = if edate == 0 { date } else { edate };
+            self.dt.insert(
+                name,
+                FileRecord {
+                    date: fdate,
+                    attr,
+                    ptrs,
+                },
+            );
+        }
+        self.new_frags.clear();
+        Ok(out)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -578,7 +898,15 @@ mod tests {
             2,
         )
         .unwrap();
-        std::fs::write("/tmp/rust_jidac.zpaq", enc).unwrap();
+        std::fs::write("/tmp/rust_jidac.zpaq", &enc).unwrap();
+        let mut ap = JidacAppender::open(&enc).unwrap();
+        let mut bigger = b"delta payload ".to_vec();
+        bigger.extend_from_slice(&[9u8; 5000]);
+        ap.add(&entry("dir/extra.log", &bigger)).unwrap();
+        let suffix = ap.commit(20_250_102_120_000, 1).unwrap();
+        let mut appended = enc;
+        appended.extend_from_slice(&suffix);
+        std::fs::write("/tmp/rust_jidac_appended.zpaq", &appended).unwrap();
     }
 
     /// Dev-only interop check: decodes an upstream `zpaq a` archive
@@ -632,6 +960,115 @@ mod tests {
             0x78, 0xb5, 0x0f, 0x02, 0x92, 0xe0,
         ];
         assert_eq!(sha1(&j.files[0].data), want);
+    }
+
+    #[test]
+    fn jidac_append_roundtrip_and_delete() {
+        let base = encode_jidac(
+            &[entry("a.txt", b"alpha"), entry("b.bin", &[7u8; 9000])],
+            20_250_101_120_000,
+            1,
+        )
+        .unwrap();
+        let mut ap = JidacAppender::open(&base).unwrap();
+        ap.add(&entry("c.log", b"tail")).unwrap();
+        ap.delete(b"a.txt");
+        let suffix = ap.commit(20_250_102_120_000, 1).unwrap();
+        assert!(!suffix.is_empty());
+        let mut archive = base.clone();
+        archive.extend_from_slice(&suffix);
+        let j = decode_jidac(&archive).unwrap();
+        assert_eq!(j.versions.len(), 2);
+        assert_eq!(j.files.len(), 2);
+        assert_eq!(j.files[0].filename, b"b.bin");
+        assert_eq!(j.files[1].filename, b"c.log");
+        assert_eq!(j.files[1].data, b"tail");
+        // v0 still shows the pre-delete view.
+        assert_eq!(j.versions[0].files.len(), 2);
+        assert_eq!(j.versions[0].files[0].filename, b"a.txt");
+    }
+
+    #[test]
+    fn jidac_append_dedup_reuses_fragments() {
+        let blob: Vec<u8> = (0..60000).map(|i| (i * 7 % 251) as u8).collect();
+        let base = encode_jidac(&[entry("one.bin", &blob)], 20_250_101_120_000, 1).unwrap();
+        let mut ap = JidacAppender::open(&base).unwrap();
+        ap.add(&entry("two.bin", &blob)).unwrap();
+        let suffix = ap.commit(20_250_102_120_000, 1).unwrap();
+        // No new fragments: the transaction is metadata-only (c + i).
+        assert!(suffix.len() < 2048);
+        let mut archive = base;
+        archive.extend_from_slice(&suffix);
+        let j = decode_jidac(&archive).unwrap();
+        assert_eq!(j.files.len(), 2);
+        assert_eq!(j.files[0].data, blob);
+        assert_eq!(j.files[1].data, blob);
+    }
+
+    #[test]
+    fn jidac_append_unchanged_is_noop() {
+        let base = encode_jidac(&[entry("a.txt", b"alpha")], 20_250_101_120_000, 1).unwrap();
+        let mut ap = JidacAppender::open(&base).unwrap();
+        ap.add(&entry("a.txt", b"alpha")).unwrap();
+        assert!(ap.commit(20_250_102_120_000, 1).unwrap().is_empty());
+        // Different content under the same name does emit.
+        let mut ap = JidacAppender::open(&base).unwrap();
+        ap.add(&entry("a.txt", b"changed")).unwrap();
+        assert!(!ap.commit(20_250_102_120_000, 1).unwrap().is_empty());
+        // Deleting an absent name is a no-op.
+        let mut ap = JidacAppender::open(&base).unwrap();
+        ap.delete(b"ghost");
+        assert!(ap.commit(20_250_102_120_000, 1).unwrap().is_empty());
+    }
+
+    /// `jidac-appended-mixed.zpaq` was produced by `encode_jidac`
+    /// (2 files), then `JidacAppender` (1 file), then upstream
+    /// `zpaq a -m1` (1 file): a three-version chain mixing our and
+    /// upstream transactions.
+    #[test]
+    fn decode_jidac_appended_mixed() {
+        let arc = include_bytes!("../../../tests/fixtures/zpaq/jidac-appended-mixed.zpaq");
+        let j = decode_jidac(arc).unwrap();
+        assert_eq!(j.versions.len(), 3);
+        assert_eq!(j.versions[0].files.len(), 2);
+        assert_eq!(j.versions[1].files.len(), 3);
+        assert_eq!(j.files.len(), 4);
+        assert_eq!(j.files[0].filename, b"bin.dat");
+        assert_eq!(j.files[0].data.len(), 777);
+        assert_eq!(j.files[1].filename, b"dir/extra.log");
+        assert_eq!(j.files[1].data.len(), 5014);
+        assert_eq!(&j.files[1].data[..14], b"delta payload ");
+        assert_eq!(j.files[2].filename, b"dir/hello.txt");
+        assert_eq!(j.files[2].data, b"hello jidac");
+        assert_eq!(j.files[3].filename, b"new.txt");
+        assert_eq!(j.files[3].data, b"newfile-content\n");
+    }
+
+    /// An archive ending in an incomplete transaction (jmp = -1) is
+    /// truncated via `committed_len` before appending, matching
+    /// upstream `zpaq add` behavior.
+    #[test]
+    fn jidac_append_truncates_incomplete_tail() {
+        let base = encode_jidac(&[entry("a.txt", b"alpha")], 20_250_101_120_000, 1).unwrap();
+        let mut truncated = base.clone();
+        emit_block(
+            &mut truncated,
+            1,
+            &jidac_name(20_250_102_120_000, b'c', 1).unwrap(),
+            &jidac_comment(8),
+            &(-1i64).to_le_bytes(),
+        )
+        .unwrap();
+        let mut ap = JidacAppender::open(&truncated).unwrap();
+        assert_eq!(ap.committed_len(), base.len());
+        ap.add(&entry("b.txt", b"beta")).unwrap();
+        let suffix = ap.commit(20_250_103_120_000, 1).unwrap();
+        let mut archive = base;
+        archive.extend_from_slice(&suffix);
+        let j = decode_jidac(&archive).unwrap();
+        assert_eq!(j.versions.len(), 2);
+        assert_eq!(j.files.len(), 2);
+        assert_eq!(j.files[1].data, b"beta");
     }
 
     #[test]

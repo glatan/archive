@@ -342,7 +342,7 @@ impl Zpaql {
         loop {
             cycles -= 1;
             if cycles == 0 {
-                return Err(Error::InvalidData("zpaq: hcomp execution limit exceeded"));
+                return Err(Error::InvalidData("zpaq: zpaql execution limit exceeded"));
             }
             if !self.execute()? {
                 return Ok(());

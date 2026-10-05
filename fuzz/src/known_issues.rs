@@ -70,7 +70,7 @@ fn is_lrzip_external_output_gap(algo: Algorithm, pattern: TestPattern, error: &s
             || (algo == Algorithm::LrzipZpaq
                 && (error.contains("zpaq: ZPAQL execution")
                     || error.contains("zpaq: invalid hcomp jump target")
-                    || error.contains("zpaq: hcomp execution limit exceeded"))))
+                    || error.contains("zpaq: zpaql execution limit exceeded"))))
 }
 
 fn is_lzw_empty_input_quirk(
@@ -177,7 +177,7 @@ mod tests {
             "invalid data: zpaq: ZPAQL execution error",
             "invalid data: zpaq: ZPAQL execution out of bounds",
             "invalid data: zpaq: invalid hcomp jump target",
-            "invalid data: zpaq: hcomp execution limit exceeded",
+            "invalid data: zpaq: zpaql execution limit exceeded",
         ] {
             let issue = classify(
                 Algorithm::LrzipZpaq,
