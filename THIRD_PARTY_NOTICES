@@ -867,9 +867,11 @@ against de facto reference behavior:
   - JIDAC journaling support (`src/archive/zpaq/jidac.rs`) was written
     against the journaling code in upstream `zpaq.cpp` v7.15 (block
     naming `jDC<date><type><num>`, transaction layout c/d/h/i, global
-    fragment table, deletion records). The upstream `zpaq` CLI (v7.15,
-    installed in the test container via `pkg/zpaq`) was used as a
-    bidirectional oracle: it decodes this crate's JIDAC output
+    fragment table, deletion records, content-defined fragmenting with
+    the order-1 rolling hash and SHA-1 fragment reuse). The upstream
+    `zpaq` CLI (v7.15, installed in the test container via `pkg/zpaq`)
+    was used as a bidirectional oracle: it decodes this crate's JIDAC
+    output including `JidacAppender` incremental transactions
     (`zpaq l`/`zpaq x`/`zpaq a` append) and this crate decodes
     CLI-produced multi-transaction archives including deletions and
     fragment-dedup reuse. The same CLI also serves as the file-based
@@ -878,11 +880,28 @@ against de facto reference behavior:
   - Patent note: upstream explicitly states the format is "not encumbered
     by any patents or pending patents" and that all past versions were
     published to establish prior art (zpaq.html)
+  - The config-language compiler (`src/compress/zpaq/config.rs`) ports
+    upstream `libzpaq.cpp` `Compiler` (public domain): the `.cfg`
+    grammar — `comp`/`hcomp`/`pcomp` sections, ZPAQL mnemonics, the
+    `if`/`else`/`endif` and `do`/`while`/`until`/`forever` structured
+    pseudo-operations lowering to `jt`/`jf`/`jmp`/`lj`, and `$N+M`
+    argument substitution — is defined only by that implementation, so
+    it is used as the normative source under the IMPLEMENTATION_POLICY
+    exception. Fidelity is pinned by compiling upstream's own `mid.cfg`
+    and `max.cfg` (zpaq 1.07+ distribution text; the GPL license notice
+    and per-line annotations are stripped — the descriptive comment
+    fragment `zpaq 1.07+ config file ...` remains, and the retained
+    declarations are byte-equivalent to the public-domain libzpaq
+    built-in model blobs; even if the retained text were GPL-3.0 it is
+    combinable into AGPL-3.0 under GPL-3.0 section 13) plus a
+    reconstructed `min.cfg`, all byte-exact against the built-in
+    level 1-3 model blobs.
   - Repository scope: wire-compatible low-level codec (including
-    optional encoder-side PCOMP/PROG emission via CustomModel), a
-    multi-entry archive layer with crate-local journaling, and upstream
-    JIDAC journaling streams (decode plus single-transaction emit;
-    write-side fragment dedup and incremental append are not claimed)
+    optional encoder-side PCOMP/PROG emission via CustomModel), the
+    config-language compiler, a multi-entry archive layer with
+    crate-local journaling, and upstream JIDAC journaling streams
+    (decode, single-transaction emit, and incremental append with
+    content-defined fragmenting and SHA-1 deduplication)
 
 
 4. Bundled tables and static assets
