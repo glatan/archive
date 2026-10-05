@@ -15,9 +15,12 @@
 //! The public encoder exposes the built-in upstream model levels `1..=3`
 //! plus a validated `encode::CustomModel` surface for arbitrary
 //! predictor/HCOMP authoring. Emitted segments always select the PASS
-//! postprocessor; encoder-side PCOMP emission is available through `CustomModel::with_pcomp`. As in
-//! upstream, the decoder accepts only level bytes 1 (modeled) and 2
-//! (unmodeled).
+//! postprocessor; encoder-side PCOMP emission is available through
+//! `CustomModel::with_pcomp`. The upstream `.cfg` config language is
+//! supported through `config::compile_config`, which compiles model
+//! definitions (COMP declarations plus ZPAQL HCOMP/PCOMP source) into
+//! `config::CompiledModel` for `CustomModel` bridging. As in upstream,
+//! the decoder accepts only level bytes 1 (modeled) and 2 (unmodeled).
 //!
 //! The committed upstream-generated fixtures cover modeled levels 1-3,
 //! stored streams, and PROG/PCOMP segments. Malformed and truncated
@@ -41,6 +44,7 @@
 //! ```
 
 /// ZPAQ encoding (public API).
+pub mod config;
 pub mod encode;
 
 /// ZPAQ decoding (public API).
