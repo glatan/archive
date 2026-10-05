@@ -35,6 +35,98 @@ pub enum IsoKind {
     Other(u32),
 }
 
+/// Content of an ISO 9660 extended attribute record (ECMA-119
+/// §9.5): owner/group identification, a deny-bit permission mask,
+/// the four file timestamps and record metadata. The record is
+/// stored in the `ext_attr_len` logical blocks preceding the file
+/// data (the first File Unit when interleaved, §6.4.4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct XaRecord {
+    /// Owner identification (BP 1-4).
+    pub owner_id: u16,
+    /// Group identification (BP 5-8).
+    pub group_id: u16,
+    /// Raw 16-bit permission mask (BP 9-10, big-endian). A set bit
+    /// denies the access: bits 4/6 = owner read/exec, 8/10 = group,
+    /// 12/14 = other; bits 0/2 are the "system" owner class.
+    pub permissions: u16,
+    /// File creation date (BP 11-27, §8.4.26.1 format).
+    pub creation_time: Option<i64>,
+    /// File modification date (BP 28-44).
+    pub modification_time: Option<i64>,
+    /// File expiration date (BP 45-61); `None` = unspecified.
+    pub expiration_time: Option<i64>,
+    /// File effective date (BP 62-78).
+    pub effective_time: Option<i64>,
+    /// Record format byte (BP 79; 0 = unspecified).
+    pub record_format: u8,
+    /// Record attributes byte (BP 80).
+    pub record_attributes: u8,
+    /// Record length (BP 81-84, both-endian).
+    pub record_length: u16,
+    /// System identifier, padding removed (BP 85-116).
+    pub system_id: String,
+    /// Length of the application-use area at BP 251+ (LEN_AU).
+    pub application_use_len: u16,
+    /// Length of the escape sequences after the fixed part
+    /// (LEN_ESC).
+    pub escape_seq_len: u8,
+}
+
+/// Sparse-file encoding parameters from a Rock Ridge `SF` entry
+/// (RRIP 1.12 §4.1.7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RrSparse {
+    /// Virtual file size: SIZE HIGH << 32 | SIZE LOW (BP5-20).
+    pub size: u64,
+    /// Index-block table depth (BP 21).
+    pub table_depth: u8,
+}
+
+/// A SUSP extension reference: `ER` fields advertise an extension
+/// in use and `ES` selector fields mark the extension applying to
+/// the entries that follow (SUSP 1.10 `fields.nr`; ES adds the
+/// EXT_SEQ byte ahead of the shared LEN_ID/LEN_DES/LEN_SRC/EXT_VER
+/// header).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuspExt {
+    /// `ES` extension sequence number (BP 5); `None` for `ER`.
+    pub sequence: Option<u8>,
+    /// Extension version byte (EXT_VER).
+    pub version: u8,
+    /// Extension identifier bytes (EXT_ID).
+    pub id: Vec<u8>,
+    /// Extension descriptor bytes (EXT_DES).
+    pub descriptor: Vec<u8>,
+    /// Extension source bytes (EXT_SRC).
+    pub source: Vec<u8>,
+}
+
+/// Apple ISO 9660 extension content (TN FL36). `AA` is the
+/// current signature (BP3 = length, BP4 = SystemUseID); `BA` is
+/// the old signature with no length byte (BP3 = SystemUseID, the
+/// record length implied by the ID). Both decode into the same
+/// variants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppleExt {
+    /// HFS metadata (`AA` ID $02, `BA` ID $06).
+    Hfs {
+        /// HFS fileType (MSB-LSB).
+        file_type: [u8; 4],
+        /// HFS fileCreator.
+        file_creator: [u8; 4],
+        /// HFS finder flags (big-endian u16).
+        finder_flags: u16,
+    },
+    /// ProDOS metadata (`AA`/`BA` ID $01).
+    ProDos {
+        /// ProDOS file type byte.
+        file_type: u8,
+        /// ProDOS aux type (LSB-MSB u16).
+        aux_type: u16,
+    },
+}
+
 /// A decoded ISO 9660 entry. `name` is the full path relative to
 /// the volume root (components joined with `/`).
 #[derive(Debug, Clone)]
@@ -46,12 +138,16 @@ pub struct IsoEntry {
     /// Entry kind.
     pub kind: IsoKind,
     /// Unix mode (file type + permissions). Rock Ridge `PX` mode when
-    /// present; otherwise `0o040555` for directories / `0o100444`
-    /// for files, matching read-only media semantics.
+    /// present, else the extended attribute record's permission bits
+    /// (deny-bit semantics inverted to r-x), else `0o040555` for
+    /// directories / `0o100444` for files, matching read-only media
+    /// semantics.
     pub mode: u32,
-    /// Owner uid (Rock Ridge `PX`; 0 otherwise).
+    /// Owner uid (Rock Ridge `PX`, else the extended attribute
+    /// record's owner id; 0 otherwise).
     pub uid: u32,
-    /// Owner gid (Rock Ridge `PX`; 0 otherwise).
+    /// Owner gid (Rock Ridge `PX`, else the extended attribute
+    /// record's group id; 0 otherwise).
     pub gid: u32,
     /// Hard link count (Rock Ridge `PX`; 1 otherwise).
     pub nlink: u32,
@@ -60,9 +156,28 @@ pub struct IsoEntry {
     /// Only meaningful when `kind` is `IsoKind::Other` with a
     /// device `S_IFMT`.
     pub dev_t: Option<u64>,
-    /// Modification time, seconds since the Unix epoch (7-byte
-    /// directory record time or Rock Ridge `TF` modify time).
+    /// Inode / file serial number (Rock Ridge `PX` BP37-44; 0 when
+    /// absent). Entries sharing the value are defined as links to
+    /// the same file or directory (RRIP 1.12 §4.1.3).
+    pub ino: u32,
+    /// Modification time, seconds since the Unix epoch (Rock Ridge
+    /// `TF` modify time, else the extended attribute record's
+    /// modification date, else the 7-byte directory record time).
     pub mtime: i64,
+    /// Parsed extended attribute record (ECMA-119 §9.5), present
+    /// when the record's Extended Attribute Length is nonzero.
+    /// For multi-extent files the record of the last section is
+    /// used (§6.4.6).
+    pub xa: Option<XaRecord>,
+    /// Sparse file parameters (Rock Ridge `SF`, RRIP §4.1.7).
+    /// `data` then holds the on-disc sparse encoding (header block,
+    /// index blocks and data); `size` is the virtual file size.
+    pub sparse: Option<RrSparse>,
+    /// SUSP `ER`/`ES` extension references found on the record.
+    pub susp_ext: Vec<SuspExt>,
+    /// Apple `AA`/`BA` extension records found on the record
+    /// (TN FL36).
+    pub apple: Vec<AppleExt>,
     /// File contents or symlink target; empty for directories.
     pub data: Vec<u8>,
 }
@@ -313,6 +428,58 @@ fn dec_vd_datetime(b: &[u8], o: usize) -> Option<i64> {
     ))
 }
 
+/// Parse the fixed part of an extended attribute record
+/// (ECMA-119 §9.5): 250 bytes at the start of a file section's
+/// extended attribute blocks, followed by LEN_AU application-use
+/// bytes and LEN_ESC escape sequences. The record version (BP 181)
+/// must be 1; all 723 fields are checked for both-endian
+/// agreement.
+fn parse_xa(data: &[u8]) -> Result<XaRecord, Error> {
+    if data.len() < 250 {
+        return Err(Error::InvalidData(
+            "iso9660 short extended attribute record",
+        ));
+    }
+    if data[180] != 1 {
+        return Err(Error::InvalidData("iso9660 bad extended attribute version"));
+    }
+    Ok(XaRecord {
+        owner_id: both16(data, 0)?,
+        group_id: both16(data, 4)?,
+        permissions: u16be(data, 8),
+        creation_time: dec_vd_datetime(data, 10),
+        modification_time: dec_vd_datetime(data, 27),
+        expiration_time: dec_vd_datetime(data, 44),
+        effective_time: dec_vd_datetime(data, 61),
+        record_format: data[78],
+        record_attributes: data[79],
+        record_length: both16(data, 80)?,
+        system_id: dec_str(&data[84..116]),
+        application_use_len: both16(data, 246)?,
+        escape_seq_len: data[181],
+    })
+}
+
+/// Apple `AA`/`BA` payload decode (TN FL36). `id` is the
+/// SystemUseID and `p` the bytes that follow it; HFS IDs are $02
+/// (`AA`) / $06 (`BA`), ProDOS is $01 in both signatures.
+fn apple_ext(id: u8, p: &[u8]) -> Option<AppleExt> {
+    match id {
+        // HFS: fileType(4) + fileCreator(4) + finder flags(2, MSB-LSB).
+        2 | 6 if p.len() >= 10 => Some(AppleExt::Hfs {
+            file_type: [p[0], p[1], p[2], p[3]],
+            file_creator: [p[4], p[5], p[6], p[7]],
+            finder_flags: u16be(p, 8),
+        }),
+        // ProDOS: file type + aux type (LSB-MSB).
+        1 if p.len() >= 3 => Some(AppleExt::ProDos {
+            file_type: p[0],
+            aux_type: u16le(p, 1),
+        }),
+        _ => None,
+    }
+}
+
 /// Parsed directory record fields (ECMA-119 §9.1).
 struct DirRec<'a> {
     extent: u32,
@@ -404,6 +571,14 @@ struct RrInfo {
     /// RE marker: this record is a relocated directory's copy in
     /// the relocation directory and is not enumerated.
     relocated: bool,
+    /// PX file serial number (inode; BP37-44, RRIP §4.1.3).
+    ino: Option<u32>,
+    /// SF sparse file parameters (RRIP §4.1.7).
+    sparse: Option<RrSparse>,
+    /// SUSP `ER`/`ES` extension references.
+    susp_ext: Vec<SuspExt>,
+    /// Apple `AA`/`BA` extension records (TN FL36).
+    apple: Vec<AppleExt>,
 }
 
 fn parse_susp(img: &[u8], blksz: usize, mut area: &[u8], depth: usize) -> Result<RrInfo, Error> {
@@ -413,7 +588,18 @@ fn parse_susp(img: &[u8], blksz: usize, mut area: &[u8], depth: usize) -> Result
     let mut rr = RrInfo::default();
     let mut cont: Option<(u64, u64, u64)> = None;
     while area.len() >= 4 {
-        let len = area[2] as usize;
+        // Apple `BA` records (TN FL36, old signature) carry no
+        // length byte: BP3 is the SystemUseID and the record
+        // length is implied by it.
+        let len = if &area[..2] == b"BA" {
+            match area[2] {
+                1 => 6,
+                6 => 13,
+                _ => break,
+            }
+        } else {
+            area[2] as usize
+        };
         if len < 4 || len > area.len() {
             break; // padding or trailing garbage is tolerated
         }
@@ -460,6 +646,9 @@ fn parse_susp(img: &[u8], blksz: usize, mut area: &[u8], depth: usize) -> Result
                     rr.nlink = Some(both32(e, 12)?);
                     rr.uid = Some(both32(e, 20)?);
                     rr.gid = Some(both32(e, 28)?);
+                    // File serial number (BP37-44, RRIP §4.1.3):
+                    // shared values mark hard links.
+                    rr.ino = Some(both32(e, 36)?);
                 }
             }
             b"SL" => {
@@ -553,8 +742,65 @@ fn parse_susp(img: &[u8], blksz: usize, mut area: &[u8], depth: usize) -> Result
                 rr.cl = Some(both32(e, 4)?);
             }
             b"RE" => rr.relocated = true,
-            // PL (RRIP §4.1.5 parent link on `..`), PD, ER, ES,
-            // RR, AS, unknown: informational for a path-based walk.
+            b"SF" => {
+                // RRIP §4.1.7: both-endian SIZE HIGH and SIZE LOW
+                // (the virtual file size) plus the index-block
+                // table depth.
+                if len < 21 {
+                    return Err(Error::InvalidData("iso9660 bad SF entry"));
+                }
+                let hi = u64::from(both32(e, 4)?);
+                let lo = u64::from(both32(e, 12)?);
+                rr.sparse = Some(RrSparse {
+                    size: hi << 32 | lo,
+                    table_depth: e[20],
+                });
+            }
+            b"ER" | b"ES" => {
+                // SUSP ER/ES share LEN_ID + LEN_DES + LEN_SRC +
+                // EXT_VER + EXT_ID/EXT_DES/EXT_SRC; ES inserts
+                // EXT_SEQ at BP5.
+                let es = sig == *b"ES";
+                let hdrlen = if es { 9 } else { 8 };
+                if len < hdrlen {
+                    return Err(Error::InvalidData("iso9660 bad ER/ES entry"));
+                }
+                let o = if es { 5usize } else { 4 };
+                let (id_len, des_len, src_len) =
+                    (e[o] as usize, e[o + 1] as usize, e[o + 2] as usize);
+                let body = &e[o + 4..];
+                if id_len + des_len + src_len > body.len() {
+                    return Err(Error::InvalidData("iso9660 bad ER/ES entry"));
+                }
+                rr.susp_ext.push(SuspExt {
+                    sequence: if es { Some(e[4]) } else { None },
+                    version: e[o + 3],
+                    id: body[..id_len].to_vec(),
+                    descriptor: body[id_len..id_len + des_len].to_vec(),
+                    source: body[id_len + des_len..id_len + des_len + src_len].to_vec(),
+                });
+            }
+            // PD: padding field; its contents are ignored in
+            // interchange per SUSP.
+            b"PD" => {}
+            b"AA" => {
+                // TN FL36 v2 signature: BP4 is the SystemUseID
+                // (the BP3 slot is the length already consumed).
+                if len >= 5
+                    && let Some(a) = apple_ext(e[3], &e[4..])
+                {
+                    rr.apple.push(a);
+                }
+            }
+            b"BA" => {
+                // Old signature: BP3 is the SystemUseID and `len`
+                // was derived from it above.
+                if let Some(a) = apple_ext(e[2], &e[3..]) {
+                    rr.apple.push(a);
+                }
+            }
+            // PL (RRIP §4.1.5 parent link on `..`), RR, AS,
+            // unknown: informational for a path-based walk.
             _ => {}
         }
         area = &area[len..];
@@ -612,6 +858,14 @@ fn parse_susp(img: &[u8], blksz: usize, mut area: &[u8], depth: usize) -> Result
             rr.cl = cont_rr.cl;
         }
         rr.relocated = rr.relocated || cont_rr.relocated;
+        if rr.ino.is_none() {
+            rr.ino = cont_rr.ino;
+        }
+        if rr.sparse.is_none() {
+            rr.sparse = cont_rr.sparse;
+        }
+        rr.susp_ext.extend(cont_rr.susp_ext);
+        rr.apple.extend(cont_rr.apple);
     }
     Ok(rr)
 }
@@ -832,7 +1086,16 @@ impl<'a> Tree<'a> {
         let unit = usize::from(rec.unit_size) * self.blksz;
         let stride = (usize::from(rec.unit_size) + usize::from(rec.gap_size)) * self.blksz;
         let mut out = Vec::with_capacity(rec.size as usize);
-        let mut off = start;
+        // An extended attribute record fills the whole first File
+        // Unit (ECMA-119 6.4.4: ext_attr_len == unit_size), so the
+        // data begins with the second File Unit, past the gap.
+        let mut off = if rec.ext_attr_len != 0 {
+            start
+                .checked_add(usize::from(rec.gap_size) * self.blksz)
+                .ok_or(Error::InvalidData("iso9660 extent out of range"))?
+        } else {
+            start
+        };
         let mut remaining = rec.size as usize;
         while remaining > 0 {
             let want = remaining.min(unit);
@@ -861,6 +1124,45 @@ impl<'a> Tree<'a> {
             out.extend_from_slice(&self.read_file(p)?);
         }
         Ok(out)
+    }
+
+    /// Read the extended attribute record preceding a file
+    /// section's data (ECMA-119 §6.4, §9.1.2). The EA occupies the
+    /// first `ext_attr_len` logical blocks of the extent — the
+    /// first File Unit when interleaved — so the same byte range
+    /// holds it in both recording modes. An all-zero EA area is
+    /// reported as absent.
+    fn read_xa(&self, rec: &DirRecOwned) -> Result<Option<XaRecord>, Error> {
+        if rec.ext_attr_len == 0 {
+            return Ok(None);
+        }
+        // An interleaved file section places its EA in the first
+        // File Unit, so its block count must equal the File Unit
+        // Size (§6.4.4).
+        if rec.unit_size != 0 && rec.ext_attr_len != rec.unit_size {
+            return Err(Error::InvalidData("iso9660 bad extended attribute length"));
+        }
+        let start = u64::from(rec.extent)
+            .checked_mul(self.blksz as u64)
+            .ok_or(Error::InvalidData("iso9660 extent out of range"))?;
+        let start = usize::try_from(start)
+            .map_err(|_| Error::InvalidData("iso9660 extent out of range"))?;
+        let len = usize::from(rec.ext_attr_len)
+            .checked_mul(self.blksz)
+            .ok_or(Error::InvalidData("iso9660 extent out of range"))?;
+        let data = self
+            .input
+            .get(
+                start
+                    ..start
+                        .checked_add(len)
+                        .ok_or(Error::InvalidData("iso9660 extent out of range"))?,
+            )
+            .ok_or(Error::InvalidData("iso9660 extent out of range"))?;
+        if data.iter().all(|&b| b == 0) {
+            return Ok(None);
+        }
+        parse_xa(data).map(Some)
     }
 
     /// Read the `.` record of the directory at logical block
@@ -1114,7 +1416,48 @@ impl Walker<'_, '_> {
                 // is always a single extent (ECMA-119 §9.2).
                 return Err(Error::InvalidData("iso9660 multi-extent directory"));
             }
-            let mode = rr.mode.unwrap_or(if is_dir { 0o040555 } else { 0o100444 });
+            // Extended attribute record (ECMA-119 §9.5, §6.4.6):
+            // the last section of a multi-extent file carries the
+            // valid record.
+            let xa = self.tree.read_xa(&recs[i + n_ext - 1].0)?;
+            let mode = rr.mode.unwrap_or_else(|| {
+                let perm = match &xa {
+                    // XA permission bits deny access when set:
+                    // bits 4/6 = owner r/x, 8/10 = group, 12/14 =
+                    // other (§9.5.3). Write permission does not
+                    // exist on a read-only medium.
+                    Some(x) => {
+                        let mut m = 0u32;
+                        if x.permissions & 0x0010 == 0 {
+                            m |= 0o400;
+                        }
+                        if x.permissions & 0x0040 == 0 {
+                            m |= 0o100;
+                        }
+                        if x.permissions & 0x0100 == 0 {
+                            m |= 0o040;
+                        }
+                        if x.permissions & 0x0400 == 0 {
+                            m |= 0o010;
+                        }
+                        if x.permissions & 0x1000 == 0 {
+                            m |= 0o004;
+                        }
+                        if x.permissions & 0x4000 == 0 {
+                            m |= 0o001;
+                        }
+                        m
+                    }
+                    None => {
+                        if is_dir {
+                            0o555
+                        } else {
+                            0o444
+                        }
+                    }
+                };
+                (if is_dir { 0o040000 } else { 0o100000 }) | perm
+            });
             let sfmt = mode & 0o170000;
             let kind = if is_dir {
                 IsoKind::Directory
@@ -1138,16 +1481,30 @@ impl Walker<'_, '_> {
                     }
                 }
             };
-            let mtime = rr.tf_modify.unwrap_or(rec.mtime);
+            let mtime = rr
+                .tf_modify
+                .or_else(|| xa.as_ref().and_then(|x| x.modification_time))
+                .unwrap_or(rec.mtime);
             self.entries.push(IsoEntry {
                 name: cpath.clone(),
                 kind,
                 mode,
-                uid: rr.uid.unwrap_or(0),
-                gid: rr.gid.unwrap_or(0),
+                uid: rr
+                    .uid
+                    .or_else(|| xa.as_ref().map(|x| u32::from(x.owner_id)))
+                    .unwrap_or(0),
+                gid: rr
+                    .gid
+                    .or_else(|| xa.as_ref().map(|x| u32::from(x.group_id)))
+                    .unwrap_or(0),
                 nlink: rr.nlink.unwrap_or(1),
                 dev_t: rr.dev_t,
+                ino: rr.ino.unwrap_or(0),
                 mtime,
+                xa,
+                sparse: rr.sparse,
+                susp_ext: rr.susp_ext.clone(),
+                apple: rr.apple.clone(),
                 data: entry_data,
             });
             if kind == IsoKind::Directory {
@@ -1426,6 +1783,21 @@ mod tests {
             let mut r = Self::dirent(extent, size, flags, name, susp);
             r[26] = unit;
             r[27] = gap;
+            r
+        }
+
+        /// `dirent` with a nonzero Extended Attribute Record
+        /// Length (BP2, ECMA-119 §9.1.2).
+        fn dirent_ea(
+            extent: u32,
+            size: u32,
+            flags: u8,
+            ea: u8,
+            name: &[u8],
+            susp: &[u8],
+        ) -> Vec<u8> {
+            let mut r = Self::dirent(extent, size, flags, name, susp);
+            r[1] = ea;
             r
         }
 
@@ -2061,6 +2433,92 @@ mod tests {
         vec![b'R', b'E', 4, 1]
     }
 
+    /// Rock Ridge `PX` entry with a caller-chosen file serial
+    /// (inode) number (44 bytes).
+    fn susp_px_ino(mode: u32, ino: u32) -> Vec<u8> {
+        let mut px = vec![b'P', b'X', 44, 1];
+        for v in [mode, 2, 0, 0, ino] {
+            px.extend_from_slice(&v.to_le_bytes());
+            px.extend_from_slice(&v.to_be_bytes());
+        }
+        px
+    }
+
+    /// Rock Ridge `SF` sparse file entry (21 bytes, RRIP §4.1.7):
+    /// both-endian SIZE HIGH + SIZE LOW + table depth.
+    fn susp_sf(size: u64, depth: u8) -> Vec<u8> {
+        let mut sf = vec![b'S', b'F', 21, 1];
+        let hi = (size >> 32) as u32;
+        let lo = size as u32;
+        for v in [hi, lo] {
+            sf.extend_from_slice(&v.to_le_bytes());
+            sf.extend_from_slice(&v.to_be_bytes());
+        }
+        sf.push(depth);
+        sf
+    }
+
+    /// SUSP `ES` extension selector: sequence + version +
+    /// id/descriptor/source byte strings.
+    fn susp_es(seq: u8, ver: u8, id: &[u8], des: &[u8], src: &[u8]) -> Vec<u8> {
+        let len = 9 + id.len() + des.len() + src.len();
+        let mut e = vec![
+            b'E',
+            b'S',
+            len as u8,
+            1,
+            seq,
+            id.len() as u8,
+            des.len() as u8,
+            src.len() as u8,
+            ver,
+        ];
+        e.extend_from_slice(id);
+        e.extend_from_slice(des);
+        e.extend_from_slice(src);
+        e
+    }
+
+    /// SUSP `PD` padding entry carrying `n` pad bytes.
+    fn susp_pd(n: usize) -> Vec<u8> {
+        let mut e = vec![b'P', b'D', (4 + n) as u8, 1];
+        e.extend_from_slice(&vec![0u8; n]);
+        e
+    }
+
+    /// Apple `AA` extension record (TN FL36 v2 signature):
+    /// BP3 = length, BP4 = SystemUseID.
+    fn susp_aa(id: u8, payload: &[u8]) -> Vec<u8> {
+        let mut e = vec![b'A', b'A', (4 + payload.len()) as u8, id];
+        e.extend_from_slice(payload);
+        e
+    }
+
+    /// Apple `BA` extension record (TN FL36 old signature): no
+    /// length byte, BP3 = SystemUseID.
+    fn susp_ba(id: u8, payload: &[u8]) -> Vec<u8> {
+        let mut e = vec![b'B', b'A', id];
+        e.extend_from_slice(payload);
+        e
+    }
+
+    /// One logical block holding an extended attribute record
+    /// (ECMA-119 §9.5, 250-byte fixed part). `perms` is the
+    /// deny-bit mask recorded big-endian at BP 9-10.
+    fn xa_block(owner: u16, group: u16, perms: u16) -> Vec<u8> {
+        let mut x = vec![0u8; SECTOR];
+        for (o, v) in [(0usize, owner), (4, group), (80, 512), (246, 0)] {
+            x[o..o + 2].copy_from_slice(&v.to_le_bytes());
+            x[o + 2..o + 4].copy_from_slice(&v.to_be_bytes());
+        }
+        x[8..10].copy_from_slice(&perms.to_be_bytes());
+        // modification date BP28-44: 2020-01-02 03:04:05.00 GMT
+        x[27..44].copy_from_slice(b"2020010203040500\x00");
+        x[84..94].copy_from_slice(b"XASYSTEMID");
+        x[180] = 1; // record version
+        x
+    }
+
     /// Multi-extent file (ECMA-119 §9.1.6 File Flags bit 7, §9.2):
     /// consecutive records with the same File Identifier form one
     /// file's extent list; bit 7 is clear on the last record.
@@ -2507,5 +2965,353 @@ mod tests {
         let jm = out.joliet_meta.expect("joliet meta");
         assert_eq!(jm.publisher_id, "JPUB");
         assert_eq!(jm.creation_time, Some(1577934245));
+    }
+
+    /// Extended attribute record (ECMA-119 §9.5, §6.4): the EA
+    /// blocks ahead of the file data are parsed into `IsoEntry::xa`
+    /// and fold into uid/gid/mode/mtime when Rock Ridge is absent.
+    #[test]
+    fn xa_record_decodes() {
+        let mut b = IsoBuilder::new();
+        // Deny owner-read (bit4) and group-exec (bit10).
+        let mut xa_file = xa_block(7, 9, 0x0410);
+        xa_file.extend_from_slice(b"file data here");
+        let ext = b.alloc_span(&xa_file);
+        // A second file carries an XA block and a Rock Ridge PX
+        // entry; the PX fields must win.
+        let mut xa2 = xa_block(11, 13, 0);
+        xa2.extend_from_slice(b"RR");
+        let ext2 = b.alloc_span(&xa2);
+        let sp = &[b'S', b'P', 7, 1, 0xBE, 0xEF, 0];
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], sp),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent_ea(ext, 14, 0, 1, b"FILE.TXT;1", &[]),
+            IsoBuilder::dirent_ea(ext2, 2, 0, 1, b"RR.TXT;1", &susp_px_ino(0o100600, 77)),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        let out = decode(&img).unwrap();
+        let e = &out.entries[0];
+        assert_eq!(e.name, "FILE.TXT");
+        assert_eq!(e.data, b"file data here");
+        let xa = e.xa.as_ref().expect("xa record");
+        assert_eq!(xa.owner_id, 7);
+        assert_eq!(xa.group_id, 9);
+        assert_eq!(xa.permissions, 0x0410);
+        assert_eq!(xa.modification_time, Some(1577934245));
+        assert_eq!(xa.record_length, 512);
+        assert_eq!(xa.system_id, "XASYSTEMID");
+        // folded fallback values
+        assert_eq!(e.uid, 7);
+        assert_eq!(e.gid, 9);
+        // owner: x only; group: r only; other: r+x
+        assert_eq!(e.mode, 0o100145);
+        assert_eq!(e.mtime, 1577934245);
+        // Rock Ridge PX wins over XA where both exist.
+        let e = &out.entries[1];
+        assert_eq!(e.uid, 0);
+        assert_eq!(e.mode, 0o100600);
+        assert_eq!(e.ino, 77);
+        assert!(e.xa.is_some());
+    }
+
+    /// Multi-extent files take the extended attribute record of
+    /// their last section (ECMA-119 §6.4.6).
+    #[test]
+    fn xa_multi_extent_uses_last() {
+        let mut b = IsoBuilder::new();
+        // part 1: EA block (owner 11) then data
+        let mut p1 = xa_block(11, 1, 0);
+        p1.extend_from_slice(b"part-1");
+        let e1 = b.alloc_span(&p1);
+        // part 2: EA block (owner 22) then data
+        let mut p2 = xa_block(22, 2, 0);
+        p2.extend_from_slice(b"part-2");
+        let e2 = b.alloc_span(&p2);
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent_ea(e1, 6, FLAG_MULTI_EXTENT, 1, b"BIG.BIN;1", &[]),
+            IsoBuilder::dirent_ea(e2, 6, 0, 1, b"BIG.BIN;1", &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        let out = decode(&img).unwrap();
+        assert_eq!(out.entries.len(), 1);
+        let e = &out.entries[0];
+        assert_eq!(e.data, b"part-1part-2");
+        assert_eq!(e.xa.as_ref().unwrap().owner_id, 22);
+        assert_eq!(e.uid, 22);
+    }
+
+    /// A both-endian field whose halves disagree is rejected
+    /// (ECMA-119 §7.3.3 via §9.5).
+    #[test]
+    fn xa_rejects_bad_both_endian() {
+        let mut b = IsoBuilder::new();
+        let mut xa_file = xa_block(7, 9, 0);
+        // Corrupt the group id's big-endian half (BP 6-7).
+        xa_file[6] ^= 0xFF;
+        xa_file.extend_from_slice(b"data");
+        let ext = b.alloc_span(&xa_file);
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent_ea(ext, 4, 0, 1, b"FILE.TXT;1", &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    /// A record version other than 1 is rejected (ECMA-119 §9.5).
+    #[test]
+    fn xa_rejects_bad_version() {
+        let mut b = IsoBuilder::new();
+        let mut xa_file = xa_block(7, 9, 0);
+        xa_file[180] = 2;
+        xa_file.extend_from_slice(b"data");
+        let ext = b.alloc_span(&xa_file);
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent_ea(ext, 4, 0, 1, b"FILE.TXT;1", &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    /// An interleaved file stores its extended attribute record in
+    /// the first File Unit (ECMA-119 §6.4.4); the EA length must
+    /// equal the File Unit Size.
+    #[test]
+    fn xa_interleaved() {
+        let mut b = IsoBuilder::new();
+        // layout: [EA unit][gap][unit1][gap][unit2]
+        let mut layout = xa_block(5, 6, 0x1000); // deny other-read
+        layout.extend_from_slice(&[0xEE; SECTOR]);
+        let mut u1 = vec![0u8; SECTOR];
+        u1[..4].copy_from_slice(b"blk1");
+        layout.extend_from_slice(&u1);
+        layout.extend_from_slice(&[0xEE; SECTOR]);
+        let mut u2 = vec![0u8; SECTOR];
+        u2[..5].copy_from_slice(b"blk2!");
+        layout.extend_from_slice(&u2);
+        let ext = b.alloc_span(&layout);
+        let size = (SECTOR + 5) as u32;
+        let mut d = IsoBuilder::dirent_ea(ext, size, 0, 1, b"FILE.BIN;1", &[]);
+        d[26] = 1; // File Unit Size
+        d[27] = 1; // Interleave Gap Size
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            d,
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        let out = decode(&img).unwrap();
+        let e = &out.entries[0];
+        let xa = e.xa.as_ref().expect("xa record");
+        assert_eq!(xa.owner_id, 5);
+        assert_eq!(e.gid, 6);
+        // other-read denied -> other keeps only x.
+        assert_eq!(e.mode & 0o777, 0o551);
+        assert_eq!(e.data.len(), SECTOR + 5);
+        assert_eq!(&e.data[..4], b"blk1");
+        assert_eq!(&e.data[SECTOR..SECTOR + 5], b"blk2!");
+        assert!(!e.data.contains(&0xEE));
+    }
+
+    /// Interleaved EA whose block count disagrees with the File
+    /// Unit Size is rejected (ECMA-119 §6.4.4).
+    #[test]
+    fn xa_interleaved_bad_ea_len() {
+        let mut b = IsoBuilder::new();
+        let f = b.alloc(b"data");
+        let mut d = IsoBuilder::dirent_ea(f, 4, 0, 1, b"BAD.BIN;1", &[]);
+        d[26] = 2; // File Unit Size 2 != ext_attr_len 1
+        d[27] = 1;
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            d,
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    /// Rock Ridge `SF` (RRIP §4.1.7): virtual size and table depth
+    /// are exposed; the on-disc encoding stays in `data`.
+    #[test]
+    fn rr_sf_sparse_fields() {
+        let mut b = IsoBuilder::new();
+        let sp = &[b'S', b'P', 7, 1, 0xBE, 0xEF, 0];
+        let mut susp = susp_px(0o100444);
+        susp.extend_from_slice(&susp_sf(0x1_0000_0ABC, 2));
+        let f = b.alloc(b"ENCODED");
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], sp),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(f, 7, 0, b"SPARSE.BIN;1", &susp),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        let out = decode(&img).unwrap();
+        let e = &out.entries[0];
+        assert_eq!(
+            e.sparse,
+            Some(RrSparse {
+                size: 0x1_0000_0ABC,
+                table_depth: 2,
+            })
+        );
+        assert_eq!(e.data, b"ENCODED");
+    }
+
+    #[test]
+    fn rr_sf_rejects_short() {
+        let mut b = IsoBuilder::new();
+        let sp = &[b'S', b'P', 7, 1, 0xBE, 0xEF, 0];
+        let susp = vec![b'S', b'F', 8, 1, 0, 0, 0, 0];
+        let f = b.alloc(b"x");
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], sp),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(f, 1, 0, b"SPARSE.BIN;1", &susp),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    /// SUSP `PD` padding is skipped and `ES` extension selector
+    /// fields are exposed on `IsoEntry::susp_ext`.
+    #[test]
+    fn susp_pd_es_parsed() {
+        let mut b = IsoBuilder::new();
+        let sp = &[b'S', b'P', 7, 1, 0xBE, 0xEF, 0];
+        let mut susp = susp_pd(9);
+        susp.extend_from_slice(&susp_es(1, 2, b"ZZZZ_199X", b"a desc", b"an.org"));
+        susp.extend_from_slice(&susp_px(0o100444));
+        let f = b.alloc(b"data");
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], sp),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(f, 4, 0, b"FILE.TXT;1", &susp),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        let out = decode(&img).unwrap();
+        let e = &out.entries[0];
+        assert_eq!(e.data, b"data");
+        assert_eq!(e.mode, 0o100444); // PX after PD still parsed
+        assert_eq!(e.susp_ext.len(), 1);
+        let x = &e.susp_ext[0];
+        assert_eq!(x.sequence, Some(1));
+        assert_eq!(x.version, 2);
+        assert_eq!(x.id, b"ZZZZ_199X");
+        assert_eq!(x.descriptor, b"a desc");
+        assert_eq!(x.source, b"an.org");
+    }
+
+    /// An `ER` reference decodes through the same path with no
+    /// sequence byte.
+    #[test]
+    fn susp_er_parsed() {
+        let mut b = IsoBuilder::new();
+        let sp = &[b'S', b'P', 7, 1, 0xBE, 0xEF, 0];
+        let id = b"RRIP_1991A";
+        let des = b"THE ROCK RIDGE INTERCHANGE PROTOCOL";
+        let src = b"IEEE_P1282";
+        let mut er = vec![
+            b'E',
+            b'R',
+            (8 + id.len() + des.len() + src.len()) as u8,
+            1,
+            id.len() as u8,
+            des.len() as u8,
+            src.len() as u8,
+            1,
+        ];
+        er.extend_from_slice(id);
+        er.extend_from_slice(des);
+        er.extend_from_slice(src);
+        let f = b.alloc(b"data");
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], sp),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(f, 4, 0, b"FILE.TXT;1", &er),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        let out = decode(&img).unwrap();
+        let x = &out.entries[0].susp_ext[0];
+        assert_eq!(x.sequence, None);
+        assert_eq!(x.id, b"RRIP_1991A");
+        assert_eq!(x.descriptor, des);
+        assert_eq!(x.source, b"IEEE_P1282");
+    }
+
+    /// Apple `AA` (current) and `BA` (old) signatures decode HFS
+    /// and ProDOS metadata (TN FL36).
+    #[test]
+    fn apple_aa_ba_parsed() {
+        let mut b = IsoBuilder::new();
+        // Apple extensions do not use SUSP framing, but the records
+        // coexist with it; include SP so the SUSP walker sees them.
+        let sp = &[b'S', b'P', 7, 1, 0xBE, 0xEF, 0];
+        // AA HFS (ID 2, len 14): type/creator/flags.
+        let mut hfs_p = Vec::new();
+        hfs_p.extend_from_slice(b"TEXT");
+        hfs_p.extend_from_slice(b"ttxt");
+        hfs_p.extend_from_slice(&0x8000u16.to_be_bytes());
+        let mut susp = susp_aa(2, &hfs_p);
+        // AA ProDOS (ID 1, len 7): file type + LE aux type.
+        susp.extend_from_slice(&susp_aa(1, &[0x04, 0x34, 0x12]));
+        // BA HFS (ID 6, implied len 13) on a second record.
+        let mut ba_susp = susp_ba(6, &hfs_p);
+        ba_susp.extend_from_slice(&susp_ba(1, &[0xB3, 0x78, 0x56]));
+        let f = b.alloc(b"data");
+        let g = b.alloc(b"more");
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], sp),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(f, 4, 0, b"FILE.TXT;1", &susp),
+            IsoBuilder::dirent(g, 4, 0, b"OLD.BIN;1", &ba_susp),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        let out = decode(&img).unwrap();
+        assert_eq!(
+            out.entries[0].apple,
+            [
+                AppleExt::Hfs {
+                    file_type: *b"TEXT",
+                    file_creator: *b"ttxt",
+                    finder_flags: 0x8000,
+                },
+                AppleExt::ProDos {
+                    file_type: 0x04,
+                    aux_type: 0x1234,
+                },
+            ]
+        );
+        assert_eq!(
+            out.entries[1].apple,
+            [
+                AppleExt::Hfs {
+                    file_type: *b"TEXT",
+                    file_creator: *b"ttxt",
+                    finder_flags: 0x8000,
+                },
+                AppleExt::ProDos {
+                    file_type: 0xB3,
+                    aux_type: 0x5678,
+                },
+            ]
+        );
     }
 }

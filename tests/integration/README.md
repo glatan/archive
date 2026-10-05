@@ -42,6 +42,12 @@
 - `lzop`
 - `lrzip`
 - `cpio`
+- `squashfs-tools` (`mksquashfs` / `unsquashfs`)
+- `git`
+- `unarchiver` (`unar`)
+- `lhasa`
+- `cabextract`
+- `arc` / `nomarch` (Debian pool binary deb 展開、oracle 専用)
 - custom package:
   - `rzip`
   - `zpaq`

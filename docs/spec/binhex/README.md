@@ -5,7 +5,7 @@
 | 形式概要 | `"(This file must be converted with BinHex 4.0)"` プロローグ + `:` + 64 文字アルファベットの 6bit エンコード + 末尾 `:` で構成される古典 Macintosh 転送形式。内部は `0x90` マーカー RLE で圧縮され、header + data fork + resource fork がそれぞれ CRC-16 (poly 0x1021, init 0, 2 ゼロバイト拡張) で終端される |
 | 基準仕様 | [BinHex 4.0 Definition (Peter N Lewis, Aug 1991)](https://files.stairways.com/other/binhex-40-specs-info.txt) (スナップショット: `docs/spec/sources/binhex-40-specs-info.txt`)、[RFC 1741 Appendix A](https://datatracker.ietf.org/doc/html/rfc1741) |
 | 参照実装 | CPython `binascii.crc_hqx` (PSF License、oracle)、独自 Python 参照エンコーダ (oracle)。詳細: THIRD_PARTY_NOTICES binhex 項 |
-| 実装 | `archive::encoding::binhex` (encode / decode)。`binhex` feature 配下 |
+| 実装 | `archive::encoding::binhex` (encode / decode / `decode_parts`)。`binhex` feature 配下 |
 
 ## テキスト層
 
@@ -15,11 +15,12 @@
 | 2 | プロローグなしで `<return>:` で始まる文書も受理 | Lewis "you may choose to ignore ... start when you get `<return>:<hex-chars>`" | ✅ | `prologue_variants` (bare `:` doc) |
 | 3 | 6bit 文字アルファベット `!"#$%&'()*+,-012345689@ABC...pqr` (index 0-63) | Lewis alphabet 定義 / RFC 1741 | ✅ | `alphabet_is_unique` + roundtrip |
 | 4 | ビット列 MSB-first → 6bit グループ → 文字、残り <8bit は切り捨て | Lewis/RFC bit 詰め規則 | ✅ | `sixbit_roundtrip_boundary` |
-| 5 | `<cr><lf><tab><spc>` はデータ中どこでも無視 | Lewis `<return>` 定義 | ✅ | `prologue_variants` (CRLF 混在) |
-| 6 | エンコード行長: 先頭行 `:`+63 文字 = 64、以降 64 文字 | Lewis "the first line should be 64 characters long, including the colon" | ✅ | encode emit 検証 |
+| 5 | `<cr><lf><tab><spc>` はデータ中どこでも無視 | Lewis `<return>` 定義 | ✅ | `prologue_variants` + `roundtrip` (空白・改行混入を skip) |
+| 6 | エンコード行長: 先頭行 `:`+63 文字 = 64、以降 64 文字 | Lewis "the first line should be 64 characters long, including the colon" | ✅ | `encode_wraps_at_64_columns` (全行 ≤64、1 行以上ちょうど 64) |
 | 7 | 64/アルファベット以外の文字はエラー | Lewis "any character other than those 64 ... indicates an error" | ✅ | `rejects_invalid_chars` |
 | 8 | 末尾 `:` 直前のレガシー `!` 1 個を許容して読み飛ばす (途中の `!` はアルファベット index 0 のデータ文字) | Lewis "Some old programs produced an extra exclamation mark" | ✅ | `prologue_variants` (legacy `!`) |
 | 9 | 末尾 `:` なしの切り詰めは拒否 | バリデーション | ✅ | `rejects_crc_and_truncation` |
+| 21 | `--- end of part NN ---` セグメント分割 | RFC 1741 / comp.binaries.mac 慣行 | ✅ | `decode_parts(&[&[u8]])` が分割ドキュメントを連結 (part 終端 `--- end of part NN ---` と `---` resume marker を行境界でのみ認識し、HQX 本文との誤認を防ぐ)。`segmented_roundtrip`, `segmented_marker_boundaries`, `rejects_bad_segment_marker` |
 
 ## RLE 層
 
@@ -46,7 +47,6 @@
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 21 | `--- end of part NN ---` セグメント分割 | ❌ intentional scope | comp.binaries.mac の分割は transport 層。連結は呼び出し側 |
 | 22 | Hqx8 (8bit 形式) | ❌ intentional scope | Lewis 定義の補助形式。実在流通はほぼ Hqx7 |
 | 23 | filename の OS 依存サニタイズ (`.`→bullet、`:`→`-` 等) | ❌ intentional scope | Lewis は decode 側 OS 依存規則と明記。name は生値を返す |
 | 24 | BinHex 4.0 より古い/別のバリアント (1.x-3.x, .hcx) | ❌ intentional scope | 4.0 が唯一のデファクト標準 |
@@ -55,7 +55,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 20 |
+| ✅ 実装+テスト済み  | 21 |
 | ⚠️ 部分対応  | 0 |
-| ❌ 未対応  | 0 |
+| ❌ 未対応  | 3 (intentional scope) |
 | **合計** | **24** |

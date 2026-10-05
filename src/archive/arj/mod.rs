@@ -5,7 +5,8 @@
 //!
 //! - reading: ARJ 2.x headers, method 0 (stored), methods 1-3
 //!   (LZH-static, 15-bit window) and method 4 ("fastest" LZSS),
-//!   file-type 3 (directory) / 4 (volume label) entries, garbled
+//!   ARJ32 no-data pseudo-methods 8/9, file-type 3 (directory) /
+//!   4 (volume label) / 5 (chapter label) entries, garbled
 //!   (password XOR, flag 0x01) entries via the `decode_with_password*`
 //!   functions, and multi-volume archives via `decode_parts`
 //!   (flag 0x04 split files reassembled across volume buffers; with

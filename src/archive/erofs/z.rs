@@ -17,7 +17,11 @@
 //! table (`m.nextpackoff`), and with `Z_EROFS_ADVISE_FRAGMENT_
 //! PCLUSTER` (`EROFS_FEATURE_INCOMPAT_FRAGMENTS`) it points into the
 //! packed inode. `h_clusterbits` bit 7 (`Z_EROFS_FRAGMENT_INODE_BIT`)
-//! marks a file stored entirely inside the packed inode.
+//! marks a file stored entirely inside the packed inode. For
+//! metabox-hosted inodes (dirent nid bit63) the map header, index
+//! table, compacted packs, extent records and inline tail are read
+//! from the decoded metabox blob; pcluster payloads remain
+//! device-relative block addresses.
 
 use alloc::vec::Vec;
 
@@ -72,6 +76,10 @@ struct ZMap {
     /// Compacted-index phase sizes (COMPRESSED_COMPACT only).
     c4b_init: usize,
     c2b: usize,
+    /// Metabox-hosted inode: index records and inline tail data are
+    /// addressed inside the decoded metabox blob (the kernel
+    /// EROFS_MAP_META path); pcluster payloads stay on the device.
+    mh: bool,
 }
 
 /// One decoded lcluster index entry.
@@ -320,7 +328,7 @@ fn unpack_compacted(
     };
     let packsz = vcnt << shift;
     let pack = img
-        .data
+        .mdata(zm.mh)?
         .get(pack_off..pack_off + packsz)
         .ok_or(Error::UnexpectedEof)?;
     // ilog2(Z_EROFS_LI_D0_CBLKCNT) + 1 = 12
@@ -401,7 +409,10 @@ fn load_index(img: &Img<'_>, zm: &ZMap, lcn: u64) -> Result<LcIndex, Error> {
             .index_base
             .checked_add(lcn as usize * 8)
             .ok_or(Error::InvalidData("erofs index overflow"))?;
-        let d = img.data.get(pos..pos + 8).ok_or(Error::UnexpectedEof)?;
+        let d = img
+            .mdata(zm.mh)?
+            .get(pos..pos + 8)
+            .ok_or(Error::UnexpectedEof)?;
         let advise = u16le(d, 0);
         let ty = (advise & LCLUSTER_TYPE_MASK) as u8;
         if ty == LCLUSTER_NONHEAD {
@@ -558,7 +569,7 @@ fn emit_inline(
         .checked_add(usize::from(idata_size))
         .ok_or(Error::InvalidData("erofs inline data range"))?;
     let region = img
-        .data
+        .mdata(zm.mh)?
         .get(ioff..iend)
         .ok_or(Error::InvalidData("erofs inline data out of range"))?;
     let la = usize::try_from(p.la).map_err(|_| Error::InvalidData("erofs extent offset"))?;
@@ -881,12 +892,18 @@ fn read_extents(
         let nrec = size.div_ceil(lsz);
         let mut pa_acc = 0u64;
         if recsz == 4 {
-            let base = img.data.get(pos..pos + 8).ok_or(Error::UnexpectedEof)?;
+            let base = img
+                .mdata(zm.mh)?
+                .get(pos..pos + 8)
+                .ok_or(Error::UnexpectedEof)?;
             pa_acc = u64le(base, 0);
             pos += 8;
         }
         for i in 0..nrec {
-            let rec = img.data.get(pos..pos + recsz).ok_or(Error::UnexpectedEof)?;
+            let rec = img
+                .mdata(zm.mh)?
+                .get(pos..pos + recsz)
+                .ok_or(Error::UnexpectedEof)?;
             pos += recsz;
             if fragment && i + 1 == nrec {
                 // The last record is a packed-inode fragment:
@@ -926,7 +943,10 @@ fn read_extents(
     let mut pend: Option<(u64, u64, u32)> = None; // (lstart, pa, plen_raw)
     for i in 0..=nrec {
         let (lstart, pa, plen_raw) = if i < nrec {
-            let rec = img.data.get(pos..pos + recsz).ok_or(Error::UnexpectedEof)?;
+            let rec = img
+                .mdata(zm.mh)?
+                .get(pos..pos + recsz)
+                .ok_or(Error::UnexpectedEof)?;
             pos += recsz;
             let plen_raw = u32le(rec, 0);
             let pa = u64::from(u32le(rec, 4)) | (u64::from(u32le(rec, 8)) << 32);
@@ -978,7 +998,10 @@ pub(crate) fn read_compressed(
     let hpos = ino_off
         .checked_add(align8(ino.isize + ino.xattr_isize))
         .ok_or(Error::InvalidData("erofs map header overflow"))?;
-    let h = img.data.get(hpos..hpos + 8).ok_or(Error::UnexpectedEof)?;
+    let h = img
+        .mdata(ino.mh)?
+        .get(hpos..hpos + 8)
+        .ok_or(Error::UnexpectedEof)?;
     if h[7] >> 7 != 0 {
         // Z_EROFS_FRAGMENT_INODE_BIT: the file lives inside the
         // packed inode entirely; the rest of the header is the
@@ -1030,6 +1053,7 @@ pub(crate) fn read_compressed(
         totalidx: ino.size.div_ceil(1u64 << (bbits + u32::from(h[7] & 0xf))) as usize,
         c4b_init: usize::MAX,
         c2b: 0,
+        mh: ino.mh,
     };
     // In the EXTENTS layout advise bits 1-2 encode the record size,
     // so the big-pcluster sanity check applies to index layouts only.

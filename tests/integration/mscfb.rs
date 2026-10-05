@@ -134,3 +134,58 @@ fn test_mscfb_rejects_truncated_fat_chain() {
     // sectors 0..2: chain must hit a missing sector or wrong data.
     assert!(mscfb::decode::decode(&out.stdout).is_err());
 }
+
+#[test]
+fn test_mscfb_encode_python_olefile_oracle() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    // System oracle: Python olefile parses an encoder-produced image.
+    // Skipped when python3 or olefile is unavailable.
+    let probe = Command::new("python3")
+        .args(["-c", "import olefile"])
+        .output();
+    match probe {
+        Ok(o) if o.status.success() => {}
+        _ => return,
+    }
+
+    let big: Vec<u8> = (0..5000u32).map(|i| (i % 251) as u8).collect();
+    let mut enc = mscfb::encode::CfbEncoder::new();
+    enc.add_stream("Storage 1/Stream Small", b"olefile mini payload");
+    enc.add_stream("Storage 1/Stream Big", &big);
+    enc.add_stream("Top", b"top");
+    enc.add_storage("Empty Storage");
+    let cfb = enc.finish().unwrap();
+
+    let script = concat!(
+        "import sys, io, olefile\n",
+        "ole = olefile.OleFileIO(io.BytesIO(sys.stdin.buffer.read()))\n",
+        "assert ole.exists('Empty Storage')\n",
+        "for p in sorted(ole.listdir(streams=True, storages=False)):\n",
+        "    d = ole.openstream(p).read()\n",
+        "    sys.stdout.write('/'.join(p) + '=' + d.hex() + '\\n')\n",
+    );
+    let mut child = Command::new("python3")
+        .args(["-c", script])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("python3");
+    child.stdin.as_mut().unwrap().write_all(&cfb).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "olefile failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let hex = |d: &[u8]| d.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let expected = format!(
+        "Storage 1/Stream Big={}\nStorage 1/Stream Small={}\nTop={}\n",
+        hex(&big),
+        hex(b"olefile mini payload"),
+        hex(b"top")
+    );
+    assert_eq!(String::from_utf8(out.stdout).unwrap(), expected);
+}

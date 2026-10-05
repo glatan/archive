@@ -29,6 +29,8 @@ use crate::util::crc32;
 
 use crate::compress::lzma::lzma_decode;
 
+use super::MAX_MEMBER_SIZE;
+
 /// lzip magic number: "LZIP" (4 bytes).
 const MAGIC: [u8; 4] = [0x4C, 0x5A, 0x49, 0x50];
 
@@ -194,6 +196,13 @@ pub fn decode(data: &[u8]) -> Result<Vec<u8>, Error> {
         // Verify data size
         if decoded.len() as u64 != expected_data_size {
             return Err(Error::InvalidData("lzip: data size mismatch"));
+        }
+
+        // Lzip manual ch.5: member size is limited to 2 PiB. The data
+        // size field spans the full u64 range (16 EiB - 1) and needs
+        // no limit check.
+        if expected_member_size > MAX_MEMBER_SIZE {
+            return Err(Error::InvalidData("lzip: member size exceeds limit"));
         }
 
         // Verify member size (from member_start to pos)
@@ -366,6 +375,29 @@ mod tests {
         let trailer_start = compressed.len() - TRAILER_SIZE;
         compressed[trailer_start + 12] ^= 0xFF;
         assert!(decode(&compressed).is_err());
+    }
+
+    /// Lzip manual ch.5: member size is limited to 2 PiB.
+    #[test]
+    fn test_decode_rejects_oversized_member() {
+        use super::super::encode;
+        let mut compressed = encode::encode(b"oversized member test data");
+        let trailer_start = compressed.len() - TRAILER_SIZE;
+        compressed[trailer_start + 12..trailer_start + TRAILER_SIZE]
+            .copy_from_slice(&(MAX_MEMBER_SIZE + 1).to_le_bytes());
+        assert!(matches!(
+            decode(&compressed),
+            Err(Error::InvalidData("lzip: member size exceeds limit"))
+        ));
+
+        // Exactly at the limit passes the bound check and fails only
+        // on the member size mismatch.
+        compressed[trailer_start + 12..trailer_start + TRAILER_SIZE]
+            .copy_from_slice(&MAX_MEMBER_SIZE.to_le_bytes());
+        assert!(matches!(
+            decode(&compressed),
+            Err(Error::InvalidData("lzip: member size mismatch"))
+        ));
     }
 
     #[test]

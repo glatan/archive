@@ -22,9 +22,9 @@ use crate::error::Error;
 use crate::compress::lzh::bits::MsbReader;
 
 /// `(offset, extra bits)` entry of a variable-length code table.
-struct Vl {
-    offset: u32,
-    bits: u32,
+pub(crate) struct Vl {
+    pub(crate) offset: u32,
+    pub(crate) bits: u32,
 }
 
 /// Read `table[i].bits` extra bits and add them to `table[i].offset`.
@@ -37,7 +37,7 @@ fn vl_decode(r: &mut MsbReader<'_>, table: &[Vl], i: usize) -> Result<u32, Error
 
 /// Circular move-to-front byte list (`HistoryLinkedList` in lhasa).
 /// `prev` walks towards the tail, `next` towards the head.
-struct History {
+pub(crate) struct History {
     prev: [u8; 256],
     next: [u8; 256],
     head: u8,
@@ -47,7 +47,7 @@ impl History {
     /// Linear chain cut into groups so ASCII bytes sit nearest the
     /// head: `0x20..0x7f`, `0x00..0x1f`, `0xa0..0xdf`, `0x80..0x9f`,
     /// `0xe0..0xff`.
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let mut h = History {
             prev: [0; 256],
             next: [0; 256],
@@ -86,8 +86,20 @@ impl History {
         code
     }
 
+    /// Position of `b` counted in `prev` links from the head — the
+    /// distance an encoder feeds to [`History::find`] to emit `b`.
+    pub(crate) fn pos(&self, b: u8) -> usize {
+        let mut code = self.head;
+        let mut n = 0usize;
+        while code != b {
+            code = self.prev[usize::from(code)];
+            n += 1;
+        }
+        n
+    }
+
     /// Move byte `b` to the head of the chain.
-    fn update(&mut self, b: u8) {
+    pub(crate) fn update(&mut self, b: u8) {
         if self.head == b {
             return;
         }
@@ -233,7 +245,7 @@ impl Trie {
 }
 
 /// `-pm2-` history-distance code (recent bytes take fewer bits).
-const PM2_HISTORY: &[Vl] = &[
+pub(crate) const PM2_HISTORY: &[Vl] = &[
     Vl { offset: 0, bits: 3 },
     Vl { offset: 8, bits: 3 },
     Vl {
@@ -509,7 +521,7 @@ const PM1_COPY_RANGES: &[Vl] = &[
 ];
 
 /// `-pm1-` byte-distance ranges for history-list walks.
-const PM1_BYTE_RANGES: &[Vl] = &[
+pub(crate) const PM1_BYTE_RANGES: &[Vl] = &[
     Vl { offset: 0, bits: 4 },
     Vl {
         offset: 16,

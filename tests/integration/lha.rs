@@ -547,13 +547,16 @@ fn lha_fixture_method(name: &str, data: &[u8], method: &[u8; 5]) -> Vec<u8> {
 }
 
 /// Compressed write→read roundtrip for every writable compressed
-/// method (st1 `-lh4-`..`-lh7-` and LArc `-lzs-`/`-lz5-`).
+/// method (st1 `-lh4-`..`-lh7-`, LArc `-lzs-`/`-lz5-`, and PMarc
+/// `-pm1-`/`-pm2-` literal-block streams).
 #[test]
 fn test_lha_compressed_method_roundtrip() {
     let mut data = Vec::new();
     data.extend_from_slice(&b"lha compressed roundtrip ".repeat(2000));
     data.extend_from_slice(&[7u8; 1000]);
-    for method in [b"-lh4-", b"-lh5-", b"-lh6-", b"-lh7-", b"-lzs-", b"-lz5-"] {
+    for method in [
+        b"-lh4-", b"-lh5-", b"-lh6-", b"-lh7-", b"-lzs-", b"-lz5-", b"-pm1-", b"-pm2-",
+    ] {
         let a = lha_fixture_method("c.bin", &data, method);
         // Method tag at offset 2; packed size (u32le) at offset 7.
         assert_eq!(&a[2..7], method.as_slice());
@@ -672,5 +675,57 @@ fn test_lha_lzs_lz5_bsdtar_interop() {
         }
         let extracted = std::fs::read(out_dir.join(&name)).unwrap();
         assert_eq!(extracted, data.as_slice(), "{tag}: bsdtar output differs");
+    }
+}
+
+/// `lhasa`/`unar` extraction oracle for crate-generated `-pm1-` /
+/// `-pm2-` archives (literal-block streams); skips when no oracle is
+/// installed or the oracle lacks PMarc support.
+#[test]
+fn test_lha_pmarc_oracle_interop() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let tools: Vec<&str> = ["lhasa", "unar"]
+        .iter()
+        .copied()
+        .filter(|t| {
+            Command::new(t)
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success() || !o.stdout.is_empty())
+                .unwrap_or(false)
+        })
+        .collect();
+    if tools.is_empty() {
+        return; // no oracle installed
+    }
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_lha_pm_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let data = b"pmarc oracle interop payload ".repeat(64);
+
+    for (method, tag) in [(b"-pm1-", "pm1"), (b"-pm2-", "pm2")] {
+        let path = dir.join(format!("test{tag}.lzh"));
+        let name = format!("{tag}.txt");
+        std::fs::write(&path, lha_fixture_method(&name, &data, method)).unwrap();
+        for tool in &tools {
+            let out_dir = dir.join(format!("{tool}_{tag}"));
+            std::fs::create_dir_all(&out_dir).unwrap();
+            let output = Command::new(tool)
+                .arg("xf")
+                .arg(&path)
+                .current_dir(&out_dir)
+                .output();
+            let Ok(output) = output else { continue };
+            if !output.status.success() {
+                continue; // oracle lacks support for this method
+            }
+            let extracted = std::fs::read(out_dir.join(&name)).unwrap();
+            assert_eq!(extracted, data.as_slice(), "{tag}: {tool} output differs");
+        }
     }
 }

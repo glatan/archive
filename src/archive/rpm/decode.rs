@@ -15,6 +15,8 @@
 //!
 //! Signature verification and package-manager semantics (install scripts,
 //! dependencies, file classification) are intentionally out of scope.
+//! Digest tags (Signature MD5/SHA1/SHA256, Header PAYLOADDIGEST family)
+//! can be checked opt-in via RpmPackage::verify_digests.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -22,6 +24,7 @@ use alloc::vec::Vec;
 use crate::archive::cpio;
 use crate::compress::{bzip2, gzip, lzma_alone, xz, zstd};
 use crate::error::Error;
+use crate::util::{md5, sha1, sha256, sha512};
 
 const LEAD_MAGIC: [u8; 4] = [0xED, 0xAB, 0xEE, 0xDB];
 const LEAD_SIZE: usize = 96;
@@ -48,6 +51,18 @@ const TAG_BASENAMES: u32 = 1117;
 const TAG_DIRNAMES: u32 = 1118;
 const TAG_PAYLOADCOMPRESSOR: u32 = 1125;
 const TAG_LONGFILESIZES: u32 = 5008;
+
+// Digest tags (rpm.org rpmtag.h / format_v6.html). The Signature digests
+// cover the header blob (+ payload for MD5); the Header PAYLOADDIGEST
+// family covers the payload with the algorithm named by
+// PAYLOADDIGESTALGO (1=MD5, 2=SHA-1, 8=SHA-256, 10=SHA-512).
+const SIGTAG_SHA1: u32 = 269;
+const SIGTAG_SHA256_V6: u32 = 272;
+const SIGTAG_SHA256_V4: u32 = 273;
+const SIGTAG_MD5: u32 = 1004;
+const TAG_PAYLOADDIGEST: u32 = 5092;
+const TAG_PAYLOADDIGESTALGO: u32 = 5093;
+const TAG_PAYLOADDIGESTALT: u32 = 5097;
 
 /// Package type from the Lead (`type` field).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -301,6 +316,54 @@ impl crate::traits::ArchiveEntry for RpmPayloadEntry {
     }
 }
 
+/// Digest algorithm used by a package digest tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RpmDigestAlgorithm {
+    /// MD5 (RPMSIGTAG_MD5, RPMTAG_PAYLOADDIGESTALGO 1).
+    Md5,
+    /// SHA-1 (RPMSIGTAG_SHA1, RPMTAG_PAYLOADDIGESTALGO 2).
+    Sha1,
+    /// SHA-256 (RPMSIGTAG_SHA256, RPMTAG_PAYLOADDIGESTALGO 8).
+    Sha256,
+    /// SHA-512 (RPMTAG_PAYLOADDIGESTALGO 10).
+    Sha512,
+}
+
+/// Byte range a package digest tag is computed over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RpmDigestTarget {
+    /// The Header section blob.
+    Header,
+    /// The Header blob followed by the stored payload bytes.
+    HeaderAndPayload,
+    /// The stored (compressed) payload bytes.
+    PayloadCompressed,
+    /// The decompressed payload bytes.
+    PayloadUncompressed,
+}
+
+/// Outcome of checking one digest tag against the package bytes.
+#[derive(Debug, Clone)]
+pub struct RpmDigestCheck {
+    /// Tag the stored digest was read from.
+    pub tag: u32,
+    /// Digest algorithm the tag uses.
+    pub algorithm: RpmDigestAlgorithm,
+    /// Byte range the digest covers.
+    pub target: RpmDigestTarget,
+    /// Digest value stored in the tag.
+    pub expected: Vec<u8>,
+    /// Digest recomputed over the covered bytes.
+    pub actual: Vec<u8>,
+}
+
+impl RpmDigestCheck {
+    /// Whether the stored digest equals the recomputed one.
+    pub fn matches(&self) -> bool {
+        self.expected == self.actual
+    }
+}
+
 /// A decoded `.rpm` package.
 #[derive(Debug, Clone)]
 pub struct RpmPackage {
@@ -310,6 +373,7 @@ pub struct RpmPackage {
     pub signature: RpmHeaderSection,
     /// Main header structure.
     pub header: RpmHeaderSection,
+    header_raw: Vec<u8>,
     payload_compressed: Vec<u8>,
 }
 
@@ -354,6 +418,119 @@ impl RpmPackage {
             "none" | "" => Ok(RpmCompression::None),
             _ => Err(Error::Unsupported("rpm: unsupported payload compressor")),
         }
+    }
+
+    /// Verify the digest tags carried by the Signature and Header
+    /// sections against the package bytes. Returns one RpmDigestCheck
+    /// per digest tag found (empty when the package carries none).
+    /// Verification is opt-in: decode never checks digests.
+    ///
+    /// Covered tags (rpm.org rpmtag.h, format_v6.html):
+    ///
+    /// - Signature 1004 (RPMSIGTAG_MD5, BIN): MD5 over header + payload.
+    /// - Signature 269 (RPMSIGTAG_SHA1, STRING hex): SHA-1 over the
+    ///   header blob.
+    /// - Signature 272/273 (RPMSIGTAG_SHA256, STRING hex): SHA-256 over
+    ///   the header blob (272 is the v6 numbering, 273 the v4 one).
+    /// - Header 5092 (RPMTAG_PAYLOADDIGEST, STRING_ARRAY hex): digest
+    ///   over the stored (compressed) payload.
+    /// - Header 5097 (RPMTAG_PAYLOADDIGESTALT): digest over the
+    ///   decompressed payload. The algorithm for both comes from
+    ///   RPMTAG_PAYLOADDIGESTALGO (5093).
+    ///
+    /// OpenPGP signature verification remains out of scope.
+    ///
+    /// # Errors
+    ///
+    /// Returns Error::InvalidData for malformed digest tags (bad hex or
+    /// PAYLOADDIGEST without PAYLOADDIGESTALGO), Error::Unsupported for
+    /// digest algorithms without an implementation, and payload
+    /// decompression errors for PAYLOADDIGESTALT.
+    pub fn verify_digests(&self) -> Result<Vec<RpmDigestCheck>, Error> {
+        let mut checks = Vec::new();
+
+        if let Some(result) = self.signature.get_bin(SIGTAG_MD5) {
+            let mut hasher = md5::Md5::new();
+            hasher.update(&self.header_raw);
+            hasher.update(&self.payload_compressed);
+            checks.push(RpmDigestCheck {
+                tag: SIGTAG_MD5,
+                algorithm: RpmDigestAlgorithm::Md5,
+                target: RpmDigestTarget::HeaderAndPayload,
+                expected: result?.to_vec(),
+                actual: hasher.finish().to_vec(),
+            });
+        }
+        for (tag, algorithm) in [
+            (SIGTAG_SHA1, RpmDigestAlgorithm::Sha1),
+            (SIGTAG_SHA256_V6, RpmDigestAlgorithm::Sha256),
+            (SIGTAG_SHA256_V4, RpmDigestAlgorithm::Sha256),
+        ] {
+            let Some(result) = self.signature.get_string(tag) else {
+                continue;
+            };
+            let expected = parse_hex_digest(&result?)?;
+            let actual = match algorithm {
+                RpmDigestAlgorithm::Sha1 => sha1::sha1(&self.header_raw).to_vec(),
+                _ => sha256::sha256(&self.header_raw).to_vec(),
+            };
+            checks.push(RpmDigestCheck {
+                tag,
+                algorithm,
+                target: RpmDigestTarget::Header,
+                expected,
+                actual,
+            });
+        }
+
+        if self.header.find(TAG_PAYLOADDIGEST).is_none()
+            && self.header.find(TAG_PAYLOADDIGESTALT).is_none()
+        {
+            return Ok(checks);
+        }
+        let algorithm = match self.header.get_i32s(TAG_PAYLOADDIGESTALGO) {
+            Some(result) => match result?.first() {
+                Some(&1) => RpmDigestAlgorithm::Md5,
+                Some(&2) => RpmDigestAlgorithm::Sha1,
+                Some(&8) => RpmDigestAlgorithm::Sha256,
+                Some(&10) => RpmDigestAlgorithm::Sha512,
+                _ => {
+                    return Err(Error::Unsupported(
+                        "rpm: unsupported payload digest algorithm",
+                    ));
+                }
+            },
+            None => {
+                return Err(Error::InvalidData(
+                    "rpm: PAYLOADDIGEST without PAYLOADDIGESTALGO",
+                ));
+            }
+        };
+        if let Some(result) = self.header.get_strings(TAG_PAYLOADDIGEST) {
+            let actual = digest_of(algorithm, &self.payload_compressed);
+            for string in result? {
+                checks.push(RpmDigestCheck {
+                    tag: TAG_PAYLOADDIGEST,
+                    algorithm,
+                    target: RpmDigestTarget::PayloadCompressed,
+                    expected: parse_hex_digest(&string)?,
+                    actual: actual.clone(),
+                });
+            }
+        }
+        if let Some(result) = self.header.get_strings(TAG_PAYLOADDIGESTALT) {
+            let actual = digest_of(algorithm, &self.payload()?);
+            for string in result? {
+                checks.push(RpmDigestCheck {
+                    tag: TAG_PAYLOADDIGESTALT,
+                    algorithm,
+                    target: RpmDigestTarget::PayloadUncompressed,
+                    expected: parse_hex_digest(&string)?,
+                    actual: actual.clone(),
+                });
+            }
+        }
+        Ok(checks)
     }
 
     /// Decompressed cpio payload bytes.
@@ -583,6 +760,29 @@ fn parse_hex_u32(bytes: &[u8]) -> Result<u32, Error> {
     Ok(value)
 }
 
+/// Digest of data for a payload-digest algorithm.
+fn digest_of(algorithm: RpmDigestAlgorithm, data: &[u8]) -> Vec<u8> {
+    match algorithm {
+        RpmDigestAlgorithm::Md5 => md5::md5(data).to_vec(),
+        RpmDigestAlgorithm::Sha1 => sha1::sha1(data).to_vec(),
+        RpmDigestAlgorithm::Sha256 => sha256::sha256(data).to_vec(),
+        RpmDigestAlgorithm::Sha512 => sha512::sha512(data).to_vec(),
+    }
+}
+
+/// Decode a hex STRING digest tag value into bytes.
+fn parse_hex_digest(string: &str) -> Result<Vec<u8>, Error> {
+    let bytes = string.as_bytes();
+    if !bytes.len().is_multiple_of(2) {
+        return Err(Error::InvalidData("rpm: odd-length digest hex"));
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    for pair in bytes.as_chunks::<2>().0 {
+        out.push(parse_hex_u32(pair)? as u8);
+    }
+    Ok(out)
+}
+
 fn read_u16_be(input: &[u8], pos: usize) -> u16 {
     u16::from_be_bytes([input[pos], input[pos + 1]])
 }
@@ -665,6 +865,7 @@ pub fn decode(input: &[u8]) -> Result<RpmPackage, Error> {
         },
         signature,
         header,
+        header_raw: input[signature_end..header_end].to_vec(),
         payload_compressed: input[header_end..].to_vec(),
     })
 }
@@ -1085,5 +1286,152 @@ mod tests {
         assert_eq!(section.get_i32s(TAG_FILESIZES).unwrap().unwrap(), [12]);
         assert!(section.get_i32s(TAG_NAME).unwrap().is_err());
         assert!(section.get_string(TAG_ARCH).is_none());
+    }
+
+    /// NUL-terminated STRING-tag bytes.
+    fn nul_str(bytes: &[u8]) -> Vec<u8> {
+        let mut v = bytes.to_vec();
+        v.push(0);
+        v
+    }
+
+    /// Lowercase hex encoding for STRING digest tags.
+    fn hex_of(bytes: &[u8]) -> Vec<u8> {
+        use alloc::fmt::Write;
+        let mut out = String::new();
+        for b in bytes {
+            write!(out, "{:02x}", b).unwrap();
+        }
+        out.into_bytes()
+    }
+
+    /// .rpm with matching digest tags in the Signature and Header.
+    fn signed_rpm(payload: &[u8]) -> Vec<u8> {
+        let paydigest = nul_str(&hex_of(&sha256::sha256(payload)));
+        let name = nul_str(b"test");
+        let none = nul_str(b"none");
+        let header = build_header(&[
+            (HDR_REGION_TAG, 7, &region_trailer(HDR_REGION_TAG)),
+            (TAG_NAME, 6, &name),
+            (TAG_PAYLOADCOMPRESSOR, 6, &none),
+            (TAG_PAYLOADDIGEST, 8, &paydigest),
+            (TAG_PAYLOADDIGESTALGO, 4, &8i32.to_be_bytes()),
+            (TAG_PAYLOADDIGESTALT, 8, &paydigest),
+        ]);
+        let mut hasher = md5::Md5::new();
+        hasher.update(&header);
+        hasher.update(payload);
+        let md5_sum = hasher.finish();
+        let sha1_hex = nul_str(&hex_of(&sha1::sha1(&header)));
+        let sha256_hex = nul_str(&hex_of(&sha256::sha256(&header)));
+        let sig = build_header(&[
+            (SIG_REGION_TAG, 7, &region_trailer(SIG_REGION_TAG)),
+            (SIGTAG_SHA1, 6, &sha1_hex),
+            (SIGTAG_SHA256_V4, 6, &sha256_hex),
+            (SIGTAG_MD5, 7, &md5_sum),
+        ]);
+        let mut rpm = vec![0u8; LEAD_SIZE];
+        rpm[..4].copy_from_slice(&LEAD_MAGIC);
+        rpm[4] = 4;
+        rpm[6..8].copy_from_slice(&0u16.to_be_bytes());
+        rpm.extend_from_slice(&sig);
+        while !rpm.len().is_multiple_of(8) {
+            rpm.push(0);
+        }
+        rpm.extend_from_slice(&header);
+        rpm.extend_from_slice(payload);
+        rpm
+    }
+
+    #[test]
+    fn verifies_md5_sha1_digests() {
+        let payload = cpio_payload(&[("hello.txt", b"hi")]);
+        let rpm = signed_rpm(&payload);
+        let package = decode(&rpm).unwrap();
+        let checks = package.verify_digests().unwrap();
+        assert_eq!(checks.len(), 5);
+        assert!(checks.iter().all(RpmDigestCheck::matches));
+        let md5_check = checks.iter().find(|c| c.tag == SIGTAG_MD5).unwrap();
+        assert_eq!(md5_check.target, RpmDigestTarget::HeaderAndPayload);
+        assert!(checks.iter().any(|c| c.tag == SIGTAG_SHA1));
+        assert!(checks.iter().any(|c| c.tag == SIGTAG_SHA256_V4));
+        let stored = checks.iter().find(|c| c.tag == TAG_PAYLOADDIGEST).unwrap();
+        assert_eq!(stored.target, RpmDigestTarget::PayloadCompressed);
+        let alt = checks
+            .iter()
+            .find(|c| c.tag == TAG_PAYLOADDIGESTALT)
+            .unwrap();
+        assert_eq!(alt.target, RpmDigestTarget::PayloadUncompressed);
+    }
+
+    #[test]
+    fn rejects_tampered_payload_digest() {
+        let payload = cpio_payload(&[("hello.txt", b"hi")]);
+        let mut rpm = signed_rpm(&payload);
+        let last = rpm.len() - 1;
+        rpm[last] ^= 0x01;
+        let package = decode(&rpm).unwrap();
+        let checks = package.verify_digests().unwrap();
+        assert!(
+            !checks
+                .iter()
+                .find(|c| c.tag == SIGTAG_MD5)
+                .unwrap()
+                .matches()
+        );
+        assert!(
+            !checks
+                .iter()
+                .find(|c| c.tag == TAG_PAYLOADDIGEST)
+                .unwrap()
+                .matches()
+        );
+        // Header digests still match.
+        assert!(
+            checks
+                .iter()
+                .find(|c| c.tag == SIGTAG_SHA256_V4)
+                .unwrap()
+                .matches()
+        );
+    }
+
+    #[test]
+    fn detects_tampered_header_digest() {
+        let payload = cpio_payload(&[("hello.txt", b"hi")]);
+        let mut rpm = signed_rpm(&payload);
+        let pos = rpm.windows(4).position(|w| w == b"test").unwrap();
+        rpm[pos] = 0x75;
+        let package = decode(&rpm).unwrap();
+        let checks = package.verify_digests().unwrap();
+        assert!(
+            !checks
+                .iter()
+                .find(|c| c.tag == SIGTAG_SHA1)
+                .unwrap()
+                .matches()
+        );
+        assert!(
+            !checks
+                .iter()
+                .find(|c| c.tag == SIGTAG_SHA256_V4)
+                .unwrap()
+                .matches()
+        );
+        assert!(
+            !checks
+                .iter()
+                .find(|c| c.tag == SIGTAG_MD5)
+                .unwrap()
+                .matches()
+        );
+        // Payload digests still match.
+        assert!(
+            checks
+                .iter()
+                .find(|c| c.tag == TAG_PAYLOADDIGEST)
+                .unwrap()
+                .matches()
+        );
     }
 }

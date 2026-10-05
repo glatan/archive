@@ -43,16 +43,19 @@ fn test_arj_rejects_truncated() {
 
 #[test]
 fn test_arj_rejects_compressed_method() {
-    let mut a = arj_fixture("f.txt", b"payload");
-    // File header follows: sig(2)+size(2)+body+crc(4)+ext(2).
-    let h1 = u16::from_le_bytes([a[2], a[3]]) as usize;
-    let second = 4 + h1 + 4 + 2;
-    a[second + 4 + 5] = 9; // method 9: never assigned
-    let bsize = u16::from_le_bytes([a[second + 2], a[second + 3]]) as usize;
-    let crc = crc32_local(&a[second + 4..second + 4 + bsize]);
-    a[second + 4 + bsize..second + 8 + bsize].copy_from_slice(&crc.to_le_bytes());
-    let err = archive::archive::arj::decode::decode(&a).unwrap_err();
-    assert!(matches!(err, archive::error::Error::Unsupported(_)));
+    // Methods 5-7 were never assigned; 10+ are reserved.
+    for method in [5u8, 6, 7, 10, u8::MAX] {
+        let mut a = arj_fixture("f.txt", b"payload");
+        // File header follows: sig(2)+size(2)+body+crc(4)+ext(2).
+        let h1 = u16::from_le_bytes([a[2], a[3]]) as usize;
+        let second = 4 + h1 + 4 + 2;
+        a[second + 4 + 5] = method;
+        let bsize = u16::from_le_bytes([a[second + 2], a[second + 3]]) as usize;
+        let crc = crc32_local(&a[second + 4..second + 4 + bsize]);
+        a[second + 4 + bsize..second + 8 + bsize].copy_from_slice(&crc.to_le_bytes());
+        let err = archive::archive::arj::decode::decode(&a).unwrap_err();
+        assert!(matches!(err, archive::error::Error::Unsupported(_)));
+    }
 }
 
 fn crc32_local(data: &[u8]) -> u32 {

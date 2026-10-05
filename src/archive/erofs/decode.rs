@@ -19,6 +19,10 @@ const INODE_COMPACT: usize = 32;
 const INODE_EXTENDED: usize = 64;
 const DIRENT_SIZE: usize = 12;
 const NULL_ADDR: u64 = u64::MAX;
+/// Dirent nid bit 63 (`EROFS_DIRENT_NID_METABOX_BIT`): the inode
+/// metadata lives in the metabox blob; the low 63 bits (nid_lo)
+/// select the inode slot inside it.
+const DIRENT_NID_METABOX: u64 = 0x8000_0000_0000_0000;
 
 /// `feature_compat` bit: the superblock carries a CRC32C checksum
 /// (`EROFS_FEATURE_COMPAT_SB_CHKSUM`); always verified when set.
@@ -86,7 +90,7 @@ pub enum ErofsKind {
 /// One decoded extended attribute (erofs_xattr_entry), resolved to
 /// a full prefix.name string. Names whose prefix cannot be resolved
 /// (unknown name index, or a long-prefix record that cannot be
-/// located) degrade to erofs.xattr.<index> instead of failing.
+/// located) degrade to `erofs.xattr.<index>` instead of failing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ErofsXattr {
     /// Full attribute name including the namespace prefix
@@ -189,6 +193,9 @@ pub struct ErofsSuperblock {
     /// (`ishare_xattr_prefix_id`); meaningful under
     /// `COMPAT_ISHARE_XATTRS`.
     pub ishare_xattr_prefix_id: u8,
+    /// Nid of the metabox inode (`metabox_nid`); valid under
+    /// `INCOMPAT_METABOX`, 0 otherwise.
+    pub metabox_nid: u64,
 }
 
 /// Decoded erofs image.
@@ -241,6 +248,11 @@ pub(crate) struct Inode {
     startblk_is_null_capable: bool,
     /// Chunk-based inode format word (`erofs_inode_chunk_info`).
     chunk_format: u16,
+    /// Metabox-hosted inode (dirent nid bit63): its metadata --
+    /// inode record, xattr ibody, chunk index table, z_erofs map and
+    /// inline tail -- is addressed inside the decoded metabox blob
+    /// rather than the image meta area.
+    pub(crate) mh: bool,
 }
 
 impl Inode {
@@ -287,8 +299,8 @@ pub(crate) struct Img<'a> {
     /// COMPAT_PLAIN_XATTR_PFX: long xattr prefixes live in the
     /// plain image area rather than the packed/metabox inode.
     plain_xattr_pfx: bool,
-    /// COMPAT_SHARED_EA_IN_METABOX: shared xattrs live in the
-    /// (unsupported) metabox inode and cannot be resolved.
+    /// COMPAT_SHARED_EA_IN_METABOX: shared xattr entries live in
+    /// the metabox blob at the usual xattr_blkaddr-based offsets.
     shared_ea_metabox: bool,
     /// Number of long xattr prefix records (xattr_prefix_count).
     xattr_prefix_count: u8,
@@ -300,6 +312,12 @@ pub(crate) struct Img<'a> {
     /// superblock names one. Source for packed-inode fragments and
     /// non-plain long xattr prefixes.
     pub(crate) packed: Option<Vec<u8>>,
+    /// Decoded contents of the metabox inode (superblock metabox_nid
+    /// under INCOMPAT_METABOX): the second metadata space holding
+    /// metabox-hosted inode slots, their xattr ibodies, chunk index
+    /// tables, z_erofs map data and inline tails, plus shared xattrs
+    /// and long xattr prefixes when selected.
+    pub(crate) metabox: Option<Vec<u8>>,
     /// LZMA dictionary size from the compression-config record
     /// (`0` when no config is present).
     #[cfg_attr(
@@ -316,22 +334,46 @@ pub(crate) struct Img<'a> {
 }
 
 impl Img<'_> {
-    fn iloc(&self, nid: u64) -> Result<usize, Error> {
-        let off = self
-            .meta_blkaddr
-            .checked_mul(self.blksz as u64)
-            .and_then(|v| {
-                nid.checked_mul(INODE_SLOT as u64)
-                    .and_then(|n| v.checked_add(n))
-            })
-            .ok_or(Error::InvalidData("erofs inode offset overflow"))?;
-        usize::try_from(off).map_err(|_| Error::InvalidData("erofs inode offset overflow"))
+    /// `erofs_iloc`: inode metadata offset, plus whether it
+    /// addresses the metabox blob. A dirent nid carrying
+    /// `DIRENT_NID_METABOX` (bit63) is metabox-hosted: nid_lo * 32
+    /// is a byte offset into the decoded metabox data; other nids
+    /// address `meta_blkaddr * blksz + nid * 32` in the image.
+    fn iloc(&self, nid: u64) -> Result<(usize, bool), Error> {
+        let mh = nid & DIRENT_NID_METABOX != 0;
+        let off = if mh {
+            (nid & !DIRENT_NID_METABOX).checked_mul(INODE_SLOT as u64)
+        } else {
+            self.meta_blkaddr
+                .checked_mul(self.blksz as u64)
+                .and_then(|v| {
+                    nid.checked_mul(INODE_SLOT as u64)
+                        .and_then(|n| v.checked_add(n))
+                })
+        }
+        .ok_or(Error::InvalidData("erofs inode offset overflow"))?;
+        let off =
+            usize::try_from(off).map_err(|_| Error::InvalidData("erofs inode offset overflow"))?;
+        Ok((off, mh))
+    }
+
+    /// `erofs_read_metabuf` equivalent: the byte source for
+    /// inode-space offsets -- the decoded metabox blob for
+    /// metabox-hosted inodes and metabox shared xattrs, the raw
+    /// image otherwise.
+    pub(crate) fn mdata(&self, mh: bool) -> Result<&[u8], Error> {
+        if !mh {
+            return Ok(self.data);
+        }
+        self.metabox
+            .as_deref()
+            .ok_or(Error::InvalidData("erofs metabox ref w/o metabox inode"))
     }
 
     fn read_inode(&self, nid: u64) -> Result<(usize, Inode), Error> {
-        let off = self.iloc(nid)?;
-        let hdr = self
-            .data
+        let (off, mh) = self.iloc(nid)?;
+        let src = self.mdata(mh)?;
+        let hdr = src
             .get(off..off.checked_add(INODE_SLOT).ok_or(Error::UnexpectedEof)?)
             .ok_or(Error::UnexpectedEof)?;
         let ifmt = u16le(hdr, 0);
@@ -345,8 +387,7 @@ impl Img<'_> {
         } else {
             INODE_COMPACT
         };
-        let inode = self
-            .data
+        let inode = src
             .get(off..off.checked_add(isize).ok_or(Error::UnexpectedEof)?)
             .ok_or(Error::UnexpectedEof)?;
         // erofs_xattr_ibody_size: 12-byte header + 4 * (n - 1) bytes.
@@ -421,6 +462,7 @@ impl Img<'_> {
                 startblk,
                 startblk_is_null_capable: null_capable,
                 chunk_format,
+                mh,
             },
         ))
     }
@@ -478,7 +520,7 @@ impl Img<'_> {
                     .checked_add(tail)
                     .ok_or(Error::InvalidData("erofs inline tail out of range"))?;
                 out.extend_from_slice(
-                    self.data
+                    self.mdata(ino.mh)?
                         .get(tail_off..end)
                         .ok_or(Error::InvalidData("erofs inline tail out of range"))?,
                 );
@@ -518,7 +560,7 @@ impl Img<'_> {
             )
             .ok_or(Error::InvalidData("erofs extent overflow"))?;
         let extents = self
-            .data
+            .mdata(ino.mh)?
             .get(eoff..eend)
             .ok_or(Error::InvalidData("erofs chunk extents out of range"))?;
         let mut out = Vec::with_capacity(size);
@@ -587,18 +629,26 @@ impl Img<'_> {
     /// is set) to short_prefix(base_index) + infix. Prefix items are
     /// 4-aligned le16-length + erofs_xattr_long_prefix records
     /// (erofs_read_metadata), located at xattr_prefix_start*4 inside
-    /// the packed inode, or in the plain image area under
-    /// COMPAT_PLAIN_XATTR_PFX. Returns None when the table or record
+    /// the metabox blob when INCOMPAT_METABOX is set, else the packed
+    /// inode, else the plain image area under COMPAT_PLAIN_XATTR_PFX.
+    /// Returns None when the table or record
     /// cannot be resolved (kernel xattr_iter skips such entries); the
     /// caller degrades instead.
     fn long_prefix(&self, idx: u8) -> Option<String> {
         if usize::from(idx) >= usize::from(self.xattr_prefix_count) {
             return None;
         }
+        // Kernel prefix order: metabox blob when INCOMPAT_METABOX is
+        // on, then the packed inode, falling back to the plain image
+        // area when neither blob exists.
         let src: &[u8] = if self.plain_xattr_pfx {
             self.data
+        } else if let Some(m) = self.metabox.as_deref() {
+            m
+        } else if let Some(p) = self.packed.as_deref() {
+            p
         } else {
-            self.packed.as_deref()?
+            self.data
         };
         let mut pos = usize::try_from(self.xattr_prefix_start)
             .ok()?
@@ -686,7 +736,10 @@ impl Img<'_> {
         let xend = xoff
             .checked_add(isize)
             .ok_or(Error::InvalidData("erofs xattr range overflow"))?;
-        let body = self.data.get(xoff..xend).ok_or(Error::UnexpectedEof)?;
+        let body = self
+            .mdata(ino.mh)?
+            .get(xoff..xend)
+            .ok_or(Error::UnexpectedEof)?;
         let shared_count = usize::from(body[4]);
         let header_sz = 12 + 4 * shared_count;
         if header_sz > isize {
@@ -713,33 +766,31 @@ impl Img<'_> {
             pos += esz;
             remaining -= esz;
         }
-        if self.shared_ea_metabox {
-            // Shared xattr ids point into the metabox inode, which is
-            // out of scope; inline entries remain decoded.
-            return Ok(out);
-        }
         // Shared entries (erofs_xattr_iter_shared): each id selects a
-        // 4-byte slot in the shared xattr area.
-        let shared_base = self
-            .xattr_blkaddr
-            .checked_mul(self.blksz as u64)
-            .ok_or(Error::InvalidData("erofs shared xattr offset"))?;
-        for i in 0..shared_count {
-            let id = u32le(body, 12 + 4 * i);
-            let pos = shared_base
-                .checked_add(u64::from(id) * 4)
+        // 4-byte slot in the shared xattr area, which lives in the
+        // metabox blob under COMPAT_SHARED_EA_IN_METABOX.
+        if shared_count > 0 {
+            let shared = self.mdata(self.shared_ea_metabox)?;
+            let shared_base = self
+                .xattr_blkaddr
+                .checked_mul(self.blksz as u64)
                 .ok_or(Error::InvalidData("erofs shared xattr offset"))?;
-            let pos = usize::try_from(pos)
-                .map_err(|_| Error::InvalidData("erofs shared xattr offset"))?;
-            let e = self
-                .data
-                .get(pos..)
-                .ok_or(Error::InvalidData("erofs shared xattr out of range"))?;
-            if e.len() < 4 {
-                return Err(Error::InvalidData("erofs shared xattr out of range"));
-            }
-            if let Some(x) = self.xattr_entry(e)? {
-                out.push(x);
+            for i in 0..shared_count {
+                let id = u32le(body, 12 + 4 * i);
+                let pos = shared_base
+                    .checked_add(u64::from(id) * 4)
+                    .ok_or(Error::InvalidData("erofs shared xattr offset"))?;
+                let pos = usize::try_from(pos)
+                    .map_err(|_| Error::InvalidData("erofs shared xattr offset"))?;
+                let e = shared
+                    .get(pos..)
+                    .ok_or(Error::InvalidData("erofs shared xattr out of range"))?;
+                if e.len() < 4 {
+                    return Err(Error::InvalidData("erofs shared xattr out of range"));
+                }
+                if let Some(x) = self.xattr_entry(e)? {
+                    out.push(x);
+                }
             }
         }
         Ok(out)
@@ -797,7 +848,9 @@ fn walk_dir(
         let mut i = 0usize;
         while i * DIRENT_SIZE < nameoff0 {
             let d = &block[i * DIRENT_SIZE..i * DIRENT_SIZE + DIRENT_SIZE];
-            let child_nid = u64le(d, 0) & 0x7FFF_FFFF_FFFF_FFFF;
+            // Keep bit63 (EROFS_DIRENT_NID_METABOX_BIT) on the nid:
+            // iloc maps metabox-hosted nids into the metabox blob.
+            let child_nid = u64le(d, 0);
             let nameoff = usize::from(u16le(d, 8));
             let next_nameoff = if (i + 1) * DIRENT_SIZE < nameoff0 {
                 usize::from(u16le(block, (i + 1) * DIRENT_SIZE + 8))
@@ -911,11 +964,11 @@ pub fn decode(input: &[u8]) -> Result<ErofsImage, Error> {
     } else {
         1usize << dirblkbits
     };
-    // Features that change metadata addressing or reference external
-    // blobs are out of scope. ZTAILPACKING and FRAGMENTS are handled
-    // by the z_erofs decoder; long xattr name prefixes do not affect
-    // what this decoder interprets.
-    if feature_incompat & INCOMPAT_METABOX != 0 || extra_devices != 0 {
+    // Multi-device images reference external blobs and are out of
+    // scope. ZTAILPACKING, FRAGMENTS and METABOX are handled below;
+    // long xattr name prefixes do not affect what this decoder
+    // interprets.
+    if extra_devices != 0 {
         return Err(Error::Unsupported("erofs incompatible feature set"));
     }
     // `INCOMPAT_COMPR_CFGS`: the `u1` union carries the
@@ -994,6 +1047,23 @@ pub fn decode(input: &[u8]) -> Result<ErofsImage, Error> {
     };
     let mut uuid = [0u8; 16];
     uuid.copy_from_slice(&sb[48..64]);
+    // INCOMPAT_METABOX: superblock extension slot 0 (offset 0x80)
+    // carries metabox_nid. The metabox inode is a regular inode whose
+    // decoded data forms a second metadata space (kernel erofs_iloc /
+    // erofs_read_metabuf). Rejected when no extension slot exists or
+    // the nid carries the metabox bit itself (kernel super.c).
+    let metabox_nid = if feature_incompat & INCOMPAT_METABOX != 0 {
+        if sb_size <= SUPER_SIZE {
+            return Err(Error::InvalidData("erofs metabox w/o sb extension slot"));
+        }
+        let nid = u64le(input, SUPER_OFF + SUPER_SIZE);
+        if nid & DIRENT_NID_METABOX != 0 {
+            return Err(Error::InvalidData("erofs metabox nid self reference"));
+        }
+        nid
+    } else {
+        0
+    };
     let superblock = ErofsSuperblock {
         feature_compat,
         feature_incompat,
@@ -1009,6 +1079,7 @@ pub fn decode(input: &[u8]) -> Result<ErofsImage, Error> {
         xattr_prefix_start: u32le(sb, 92),
         packed_nid: u64le(sb, 96),
         ishare_xattr_prefix_id: sb[105],
+        metabox_nid,
     };
     let mut img = Img {
         data: input,
@@ -1028,6 +1099,7 @@ pub fn decode(input: &[u8]) -> Result<ErofsImage, Error> {
         xattr_prefix_count: sb[91],
         xattr_prefix_start: u32le(sb, 92),
         packed: None,
+        metabox: None,
         lzma_dict_size,
     };
     let packed_nid = u64le(sb, 96);
@@ -1040,11 +1112,19 @@ pub fn decode(input: &[u8]) -> Result<ErofsImage, Error> {
         let (p_off, p_ino) = img.read_inode(packed_nid)?;
         img.packed = Some(img.read_data(&p_ino, p_off)?);
     }
-    if img
-        .iloc(rootnid)
-        .is_ok_and(|o| o + INODE_SLOT > input.len())
-        || img.iloc(rootnid).is_err()
-    {
+    if feature_incompat & INCOMPAT_METABOX != 0 {
+        // The metabox inode is a regular (usually compressed) inode;
+        // decode it once as the metadata pool for metabox-hosted
+        // inodes and metabox shared xattrs.
+        let (m_off, m_ino) = img.read_inode(metabox_nid)?;
+        img.metabox = Some(img.read_data(&m_ino, m_off)?);
+    }
+    let root_in_range = match img.iloc(rootnid) {
+        Ok((o, false)) => o + INODE_SLOT <= input.len(),
+        Ok((o, true)) => o + INODE_SLOT <= img.metabox.as_ref().map_or(0, Vec::len),
+        Err(_) => false,
+    };
+    if !root_in_range {
         return Err(Error::InvalidData("erofs root inode out of range"));
     }
     let mut visited = BTreeSet::new();
@@ -1319,6 +1399,31 @@ mod tests {
             self.data[SUPER_OFF + 44..SUPER_OFF + 48].copy_from_slice(&le32(blk));
         }
 
+        /// Set superblock compat feature bits.
+        #[allow(dead_code)]
+        fn set_compat(&mut self, bits: u32) {
+            let cur = u32le(&self.data[SUPER_OFF..SUPER_OFF + SUPER_SIZE], 8);
+            self.data[SUPER_OFF + 8..SUPER_OFF + 12].copy_from_slice(&le32(cur | bits));
+        }
+
+        /// Set the sb_extslots count and skip inode-slot allocation
+        /// past the extension area.
+        #[allow(dead_code)]
+        fn set_extslots(&mut self, n: u8) {
+            self.data[SUPER_OFF + 13] = n;
+            let min_slot = ((SUPER_OFF + SUPER_SIZE) as u64 + 16 * u64::from(n)).div_ceil(32);
+            self.next_slot = self.next_slot.max(min_slot);
+        }
+
+        /// Enable INCOMPAT_METABOX and write metabox_nid into sb
+        /// extension slot 0 (offset 0x80).
+        #[allow(dead_code)]
+        fn set_metabox(&mut self, nid: u64) {
+            self.set_incompat(INCOMPAT_METABOX);
+            self.set_extslots(1);
+            self.data[SUPER_OFF + 128..SUPER_OFF + 136].copy_from_slice(&le64(nid));
+        }
+
         /// Add an empty regular file carrying body as its xattr
         /// ibody (12-byte header + shared-id array + inline entries);
         /// icount is the i_xattr_icount value in 4-byte units.
@@ -1404,6 +1509,25 @@ mod tests {
             self.data[1038..1040].copy_from_slice(&le16(root as u16));
             self.data
         }
+    }
+
+    /// 32-byte compact inode record (uid 1000 / gid 100) for
+    /// embedding in a metabox blob.
+    fn mh_rec(datalayout: u8, mode: u16, nlink: u16, size: u32, iu: u32) -> [u8; 32] {
+        let mut r = [0u8; 32];
+        let nlink1 = mode & 0o170000 != 0o040000 && nlink == 1;
+        let mut ifmt = u16::from(datalayout) * 2;
+        if nlink1 {
+            ifmt |= 0x10;
+        }
+        r[0..2].copy_from_slice(&le16(ifmt));
+        r[4..6].copy_from_slice(&le16(mode));
+        r[6..8].copy_from_slice(&le16(if nlink1 { 0 } else { nlink }));
+        r[8..12].copy_from_slice(&le32(size));
+        r[16..20].copy_from_slice(&le32(iu));
+        r[24..26].copy_from_slice(&le16(1000));
+        r[26..28].copy_from_slice(&le16(100));
+        r
     }
 
     /// `z_erofs_map_header` (8 bytes): `[lo32, advise, algo, cbits]`.
@@ -2421,6 +2545,232 @@ mod tests {
         body[13] = 1;
         body[14..16].copy_from_slice(&le16(10));
         let f = b.add_xattr_file(3, &body);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    // ---- metabox tests ----
+
+    /// INCOMPAT_METABOX: the metabox inode named by sb extension
+    /// slot 0 decodes early; it is not listed as an entry.
+    #[test]
+    fn metabox_inode_decodes() {
+        let mut b = ImgBuilder::new();
+        b.set_extslots(1);
+        let mbox = b.add_file(b"metabox-pool");
+        b.set_metabox(mbox);
+        let f = b.add_file(b"data!");
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let img = decode(&img).unwrap();
+        assert_eq!(img.superblock.metabox_nid, mbox);
+        assert_eq!(img.entries.len(), 1);
+        assert_eq!(img.entries[0].name, "f");
+        assert_eq!(img.entries[0].data, b"data!");
+    }
+
+    /// A dirent nid with bit63 resolves inside the decoded metabox
+    /// blob: nid_lo * 32 is the inode slot offset and the
+    /// FLAT_INLINE tail follows the inode metadata in the blob.
+    #[test]
+    fn metabox_hosted_inode() {
+        let mut b = ImgBuilder::new();
+        b.set_extslots(1);
+        // Metabox blob: slot 0 is a compact FLAT_INLINE file inode
+        // (size 6, NULL startblk); its tail data sits at offset 32.
+        let mut blob = mh_rec(DATALAYOUT_FLAT_INLINE, 0o100644, 1, 6, 0xFFFF_FFFF).to_vec();
+        blob.extend_from_slice(b"mbox!!");
+        let mbox = b.add_file(&blob);
+        b.set_metabox(mbox);
+        let root = b.add_dir(&[DirEnt {
+            nid: DIRENT_NID_METABOX,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let img = decode(&img).unwrap();
+        let e = img.entries.iter().find(|e| e.name == "f").unwrap();
+        assert_eq!(e.kind, ErofsKind::File);
+        assert_eq!(e.data, b"mbox!!");
+    }
+
+    /// A metabox-hosted directory reads its inline dirent block from
+    /// the metabox blob; children may still be regular inodes.
+    #[test]
+    fn metabox_hosted_dir() {
+        let mut b = ImgBuilder::new();
+        b.set_extslots(1);
+        let f = b.add_file(b"in-dir");
+        let dblk = ImgBuilder::dir_bytes(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let mut blob = mh_rec(
+            DATALAYOUT_FLAT_INLINE,
+            0o40755,
+            2,
+            dblk.len() as u32,
+            0xFFFF_FFFF,
+        )
+        .to_vec();
+        blob.extend_from_slice(&dblk);
+        let mbox = b.add_file(&blob);
+        b.set_metabox(mbox);
+        let root = b.add_dir(&[DirEnt {
+            nid: DIRENT_NID_METABOX,
+            name: b"d",
+            ftype: 4,
+        }]);
+        let img = b.build(root);
+        let img = decode(&img).unwrap();
+        let e = img.entries.iter().find(|e| e.name == "d/f").unwrap();
+        assert_eq!(e.data, b"in-dir");
+    }
+
+    /// A metabox-hosted z_erofs inode reads its map header and index
+    /// table from the metabox blob while the pcluster payload stays
+    /// device-relative.
+    #[test]
+    fn metabox_hosted_zinode() {
+        let mut b = ImgBuilder::new();
+        b.set_extslots(1);
+        let blk = b.add_pcluster(&vec![0xAAu8; BLK], 1, false);
+        // Metabox blob slot 0: COMPRESSED_FULL file of size BLK; the
+        // map header, reserved FULL_INDEX_START slot and one PLAIN
+        // index follow in the blob.
+        let mut blob = mh_rec(DATALAYOUT_COMPRESSED_FULL, 0o100644, 1, BLK as u32, 0).to_vec();
+        blob.extend_from_slice(&zmap_header(0, 0, 0));
+        blob.extend_from_slice(&[0u8; 8]);
+        blob.extend_from_slice(&zidx_head(0, 0, blk as u32));
+        let mbox = b.add_file(&blob);
+        b.set_metabox(mbox);
+        let root = b.add_dir(&[DirEnt {
+            nid: DIRENT_NID_METABOX,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let img = decode(&img).unwrap();
+        let e = img.entries.iter().find(|e| e.name == "f").unwrap();
+        assert_eq!(e.data, vec![0xAAu8; BLK]);
+    }
+
+    /// COMPAT_SHARED_EA_IN_METABOX: shared xattr ids resolve at
+    /// xattr_blkaddr * blksz + 4 * id inside the metabox blob.
+    #[test]
+    fn metabox_shared_xattr() {
+        let mut b = ImgBuilder::new();
+        b.set_extslots(1);
+        b.set_compat(COMPAT_SHARED_EA_IN_METABOX);
+        // xattr_blkaddr = 0: shared slot 2 lives at metabox offset 8.
+        let mut blob = vec![0u8; 8];
+        blob.extend_from_slice(&[3, 1]); // name_len 3, index user.
+        blob.extend_from_slice(&le16(2)); // value_len 2
+        blob.extend_from_slice(b"abcde"); // name "abc", value "de"
+        let mbox = b.add_file(&blob);
+        b.set_metabox(mbox);
+        // icount = 2 -> isize 16: header + one shared id.
+        let mut body = vec![0u8; 16];
+        body[4] = 1; // h_shared_count
+        body[12..16].copy_from_slice(&le32(2));
+        let f = b.add_xattr_file(2, &body);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let img = decode(&img).unwrap();
+        let e = img.entries.iter().find(|e| e.name == "f").unwrap();
+        assert_eq!(e.xattrs.len(), 1);
+        assert_eq!(e.xattrs[0].name, "user.abc");
+        assert_eq!(e.xattrs[0].value, b"de");
+    }
+
+    /// The xattr ibody of a metabox-hosted inode is read from the
+    /// metabox blob right after the inode slot.
+    #[test]
+    fn metabox_hosted_xattr_ibody() {
+        let mut b = ImgBuilder::new();
+        b.set_extslots(1);
+        // Metabox blob slot 0: FLAT_INLINE file (size 4); icount 3
+        // gives a 20-byte ibody holding one inline entry
+        // user.a = "b"; the file tail sits at offset 52.
+        let mut rec = mh_rec(DATALAYOUT_FLAT_INLINE, 0o100644, 1, 4, 0xFFFF_FFFF);
+        rec[2..4].copy_from_slice(&le16(3));
+        let mut blob = rec.to_vec();
+        blob.extend_from_slice(&[0u8; 12]); // ibody header, no shared ids
+        blob.extend_from_slice(&[1, 1]); // name_len 1, index user.
+        blob.extend_from_slice(&le16(1));
+        blob.extend_from_slice(b"ab");
+        blob.extend_from_slice(&[0u8; 2]); // entry padded to 4 bytes
+        blob.extend_from_slice(b"tail");
+        let mbox = b.add_file(&blob);
+        b.set_metabox(mbox);
+        let root = b.add_dir(&[DirEnt {
+            nid: DIRENT_NID_METABOX,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        let img = decode(&img).unwrap();
+        let e = img.entries.iter().find(|e| e.name == "f").unwrap();
+        assert_eq!(e.data, b"tail");
+        assert_eq!(e.xattrs.len(), 1);
+        assert_eq!(e.xattrs[0].name, "user.a");
+        assert_eq!(e.xattrs[0].value, b"b");
+    }
+
+    /// extra_devices != 0 stays rejected even though INCOMPAT_METABOX
+    /// is now accepted.
+    #[test]
+    fn rejects_extra_devices() {
+        let mut b = ImgBuilder::new();
+        let f = b.add_file(b"x");
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let mut img = b.build(root);
+        img[SUPER_OFF + 86..SUPER_OFF + 88].copy_from_slice(&le16(1));
+        assert!(matches!(decode(&img), Err(Error::Unsupported(_))));
+    }
+
+    /// INCOMPAT_METABOX without a superblock extension slot for
+    /// metabox_nid is rejected (kernel checks
+    /// sb_size > offsetof(metabox_nid)).
+    #[test]
+    fn rejects_metabox_wo_extslot() {
+        let mut b = ImgBuilder::new();
+        b.set_incompat(INCOMPAT_METABOX);
+        let f = b.add_file(b"x");
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let img = b.build(root);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    /// A metabox_nid carrying the metabox bit itself is rejected
+    /// (kernel self-loop detection).
+    #[test]
+    fn rejects_metabox_self_nid() {
+        let mut b = ImgBuilder::new();
+        b.set_metabox(DIRENT_NID_METABOX | 1);
+        let f = b.add_file(b"x");
         let root = b.add_dir(&[DirEnt {
             nid: f,
             name: b"f",

@@ -20,6 +20,8 @@ use crate::util::crc32;
 
 use crate::compress::lzma::lzma_encode;
 
+use super::{MAX_DATA_SIZE, MAX_MEMBER_SIZE};
+
 /// lzip magic number: "LZIP" (4 bytes).
 const MAGIC: [u8; 4] = [0x4C, 0x5A, 0x49, 0x50];
 
@@ -119,6 +121,12 @@ pub fn encode_with_dict_size(
 ) -> Result<Vec<u8>, Error> {
     validate_dict_size(dict_size_byte, dict_size)?;
 
+    // Lzip manual ch.5: a member encodes at most 16 EiB - 1 bytes of
+    // uncompressed data. Unreachable where usize fits in u64.
+    if data.len() as u128 > u128::from(MAX_DATA_SIZE) {
+        return Err(Error::InvalidData("lzip: data size exceeds limit"));
+    }
+
     // Encode the LZMA stream
     let lzma_data = lzma_encode(data, dict_size);
 
@@ -128,6 +136,11 @@ pub fn encode_with_dict_size(
     // Build the member
     let data_size = data.len() as u64;
     let member_size = (HEADER_SIZE + lzma_data.len() + TRAILER_SIZE) as u64;
+
+    // Lzip manual ch.5: member size is limited to 2 PiB.
+    if member_size > MAX_MEMBER_SIZE {
+        return Err(Error::InvalidData("lzip: member size exceeds limit"));
+    }
 
     let mut output = Vec::with_capacity(member_size as usize);
 

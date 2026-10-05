@@ -27,15 +27,31 @@
 //! entries plus shared-xattr references, short and long name
 //! prefixes) and exposed as `decode::ErofsEntry::xattrs`.
 //!
-//! Multi-device images and metabox images are intentionally out of
-//! scope; encountering them is reported as `Error::Unsupported`.
-//! Writing erofs images is intentionally out of scope (mkfs.erofs is
-//! the reference producer).
+//! Metabox images (`INCOMPAT_METABOX`) are supported: the metabox
+//! inode (superblock extension slot 0, `metabox_nid`) decodes to a
+//! second metadata space holding metabox-hosted inode slots (dirent
+//! nid bit63), their xattr ibodies, chunk index tables, z_erofs map
+//! data and inline tails; shared xattrs and long xattr prefixes may
+//! also live there (`COMPAT_SHARED_EA_IN_METABOX`). Multi-device
+//! images remain out of scope and are reported as
+//! `Error::Unsupported`.
+//!
+//! The encoder (`encode` module / `ErofsArchiveEncoder`)
+//! produces uncompressed images equivalent to plain `mkfs.erofs`
+//! output: flat `FLAT_PLAIN`/`FLAT_INLINE` data layouts, compact or
+//! extended inodes, name-sorted dirent blocks, and the
+//! `EROFS_FEATURE_COMPAT_SB_CHKSUM` superblock CRC32C. Writing
+//! z_erofs compressed, chunk-based, fragment or metabox images is
+//! intentionally out of scope (mkfs.erofs is the reference
+//! producer for those).
 
 use crate::error::Error;
 
 /// Linux erofs filesystem image decoding.
 pub mod decode;
+
+/// Linux erofs filesystem image encoding (uncompressed flat layouts).
+pub mod encode;
 
 mod z;
 
@@ -47,5 +63,35 @@ impl crate::traits::ArchiveDecode for ErofsCodec {
 
     fn decode(&self, input: &[u8]) -> Result<alloc::vec::Vec<Self::Entry>, Error> {
         decode::decode(input).map(|img| img.entries)
+    }
+}
+
+/// Encoder struct for trait-based erofs encode operations.
+pub struct ErofsArchiveEncoder {
+    inner: encode::ErofsEncoder,
+}
+
+impl ErofsArchiveEncoder {
+    /// Create a new trait-based erofs encoder.
+    pub const fn new() -> Self {
+        Self {
+            inner: encode::ErofsEncoder::new(),
+        }
+    }
+}
+
+impl Default for ErofsArchiveEncoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl crate::traits::ArchiveEncode for ErofsArchiveEncoder {
+    fn add_file(&mut self, name: &str, data: &[u8]) {
+        self.inner.add_file(name, data);
+    }
+
+    fn finish(self) -> Result<alloc::vec::Vec<u8>, Error> {
+        self.inner.finish()
     }
 }

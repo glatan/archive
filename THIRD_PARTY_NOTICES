@@ -31,7 +31,9 @@ specifications or standards documents:
   GPL-3.0-or-later) is invoked only as a local test-time
   interoperability oracle and fixture generator
   (`tests/fixtures/gzip/`); it is not linked or distributed
-- zlib: RFC 1950
+- zlib: RFC 1950. The Python `zlib` module (CPython, PSF License)
+  is invoked only as a local test-time interoperability oracle;
+  it is not linked or distributed
 - zstd: RFC 8878. The upstream reference implementation is dual
   BSD-3-Clause OR GPLv2 licensed; Meta's earlier BSD+PATENTS grant was
   removed by that 2017 relicensing
@@ -174,6 +176,8 @@ specifications or standards documents:
   tool built locally from mackyle/xar (BSD-3-Clause, used only as
   an interoperability oracle); encode-direction interop was
   verified by `xar -tf`/`-xf` accepting this crate's output.
+  `unar` (The Unarchiver) is additionally used as a decode-side
+  behavioral oracle.
   Decode additionally verifies each file's `archived-checksum`
   digest (over stored heap bytes) in addition to
   `extracted-checksum`, per the same `xarformat` description.
@@ -280,7 +284,9 @@ specifications or standards documents:
   format_lead, https://rpm-software-management.github.io/rpm/manual/)
   and rpm `lib/cpio.c` stripped payload behavior notes;
   `lib/cpio.c` was read only to confirm structural facts — no code was
-  copied. rpm's COPYING distributes `lib/` sources under GPL-2.0-or-later
+  copied. Digest/signature tag constants are referenced from rpm
+  `include/rpm/rpmtag.h` (same license terms; numeric constants only,
+  no code copied). rpm's COPYING distributes `lib/` sources under GPL-2.0-or-later
   or, at the distributor's option, LGPL-2.0-or-later, so a conversion
   path (LGPL-2.0 section 3 -> GPL-3.0 -> AGPL-3.0 section 13) exists
   were any incorporation ever needed.
@@ -293,9 +299,11 @@ specifications or standards documents:
 - squashfs: SquashFS binary format documentation
   (https://dr-emann.github.io/squashfs/squashfs.html, CC BY-SA 4.0).
   Test fixtures are produced by `mksquashfs` and writer output
-  is validated with `unsquashfs` (squashfs-tools, GPL-2.0-only),
+  is validated with `unsquashfs` (squashfs-tools, GPL-2.0-or-later),
   invoked only as local test-time tools; they are not linked or
-  distributed.
+  distributed. `lzma_wrapper.c` (same package, snapshot at
+  `docs/spec/sources/lzma_wrapper.c`) served as the wire-format
+  reference for the LZMA1 (compressor id 2) decoder; no code copied.
 - mscab: [MS-CAB] Cabinet File Format documentation
   (Microsoft Open Specifications,
   https://learn.microsoft.com/openspecs/windows_protocols/ms-cab/).
@@ -408,9 +416,12 @@ specifications or standards documents:
   behaviour-matched against lhasa `lz5_decoder.c` (ISC). `pmarc.rs`
   ports lhasa's `pm1_decoder.c`, `pm2_decoder.c`, and `pma_common.c`
   (ISC; lhasa by Simon Howard - copyright/permission notice required
-  in all copies, satisfied in section 4a). `compress::lzh::st1_enc`
-  and `larc_enc.rs` are crate-original encoder counterparts and carry
-  no upstream attribution.
+  in all copies, satisfied in section 4a). `compress::lzh::st1_enc` and
+  `larc_enc.rs` are crate-original encoder counterparts and carry
+  no upstream attribution. `pmarc_enc.rs` is likewise crate-original
+  (lhasa has no pm encoder; it is a reverse design from the decode
+  wire contract), reusing the ISC-licensed tables already ported in
+  `pmarc.rs`.
   `-lh1-`, `-lh2-`, and `-lh3-` are intentionally unsupported: their
   only references are Yoshizaki's `lzhuf.c` (distributed without an
   explicit license grant, formally all-rights-reserved) and LHa for
@@ -435,7 +446,10 @@ specifications or standards documents:
   shared `compress::lzh::st1` decoder. Garbled-entry semantics follow
   XADMaster's ARJPasswordModifier + XOR handle behavior; the same
   transform is used by `ArjEncoder::with_password`. UNARJ sources
-  were not consulted or copied.
+  were not consulted or copied. ARJ32 method 8/9 (no-data
+  pseudo-method) and file_type 5 (chapter label) acceptance follow
+  `unar`/7-Zip `NArj` decoder behavior, used as oracles only —
+  TECHNOTE.ARJ (ARJ 2.x) covers methods 0-4 only.
 - arc: SEA ARC file format description
   (wotsit.org "arc" format entry); member structure facts from the
   document. Compression methods 5-7/0xa/0xb
@@ -455,7 +469,8 @@ specifications or standards documents:
   documents rather than official vendor specifications, and are treated
   as de facto format definitions.
   For lha/arj/arc interoperability checks the `bsdtar` (libarchive,
-  BSD 2-Clause) and `7z` binaries are invoked only as local test-time
+  BSD 2-Clause), `7z`, `unar` (The Unarchiver), `lhasa` and `lha`
+  (LHa for UNIX) binaries are invoked only as local test-time
   oracles; they are not linked or distributed.
 - uuencode: IEEE Std 1003.1-2017 `uuencode` utility description
   (historical algorithm). Spec-informed implementation; no code was
@@ -479,13 +494,19 @@ specifications or standards documents:
   (cramfs.rst, fs/cramfs/README, include/uapi/linux/cramfs_fs.h;
   GPL-2.0 with Linux-syscall-note). Spec-informed implementation;
   no code was copied. `mkfs.cramfs`/`fsck.cramfs` (util-linux,
-  GPL-2.0+) are used only as test-time interoperability oracles
-  inside the test container; they are not linked or distributed.
+  GPL-2.0+) are used as test-time interoperability oracles inside
+  the test container — `fsck.cramfs` also validates
+  encoder-produced images — and mkfs.cramfs output serves as a
+  behavioral reference for encoder layout (no code was copied);
+  they are not linked or distributed.
 - crx3: Chromium components/crx_file/crx3.proto (BSD-style
   license). Format documentation embedded in proto comments;
   spec-informed implementation. The protobuf wire parsing was
   written directly from the .proto definitions; no Chromium or
-  protobuf library code was copied. An independently written
+  protobuf library code was copied. The CRX2 fixed-header layout
+  additionally consulted `components/crx_file/crx_file.h` and
+  `crx_verifier.cc` (same BSD license) as written references —
+  no code was copied. An independently written
   Python protobuf/zip generator is used only as a local test-time
   interoperability oracle; it is not linked or distributed.
 - pea: PEA file format specification (pea_help.pdf, public
@@ -494,16 +515,30 @@ specifications or standards documents:
   implementation; the wire format was reimplemented from the
   specification and reference behavior — no code was copied.
   `src/archive/pea/encode.rs` is written from the same declared
-  provenance. An independently written Python PEA writer and
-  parser are used only as local test-time interoperability
-  oracles; they are not linked or distributed.
+  provenance. Encrypted-stream decoding additionally consulted
+  the Wolfgang Ehrhardt crypto units bundled with PeaZip
+  (fcrypta.pas, fcaes256.pas, aes_eax.pas, aes_omac.pas,
+  aes_ctr.pas, aes_type.pas, kdf.pas, whirl512.pas; zlib-style
+  permissive notices in-file, snapshots in docs/spec/sources/)
+  as behavioral references for key derivation, CTR/EAX, and
+  Whirlpool — again no code was copied. Test vectors embedded in
+  `src/util/eax.rs` derive from libtomcrypt `eax_test.c` (public
+  domain) and Brian Gladman's AES vector set (permissive);
+  `src/util/pbkdf2.rs` vectors were cross-checked against OpenSSL
+  (Apache-2.0) and RFC 6070/2202. An independently
+  written Python PEA writer and parser are used only as local
+  test-time interoperability oracles; they are not linked or
+  distributed.
 - romfs: Linux kernel romfs documentation
-  (Documentation/filesystems/romfs.rst; GPL-2.0 with
-  Linux-syscall-note). Spec-informed implementation; no code was
+  (Documentation/filesystems/romfs.rst; GPL-2.0). Spec-informed implementation; no code was
   copied. `genromfs` 0.5.2 (GPL-2.0+, Jan T Zimmerman / Janos
   Farkas) was built from source and used only to produce the
   checked-in test fixture `tests/fixtures/romfs/genromfs.romfs`;
-  it is not linked or distributed.
+  it is not linked or distributed. `fsck.romfs` (same genromfs
+  package) is additionally invoked as a local test-time oracle
+  to validate encoder output; it is not linked or distributed.
+  Encoder layout follows genromfs output as a behavioral
+  reference (no code was copied).
 - erofs: Linux kernel erofs documentation
   (Documentation/filesystems/erofs.rst; GPL-2.0 with
   Linux-syscall-note) and the on-disk structure header
@@ -512,15 +547,21 @@ specifications or standards documents:
   relicensed to MIT upstream). The kernel copy
   `fs/erofs/erofs_fs.h` (likewise MIT SPDX since 2025-11) is
   also pinned for `Z_EROFS_LI_HOLE`, which exists only there.
-  Spec-informed implementation; no code was copied.
+  Spec-informed implementation; no code was copied. Individual
+  kernel `.c` files (super.c, zmap.c, the z_erofs metabox paths)
+  were consulted only for behavioral clarification of metabox
+  and superblock semantics; no code was copied from them.
   `erofs-utils` `mkfs.erofs`/`fsck.erofs`
-  (GPL-2.0+) were built from source and used only to produce and
+  (GPL-2.0+) were built from source and used to produce and
   cross-validate the checked-in test fixture
   `tests/fixtures/erofs/mkfs.*.img` (uncompressed, lz4/zstd/
   microlzma codecs, big pcluster, extents/full-index layouts,
   ztailpacking and fragments images produced with
-  `mkfs.erofs -E` feature options); they are not linked or
-  distributed.
+  `mkfs.erofs -E` feature options). Encoder layout decisions
+  additionally follow mkfs.erofs output as a behavioral reference
+  (no code was copied), and `fsck.erofs --extract` is invoked on
+  encoder-produced images as a local test-time oracle; they are
+  not linked or distributed.
 - iso9660: ECMA-119 4th edition (= ISO 9660; Ecma International),
   Linux kernel isofs documentation and on-disk header
   (Documentation/filesystems/isofs.rst, include/uapi/linux/iso_fs.h;
@@ -529,14 +570,20 @@ specifications or standards documents:
   Joliet specification. Spec-informed implementation; no code was
   copied. `bsdtar`/`libarchive` (BSD-2-Clause) was used only as a
   local test-time oracle to produce and cross-validate the checked-in
-  fixtures `tests/fixtures/iso9660/bsdtar-*.iso`; it is not linked or
-  distributed.
+  fixtures `tests/fixtures/iso9660/bsdtar-*.iso`, and to validate
+  encoder-produced images (`bsdtar -tf`/`xf` acceptance); it is not
+  linked or distributed.
 - mscfb: [MS-CFB] Compound File Binary File Format v20210625
   (Microsoft Open Specifications). Spec-informed implementation;
   no code was copied. An independently written Python reference
   generator (built directly against [MS-CFB] section 2) is used
   only as a local test-time interoperability oracle; it is not
-  linked or distributed.
+  linked or distributed. The writer was cross-checked against
+  the public read-side references cfb (MIT), Apache POI POIFS
+  (Apache-2.0) and libgsf (LGPL-2.1) as behavioral references —
+  no code was copied — and encoder output is validated with the
+  `olefile` Python package (BSD-style license) as a local
+  test-time oracle; it is not linked or distributed.
 - binhex: "BinHex 4.0 Definition" (Peter N Lewis, Aug 1991) and
   RFC 1741 Appendix A. Spec-informed implementation; no code was
   copied. CPython `binascii.crc_hqx` (PSF License) and an
@@ -652,7 +699,9 @@ against de facto reference behavior:
     additionally verified to expand correctly under hwunshrink/
     hwexpand/hwexplode (local oracle, not distributed). `unar`
     (XADMaster) and Info-ZIP `unzip` serve as additional local decode
-    oracles for Shrink/Implode/Deflate64.
+    oracles for Shrink/Implode/Deflate64; the Info-ZIP `zip`
+    binary (same package, same license) is additionally invoked
+    as a local encode-side oracle.
 
 - FastLZ
   - Reference: `fastlz.c` reference implementation by Ariya Hidayat
@@ -758,7 +807,10 @@ against de facto reference behavior:
   - Repository scope: Rust implementation of the upstream container shape and
     token/chunk behavior
   - Provenance note: the long-range matching and chunk logic are implemented in
-    Rust for this repository and are not shipped as upstream C source files
+    Rust for this repository and are not shipped as upstream C source files.
+    The upstream `rzip` binary (built from source via pkg/rzip/PKGBUILD)
+    is invoked only as a local test-time interoperability oracle; it is
+    not linked or distributed
 
 - lrzip
   - Reference: lrzip framing (Con Kolivas et al., GPL-2.0-or-later) plus
@@ -934,6 +986,17 @@ against de facto reference behavior:
   - AES-128/192/256 (`aes256.rs`): clean-room Rust implementation of FIPS 197;
     includes CBC and CTR modes for ZIP and 7z encryption
   - MD5 (`md5.rs`): clean-room Rust implementation of RFC 1321
+  - SHA-512 (`sha512.rs`): clean-room Rust implementation of FIPS 180-4;
+    used by XAR/RPM digest verification
+  - Whirlpool (`whirlpool.rs`): clean-room Rust implementation of
+    ISO/IEC 10118-3 Whirlpool-512; the S-box is the published spec
+    constant and the C tables are generated at compile time from that
+    S-box and the spec's cyclic row pattern (not copied); used by PEA
+  - PBKDF2 (`pbkdf2.rs`): clean-room Rust implementation of RFC 2898;
+    used by PEA key derivation (SHA-1/Whirlpool variants)
+  - EAX (`eax.rs`): clean-room Rust implementation of the EAX AEAD
+    mode (Bellare-Rogaway-Wagner, patent-free by design) over
+    AES-CTR + OMAC1/CMAC; used by PEA encrypted streams
   - Base64 (`base64.rs`): clean-room Rust implementation of RFC 4648
     section 4 (canonical decoding); used by uuencode's Base64 mode
   - Adler-32 (`adler32.rs`): clean-room Rust
@@ -1040,8 +1103,8 @@ incorporation:
       CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 - LHA 2.11 source files (Haruyasu Yoshizaki, Vector fh002420
   `lha211_s.lzh`) and LHa for UNIX 1.14i (jca02266/lha): written
-  reference + fixture generation only — no code is derived from
-  these sources. The former `dhuf.c`/`shuf.c`/`huf.c`-derived
+  reference + fixture generation + local test-time oracle only —
+  no code is derived from these sources. The former `dhuf.c`/`shuf.c`/`huf.c`-derived
   decoders (`-lh1-`/`-lh2-`/`-lh3-` and the st1 matching) were
   removed or re-referenced to Okumura's public-domain `ar002`;
   LHa for UNIX's own license is non-OSI (copyright retention,
@@ -1076,8 +1139,11 @@ incorporation:
   behavior; `decode.c` was not used. Debian `arj` is non-free;
   `unar`/`7z` are the decode oracles actually used.
 - MS-CFB write references: `cfb` crate (MIT), Apache POI POIFS
-  (Apache-2.0), libgsf (LGPL-2.1). Reference only — CFB write remains
-  intentional scope.
+  (Apache-2.0), libgsf (LGPL-2.1). Reference only — `CfbEncoder` was
+  cross-checked against them as behavioral references and no code was
+  copied; encoder output is additionally validated with the `olefile`
+  Python package (BSD-style license) as a local test-time oracle that
+  is not linked or distributed.
 - OSTA UDF 2.60 / ECMA TR/112-2: primary specification for any future UDF
   bridge work (UDF is a distinct filesystem, not an ISO 9660 extension).
   ECMA TR/112-2 carries a copyright notice permitting copying and
@@ -1087,9 +1153,10 @@ incorporation:
   filed, completely free), Serpent (author declares public domain; note
   some optimized implementations are GPL — code reference only with
   care), Whirlpool (authors' non-patented/free-use declaration,
-  ISO/IEC 10118-3), HMAC (RFC 2104) — all patent-free per their authors'
-  statements. Published specs exist, but the feature remains intentional
-  scope because it requires block-cipher + AEAD implementations.
+  ISO/IEC 10118-3), HMAC (RFC 2104), PBKDF2 (RFC 2898) — all
+  patent-free per their authors' statements. The AES-based encrypted
+  streams (codes 48, 49, 65) are implemented for decode; the
+  Twofish/Serpent modes and triple cascades remain intentional scope.
 
 Pinned upstream sources in `docs/spec/sources/`:
   Besides specification documents, that directory pins verbatim
@@ -1099,8 +1166,12 @@ Pinned upstream sources in `docs/spec/sources/`:
   Lehmann), `lzrw*.c` / `lzrw_headers.h` (Ross Williams; public-domain
   declarations in-file), `ncompress_4.2.4_compress42.c` (ncompress
   4.2.4; upstream is dedicated to the public domain, although the
-  pinned file itself carries no license header), and `pea.pas` /
-  `pea_utils.pas` (PeaZip, LGPL-3.0; license headers retained). These
+  pinned file itself carries no license header), `pea.pas` /
+  `pea_utils.pas` (PeaZip, LGPL-3.0; license headers retained), and
+  the PeaZip/Ehrhardt crypto units `fcrypta.pas`, `fcaes256.pas`,
+  `aes_eax.pas`, `aes_omac.pas`, `aes_ctr.pas`, `aes_type.pas`,
+  `kdf.pas`, `whirl512.pas` (zlib-style permissive; license headers
+  retained). These
   snapshots are reference material only: they are not compiled into
   the crate and no code was copied from them into `src/` (compress42.c
   is additionally the design/constant reference for the adaptive-reset
@@ -1110,9 +1181,25 @@ Pinned upstream sources in `docs/spec/sources/`:
   `src/` and the shipped library.
   Most pinned files are fetched on demand via
   `docs/spec/sources/fetch.py` and exist only as git-ignored local
-  copies; `pea.pas`, `pea_utils.pas`, and `crx3.proto` are checked in.
+  copies; `pea.pas`, `pea_utils.pas`, `crx3.proto`, and the eight
+  PeaZip/Ehrhardt crypto units (`fcrypta.pas`, `fcaes256.pas`,
+  `aes_eax.pas`, `aes_omac.pas`, `aes_ctr.pas`, `aes_type.pas`,
+  `kdf.pas`, `whirl512.pas`) are checked in.
   `docs/spec/sources/manifest.json` is the canonical catalogue of
   these references for downstream audits.
+
+External crate dependencies:
+  The `archive` library crate itself has no external runtime
+  dependencies. Workspace tooling members pull the following
+  permissively-licensed crates (all AGPL-3.0-only compatible):
+  `archive-cli` uses `clap` (MIT OR Apache-2.0), `serde` and
+  `serde_json` (MIT OR Apache-2.0); `archive-fuzz` uses `sha3`
+  (MIT OR Apache-2.0), `blake3` (CC0-1.0 OR Apache-2.0 OR
+  Apache-2.0 WITH LLVM-exception) and `rand` (MIT OR Apache-2.0),
+  with `tempfile` (MIT OR Apache-2.0) for dev tests; the root
+  benches use `criterion` (Apache-2.0 OR MIT). MIT/Apache-2.0
+  notice preservation applies to distributed binaries of these
+  tool crates.
 
 Test-fixture provenance:
   Fixture provenance is recorded per file in
@@ -1121,7 +1208,8 @@ Test-fixture provenance:
   only to produce fixtures — e.g. GNU binutils `ar`, GNU cpio, GNU
   tar, Unix `compress`, `lzop`, `lrzip`, `genromfs`, `mkfs.erofs`,
   `mksquashfs`, and `git` — are invoked locally and are never linked
-  or distributed.
+  or distributed. `setfattr` (attr package) is likewise invoked as a
+  best-effort local test helper for squashfs xattr coverage.
 
 
 5. Current non-goals and exclusions

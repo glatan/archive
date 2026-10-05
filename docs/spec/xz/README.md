@@ -113,7 +113,7 @@
 | 56 | Block Header Padding は MUST null (ゼロ) バイト | xz-file-format.txt §3.1.6 | ✅ | `decode.rs` で non-zero block header padding を reject |
 | 57 | BCJ/Delta は最終フィルターにできない (Allow as the last filter: No → 最終は LZMA2 のみ) | xz-file-format.txt §5.3.2 / §5.3.3 | ✅ | `parse_filter` の `is_last` チェック、`test_parse_unknown_final_filter_rejected` |
 | 58 | Filter IDs ≥ 2^62 (0x4000_0000_0000_0000) は List of Filter Flags で使用禁止 | xz-file-format.txt §3.1.5 | ✅ | 実装済み — `FILTER_ID_RESERVED_START` (2^62) 以上を `Error::InvalidData` で reject (parse/validate/registry)。`test_reserved_high_filter_id_rejected` `test_block_header_reserved_high_filter_id_rejected` |
-| 59 | Index field 最大 16 GiB (2^34) | xz-file-format.txt §2.1 | ❌ | 未検証・未記載 (実用上到達不可能に近い intentional scope 相当) |
+| 59 | Index field 最大 16 GiB (2^34) | xz-file-format.txt §2.1 | ✅ | `MAX_INDEX_SIZE = 16 GiB` を明示し `verify_index` で境界を検証 (Backward Size 演算とレコード数チェックは `u64` で評価)。`test_backward_size_max_implies_index_limit`, `test_index_max_vli_record_count_rejected` |
 
 ---
 
@@ -121,6 +121,5 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 58 |
-| ❌ 未実装  | 1 |
+| ✅ 実装+テスト済み  | 59 |
 | **合計** | **59** |

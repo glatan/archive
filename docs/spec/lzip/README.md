@@ -75,7 +75,7 @@
 | 38 | Trailing data after last member | lzip manual | ✅ | 無視 (lzip manual は reject を要求しない。正しい動作) |
 | 39 | EOS marker 必須 | lzip manual | ✅ | LZMA decoder で検証 |
 | 40 | multimember file 内の empty member (data size = 0) は不許可 | lzip manual ch.5 | ✅ | 実装済み — multimember 内の empty member (data size = 0) を reject。単一メンバーの空ファイルは受理。`test_empty_member_in_multimember_rejected` |
-| 41 | member size 上限 (member あたり 2 PiB / 16 EiB−1) | lzip manual ch.5 | ❌ | 未記載・未検証 (実用上到達不可能な intentional scope 相当) |
+| 41 | member size 上限 (member あたり 2 PiB / 16 EiB−1) | lzip manual ch.5 | ✅ | `MAX_MEMBER_SIZE = 2^51` (2 PiB) を明示。decode は trailer の member size 超過を reject、encode 側も data/member size の上限を検証。`test_decode_rejects_oversized_member` |
 
 ---
 
@@ -83,8 +83,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 40 |
-| ❌ 未実装  | 1 |
+| ✅ 実装+テスト済み  | 41 |
 | **合計** | **41** |
 
 

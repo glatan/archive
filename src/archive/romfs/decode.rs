@@ -11,18 +11,18 @@ use alloc::vec::Vec;
 
 use crate::error::Error;
 
-const MAGIC: &[u8; 8] = b"-rom1fs-";
-const ROMFH_SIZE: usize = 16;
-const ALIGN: usize = 16;
+pub(crate) const MAGIC: &[u8; 8] = b"-rom1fs-";
+pub(crate) const ROMFH_SIZE: usize = 16;
+pub(crate) const ALIGN: usize = 16;
 
-const TYPE_HARDLINK: u32 = 0;
-const TYPE_DIR: u32 = 1;
-const TYPE_REG: u32 = 2;
-const TYPE_SYMLINK: u32 = 3;
-const TYPE_BLOCK: u32 = 4;
-const TYPE_CHAR: u32 = 5;
-const TYPE_SOCKET: u32 = 6;
-const TYPE_FIFO: u32 = 7;
+pub(crate) const TYPE_HARDLINK: u32 = 0;
+pub(crate) const TYPE_DIR: u32 = 1;
+pub(crate) const TYPE_REG: u32 = 2;
+pub(crate) const TYPE_SYMLINK: u32 = 3;
+pub(crate) const TYPE_BLOCK: u32 = 4;
+pub(crate) const TYPE_CHAR: u32 = 5;
+pub(crate) const TYPE_SOCKET: u32 = 6;
+pub(crate) const TYPE_FIFO: u32 = 7;
 
 const S_IFDIR: u16 = 0x4000;
 const S_IFREG: u16 = 0x8000;
@@ -96,13 +96,13 @@ fn u32be(b: &[u8], o: usize) -> u32 {
     u32::from_be_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
 }
 
-fn align16(n: usize) -> usize {
+pub(crate) fn align16(n: usize) -> usize {
     n.div_ceil(ALIGN) * ALIGN
 }
 
 /// AFFS-style checksum: sum of big-endian longwords. A tail of
 /// fewer than 4 bytes is shifted into place (padded with zeros).
-fn checksum(b: &[u8]) -> u32 {
+pub(crate) fn checksum(b: &[u8]) -> u32 {
     let mut sum = 0u32;
     for i in (0..b.len()).step_by(4) {
         let mut v = 0u32;

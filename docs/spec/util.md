@@ -122,7 +122,7 @@
 | 50 | AES-CTR mode (ZIP-compatible) | WinZip AES spec | ✅ | `apply_ctr_zip_compatible()` |
 | 51 | AES-CBC mode (7zAES) | 7z Methods.txt | ✅ | `decrypt_cbc_truncated()` / `encrypt_cbc_zero_padded()` |
 
-> 注: `util::aes256` は constant-time 実装ではない (逆 S-box がデータ依存の全探索、GF(2^8) ヘルパがデータ依存ループ)。用途はレガシーフォーマット相互運用 (WinZip AES, 7z AES) に限定され、タイミングサイドチャネルが問題になる用途には使わないこと。同様に MD5/SHA-1 は暗号学的に弱い・破られているが、レガシー相互運用目的の実装である。
+> 注: `util::aes256` は constant-time 実装ではない (逆 S-box がデータ依存の全探索、GF(2^8) ヘルパがデータ依存ループ)。用途はレガシーフォーマット相互運用 (WinZip AES, 7z AES, PEA AES ストリーム) に限定され、タイミングサイドチャネルが問題になる用途には使わないこと。同様に MD5/SHA-1 は暗号学的に弱い・破られているが、レガシー相互運用目的の実装である。
 
 ### MD5
 
@@ -132,11 +132,20 @@
 | 53 | RFC 1321 §A.5 既知ベクター | RFC 1321 | ✅ | `test_md5_empty`, `test_md5_abc`, `test_md5_message_digest`, `test_md5_a_to_z`, `test_md5_alphanumeric`, `test_md5_digits_repeated` |
 | 54 | Incremental update (multi-block) | RFC 1321 | ✅ | `test_md5_incremental` |
 
+### SHA-512 / Whirlpool / PBKDF2 / EAX
+
+| # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
+|---|------|----------|------|----------------|
+| 55 | SHA-512 メッセージダイジェスト | FIPS 180-4 | ✅ | `util::sha512` (xar/rpm feature)。`test_sha512_empty`, `test_sha512_abc`, `test_sha512_two_block`, `test_sha512_million_a`, `test_sha512_padding_boundary` |
+| 56 | Whirlpool-512 メッセージダイジェスト | ISO/IEC 10118-3 / Whirlpool 仕様 (非特許宣言済み) | ✅ | `util::whirlpool` (pea feature)。C テーブルは S-box + 巡回行から const fn で生成。`test_whirlpool_empty`, `test_whirlpool_abc`, `test_whirlpool_incremental`, `test_whirlpool_padding_boundary` |
+| 57 | PBKDF2 (SHA-1 / Whirlpool) | RFC 2898 + PEA KDF ワイヤ仕様 | ✅ | `util::pbkdf2` (pea feature)。`test_pbkdf2_sha1_rfc6070`, `test_pbkdf2_whirlpool`, `test_pbkdf2_sha1_xkey_layout`, `test_hmac_sha1_rfc2202`, `test_hmac_long_key` |
+| 58 | AES-EAX 認証付き暗号 (OMAC1 + CTR) | EAX (Bellare-Rogaway-Wagner) + SP 800-38A/38B | ✅ | `util::eax` (pea feature)。`test_eax_paper_vectors`, `test_eax_gladman_vectors`, `test_eax_rejects_bad_tag` |
+
 ---
 
 ## 集計
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 54 |
-| **合計** | **54** |
+| ✅ 実装+テスト済み | 58 |
+| **合計** | **58** |

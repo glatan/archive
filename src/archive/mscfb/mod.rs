@@ -1,6 +1,6 @@
-//! Microsoft Compound File Binary (`.doc`, `.xls`, `.msi`, OLE2) read support.
+//! Microsoft Compound File Binary (`.doc`, `.xls`, `.msi`, OLE2) read/write support.
 //!
-//! Read-only decoder for the container defined in [MS-CFB] (v20210625,
+//! Reader and writer for the container defined in [MS-CFB] (v20210625,
 //! sections 2.1-2.6). Supports version 3 (512-byte sectors) and
 //! version 4 (4096-byte sectors) files: header parsing, the 109-entry
 //! in-header DIFAT plus chained DIFAT sectors, FAT sector chains, the
@@ -14,8 +14,12 @@
 //! (color flags, NOSTREAM sibling/child conventions, unique sibling
 //! names) that the lenient decoder tolerates.
 //!
-//! Writing compound files, transactions, the range lock sector, and
-//! structured-storage property semantics are intentionally out of scope.
+//! [`encode::CfbEncoder`] writes whole compound file images: nested
+//! storages, mini-stream packing below the cutoff, balanced sibling
+//! trees per the [MS-CFB] 2.6.4 sort rule, and chained DIFAT sectors
+//! for large images. Transactions, the range lock sector, and
+//! structured-storage property semantics are intentionally out of
+//! scope.
 
 use alloc::vec::Vec;
 
@@ -23,6 +27,9 @@ use crate::error::Error;
 
 /// Microsoft Compound File Binary decoding.
 pub mod decode;
+
+/// Microsoft Compound File Binary encoding.
+pub mod encode;
 
 /// Codec struct for trait-based MS-CFB decode operations.
 pub struct MscfbCodec;

@@ -10,13 +10,21 @@
 //! (zero pointers), and the `CRAMFS_FLAG_EXT_BLOCK_POINTERS`
 //! uncompressed/direct block pointer extension.
 //!
-//! Writing cramfs images and big-endian images are intentionally out
-//! of scope (the kernel itself refuses foreign-endian images).
+//! The encoder (`encode` module / [`CramfsArchiveEncoder`]) produces
+//! mkfs.cramfs-compatible little-endian images: sorted contiguous
+//! directory entries, zlib-compressed 4 KiB data blocks, and the
+//! `CRAMFS_FLAG_FSID_VERSION_2` fsid checksum.
+//!
+//! Big-endian images are intentionally out of scope (the kernel itself
+//! refuses foreign-endian images).
 
 use crate::error::Error;
 
 /// Linux cramfs filesystem image decoding.
 pub mod decode;
+
+/// Linux cramfs filesystem image encoding.
+pub mod encode;
 
 /// Codec struct for trait-based cramfs decode operations.
 pub struct CramfsCodec;
@@ -26,5 +34,35 @@ impl crate::traits::ArchiveDecode for CramfsCodec {
 
     fn decode(&self, input: &[u8]) -> Result<alloc::vec::Vec<Self::Entry>, Error> {
         decode::decode(input).map(|img| img.entries)
+    }
+}
+
+/// Encoder struct for trait-based cramfs encode operations.
+pub struct CramfsArchiveEncoder {
+    inner: encode::CramfsEncoder,
+}
+
+impl CramfsArchiveEncoder {
+    /// Create a new trait-based cramfs encoder.
+    pub const fn new() -> Self {
+        Self {
+            inner: encode::CramfsEncoder::new(),
+        }
+    }
+}
+
+impl Default for CramfsArchiveEncoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl crate::traits::ArchiveEncode for CramfsArchiveEncoder {
+    fn add_file(&mut self, name: &str, data: &[u8]) {
+        self.inner.add_file(name, data);
+    }
+
+    fn finish(self) -> Result<alloc::vec::Vec<u8>, Error> {
+        self.inner.finish()
     }
 }

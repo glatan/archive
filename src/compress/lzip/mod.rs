@@ -18,6 +18,13 @@ use alloc::vec::Vec;
 use crate::error::Error;
 use crate::traits::{Decode, Encode};
 
+/// Maximum uncompressed data size per member: 16 EiB - 1 (2^64 - 1).
+/// The 8-byte trailer field always covers this range (lzip manual ch.5).
+const MAX_DATA_SIZE: u64 = u64::MAX;
+
+/// Maximum member size: 2 PiB (lzip manual ch.5).
+const MAX_MEMBER_SIZE: u64 = 0x8_0000_0000_0000;
+
 /// Zero-sized codec for lzip compression/decompression via trait interface.
 pub struct LzipCodec;
 

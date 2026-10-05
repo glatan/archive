@@ -108,6 +108,7 @@ macro_rules! define_aes_cipher {
                 Ok(out)
             }
 
+            #[cfg_attr(feature = "pea", allow(dead_code))]
             pub(crate) fn apply_ctr_zip_compatible(&self, data: &[u8]) -> Vec<u8> {
                 let mut out = Vec::with_capacity(data.len());
                 let mut nonce = [0u8; BLOCK_SIZE];
@@ -127,7 +128,7 @@ macro_rules! define_aes_cipher {
                 out
             }
 
-            fn encrypt_block(&self, block: &mut [u8; BLOCK_SIZE]) {
+            pub(crate) fn encrypt_block(&self, block: &mut [u8; BLOCK_SIZE]) {
                 const NR: usize = $nr;
                 add_round_key(block, &self.round_keys[0]);
                 for round in 1..NR {

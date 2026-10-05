@@ -8,6 +8,11 @@
 //! (poly 0x1021, init 0) computed with a two-zero-byte augmentation.
 //! RLE marker `0x90`: `X 90 n` expands X to a total of `n` occurrences;
 //! `90 00` is a literal `0x90`.
+//!
+//! [`decode_parts`](crate::encoding::binhex::decode_parts) decodes a document split into comp.binaries.mac-style
+//! segments (Lewis "Parts"): a `<return>--- end of part NN ---<return>`
+//! line closes each non-final part and a `<return>---<return>` line marks
+//! where data resumes in each non-first part.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -318,6 +323,84 @@ pub fn decode(input: &[u8]) -> Result<BinHexEntry, Error> {
     })
 }
 
+// ---------- segmented documents ----------
+
+const END_OF_PART: &[u8] = b"--- end of part";
+
+/// Strip a part's trailing `<return>--- end of part NN ---` marker line,
+/// returning the body before it. Everything after the marker is dropped.
+fn strip_part_end(part: &[u8]) -> Result<&[u8], Error> {
+    let bad = || Error::InvalidData("binhex: bad 'end of part' marker");
+    for i in 0..part.len() {
+        if !matches!(part[i], b'\r' | b'\n') || !part[i + 1..].starts_with(END_OF_PART) {
+            continue;
+        }
+        // `NN` is one or more digits; the line must close with `---`
+        // followed by <return> or the end of the part.
+        let rest = part[i + 1 + END_OF_PART.len()..]
+            .strip_prefix(b" ")
+            .ok_or_else(bad)?;
+        let digits = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+        if digits == 0 {
+            return Err(bad());
+        }
+        let rest = rest[digits..].strip_prefix(b" ---").ok_or_else(bad)?;
+        match rest.first().copied() {
+            None | Some(b'\r' | b'\n') => return Ok(&part[..i]),
+            _ => return Err(bad()),
+        }
+    }
+    Err(Error::InvalidData("binhex: missing 'end of part' marker"))
+}
+
+/// Find a non-first part's `<return>---<return>` resume marker and return
+/// the data following it. `---` is valid hqx data, so a `<cr>` or `<lf>`
+/// is required immediately on each side (part start counts as the
+/// preceding one); a longer dash run is not a marker.
+fn resume_after_marker(part: &[u8]) -> Result<&[u8], Error> {
+    if part.starts_with(b"---") && matches!(part.get(3).copied(), Some(b'\r' | b'\n')) {
+        return Ok(&part[4..]);
+    }
+    for i in 0..part.len().saturating_sub(3) {
+        if matches!(part[i], b'\r' | b'\n')
+            && part[i + 1..].starts_with(b"---")
+            && matches!(part.get(i + 4).copied(), Some(b'\r' | b'\n'))
+        {
+            return Ok(&part[i + 5..]);
+        }
+    }
+    Err(Error::InvalidData("binhex: missing '---' resume marker"))
+}
+
+/// Decode a BinHex 4.0 document split into comp.binaries.mac-style
+/// parts, in order. Every part but the last must close with a
+/// `<return>--- end of part NN ---` marker line and every part but the
+/// first resumes after a `<return>---<return>` line; both are verified,
+/// stripped, and the concatenated bodies are passed to [`decode`]. A
+/// single-element `parts` is decoded directly (no markers required).
+///
+/// This function does not panic on malformed input.
+pub fn decode_parts(parts: &[&[u8]]) -> Result<BinHexEntry, Error> {
+    if parts.is_empty() || parts.iter().any(|p| p.is_empty()) {
+        return Err(Error::InvalidData("binhex: empty part"));
+    }
+    if parts.len() == 1 {
+        return decode(parts[0]);
+    }
+    let mut joined = Vec::new();
+    for (i, part) in parts.iter().enumerate() {
+        let mut body = *part;
+        if i > 0 {
+            body = resume_after_marker(body)?;
+        }
+        if i + 1 < parts.len() {
+            body = strip_part_end(body)?;
+        }
+        joined.extend_from_slice(body);
+    }
+    decode(&joined)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -471,5 +554,147 @@ mod tests {
                 .collect();
             assert_eq!(sixbit_decode(&chars).unwrap(), data);
         }
+    }
+
+    fn segmented(doc: &[u8], cuts: &[usize]) -> Vec<Vec<u8>> {
+        let mut parts = Vec::new();
+        let mut prev = 0;
+        for (i, &c) in cuts.iter().enumerate() {
+            let mut p = doc[prev..c].to_vec();
+            p.extend_from_slice(alloc::format!("\r\n--- end of part {} ---\r\n", i + 1).as_bytes());
+            parts.push(p);
+            prev = c;
+        }
+        let mut last = b"---\r\n".to_vec();
+        last.extend_from_slice(&doc[prev..]);
+        parts.push(last);
+        // Non-first, non-last parts resume after a "---" line too.
+        for i in 1..parts.len() - 1 {
+            let mut p = b"---\n".to_vec();
+            p.extend_from_slice(&parts[i]);
+            parts[i] = p;
+        }
+        parts
+    }
+
+    #[test]
+    fn segmented_roundtrip() {
+        let e = entry();
+        let doc = encode(&e);
+        let start = doc.iter().position(|&b| b == b':').unwrap() + 1;
+        let end = doc.iter().rposition(|&b| b == b':').unwrap();
+        let a = start + (end - start) / 3;
+        let b = start + 2 * (end - start) / 3;
+
+        // 2 and 3 part splits; marker lines sit at the seam.
+        for cuts in [&[b][..], &[a, b][..]] {
+            let parts = segmented(&doc, cuts);
+            let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
+            assert_eq!(decode_parts(&refs).unwrap(), e, "cuts={cuts:?}");
+        }
+        // Middle part carrying a news-style preamble before "---".
+        let mut parts = segmented(&doc, &[a, b]);
+        let mut p = b"From: someone\r\nSubject: part 2/3\r\n\r\n".to_vec();
+        p.extend_from_slice(&parts[1]);
+        parts[1] = p;
+        let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
+        assert_eq!(decode_parts(&refs).unwrap(), e);
+        // A single element needs no markers.
+        assert_eq!(decode_parts(&[&doc[..]]).unwrap(), e);
+    }
+
+    #[test]
+    fn segmented_marker_boundaries() {
+        let e = entry();
+        let doc = encode(&e);
+        let end = doc.iter().rposition(|&b| b == b':').unwrap();
+        let mid = end / 2;
+        let (a, b) = (&doc[..mid], &doc[mid..]);
+
+        // <cr>, <lf> and <cr><lf> are all accepted around each marker;
+        // the part may also start directly with "---".
+        for pre in [b"\r".as_slice(), b"\n".as_slice(), b"\r\n".as_slice()] {
+            for post in [b"\r".as_slice(), b"\n".as_slice(), b"\r\n".as_slice()] {
+                let mut p1 = a.to_vec();
+                p1.extend_from_slice(pre);
+                p1.extend_from_slice(b"--- end of part 12 ---");
+                p1.extend_from_slice(post);
+                let mut p2 = b"---".to_vec();
+                p2.extend_from_slice(post);
+                p2.extend_from_slice(b);
+                assert_eq!(decode_parts(&[&p1[..], &p2[..]]).unwrap(), e);
+            }
+        }
+        // Marker at end of part with no trailing <return>; also a
+        // "---abc"-style line in the preamble is data, not the marker.
+        let mut p1 = a.to_vec();
+        p1.extend_from_slice(b"\n--- end of part 1 ---");
+        let mut p2 = b"header\n---abc\n---\n".to_vec();
+        p2.extend_from_slice(b);
+        assert_eq!(decode_parts(&[&p1[..], &p2[..]]).unwrap(), e);
+    }
+
+    #[test]
+    fn rejects_bad_segment_marker() {
+        let e = entry();
+        let doc = encode(&e);
+        let end = doc.iter().rposition(|&b| b == b':').unwrap();
+        let mid = end / 2;
+        let (a, b) = (&doc[..mid], &doc[mid..]);
+        let mut ok_p2 = b"---\n".to_vec();
+        ok_p2.extend_from_slice(b);
+        let p1 = |marker: &[u8]| {
+            let mut p = a.to_vec();
+            p.extend_from_slice(marker);
+            p
+        };
+        // No marker at all; wrong prefix; no digits; no closing dashes;
+        // junk after the closing dashes; marker not at a line start.
+        for marker in [
+            &b"\n"[..],
+            &b"\n--- end of file 1 ---\n"[..],
+            &b"\n--- end of part ---\n"[..],
+            &b"\n--- end of part 1\n"[..],
+            &b"\n--- end of part 1 --- extra\n"[..],
+            &b"x--- end of part 1 ---\n"[..],
+        ] {
+            let p = p1(marker);
+            assert!(decode_parts(&[&p[..], &ok_p2[..]]).is_err(), "{marker:?}");
+        }
+        // Part 2 without a resume marker line; a "---" not closed by
+        // <return>; a 4-dash line is not a resume marker.
+        for p2 in [
+            b"Subject: x\n\n".as_slice(),
+            b"header\n---tail\n".as_slice(),
+            b"header\n----\n".as_slice(),
+        ] {
+            let mut p = p2.to_vec();
+            p.extend_from_slice(b);
+            assert!(decode_parts(&[&p1(b"\n--- end of part 1 ---\n")[..], &p[..]]).is_err());
+        }
+        // Empty input / empty parts.
+        assert!(decode_parts(&[]).is_err());
+        assert!(decode_parts(&[&p1(b"\n--- end of part 1 ---\n")[..], &[]]).is_err());
+        // Segments still decode-checked end to end.
+        let mut parts = segmented(&doc, &[mid]);
+        let n = parts[1].len();
+        parts[1][n - 4] = ALPHABET[(dec_char(parts[1][n - 4]).unwrap_or(0) as usize + 1) % 64];
+        let refs: Vec<&[u8]> = parts.iter().map(|p| p.as_slice()).collect();
+        assert!(decode_parts(&refs).is_err());
+    }
+    #[test]
+    fn encode_wraps_at_64_columns() {
+        let mut e = entry();
+        e.data = (0..400u32).map(|i| (i * 3 % 256) as u8).collect();
+        let doc = encode(&e);
+        // Data region spans the leading ':' to the terminating ':'.
+        let first = doc.iter().position(|&b| b == b':').unwrap();
+        let last = doc.iter().rposition(|&b| b == b':').unwrap();
+        let lines: Vec<&[u8]> = doc[first..last].split(|&b| b == b'\n').collect();
+        // First line = ':' + 63 chars max; later lines 64 chars max.
+        assert!(lines.len() >= 3);
+        assert!(lines.iter().all(|l| l.len() <= 64));
+        assert!(lines.iter().any(|l| l.len() == 64));
+        assert_eq!(lines[0][0], b':');
     }
 }

@@ -46,6 +46,21 @@ use alloc::vec::Vec;
 
 use crate::error::Error;
 
+/// Multi-disk (MDF) segment descriptor from extended header `0x39`.
+/// Reassembling the segments into the original file is the caller's
+/// responsibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LhaSpan {
+    /// Span-mode byte stored in the block.
+    pub mode: u8,
+    /// Byte offset of this run within the original file
+    /// (`i32` on the wire).
+    pub beginning_offset: u32,
+    /// Bytes of the original file carried by this member
+    /// (`i32` on the wire).
+    pub size_of_run: u32,
+}
+
 /// One decoded LHA entry.
 #[derive(Debug, Clone)]
 pub struct LhaEntry {
@@ -61,6 +76,20 @@ pub struct LhaEntry {
     /// DOS-format timestamp as stored (level 0/1) or Unix seconds
     /// (level 2); `None` if the level does not define one.
     pub mtime: u32,
+    /// MS-DOS attribute byte: the level-0/1 basic-header attribute,
+    /// or extended header `0x40` when present.
+    pub dos_attr: Option<u8>,
+    /// UNIX permission bits from extended header `0x50`.
+    pub unix_mode: Option<u16>,
+    /// UNIX user id from extended header `0x51`.
+    pub unix_uid: Option<u16>,
+    /// UNIX group id from extended header `0x51` (the wire stores
+    /// gid first, per LHa `header.doc.md`).
+    pub unix_gid: Option<u16>,
+    /// UNIX `time_t` from extended header `0x54`.
+    pub unix_mtime: Option<u32>,
+    /// Multi-disk segment descriptor from extended header `0x39`.
+    pub span: Option<LhaSpan>,
     /// Entry payload (empty for directories and unsupported methods).
     pub data: Vec<u8>,
 }
@@ -81,15 +110,26 @@ fn u32le(b: &[u8]) -> u32 {
     u32::from_le_bytes([b[0], b[1], b[2], b[3]])
 }
 
-/// (filename extension, directory extension) pair.
-type ExtNameDir = (Option<Vec<u8>>, Option<Vec<u8>>);
+/// Extended-header fields collected while walking a chain: the
+/// filename and directory blocks plus any attribute blocks.
+#[derive(Default)]
+struct ExtHeaders {
+    name: Option<Vec<u8>>,
+    dir: Option<Vec<u8>>,
+    dos_attr: Option<u8>,
+    unix_mode: Option<u16>,
+    unix_uid: Option<u16>,
+    unix_gid: Option<u16>,
+    unix_mtime: Option<u32>,
+    span: Option<LhaSpan>,
+}
 
 /// Walk a level-1/2 extended-header chain and return (filename,
 /// directory-path components, consumed bytes). `blocks` starts at the
 /// first `u16` extension size; each block is `u16 size` (counting the
 /// size field itself) + `u8 type` + payload, and the chain ends with a
 /// `u16` zero terminator (counted in `consumed`).
-fn walk_ext_headers(blocks: &[u8]) -> Result<(ExtNameDir, usize), Error> {
+fn walk_ext_headers(blocks: &[u8]) -> Result<(ExtHeaders, usize), Error> {
     walk_ext_headers_sized(blocks, 2)
 }
 
@@ -98,9 +138,8 @@ fn walk_ext_headers(blocks: &[u8]) -> Result<(ExtNameDir, usize), Error> {
 fn walk_ext_headers_sized(
     mut blocks: &[u8],
     size_bytes: usize,
-) -> Result<(ExtNameDir, usize), Error> {
-    let mut name = None;
-    let mut dir = None;
+) -> Result<(ExtHeaders, usize), Error> {
+    let mut ext = ExtHeaders::default();
     let mut consumed = 0usize;
     loop {
         if blocks.len() < size_bytes {
@@ -111,7 +150,7 @@ fn walk_ext_headers_sized(
             _ => u32le(blocks) as usize,
         };
         if size == 0 {
-            return Ok(((name, dir), consumed + size_bytes));
+            return Ok((ext, consumed + size_bytes));
         }
         if size < size_bytes + 1 || size > blocks.len() {
             return Err(Error::InvalidData("lha: bad extended header"));
@@ -119,8 +158,26 @@ fn walk_ext_headers_sized(
         let ty = blocks[size_bytes];
         let payload = &blocks[size_bytes + 1..size];
         match ty {
-            0x01 => name = Some(payload.to_vec()),
-            0x02 => dir = Some(payload.to_vec()),
+            0x01 => ext.name = Some(payload.to_vec()),
+            0x02 => ext.dir = Some(payload.to_vec()),
+            // Multi-disk segment: mode byte + i32 run offset + i32 run
+            // size; reassembly is the caller's responsibility.
+            0x39 if payload.len() >= 9 => {
+                ext.span = Some(LhaSpan {
+                    mode: payload[0],
+                    beginning_offset: u32le(&payload[1..]),
+                    size_of_run: u32le(&payload[5..]),
+                });
+            }
+            0x40 if !payload.is_empty() => ext.dos_attr = Some(payload[0]),
+            0x50 if payload.len() >= 2 => ext.unix_mode = Some(u16le(payload)),
+            // `header.doc.md` stores gid first, then uid (lzhformat
+            // documents the opposite order).
+            0x51 if payload.len() >= 4 => {
+                ext.unix_gid = Some(u16le(payload));
+                ext.unix_uid = Some(u16le(&payload[2..]));
+            }
+            0x54 if payload.len() >= 4 => ext.unix_mtime = Some(u32le(payload)),
             _ => {}
         }
         blocks = &blocks[size..];
@@ -248,7 +305,7 @@ fn decode_level01(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Resu
         return Err(Error::InvalidData("lha: truncated filename"));
     }
     let name_field = &hdr[20..20 + name_len];
-    let (name, crc16, packed, data_start) = if level == 0 {
+    let (name, crc16, packed, data_start, ext) = if level == 0 {
         // filename + u16 CRC-16
         if 20 + name_len + 2 > hsize {
             return Err(Error::InvalidData("lha: truncated crc"));
@@ -258,6 +315,7 @@ fn decode_level01(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Resu
             Some(u16le(&hdr[20 + name_len..])),
             packed,
             pos + 2 + hsize,
+            ExtHeaders::default(),
         )
     } else {
         // level 1: filename + u16 CRC + u8 OS id (+ old-style padding)
@@ -270,30 +328,30 @@ fn decode_level01(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Resu
         }
         let crc = u16le(&hdr[20 + name_len..]);
         let ext_area = &input[pos + 2 + hsize - 2..];
-        let ((ext_name, dir), consumed) = walk_ext_headers(ext_area)?;
+        let (ext, consumed) = walk_ext_headers(ext_area)?;
         let ext_bytes = consumed - 2; // u16 size field already in hsize
         let packed = packed
             .checked_sub(ext_bytes)
             .ok_or(Error::InvalidData("lha: bad skip size"))?;
-        let name = match (ext_name, dir) {
+        let name = match (&ext.name, &ext.dir) {
             (None, None) => sanitize_basic_name(name_field)?,
             (ext_name, dir) => {
                 let mut s = match dir {
-                    Some(d) => sanitize_name(&d)?,
+                    Some(d) => sanitize_name(d)?,
                     None => String::new(),
                 };
                 if !s.is_empty() && !s.ends_with('/') {
                     s.push('/');
                 }
                 let base = match ext_name {
-                    Some(n) => sanitize_name(&n)?,
+                    Some(n) => sanitize_name(n)?,
                     None => sanitize_basic_name(name_field)?,
                 };
                 s.push_str(&base);
                 s
             }
         };
-        (name, Some(crc), packed, pos + 2 + hsize + ext_bytes)
+        (name, Some(crc), packed, pos + 2 + hsize + ext_bytes, ext)
     };
     let mut name = name;
     if is_dir && !name.ends_with('/') {
@@ -316,6 +374,14 @@ fn decode_level01(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Resu
         is_dir,
         crc16,
         mtime,
+        // hdr[17] is the basic-header MS-DOS attribute byte; an
+        // explicit `0x40` extended attribute takes precedence.
+        dos_attr: ext.dos_attr.or(Some(hdr[17])),
+        unix_mode: ext.unix_mode,
+        unix_uid: ext.unix_uid,
+        unix_gid: ext.unix_gid,
+        unix_mtime: ext.unix_mtime,
+        span: ext.span,
         data,
     });
     Ok(data_start + take)
@@ -346,17 +412,17 @@ fn decode_level2(
     let crc = u16le(&hdr[19..]);
     // byte 21 (hdr[21]): OS id, then extended headers at hdr[22..]
     // (the u16 next-header size at absolute offset 24).
-    let ((name, dir), _) = walk_ext_headers(&hdr[22..])?;
-    let mut name = match (name, dir) {
+    let (ext, _) = walk_ext_headers(&hdr[22..])?;
+    let mut name = match (&ext.name, &ext.dir) {
         (Some(n), Some(d)) => {
-            let mut s = sanitize_name(&d)?;
+            let mut s = sanitize_name(d)?;
             if !s.is_empty() && !s.ends_with('/') {
                 s.push('/');
             }
-            s.push_str(&sanitize_name(&n)?);
+            s.push_str(&sanitize_name(n)?);
             s
         }
-        (Some(n), None) => sanitize_name(&n)?,
+        (Some(n), None) => sanitize_name(n)?,
         _ => return Err(Error::InvalidData("lha: no filename")),
     };
     if is_dir && !name.ends_with('/') {
@@ -377,6 +443,12 @@ fn decode_level2(
         is_dir,
         crc16: Some(crc),
         mtime,
+        dos_attr: ext.dos_attr,
+        unix_mode: ext.unix_mode,
+        unix_uid: ext.unix_uid,
+        unix_gid: ext.unix_gid,
+        unix_mtime: ext.unix_mtime,
+        span: ext.span,
         data,
     });
     Ok(data_start + take)
@@ -415,17 +487,17 @@ fn decode_level3(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Resul
     }
     let crc = u16le(&hdr[19..]);
     // Extended headers at absolute offset 28 (hdr[26..]), u32 sizes.
-    let ((name, dir), _) = walk_ext_headers_sized(&hdr[26..], 4)?;
-    let mut name = match (name, dir) {
+    let (ext, _) = walk_ext_headers_sized(&hdr[26..], 4)?;
+    let mut name = match (&ext.name, &ext.dir) {
         (Some(n), Some(d)) => {
-            let mut s = sanitize_name(&d)?;
+            let mut s = sanitize_name(d)?;
             if !s.is_empty() && !s.ends_with('/') {
                 s.push('/');
             }
-            s.push_str(&sanitize_name(&n)?);
+            s.push_str(&sanitize_name(n)?);
             s
         }
-        (Some(n), None) => sanitize_name(&n)?,
+        (Some(n), None) => sanitize_name(n)?,
         _ => return Err(Error::InvalidData("lha: no filename")),
     };
     if is_dir && !name.ends_with('/') {
@@ -446,6 +518,12 @@ fn decode_level3(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Resul
         is_dir,
         crc16: Some(crc),
         mtime,
+        dos_attr: ext.dos_attr,
+        unix_mode: ext.unix_mode,
+        unix_uid: ext.unix_uid,
+        unix_gid: ext.unix_gid,
+        unix_mtime: ext.unix_mtime,
+        span: ext.span,
         data,
     });
     Ok(data_start + take)
@@ -823,17 +901,15 @@ mod tests {
             LhaEncoder::new().with_method(b"-lh1-"),
             Err(Error::Unsupported(_))
         ));
-        assert!(matches!(
-            LhaEncoder::new().with_method(b"-pm1-"),
-            Err(Error::Unsupported(_))
-        ));
-        // `-lh0-`, the stored aliases, and the LArc LZSS methods stay
-        // valid selections.
+        // `-lh0-`, the stored aliases, the LArc LZSS methods, and the
+        // PMarc literal-block methods stay valid selections.
         assert!(LhaEncoder::new().with_method(b"-lh0-").is_ok());
         assert!(LhaEncoder::new().with_method(b"-lz4-").is_ok());
         assert!(LhaEncoder::new().with_method(b"-pm0-").is_ok());
         assert!(LhaEncoder::new().with_method(b"-lzs-").is_ok());
         assert!(LhaEncoder::new().with_method(b"-lz5-").is_ok());
+        assert!(LhaEncoder::new().with_method(b"-pm1-").is_ok());
+        assert!(LhaEncoder::new().with_method(b"-pm2-").is_ok());
     }
 
     #[test]
@@ -893,5 +969,105 @@ mod tests {
             let e = decode(&a).unwrap();
             assert_eq!(e[0].data, data.as_slice());
         }
+    }
+
+    #[test]
+    fn pm1_pm2_archive_roundtrip() {
+        // PMarc literal-block streams behind a level-0 header;
+        // compressible input keeps the selected method tag.
+        let data = b"the quick brown fox jumps over the lazy dog. ".repeat(500);
+        for method in [b"-pm1-", b"-pm2-"] {
+            let mut enc = crate::archive::lha::encode::LhaEncoder::new()
+                .with_method(method)
+                .unwrap();
+            enc.add_file("fox.txt", &data, 0).unwrap();
+            let a = enc.finish();
+            assert_eq!(&a[2..7], method.as_slice());
+            assert!(packed_size(&a) < data.len());
+            let e = decode(&a).unwrap();
+            assert_eq!(e[0].name, "fox.txt");
+            assert_eq!(e[0].data, data.as_slice());
+        }
+    }
+
+    #[test]
+    fn level1_unix_ext_attrs() {
+        // level1.lzh (reference LHa, OS id 'U') carries UNIX ext
+        // blocks: 0x50 permission 0o100644, 0x51 gid+uid 1000 (gid is
+        // stored first, per header.doc.md), 0x54 time_t.
+        let a = include_bytes!("../../../tests/fixtures/lha/level1.lzh");
+        let e = decode(a).unwrap();
+        assert_eq!(e[0].unix_mode, Some(0o100644));
+        assert_eq!(e[0].unix_gid, Some(1000));
+        assert_eq!(e[0].unix_uid, Some(1000));
+        assert_eq!(e[0].unix_mtime, Some(0x6ab9_cea1));
+        assert_eq!(e[1].unix_mode, Some(0o100644));
+        assert_eq!(e[1].unix_gid, Some(1000));
+        assert_eq!(e[1].unix_uid, Some(1000));
+        assert_eq!(e[1].unix_mtime, Some(0x6ab9_cea1));
+    }
+
+    #[test]
+    fn dos_attr_from_basic_header() {
+        // The level-0/1 basic-header attribute byte surfaces as
+        // `dos_attr` (0x20 file, 0x10 directory).
+        let mut enc = crate::archive::lha::encode::LhaEncoder::new();
+        enc.add_file("f.txt", b"x", 0).unwrap();
+        enc.add_dir("d", 0).unwrap();
+        let e = decode(&enc.finish()).unwrap();
+        assert_eq!(e[0].dos_attr, Some(0x20));
+        assert_eq!(e[1].dos_attr, Some(0x10));
+        // The level-1 fixture carries the same basic attribute byte.
+        let a = include_bytes!("../../../tests/fixtures/lha/level1.lzh");
+        let e = decode(a).unwrap();
+        assert_eq!(e[0].dos_attr, Some(0x20));
+        assert_eq!(e[0].span, None);
+    }
+
+    #[test]
+    fn span_header_exposed() {
+        // Hand-built level-2 header carrying a 0x39 multi-disk (MDF)
+        // block: u8 mode + i32 beginning_offset + i32 size_of_run.
+        let name = b"abc";
+        let mut ext = Vec::new();
+        ext.extend_from_slice(&5u16.to_le_bytes()); // header-crc block
+        ext.push(0x00);
+        ext.extend_from_slice(&0u16.to_le_bytes()); // hcrc placeholder
+        ext.extend_from_slice(&((3 + name.len()) as u16).to_le_bytes());
+        ext.push(0x01);
+        ext.extend_from_slice(name);
+        ext.extend_from_slice(&12u16.to_le_bytes()); // size = 2+1+9
+        ext.push(0x39);
+        ext.push(1); // span mode
+        ext.extend_from_slice(&12i32.to_le_bytes());
+        ext.extend_from_slice(&3i32.to_le_bytes());
+        ext.extend_from_slice(&0u16.to_le_bytes()); // terminator
+        let hsize = (2 + 5 + 4 + 4 + 4 + 1 + 1 + 2 + 1 + ext.len()) as u16;
+        let mut h = Vec::new();
+        h.extend_from_slice(&hsize.to_le_bytes());
+        h.extend_from_slice(b"-lh0-");
+        h.extend_from_slice(&3u32.to_le_bytes());
+        h.extend_from_slice(&3u32.to_le_bytes());
+        h.extend_from_slice(&0u32.to_le_bytes());
+        h.push(0x20);
+        h.push(2);
+        h.extend_from_slice(&crate::util::crc16::crc16(b"abc").to_le_bytes());
+        h.push(b'U');
+        h.extend_from_slice(&ext);
+        assert_eq!(h.len(), hsize as usize);
+        let hcrc = crate::util::crc16::crc16(&h);
+        h[27..29].copy_from_slice(&hcrc.to_le_bytes());
+        h.extend_from_slice(b"abc");
+        h.push(0);
+        let e = decode(&h).unwrap();
+        assert_eq!(
+            e[0].span,
+            Some(LhaSpan {
+                mode: 1,
+                beginning_offset: 12,
+                size_of_run: 3,
+            })
+        );
+        assert_eq!(e[0].data, b"abc");
     }
 }
