@@ -13,7 +13,8 @@
 //! - crate-local journaling transactions via `ZpaqJournalEncoder`
 //!   together with `decode_journal_latest` / `decode_journal_versions`
 //! - upstream JIDAC journaling streams via [`jidac`]: decode of
-//!   multi-transaction `zpaq add` archives plus single-transaction emit
+//!   multi-transaction `zpaq add` archives, single-transaction emit,
+//!   and incremental append with fragment deduplication
 //! - materialized archive editing via `ZpaqArchiveEditor`, including
 //!   import from plain archives or latest journal view followed by
 //!   push/put/delete and rewrite
