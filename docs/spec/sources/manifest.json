@@ -1170,7 +1170,8 @@
    "reference_url": [
     "https://github.com/hyc/arc",
     "https://github.com/ani6al/arc",
-    "https://sources.debian.org/src/arc/"
+    "https://sources.debian.org/src/arc/",
+    "https://git.hadrons.org/cgit/debian/pkgs/arc.git"
    ],
    "license": "GPL (版番号未記、Debian 整理上 GPL-2 系)"
   },
@@ -1454,6 +1455,7 @@
    "note": "method 8/9 (compress-LZW) および squeeze/crunch/crush の挙動確認 oracle として過去に参照。GPL-2.0-or-later (変換パスあり) だが、実装参照には使わず oracle/fixture 用途に限定。実装移植元は newtua_dos / XADMaster (LGPL) および compcol (MIT)。",
    "reference_url": [
     "https://zgedneil.nfshost.com/nomarch.html",
+    "https://www.ibiblio.org/pub/Linux/utils/compress/",
     "https://sources.debian.org/src/nomarch/"
    ],
    "license": "GPL-2.0-or-later"

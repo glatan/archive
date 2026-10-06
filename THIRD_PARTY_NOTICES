@@ -1068,7 +1068,11 @@ incorporation:
   document.
   Debian `arc` 5.21q produced the `tests/fixtures/arc/fix*.arc`
   fixtures (program output); `arc`/`nomarch`/`unar` are used as interop
-  oracles. No GPL code copied.
+  oracles. No GPL code copied into the crate.
+  The test container builds arc from the Debian source package
+  (arc_5.21q.orig.tar.gz + arc_5.21q-16.debian.tar.xz; the packaging
+  quilt series is the de facto current maintenance of the upstream
+  line). `nomarch` 1.4 is built from the upstream ibiblio tarball.
 - lhasa (fragglet, ISC): port source + format reference + fixtures —
   `lha/pmarc.rs` ports its `pm1_decoder.c`/`pm2_decoder.c`/
   `pma_common.c` (the latter originally reverse-engineered from

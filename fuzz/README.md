@@ -61,8 +61,8 @@ cargo run --release -p archive-fuzz -- --pattern original-decompress
 | `cabextract` | pacman `cabextract` | mscab の decode oracle |
 | `cpio` | pacman `cpio` | cpio の interop |
 | `tar` / `ar` | base-devel (GNU binutils/tar) | tar/ar/deb の interop |
-| `arc` / `marc` | Debian deb (sha256 pin、`Containerfile` 参照) | arc の oracle |
-| `nomarch` | Debian deb (sha256 pin) | arc の decode oracle |
+| `arc` / `marc` | PKGBUILD (`pkg/arc`、ソースビルド) | arc の oracle |
+| `nomarch` | PKGBUILD (`pkg/nomarch`、ソースビルド) | arc の decode oracle |
 | `mksquashfs` / `unsquashfs` | pacman `squashfs-tools` | squashfs の interop |
 | `git` | pacman `git` | git-pack の interop (`index-pack` 等) |
 | `python3` | pacman `python` | 独自 oracle スクリプト (pea 等) |
