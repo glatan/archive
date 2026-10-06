@@ -21,7 +21,7 @@
 | ZIP64 (§4.3.14-15 EOCD+locator, §4.5.3 extra field) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ✅ | ✅ | auto-promotion 対応 |
 | Traditional PKZIP encryption (§6) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ✅ | ✅ | |
 | WinZip AES-128/192/256 (Method 99, extra field 0x9901) | [WinZip AE-x spec](https://www.winzip.com/en/support/aes-encryption/) | ✅ | ✅ | |
-| Strong Encryption (§7) / Central Directory Encryption (§7.5) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ❌ | ❌ | intentional non-support: §10.1 が実装に PKWARE との別途ライセンス契約を要求。bit 6 / extra 0x0017 / ADH は検出して `Unsupported` を返す |
+| Strong Encryption (§7) / Central Directory Encryption (§7.5) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ❌ | ❌ | intentional non-support: §10.1 により実装に PKWARE との別途ライセンス契約が義務付けられているため。bit 6 / extra 0x0017 / ADH は検出して `Unsupported` を返す |
 | マルチディスク (§8) | [APPNOTE](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) | ✅ | ❌ | `decode_parts` で split/spanned archive を decode |
 
 状態マーカー: ✅ 実装+テスト済み / ⚠️ 部分実装 / ❌ 未実装

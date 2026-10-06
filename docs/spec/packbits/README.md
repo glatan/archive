@@ -24,7 +24,7 @@
 |---|------|----------|------|----------------|
 | 7 | 3 バイト以上の連続同一バイトのみ反復パケット化 (1〜2 バイトの run はリテラルに含める) | TN1023 "PackBits packs the data only when there are three or more consecutive bytes" | ✅ | `two_byte_run_stays_literal`、`tn1023_worked_example` |
 | 8 | 1 パケットあたりの最大長はリテラル・反復ともに 128 バイト | TN1023 / TIFF6 §9 (flag-counter の値域) | ✅ | `repeat_packet` (128→`0x81`)、`literal_packet` |
-| 9 | 129 バイト超の run は複数パケットに分割 (128+残り、残り 1〜2 バイトはリテラル落ち) | 実装方針 | ✅ | `repeat_packet` |
+| 9 | 129 バイト超の run は複数パケットに分割 (128+残り、残り 1〜2 バイトはリテラルパケットとして出力) | 実装方針 | ✅ | `repeat_packet` |
 | 10 | エンコーダは flag-counter `0x80` (`-128`) を生成しない | TN1023 "PackBits never generates the value -128" | ✅ | `worst_case_bound`、全 encode テスト (assert) |
 | 11 | TN1023 の公式作例 (`AA AA AA 80 00 2A …`) をバイト一致で再現 | TN1023 worked example | ✅ | `tn1023_worked_example` (KAT) |
 | 12 | 最悪出力サイズ ≦ `srcBytes + (srcBytes+126)/127` | TN1023 "worst case" 公式 | ✅ | `worst_case_bound` |

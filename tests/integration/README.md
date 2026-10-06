@@ -1,7 +1,7 @@
 # Integration tests
 
 このディレクトリ配下の integration test は、crate の public API を format ごとに end-to-end で検証することを目的とする。
-主に次の観点を扱う。
+主に次の項目を検証する。
 
 - encode/decode の roundtrip
 - `encode_writer` / `decode_reader`
@@ -62,11 +62,11 @@
   - 現在は `crate -> system 7z extract` 側を固定している
 - `rzip`
   - `system rzip -> crate decode` と `crate -> system rzip decode` を simple payload で固定している
-  - large payload や multi-chunk 境界の `system rzip` parity はまだ主張していない
+  - large payload や multi-chunk 境界における `system rzip` との同一性は保証の対象外としている
 
 ## Test inventory
 
-以下の表は、各 integration test file がどの観点をどの test case で固定しているかを対応付けたものである。
+以下の表は、各 integration test file がどの検証項目をどの test case で固定しているかを対応付けたものである。
 
 ### `ar.rs`
 
@@ -89,8 +89,8 @@
 
 ### `rpm.rs`
 
-| カバー項目 | テスト |
-|---|---|
+| Coverage | Test cases |
+| --- | --- |
 | uncompressed cpio payload decode | `test_rpm_decode_uncompressed_payload` |
 | gzip payload decode | `test_rpm_decode_gzip_payload` |
 | xz / zstd payload decode | `test_rpm_decode_xz_and_zstd_payloads` |
@@ -100,23 +100,23 @@
 
 ### `squashfs.rs`
 
-| カバー項目 | テスト |
-|---|---|
+| Coverage | Test cases |
+| --- | --- |
 | `mksquashfs` 生成 image (gzip/zstd/xz/lz4/lzo) の decode | `test_squashfs_decode_mksquashfs_image` |
 | 本 writer 出力 (gzip/xz/lz4/lzo/zstd) の `unsquashfs` 展開 | `test_squashfs_encoder_unsquashfs_extract` |
 | encoder → decoder roundtrip | `test_squashfs_encoder_roundtrip` |
 
 ### `mscab.rs`
 
-| 内容 | テスト名 |
-|------|----------|
+| Coverage | Test cases |
+| --- | --- |
 | MSZIP 圧縮 cabinet の decode | `test_mscab_decode_mszip_cabinet` |
 | crate 生成 cab の `bsdtar` 展開 interop | `test_mscab_bsdtar_interop` |
 
 ### `zim.rs`
 
-| 内容 | テスト名 |
-|------|----------|
+| Coverage | Test cases |
+| --- | --- |
 | stored cluster decode | `test_zim_decode_stored_cluster` |
 | xz cluster decode | `test_zim_decode_xz_cluster` |
 | zstd cluster decode | `test_zim_decode_zstd_cluster` |
@@ -124,15 +124,15 @@
 
 ### `mtree.rs`
 
-| 内容 | テスト名 |
-|------|----------|
+| Coverage | Test cases |
+| --- | --- |
 | basic manifest decode (/set・相対 dir 遷移) | `test_mtree_decode_basic` |
 | `bsdtar --format=mtree` 生成マニフェストの decode interop | `test_mtree_bsdtar_interop` |
 
 ### `warc.rs`
 
-| 内容 | テスト名 |
-|------|----------|
+| Coverage | Test cases |
+| --- | --- |
 | 複数 record ストリーム decode (warcinfo/response/revisit) | `test_warc_decode_records` |
 | gzip 伸張経路経由の `.warc.gz` decode | `test_warc_gzip_members` |
 

@@ -144,7 +144,7 @@
 
 - `hello.lrz`
   - 小さい `.lrz` sample archive
-  - crate-local な lrzip container layout を目視確認・手元デバッグするときのサンプルとして保持している
+  - crate-local な lrzip container layout を目視確認・ローカル環境でデバッグする際のサンプルとして保持している
   - system `lrzip` 完全互換を保証するための fixture ではない
   - 生成元は未記録 (初回コミット由来のため crate 生成か system `lrzip` 生成か不明)。ライセンス上の懸念はなし
 
@@ -179,7 +179,7 @@
 
 - `bsdtar-plain.iso` / `bsdtar-rockridge.iso` / `bsdtar-joliet.iso` / `bsdtar-eltorito.iso`
   - `bsdtar` (libarchive, BSD-2-Clause) が生成した ISO 9660 イメージ
-  - 素の ISO、Rock Ridge、Joliet、El Torito 各バリアントの decode 回帰用
+  - 標準 ISO 9660、Rock Ridge、Joliet、El Torito 各バリアントの decode 回帰用
 
 ### `lzs/`
 
@@ -267,17 +267,17 @@
 個別の provenance は記さない。
 
 - `zstd_original_compress_1.bin`
-  - fuzz で残した ASCII 寄りの入力データ
+  - ファズテストで検出・保存された ASCII 寄りの入力データ
 - `zstd_original_compress_1.zst`
   - 上の `.bin` を system `zstd` 側で圧縮した対応データ
   - crate 側 decode が system `zstd` 出力を正しく読めるかの回帰用
 - `lzip_original_compress_1.bin`
-  - fuzz で残したバイナリ入力
+  - ファズテストで検出・保存されたバイナリ入力
 - `lzip_original_compress_1.lz`
   - 上の `.bin` を system `lzip -c` で圧縮した対応データ
   - crate 側 decode が system `lzip` 出力を正しく読めるかの回帰用（ツール不要）
 - `xz_original_compress_1.bin` / `xz_original_compress_2.bin` / `xz_original_compress_3.bin`
-  - fuzz で残したバイナリ入力
+  - ファズテストで検出・保存されたバイナリ入力
 - `xz_original_compress_1.xz` / `xz_original_compress_2.xz`
   - 対応する `.bin` を system `xz -c` で圧縮した対応データ
   - crate 側 decode の回帰用（ツール不要）
@@ -285,9 +285,9 @@
   - `xz_original_compress_3.bin` を system `xz -0 -c` で圧縮した対応データ
   - dict_size=256KiB の non-reset chunk 継続（dict boundary）を含むストリームの回帰用（ツール不要）
 - `xz_original_decompress_1.bin`
-  - fuzz で残した ASCII 寄りの入力
+  - ファズテストで検出・保存された ASCII 寄りの入力
   - crate 側で xz encode した結果を system `xz -dc` で展開できるかの回帰に使う
   - ツール不在時は self-roundtrip のみ検証する
 - `lzw_clear_pad_run_start.bin`
-  - fuzz で残したバイナリ入力 (90,029 バイト)
+  - ファズテストで検出・保存されたバイナリ入力 (90,029 バイト)
   - `.Z` の group-of-8 pad が body 先頭ではなくブロックラン起点 (compress42.c `boff`) から測られることの回帰用 — `test_fuzz_regression_clear_pad_run_start` が compress42.c/gzip `unlzw` 参照モデルでエンコード結果を検証

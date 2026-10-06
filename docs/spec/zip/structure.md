@@ -135,9 +135,9 @@
 | 58 | Bit 0: File is encrypted | §4.4.4 | ✅ | encryption dispatch |
 | 59 | Bit 1-2: method-specific flags (Implode/Deflate compression options) | §4.4.4 | ✅ | Implode: bit 1 (8K dict), bit 2 (3 trees) を decode で解釈。Deflate: option 未解釈 (動作に影響なし) |
 | 60 | Bit 3: Data Descriptor present | §4.4.4 | ✅ | `test_roundtrip_data_descriptor_single_file` |
-| 61 | Bit 4: Enhanced Deflating reserved | §4.4.4 | ✅ | reserved bit、読み飛ばし (正しい動作) |
-| 62 | Bit 5: Compressed patched data | §4.4.4 | ✅ | 未サポート機能、読み飛ばし (正しい動作) |
-| 63 | Bit 6: Strong encryption | §4.4.4 | ✅ | 検出して `Unsupported` を返す。復号は intentional non-support (APPNOTE §10.1 が PKWARE との別途ライセンス契約を要求するため)。`test_strong_encryption_rejected_aes`, `test_strong_encryption_rejected_other_algorithms` |
+| 61 | Bit 4: Enhanced Deflating reserved | §4.4.4 | ✅ | reserved bit、読み飛ばし (仕様通りの動作) |
+| 62 | Bit 5: Compressed patched data | §4.4.4 | ✅ | 未サポート機能、読み飛ばし (仕様通りの動作) |
+| 63 | Bit 6: Strong encryption | §4.4.4 | ✅ | 検出して `Unsupported` を返す。復号は intentional non-support (APPNOTE §10.1 により実装に PKWARE との別途ライセンス契約が義務付けられているため)。`test_strong_encryption_rejected_aes`, `test_strong_encryption_rejected_other_algorithms` |
 | 64 | Bit 11: Language Encoding Flag (UTF-8) | §4.4.4 | ✅ | `test_decode_cp437_name_and_comment`, `test_decode_invalid_utf8_metadata_rejected` |
 | 65 | Bit 13: Central Directory Encryption masking | §4.4.4 | ✅ | bit 13 検出時に CRC-32/圧縮サイズ/非圧縮サイズを Local File Header からフォールバック。CD 本体の暗号化 (ADH) は検出して `Unsupported` を返す |
 | 66 | Bit 6 set → version ≥ 50, bit 0 も set | §4.4.4 | ✅ | version < 50 と bit 0 未設定を reject |

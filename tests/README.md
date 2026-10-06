@@ -4,7 +4,7 @@
 
 | Path | Role |
 | --- | --- |
-| `tests/integration.rs` | integration test harness。本体 crate を feature 全載せで読み込み、`tests/integration/*.rs` を module として束ねる |
+| `tests/integration.rs` | integration test harness。本体 crate の全 feature を有効化して読み込み、`tests/integration/*.rs` を module として束ねる |
 | `tests/integration/` | format / algorithm ごとの integration test 本体 |
 | `tests/fixtures/` | integration test から参照する固定 fixture とその provenance |
 

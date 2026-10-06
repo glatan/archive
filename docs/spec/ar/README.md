@@ -19,7 +19,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 1 | グローバルヘッダー `!<arch>\n` (8B) 検証 | IEEE Std 1003.1: ar magic string | ✅ | `decode()` 冒頭で検証, `test_decode_short_gnu_archive` |
+| 1 | グローバルヘッダー `!<arch>\n` (8B) 検証 | IEEE Std 1003.1: ar magic string | ✅ | `decode()` 冒頭で検証、`test_decode_short_gnu_archive` |
 | 2 | 60B 固定長メンバーヘッダー: ar_name[16] / ar_date[12] / ar_uid[6] / ar_gid[6] / ar_mode[8] / ar_size[10] / ar_fmag[2] | IEEE Std 1003.1: ar member header fields | ✅ | `test_decode_short_gnu_archive` |
 | 3 | ar_fmag (bytes 58-59): `` `\n`` (backtick + newline) 検証 | IEEE Std 1003.1: ar_fmag field | ✅ | デコーダーで検証 |
 | 4 | ar_date: 10進 ASCII (右スペースパディング) | IEEE Std 1003.1: ar member header fields | ✅ | `parse_decimal_field()` |

@@ -18,7 +18,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 1 | Preamble: varint-encoded uncompressed length | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt): Preamble | ✅ | `decode_raw()` で検証, `test_decode_raw_literal_only` |
+| 1 | Preamble: varint-encoded uncompressed length | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt): Preamble | ✅ | `decode_raw()` で検証、`test_decode_raw_literal_only` |
 | 2 | Tag byte bits 0-1: element type (00=literal, 01=copy-1, 10=copy-2, 11=copy-4) | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt): Element type | ✅ | 全 raw テストで検証 |
 | 3 | Literal tag (00): bits 2-7 で長さ 0-59 は直接、60-63 は 1-4 バイト拡張 | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt): Literal (tag type 00) | ✅ | `test_decode_raw_literal_only`, `test_encode_raw_literal_only` |
 | 4 | Copy-1 tag (01): 3-bit length (bits 2-4) + 3-bit offset high (bits 5-7) + 1-byte offset low | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt): Copy with 1-byte offset (01) | ✅ | `test_decode_raw_copy` |

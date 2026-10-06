@@ -5,9 +5,9 @@
 ## テスト / clippy 実行ルール
 
 - コードを変更した場合は、完了前に `cargo fmt` も実行して整形を合わせる。
-- 変更中は、触った箇所に近い **targeted test** を先に実行してよい。
+- 変更中は、変更対象に近い **targeted test** を先に実行してよい。
 - テスト確認は原則として **コンテナ内** で行う。既存フローとして `make build-container.test && make test` を優先し、ホスト側の `cargo test ...` は調査・切り分け用の補助として使う。
-- ユーザーへ完了報告する前には、コード変更がある場合は原則として次を通す。
+- ユーザーへ完了報告する前には、コード変更がある場合は原則として次の検証を通過させる。
   - `cargo fmt`
   - `make build-container.test && make test`
   - `cargo clippy --all-features --all-targets -- -D warnings`

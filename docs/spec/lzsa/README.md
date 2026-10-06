@@ -76,7 +76,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 31 | CLI は `lzsa` (v1) / `lzsa2` (v2) フォーマットで compress、ストリームの `7b 9e` magic で自動検出、raw ブロックは `--format` 必須 | crate CLI contract | ✅ | `detect_lzsa` (detect 分岐を実装済み)。backward は raw ブロック限定のため CLI 露出なし (library API のみ) |
+| 31 | CLI は `lzsa` (v1) / `lzsa2` (v2) フォーマットで compress、ストリームの `7b 9e` magic で自動検出、raw ブロックは `--format` 必須 | crate CLI contract | ✅ | `detect_lzsa` (detect 分岐を実装済み)。backward は raw ブロック限定のため CLI からは提供しない (library API のみ) |
 | 32 | backward モード (`-r -b`): 入力を `reverse` → 通常ブロックとして符号化 → 出力を `reverse` する pure byte-reversal wrapper で wire 形式は不変。decode は逆順に適用。prefix 履歴は ZX 系の suffix 履歴と異なり正順のまま | 参照 `lzsa.c` / `shrink_context.c` 解析 + upstream 生成ベクタで検証 | ✅ | `lzsa1_raw_block_backwards_reference_vector` / `lzsa2_raw_block_backwards_reference_vector` / `backwards_block_byte_reversal_property` (統合) |
 | 33 | raw ブロック forward/backward encode (`encode_lzsa{1,2}_block{,_backwards}` 系) は `Option<Vec<u8>>` を返す。1 raw ブロックで表現不能な入力 (literal ラン上限超過等) では `None` — stream の verbatim フレーム fallback は利用不可 | BlockFormat_LZSA1/2.md | ✅ | `backwards_raw_block_roundtrip` (統合) |
 

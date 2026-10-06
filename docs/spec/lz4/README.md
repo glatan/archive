@@ -45,7 +45,7 @@
 | 22 | トークンバイト: リテラル長 (上位4bit) + マッチ長 (下位4bit) | [LZ4 Block Format](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) | ✅ | ラウンドトリップで検証 |
 | 23 | LSIC (Linear Small Integer Code) リテラル長拡張 | [LZ4 Block Format](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) | ✅ | 長いデータのラウンドトリップ |
 | 24 | リテラルコピー | [LZ4 Block Format](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) | ✅ | 全ラウンドトリップテスト |
-| 25 | マッチオフセット (2バイト LE) | [LZ4 Block Format](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) | ✅ | ラウンドトリップで検証, `test_decode_max_match_offset_65535` |
+| 25 | マッチオフセット (2バイト LE) | [LZ4 Block Format](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) | ✅ | ラウンドトリップで検証、`test_decode_max_match_offset_65535` |
 | 26 | LSIC マッチ長拡張 | [LZ4 Block Format](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) | ✅ | 長いデータのラウンドトリップ |
 | 27 | 最小マッチ長 4 | [LZ4 Block Format](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) | ✅ | `MIN_MATCH` 定数、ラウンドトリップ |
 | 28 | 最終シーケンスはマッチなし | [LZ4 Block Format](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) | ✅ | `emit_literals` |

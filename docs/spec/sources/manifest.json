@@ -1216,7 +1216,7 @@
    "format": "arj",
    "title": "UNARJ (unarj.c / decode.c, Robert K Jung)",
    "version": "UNARJ 2.41",
-   "note": "ARJ 公式 decoder ソース (制限付き freeware: ソース利用は「ARJ archiver＝圧縮+解凍の双方を行う製品」でない範囲のみ自由、改変版は改変表示必須、再配布は無改変完全パッケージ・無償のみ)。本 crate は ARJ read+write を持つため同条件に触れ得る — 参照・oracle 用途のみでコード取り込み不可。method 1-4 decode・garbled flag・multi-volume 処理の参照。TECHNOTE.DOC に method 概略記述あり。Debian `arj` は non-free のため oracle は unar/7z を推奨",
+   "note": "ARJ 公式 decoder ソース (制限付き freeware: ソース利用は「ARJ archiver＝圧縮+解凍の双方を行う製品」でない範囲のみ自由、改変版は改変表示必須、再配布は無改変完全パッケージ・無償のみ)。本 crate は ARJ read+write を持つため同条件に抵触し得る — 参照・oracle 用途のみでコード取り込み不可。method 1-4 decode・garbled flag・multi-volume 処理の参照。TECHNOTE.DOC に method 概略記述あり。Debian `arj` は non-free のため oracle は unar/7z を推奨",
    "reference_url": [
     "http://fileformats.archiveteam.org/wiki/ARJ"
    ],

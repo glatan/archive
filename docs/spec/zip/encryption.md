@@ -16,7 +16,7 @@
 
 | # | 仕様要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|---------|---------|------|----------------|
-| 107 | DES / 3DES / RC2 / RC4 encryption | §7.2.3 | ❌ | intentional non-support: APPNOTE §10.1 が実装に PKWARE との別途ライセンス契約を要求。bit 6 検出時は `Unsupported` を返す (`test_strong_encryption_rejected_other_algorithms`) |
+| 107 | DES / 3DES / RC2 / RC4 encryption | §7.2.3 | ❌ | intentional non-support: APPNOTE §10.1 により実装に PKWARE との別途ライセンス契約が義務付けられているため。bit 6 検出時は `Unsupported` を返す (`test_strong_encryption_rejected_other_algorithms`) |
 | 108 | AES 128/192/256 via Strong Encryption Header | §7.2.3 | ❌ | intentional non-support (§10.1 同上)。extra field 0x0017 は検出用にパースのみ (`test_strong_encryption_rejected_aes`) |
 | 109 | Certificate-based encryption | §7.2.4 | ❌ | 未対応 (intentional) |
 | 110 | Central Directory Encryption | §7.5 | ❌ | intentional non-support (§10.1 同上)。Archive Decryption Header (§4.3.10) は検出して `Unsupported` を返す (`test_central_directory_encryption_rejected`) |

@@ -39,7 +39,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
 | 18 | decode→encode→decode ラウンドトリップ | lzrw2.c | ✅ | `roundtrip_various`、`lzrw2_roundtrips` (統合) |
-| 19 | 圧縮後サイズが入力 + flag を下回らない場合は verbatim 形式 (flag=1) を出力 (参照実装は flag 込み出力が `src_len` を超えた時点で中断する能動ガード; 本実装は圧縮完了後に `out.len() >= FLAG_BYTES + src_len` で事後判定するため、verbatim 判定の閾値は最大 FLAG_BYTES (4 バイト) だけ後ろ倒しになりうる) | lzrw2.c overrun 経路 | ✅ | noise roundtrip で検証 |
+| 19 | 圧縮後サイズが入力 + flag を下回らない場合は verbatim 形式 (flag=1) を出力 (参照実装は flag 込み出力が `src_len` を超えた時点で中断する能動ガード; 本実装は圧縮完了後に `out.len() >= FLAG_BYTES + src_len` で事後判定するため、verbatim 判定の閾値は最大 FLAG_BYTES (4 バイト) だけ後方にシフトし得る) | lzrw2.c overrun 経路 | ✅ | noise roundtrip で検証 |
 | 20 | エンコーダはデコーダと同一の phrase table 規律 (各アイテムで次エントリ更新、hash table は phrase index を保持) を再現。送信 index が両側で同一 source に解決されることを保証 | lzrw2.c compressor 動作 | ✅ | 参照デコーダ相互運用 (167KB 入力) で検証 |
 | 21 | リファレンスとの出力バイト一致は保証しない (hash 関数・候補選択はフォーマット定義外のため、本実装は参照と同一式 `HASH(PTR)` を採用しつつも選択枝は異なりうる) | 実装選択 | ✅ | roundtrip + 参照デコーダ相互運用で検証 |
 

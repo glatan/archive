@@ -51,7 +51,7 @@
 | 21 | `pcrc32=` があれば照合 | draft §multipart | ✅ | `encode_part` が emit + decode 検証 |
 | 22 | `=ypart` range が全体サイズを超える場合は拒否 | バリデーション | ✅ | `decode` 内 range チェック |
 | 25 | `total=` の部分検証: `part > total` を reject、`part == total` なら `=ypart end` == `=ybegin size` を照合 (不在は受理) | draft "(1.2) should be also added" 推奨項目 | ✅ | `multipart_total_validation`。全パートを対象とした集計照合は `join_parts` (要件 23) で実施する |
-| 23 | part の結合・順序付け・missing part 検出 | draft §multipart | ✅ | `join_parts` でパート番号順に結合し、欠落したパートは `Error::InvalidData` として拒絶する (`join_parts_roundtrip`, `join_parts_detects_missing_part`, `join_parts_reorders`, `join_parts_rejects_name_mismatch`) |
+| 23 | part の結合・順序付け・missing part 検出 | draft §multipart | ✅ | `join_parts` でパート番号順に結合し、欠落したパートは `Error::InvalidData` で拒否する (`join_parts_roundtrip`, `join_parts_detects_missing_part`, `join_parts_reorders`, `join_parts_rejects_name_mismatch`) |
 
 ## 意図的な scope 制約
 
