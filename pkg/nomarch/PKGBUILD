@@ -1,0 +1,20 @@
+pkgname=nomarch
+pkgver=1.4
+pkgrel=1
+pkgdesc="Read-only listing and extraction tool for ARC archives"
+arch=('x86_64')
+url="https://www.ibiblio.org/pub/Linux/utils/compress/"
+license=('GPL-2.0-or-later')
+source=("https://www.ibiblio.org/pub/Linux/utils/compress/$pkgname-$pkgver.tar.gz")
+sha256sums=('fe20da34e0d3ba0cf6388701f44ac22224cf65130ddbc5fcbc27bc4949a6e1ad')
+
+build() {
+    cd "$pkgname-$pkgver"
+    make
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    install -Dm755 nomarch "$pkgdir/usr/bin/nomarch"
+    install -Dm644 nomarch.1 "$pkgdir/usr/share/man/man1/nomarch.1"
+}

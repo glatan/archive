@@ -10,23 +10,25 @@ RUN pacman -Syu --noconfirm && \
     rustup default stable && \
     pacman -Scc --noconfirm
 
-# arc / nomarch — Arch official に無いため Debian pool のバイナリ deb を展開
-# (interop oracle 専用。どちらも libc のみに依存する静的配置なので Arch 上で動作する)
-RUN mkdir /tmp/debs && cd /tmp/debs && \
-    curl -fsSL -o arc.deb https://deb.debian.org/debian/pool/main/a/arc/arc_5.21q-12_amd64.deb && \
-    curl -fsSL -o nomarch.deb https://deb.debian.org/debian/pool/main/n/nomarch/nomarch_1.4-4_amd64.deb && \
-    echo "9dcc3eb11abad79785c2bdbac97745ce7b47229b627e6bfa10ce307d5903fdfa  arc.deb" | sha256sum -c - && \
-    echo "802d37330a29481680ad74546f734e7bf542fa620eb5dd3fb8f677e722a77e1d  nomarch.deb" | sha256sum -c - && \
-    mkdir arc nomarch && \
-    bsdtar -C arc -xf arc.deb && bsdtar -C arc -xf arc/data.tar.xz && \
-    bsdtar -C nomarch -xf nomarch.deb && bsdtar -C nomarch -xf nomarch/data.tar.xz && \
-    install -m755 arc/usr/bin/arc arc/usr/bin/marc nomarch/usr/bin/nomarch /usr/bin/ && \
-    install -Dm644 arc/usr/share/doc/arc/Arcinfo.gz /usr/share/doc/arc/Arcinfo.gz && \
-    cd / && rm -rf /tmp/debs
-
 # makepkg 用の非 root ユーザー
 RUN useradd -m builder && \
     echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+# arc — Debian ソースパッケージを PKGBUILD からビルド (interop oracle 専用)
+COPY pkg/arc/PKGBUILD /tmp/arc/PKGBUILD
+RUN chown -R builder: /tmp/arc && \
+    su builder -c "cd /tmp/arc && makepkg -s --noconfirm" && \
+    pacman -U --noconfirm /tmp/arc/*.pkg.tar.zst && \
+    rm -rf /tmp/arc && \
+    pacman -Scc --noconfirm
+
+# nomarch — PKGBUILD からビルド (interop oracle 専用)
+COPY pkg/nomarch/PKGBUILD /tmp/nomarch/PKGBUILD
+RUN chown -R builder: /tmp/nomarch && \
+    su builder -c "cd /tmp/nomarch && makepkg -s --noconfirm" && \
+    pacman -U --noconfirm /tmp/nomarch/*.pkg.tar.zst && \
+    rm -rf /tmp/nomarch && \
+    pacman -Scc --noconfirm
 
 # rzip — PKGBUILD からビルド
 COPY pkg/rzip/PKGBUILD /tmp/rzip/PKGBUILD

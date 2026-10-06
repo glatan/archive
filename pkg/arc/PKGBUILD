@@ -1,0 +1,41 @@
+pkgname=arc
+pkgver=5.21q
+_debrev=16
+pkgrel=1
+pkgdesc="SEA ARC archive utility (arc and marc)"
+arch=('x86_64')
+url="https://github.com/ani6al/arc"
+license=('GPL-2.0-only')
+# arc's upstream line is maintained by the Debian maintainer since 5.21k;
+# the current packaging repo is git.hadrons.org/cgit/debian/pkgs/arc.git
+# (debian/-only branch), so the consumable artifact is the source package.
+# snapshot.debian.org is used because pool URLs age out on new revisions.
+_snap=20260301T000000Z
+source=("https://snapshot.debian.org/archive/debian/${_snap}/pool/main/a/arc/arc_${pkgver}.orig.tar.gz"
+        "https://snapshot.debian.org/archive/debian/${_snap}/pool/main/a/arc/arc_${pkgver}-${_debrev}.debian.tar.xz")
+sha256sums=('bde44648d0c451852612da2256f5a7e48b97d0d625ba88b903d7f223959528cc'
+            'ab1797adf86681376051472a8100d8a4b9683885a3ca26c940d39a580d281346')
+
+prepare() {
+    cd "$pkgname-$pkgver"
+    # Apply the downstream quilt series: contains real fixes on top of the
+    # 2013 upstream tag (v1 header reading, arcdie varargs, directory
+    # traversal, -std=gnu17 for gcc-15+, time64) that the oracle needs.
+    local p
+    while IFS= read -r p || [ -n "$p" ]; do
+        patch -p1 < "$srcdir/debian/patches/$p"
+    done < "$srcdir/debian/patches/series"
+}
+
+build() {
+    cd "$pkgname-$pkgver"
+    # 010_fix-makefile.patch makes CFLAGS += merge env CFLAGS with
+    # OPT/SYSTEM/CPPFLAGS; c-dialect.patch pins -std=gnu17 for gcc-15+
+    make
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    make DESTDIR="$pkgdir" PREFIX=/usr install
+    install -Dm644 Arcinfo "$pkgdir/usr/share/doc/arc/Arcinfo"
+}

@@ -47,8 +47,8 @@
 - `unarchiver` (`unar`)
 - `lhasa`
 - `cabextract`
-- `arc` / `nomarch` (Debian pool binary deb 展開、oracle 専用)
 - custom package:
+  - `arc` / `nomarch` (PKGBUILD によるソースビルド、oracle 専用)
   - `rzip`
   - `zpaq`
 
