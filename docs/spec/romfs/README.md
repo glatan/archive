@@ -42,7 +42,7 @@
 | 19 | 非アラインヘッダ・イメージサイズ未満の入力を拒否 | 防御的検証 | ✅ | `parse_hdr` / decode 冒頭 |
 | 20 | ディレクトリ深さ制限 (128) | 防御的検証 | ✅ | walk 深度ガード |
 | 22 | block/char のデバイス番号解釈 | romfs.rst (spec.info) | ✅ | `RomfsEntry::dev: Option<(u16, u16)>` で major/minor を公開する (socket/fifo は None)。`exposes_device_major_minor`, `socket_fifo_have_no_device` |
-| 21 | romfs write | romfs.rst + genromfs 出力 | ✅ | `RomfsEncoder`/`encode()` で image 生成 (big-endian header+file headers、directory/symlink/hardlink/device node、volume name)。`roundtrip_basic`, `roundtrip_nested_dirs`, `roundtrip_hardlink_and_devices` |
+| 21 | romfs write | romfs.rst + genromfs 出力 | ✅ | `RomfsEncoder`/`encode()` で image 生成 (big-endian header+file headers、directory/symlink/hardlink/device node、volume name)。`roundtrip_basic`, `roundtrip_nested_dirs`, `roundtrip_hardlink_and_devices`。fuzz harness `romfs` で roundtrip + corrupt 対象 |
 
 ## 意図的な scope 制約
 

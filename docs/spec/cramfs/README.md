@@ -41,7 +41,7 @@
 | 16 | `CRAMFS_FLAG_EXT_BLOCK_POINTERS`: UNCOMPRESSED(bit31) は生コピー、DIRECT_PTR(bit30) は `ptr<<2` の絶対位置 (uncompressed は blksize、compressed は先頭 2B が長さ) | fs/cramfs/README EXT_BLOCK_POINTERS 節 | ✅ | `FLAG_EXT_BLOCK_PTRS` 読み取り + `BLK_UNCOMPRESSED`/`BLK_DIRECT_PTR` 分岐。`ext_block_ptr_uncompressed_contiguous`, `ext_block_ptr_direct_uncompressed`, `ext_block_ptr_direct_compressed` |
 | 17 | symlink のデータ = リンク先パス (ファイルと同じブロック形式) | inode.c readpage/コメント | ✅ | `test_cramfs_decode_mkfs_image` (alink) |
 | 18 | 空ファイル/空ディレクトリは offset=0, size=0 でデータなし | inode コメント | ✅ | `test_cramfs_decode_mkfs_image` (empty.txt) |
-| 19 | cramfs write | cramfs.rst + cramfs_fs.h | ✅ | `CramfsEncoder` で image 生成 (zlib 圧縮 data block、file/directory/symlink、任意 UID/GID/mode)。device node および DIRECT_PTR flag の出力は encoder の scope 外。`roundtrip_basic`, `roundtrip_nested_dirs`, `roundtrip_symlink`, `roundtrip_multiblock_file`, `trait_encoder_roundtrip` |
+| 19 | cramfs write | cramfs.rst + cramfs_fs.h | ✅ | `CramfsEncoder` で image 生成 (zlib 圧縮 data block、file/directory/symlink、任意 UID/GID/mode)。device node および DIRECT_PTR flag の出力は encoder の scope 外。`roundtrip_basic`, `roundtrip_nested_dirs`, `roundtrip_symlink`, `roundtrip_multiblock_file`, `trait_encoder_roundtrip`。fuzz harness `cramfs` で roundtrip + corrupt 対象 |
 
 ## 意図的な scope 制約
 

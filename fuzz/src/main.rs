@@ -11,11 +11,13 @@ mod checksum;
 mod corpus;
 mod datagen;
 mod external;
+mod fixtures;
 mod known_issues;
 mod minimizer;
 mod regression;
 mod report;
 mod runner;
+mod watchdog;
 
 use algorithms::Algorithm;
 use clap::{Parser, ValueEnum};
@@ -43,7 +45,7 @@ struct Cli {
     #[arg(short, long, default_value_t = 60)]
     duration: u64,
 
-    /// Test pattern (all/self/original-compress/original-decompress)
+    /// Test pattern (all/self/original-compress/original-decompress/corrupt)
     #[arg(short, long, default_value = "all")]
     pattern: String,
 
@@ -67,6 +69,10 @@ struct Cli {
     #[arg(long, default_value = "fuzz/corpus/")]
     corpus_dir: String,
 
+    /// Fixtures directory whose real tool-produced files seed corrupt bases
+    #[arg(long, default_value = "tests/fixtures/")]
+    fixtures_dir: String,
+
     /// Input generation mode
     #[arg(long, value_enum, default_value_t = ModeArg::Time)]
     mode: ModeArg,
@@ -75,7 +81,7 @@ struct Cli {
     #[arg(long, default_value_t = 1)]
     jobs: usize,
 
-    /// Replay a saved failure artifact (.json or .bin companion pair)
+    /// Replay a saved failure artifact (.json/.bin pair) or a directory of them
     #[arg(long)]
     replay: Option<String>,
 
@@ -110,7 +116,10 @@ fn main() {
     }
 
     if let Some(path) = cli.import_regression.as_deref() {
-        match regression::import_failure(Path::new(path), Path::new(".")) {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap_or_else(|| Path::new("."));
+        match regression::import_failure(Path::new(path), repo_root) {
             Ok((fixture, test, mod_file)) => {
                 eprintln!("imported fixture: {}", fixture.display());
                 eprintln!("imported test: {}", test.display());
@@ -125,7 +134,7 @@ fn main() {
     }
 
     if let Some(path) = cli.replay.as_deref() {
-        match runner::replay_failure(Path::new(path)) {
+        match runner::replay_path(Path::new(path), Path::new(&cli.fixtures_dir)) {
             Ok(()) => return,
             Err(err) => {
                 eprintln!("replay failed: {err}");
@@ -182,6 +191,7 @@ fn main() {
         jobs: cli.jobs.max(1),
         output_dir: cli.output,
         corpus_dir: cli.corpus_dir,
+        fixtures_dir: cli.fixtures_dir,
     };
 
     let stats = runner::run(&config);
@@ -208,6 +218,7 @@ fn parse_pattern(s: &str) -> PatternFilter {
         "self" => PatternFilter::Self_,
         "original-compress" => PatternFilter::OriginalCompress,
         "original-decompress" => PatternFilter::OriginalDecompress,
+        "corrupt" => PatternFilter::Corrupt,
         _ => panic!("Unknown pattern: {s}"),
     }
 }

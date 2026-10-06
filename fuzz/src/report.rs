@@ -21,6 +21,9 @@ pub enum TestPattern {
     OriginalCompress,
     /// Our library encodes, external tool decodes.
     OriginalDecompress,
+    /// Our library encodes, the stream is mutated deterministically, then our
+    /// library must decode it without panicking or producing unbounded output.
+    Corrupt,
 }
 
 impl TestPattern {
@@ -30,6 +33,7 @@ impl TestPattern {
             TestPattern::Self_ => "self",
             TestPattern::OriginalCompress => "original-compress",
             TestPattern::OriginalDecompress => "original-decompress",
+            TestPattern::Corrupt => "corrupt",
         }
     }
 
@@ -38,6 +42,7 @@ impl TestPattern {
             "self" => Some(Self::Self_),
             "original-compress" => Some(Self::OriginalCompress),
             "original-decompress" => Some(Self::OriginalDecompress),
+            "corrupt" => Some(Self::Corrupt),
             _ => None,
         }
     }
@@ -69,6 +74,13 @@ pub struct FailureReport {
     pub signature: String,
     #[serde(default)]
     pub bin_file: String,
+    /// Sidecar holding the exact mutated encoded stream that triggered a
+    /// corrupt-pattern failure; empty for other patterns.
+    #[serde(default)]
+    pub mut_file: Option<String>,
+    /// Mutation descriptor (e.g. `self/truncate@42`) for corrupt failures.
+    #[serde(default)]
+    pub mutation: Option<String>,
 }
 
 /// All context needed to report and persist a single test failure.
@@ -83,6 +95,11 @@ pub struct FailureInfo<'a> {
     pub error: &'a str,
     pub case_label: Option<String>,
     pub signature: String,
+    /// For corrupt failures: the minimized mutated encoded stream to persist
+    /// as a `.mut.bin` sidecar.
+    pub mutated_stream: Option<&'a [u8]>,
+    /// Mutation descriptor (e.g. `fixture#3/truncate@42`).
+    pub mutation: Option<String>,
 }
 
 /// Aggregate pass/fail counters, broken down by [`TestPattern`].
@@ -161,7 +178,7 @@ pub fn log_progress_status(
 
 /// Write a failure report as a single JSON line to stdout.
 pub fn emit_failure_json(info: &FailureInfo) {
-    let report = failure_report(info, String::new());
+    let report = failure_report(info, String::new(), None);
     if let Ok(json) = serde_json::to_string(&report) {
         println!("{json}");
     }
@@ -193,9 +210,19 @@ pub fn save_failure(output_dir: &Path, info: &FailureInfo) {
         let _ = f.write_all(info.data);
     }
 
+    // Save the mutated encoded stream that triggered a corrupt failure so
+    // replay and regression generation can target it directly.
+    let mut_file = info.mutated_stream.map(|bytes| {
+        let name = format!("{base}.mut.bin");
+        if let Ok(mut f) = fs::File::create(output_dir.join(&name)) {
+            let _ = f.write_all(bytes);
+        }
+        name
+    });
+
     // Save metadata
     let json_path = output_dir.join(format!("{base}.json"));
-    let meta = failure_report(info, format!("{base}.bin"));
+    let meta = failure_report(info, format!("{base}.bin"), mut_file);
     if let Ok(json) = serde_json::to_string_pretty(&meta)
         && let Ok(mut f) = fs::File::create(&json_path)
     {
@@ -203,7 +230,7 @@ pub fn save_failure(output_dir: &Path, info: &FailureInfo) {
     }
 }
 
-fn failure_report(info: &FailureInfo, bin_file: String) -> FailureReport {
+fn failure_report(info: &FailureInfo, bin_file: String, mut_file: Option<String>) -> FailureReport {
     FailureReport {
         algorithm: info.algo.name().to_string(),
         pattern: info.pattern.label().to_string(),
@@ -218,6 +245,8 @@ fn failure_report(info: &FailureInfo, bin_file: String) -> FailureReport {
         case_label: info.case_label.clone(),
         signature: info.signature.clone(),
         bin_file,
+        mut_file,
+        mutation: info.mutation.clone(),
     }
 }
 
@@ -234,6 +263,7 @@ pub fn print_summary(duration_secs: u64, algorithms: usize, stats: &Stats) {
         TestPattern::Self_,
         TestPattern::OriginalCompress,
         TestPattern::OriginalDecompress,
+        TestPattern::Corrupt,
     ];
     for p in &patterns {
         let count = stats.counts.get(p).copied().unwrap_or(0);
@@ -392,6 +422,7 @@ pub fn write_run_summary(
 ) -> Result<(), String> {
     let patterns = [
         TestPattern::Self_,
+        TestPattern::Corrupt,
         TestPattern::OriginalCompress,
         TestPattern::OriginalDecompress,
     ]
@@ -427,6 +458,7 @@ struct MatrixRow {
     algorithm: String,
     external_tool_available: bool,
     self_enabled: bool,
+    corrupt_enabled: bool,
     original_compress_enabled: bool,
     original_decompress_enabled: bool,
     special_cases: Vec<String>,
@@ -456,6 +488,7 @@ pub fn write_matrix_report(
                 algorithm: algo.name().to_string(),
                 external_tool_available: has_tool,
                 self_enabled: true,
+                corrupt_enabled: true,
                 original_compress_enabled: has_tool && !no_external,
                 original_decompress_enabled: has_tool && !no_external,
                 special_cases: crate::algorithms::special_case_labels(algo)
@@ -481,7 +514,66 @@ pub fn load_failure(path: &Path) -> Result<LoadedFailure, String> {
     )
     .map_err(|e| format!("parse failure json failed: {e}"))?;
     let data = fs::read(&bin_path).map_err(|e| format!("read failure bin failed: {e}"))?;
+    // `mut_file` is joined onto the artifact directory by replay/export —
+    // reject anything but a bare filename so a crafted report cannot make
+    // the harness read or copy files outside that directory.
+    if let Some(name) = &report.mut_file
+        && !is_bare_name(name)
+    {
+        return Err(format!("invalid mut_file name in report: {name:?}"));
+    }
     Ok(LoadedFailure { report, data })
+}
+
+/// A file name that is safe to join onto an artifact directory: exactly
+/// one normal path component, no separators or `..`.
+fn is_bare_name(name: &str) -> bool {
+    let mut components = Path::new(name).components();
+    matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none()
+}
+
+/// Metadata of a `hang-*.json` watchdog artifact. Deliberately not a
+/// [`FailureReport`]: the process died before one could be written, so
+/// only identification fields exist.
+#[derive(Debug)]
+pub struct HangMeta {
+    pub algorithm: String,
+    pub pattern: String,
+    pub iteration: u64,
+    pub bin_file: String,
+}
+
+/// Load a watchdog hang artifact (`hang-*.json`). Returns `Err` for any
+/// other file, including valid failure reports.
+pub fn load_hang(path: &Path) -> Result<HangMeta, String> {
+    #[derive(Deserialize)]
+    struct RawHang {
+        kind: String,
+        algorithm: String,
+        pattern: String,
+        iteration: u64,
+        bin_file: String,
+    }
+    let raw: RawHang = serde_json::from_slice(
+        &fs::read(path).map_err(|e| format!("read hang report failed: {e}"))?,
+    )
+    .map_err(|e| format!("parse hang report failed: {e}"))?;
+    if raw.kind != "hang" {
+        return Err(format!("{} is not a hang report", path.display()));
+    }
+    if !is_bare_name(&raw.bin_file) {
+        return Err(format!(
+            "invalid bin_file name in hang report: {:?}",
+            raw.bin_file
+        ));
+    }
+    Ok(HangMeta {
+        algorithm: raw.algorithm,
+        pattern: raw.pattern,
+        iteration: raw.iteration,
+        bin_file: raw.bin_file,
+    })
 }
 
 pub fn failure_signature(algo: Algorithm, pattern: TestPattern, error: &str) -> String {
@@ -527,6 +619,19 @@ fn sanitize_filename_component(input: &str) -> String {
 }
 
 fn normalize_error(error: &str) -> String {
+    // A trailing " @ <file>:<line>" panic location is appended verbatim after
+    // normalization so distinct panic sites keep distinct signatures.
+    let (error, location) = match error.rsplit_once(" @ ") {
+        Some((body, loc))
+            if loc.rsplit_once(':').is_some_and(|(f, n)| {
+                f.ends_with(".rs") && n.bytes().all(|b| b.is_ascii_digit())
+            }) =>
+        {
+            (body, Some(loc))
+        }
+        _ => (error, None),
+    };
+
     let mut out = String::with_capacity(error.len());
     let mut in_digits = false;
     let mut last_was_space = false;
@@ -557,7 +662,11 @@ fn normalize_error(error: &str) -> String {
         }
     }
 
-    out.trim().to_string()
+    let trimmed = out.trim();
+    match location {
+        Some(loc) => format!("{trimmed} @ {loc}"),
+        None => trimmed.to_string(),
+    }
 }
 
 fn write_json<T: Serialize>(path: PathBuf, value: &T) -> Result<(), String> {
@@ -626,6 +735,8 @@ mod tests {
             error: "boom 42",
             case_label: Some("case".to_string()),
             signature: failure_signature(Algorithm::Gzip, TestPattern::Self_, "boom 42"),
+            mutated_stream: None,
+            mutation: None,
         };
         save_failure(&tmp, &info);
 

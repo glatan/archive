@@ -107,6 +107,11 @@ fn is_sevenz_empty_stream_entry(
             | Algorithm::SevenZPpmd
             | Algorithm::SevenZDeflate
             | Algorithm::SevenZBzip2
+            | Algorithm::SevenZDeflate64
+            | Algorithm::SevenZBrotli
+            | Algorithm::SevenZX86
+            | Algorithm::SevenZBcj2
+            | Algorithm::SevenZDelta
     ) && pattern == TestPattern::OriginalCompress
         && data.is_empty()
         && error.contains("empty-stream entries are not supported")

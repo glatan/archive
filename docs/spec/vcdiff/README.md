@@ -76,7 +76,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
 | 29 | CLI `--format vcdiff` で decode/encode。magic `D6 C3 C4` で自動検出も可 | crate CLI contract | ✅ | archive-cli 配線 |
-| 30 | fuzz ラウンドトリップ対象 (algorithm `vcdiff`)。外部ツール interop ハーネスへの接続はなし (xdelta3 は source ファイル引数を要し pipe 型 spec に合わない) | crate fuzz contract | ✅ | fuzz 配線 |
+| 30 | fuzz ラウンドトリップ対象 (algorithm `vcdiff` 空 source、`vcdiff-source` 非空 source)。外部ツール interop ハーネスへの接続はなし (xdelta3 は source ファイル引数を要し pipe 型 spec に合わない) | crate fuzz contract | ✅ | fuzz 配線 |
 
 ## 出典 / 検証メモ
 

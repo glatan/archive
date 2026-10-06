@@ -40,7 +40,7 @@
 | 16 | mini FAT 自身は Number of Mini FAT Sectors 個の通常セクターチェーン | §2.4 | ✅ | `decodes_mini_stream` |
 | 17 | size ≥ cutoff の stream は通常 FAT チェーン | §2.7 | ✅ | `decodes_regular_sector_stream` (5000B/10 セクター) |
 | 18 | チェーン終端到達前に size 分読めない/超過読みをした場合の切り詰め拒否 | §4.1 | ✅ | `rejects_bad_signature_and_truncation` |
-| 19 | compound file write | [MS-CFB] | ✅ | `CfbEncoder` で v3/v4 image 生成 (FAT/miniFAT チェーン、4096B mini stream cutoff、名前ソート balanced binary tree directory、DIFAT)。`roundtrip_stream_tree`, `mini_stream_roundtrip`, `v4_sector_roundtrip`, `difat_chain_roundtrip`, `empty_file_roundtrip`。CLSID/state bits/timestamp は emit しない (writer 側 scope 外)。write 参照実装は manifest `no_url_available` の `mscfb-write-refs` (cfb crate / Apache POI / libgsf) |
+| 19 | compound file write | [MS-CFB] | ✅ | `CfbEncoder` で v3/v4 image 生成 (FAT/miniFAT チェーン、4096B mini stream cutoff、名前ソート balanced binary tree directory、DIFAT)。`roundtrip_stream_tree`, `mini_stream_roundtrip`, `v4_sector_roundtrip`, `difat_chain_roundtrip`, `empty_file_roundtrip`。CLSID/state bits/timestamp は emit しない (writer 側 scope 外)。write 参照実装は manifest `no_url_available` の `mscfb-write-refs` (cfb crate / Apache POI / libgsf)。fuzz harness `mscfb`/`mscfb-v4` で roundtrip + corrupt 対象 |
 
 ## 意図的な scope 制約
 

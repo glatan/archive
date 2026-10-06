@@ -5,7 +5,7 @@
 | 形式概要 | Chrome 拡張パッケージ。`Cr24` magic + version 3 + protobuf `CrxFileHeader` + ZIP アーカイブ |
 | 基準仕様 | Chromium `components/crx_file/crx3.proto` (`docs/spec/sources/crx3.proto` にスナップショット) |
 | 参照実装 | 独自 Python protobuf/zip ジェネレータ (interop oracle)。CRX2 固定ヘッダは Chromium `components/crx_file/crx_file.h` / `crx_verifier.cc` (BSD-3、書面参照のみ) が根拠。詳細: THIRD_PARTY_NOTICES crx3 項 |
-| 実装 | `archive::archive::crx3::decode` (CRX3/CRX2 read のみ)。`crx3` feature 配下 (`zip` feature に依存) |
+| 実装 | `archive::archive::crx3::decode` (CRX3/CRX2 read のみ)。`crx3` feature 配下 (`zip` feature に依存)。fuzz harness `crx3` は生成 fixture 経由で decode + corrupt パターンを検証 |
 
 ## コンテナ層
 
