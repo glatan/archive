@@ -99,6 +99,60 @@ fn test_lzw_encode_decoded_by_system_uncompress() {
     assert_eq!(output.stdout, input);
 }
 
+/// Encode at max_bits=9 and verify system `uncompress`/`gzip -d` accepts
+/// the stream: the dict-full CLEAR must be emit #256 of its run so the
+/// compress42.c-family decoder never crosses its phantom width bump
+/// (`free_ent > maxcode` widens with no `n_bits < maxbits` guard).
+#[test]
+fn test_lzw_encode_bits9_decoded_by_system_uncompress() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let has_uncompress = Command::new("uncompress").arg("-V").output().is_ok()
+        || Command::new("gzip").arg("--version").output().is_ok();
+    if !has_uncompress {
+        return;
+    }
+
+    // Both inputs fill the 9-bit dictionary; incrementing-511 is the
+    // input behind fuzz failure artifact run-1791251880.
+    for input in [
+        (0..511u32).map(|i| (i % 256) as u8).collect::<Vec<u8>>(),
+        (0..4096u32).map(|i| (i % 256) as u8).collect(),
+    ] {
+        let encoded = lzw::encode::encode_with_options(&input, 9);
+
+        let uniq = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("archive_test_lzw9_{uniq}.Z"));
+        std::fs::write(&path, &encoded).unwrap();
+
+        let output = if Command::new("uncompress").arg("-V").output().is_ok() {
+            Command::new("uncompress")
+                .args(["-c"])
+                .arg(&path)
+                .output()
+                .unwrap()
+        } else {
+            Command::new("gzip")
+                .args(["-d", "-c", "-S", ".Z"])
+                .arg(&path)
+                .output()
+                .unwrap()
+        };
+        let _ = std::fs::remove_file(&path);
+
+        assert!(
+            output.status.success(),
+            "system .Z decode failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, input);
+    }
+}
+
 #[test]
 fn test_lzw_decode_system_compressed_stream() {
     use std::process::{Command, Stdio};

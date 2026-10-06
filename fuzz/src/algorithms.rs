@@ -437,7 +437,8 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
         Algorithm::Lzip | Algorithm::LzipFast | Algorithm::LzipBest => lzip::encode::encode(data),
         Algorithm::LzmaAlone => lzma_alone::encode::encode(data),
         Algorithm::Xz | Algorithm::XzFast | Algorithm::XzBest => xz::encode::encode(data),
-        Algorithm::Lzw | Algorithm::LzwBits9 => lzw::encode::encode(data),
+        Algorithm::Lzw => lzw::encode::encode(data),
+        Algorithm::LzwBits9 => lzw::encode::encode_with_options(data, 9),
         Algorithm::Lz4 | Algorithm::Lz4Fast | Algorithm::Lz4Best => lz4::encode::encode(data),
         Algorithm::Lz4SmallBlock => {
             lz4::encode::encode_with_options(data, lz4::encode::BlockMaxSize::KB64, true)

@@ -288,3 +288,6 @@
   - fuzz で残した ASCII 寄りの入力
   - crate 側で xz encode した結果を system `xz -dc` で展開できるかの回帰に使う
   - ツール不在時は self-roundtrip のみ検証する
+- `lzw_clear_pad_run_start.bin`
+  - fuzz で残したバイナリ入力 (90,029 バイト)
+  - `.Z` の group-of-8 pad が body 先頭ではなくブロックラン起点 (compress42.c `boff`) から測られることの回帰用 — `test_fuzz_regression_clear_pad_run_start` が compress42.c/gzip `unlzw` 参照モデルでエンコード結果を検証

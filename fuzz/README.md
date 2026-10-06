@@ -143,7 +143,7 @@ cargo run --release -p archive-fuzz -- --import-regression fuzz/failures/run-...
 | `lrzip-*` (全 backend) | `original-decompress` | system `lrzip` の outer `.lrz` framing との完全互換を主張しない (intentional scope) |
 | `lrzip-*` (全 backend) | `original-compress` | 特定エラー (`unsupported compression type` / `unexpected end of input` / `match offset out of range` / `zpaq: ZPAQL execution error` / `zpaq: invalid hcomp jump target` / `zpaq: zpaql execution limit exceeded`) は system lrzip 側の制限 |
 | `lzw`, `lzw-bits9` | `original-compress`, `original-decompress` | `ncompress` は空入力を exit status 2 で拒否する外部ツール固有の動作 |
-| `lzw-bits9` | `original-compress` | `compress -b 9` は一部入力でロッシーな roundtrip を起こす外部ツール自身のバグ |
+| `lzw-bits9` | `original-compress` | `compress -b 9` は一部入力でロッシーな roundtrip を起こす外部ツール自身のバグ (encoder の `n_bits < maxbits` ガードと decoder の無条件 phantom bump が不整合となるため) |
 | `7z`, `7z-copy`, `7z-lzma`, `7z-ppmd`, `7z-deflate`, `7z-bzip2` | `original-compress` | system `7z` は空入力を empty-stream エントリーとして格納するが、このエントリー種別は intentional exclusion |
 
 ## Resource oracle の注意点

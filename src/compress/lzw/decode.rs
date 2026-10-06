@@ -92,6 +92,10 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 /// Spark `0x7f` method which embed the stream inside their own member
 /// records. `max_bits` is the maximum code width (9-16); `block_mode`
 /// enables the reserved clear code 256 and the group-of-8 resync.
+/// Resync boundaries are measured from the block-run origin — the
+/// landing of the previous width bump or clear resync (compress42.c
+/// `boff` / the `resetbuf` slide), which is the body start for the
+/// first run.
 pub(crate) fn decode_body(data: &[u8], max_bits: u32, block_mode: bool) -> Result<Vec<u8>, Error> {
     if !(9..=16).contains(&max_bits) {
         return Err(Error::InvalidData("lzw: max bits out of range (9-16)"));
@@ -117,6 +121,13 @@ pub(crate) fn decode_body(data: &[u8], max_bits: u32, block_mode: bool) -> Resul
     let mut next_code: u32 = if block_mode { FIRST_CODE as u32 } else { 256 };
     let mut code_bits: u32 = 9;
     let mut bit_pos: usize = 0;
+    // Bit position (relative to `data`) of the current block-run origin —
+    // the landing of the most recent group-of-8 resync. compress42.c's
+    // decoder re-bases its input buffer at every resync (the `resetbuf`
+    // slide, equivalent to the encoder's `boff`), so the resync lattice
+    // is measured from the last width-bump or clear landing, not from
+    // the body start.
+    let mut run_start: usize = 0;
     let mut output = Vec::new();
 
     // Temp buffer for decoding a dictionary chain
@@ -144,12 +155,15 @@ pub(crate) fn decode_body(data: &[u8], max_bits: u32, block_mode: bool) -> Resul
             // Skip to next old_code_bits-aligned boundary.
             // Unix compress packs codes in groups of 8, each group being
             // old_code_bits bytes. After clear, remaining bits in the
-            // current group are discarded.
-            let bits_per_group = old_code_bits as usize;
-            let remainder = bit_pos % (bits_per_group * 8);
+            // current group are discarded. The group lattice is measured
+            // from the block-run origin (the previous resync landing),
+            // not from the body start — see compress42.c `resetbuf`.
+            let group_bits = old_code_bits as usize * 8;
+            let remainder = (bit_pos - run_start) % group_bits;
             if remainder != 0 {
-                bit_pos += bits_per_group * 8 - remainder;
+                bit_pos += group_bits - remainder;
             }
+            run_start = bit_pos;
 
             // Read next code after clear
             prev_code = match read_code(data, &mut bit_pos, code_bits) {
@@ -197,6 +211,17 @@ pub(crate) fn decode_body(data: &[u8], max_bits: u32, block_mode: bool) -> Resul
             // The decoder reconstructs dictionary entries one step behind the
             // encoder, so it widens one boundary earlier than the encoder.
             if should_bump_decode_code_width(next_code, code_bits, max_bits) {
+                // compress42.c L1700-1710: before reading at the new
+                // width, skip to the next old-width group boundary
+                // measured from the block-run origin (a no-op for
+                // conforming streams, whose bumps land exactly on the
+                // lattice), and re-origin the lattice at the landing.
+                let group_bits = code_bits as usize * 8;
+                let remainder = (bit_pos - run_start) % group_bits;
+                if remainder != 0 {
+                    bit_pos += group_bits - remainder;
+                }
+                run_start = bit_pos;
                 code_bits += 1;
             }
         }
@@ -791,6 +816,116 @@ mod tests {
         let compressed = super::super::encode::encode_with_full_options(&data, 16, false);
         let decoded = decode(&compressed).unwrap();
         assert_eq!(&decoded[..], &data[..]);
+    }
+
+    /// Append `bits` bits of `code` to `body` at `bit_pos` (LSB-first).
+    fn push_code(body: &mut Vec<u8>, bit_pos: &mut usize, code: u32, bits: u32) {
+        let need = (*bit_pos + bits as usize).div_ceil(8);
+        while body.len() < need {
+            body.push(0);
+        }
+        for i in 0..bits as usize {
+            if (code >> i) & 1 != 0 {
+                body[(*bit_pos + i) / 8] |= 1 << ((*bit_pos + i) % 8);
+            }
+        }
+        *bit_pos += bits as usize;
+    }
+
+    #[test]
+    fn test_clear_resync_originates_at_bump_landing() {
+        // compress42.c measures the post-CLEAR group-of-8 resync from
+        // the current block-run origin — the landing of the previous
+        // width bump or clear (`boff`, re-based via `resetbuf` in the
+        // decoder) — not from the body start. Build a conforming stream
+        // by hand: 256 9-bit literal codes push the dictionary across
+        // the 9→10 bump at body bit 2304 (= 32 complete 9-byte groups),
+        // then a CLEAR at 10 bits. Its pad must reach the next 80-bit
+        // boundary counted from bit 2304 — bit 2384, not bit 2320
+        // (the body-relative boundary the pre-fix decoder resynced to).
+        let mut body = Vec::new();
+        let mut bp = 0usize;
+        let mut expected = Vec::new();
+
+        // First code of the stream must be a literal.
+        push_code(&mut body, &mut bp, u32::from(b'A'), 9);
+        expected.push(b'A');
+        // 255 more literal codes: each adds one dictionary entry, so the
+        // decoder widens 9→10 bits right after the 256th code.
+        for i in 0..255u32 {
+            let lit = i % 250 + 1; // literals 1..=250; never 256 (CLEAR)
+            push_code(&mut body, &mut bp, lit, 9);
+            expected.push(lit as u8);
+        }
+        assert_eq!(bp, 256 * 9, "bump lands at body bit 2304");
+
+        // CLEAR is written at the new 10-bit width...
+        push_code(&mut body, &mut bp, CLEAR_CODE as u32, 10);
+        // ...and padded to the next 80-bit group boundary counted from
+        // the bump landing at bit 2304.
+        let bump_landing = 256 * 9;
+        let rem = (bp - bump_landing) % 80;
+        if rem != 0 {
+            bp += 80 - rem;
+        }
+        assert_eq!(bp, 2384, "run-relative resync lands at bit 2384");
+        while body.len() < bp.div_ceil(8) {
+            body.push(0);
+        }
+
+        push_code(&mut body, &mut bp, u32::from(b'Z'), 9);
+        expected.push(b'Z');
+        while body.len() < bp.div_ceil(8) {
+            body.push(0);
+        }
+
+        let mut stream = vec![0x1F, 0x9D, BLOCK_MODE | 10];
+        stream.extend_from_slice(&body);
+        let decoded = decode(&stream).unwrap();
+        assert_eq!(decoded, expected);
+    }
+
+    #[test]
+    fn test_clear_body_relative_pad_is_corrupt() {
+        // The same hand-built stream, but with the post-CLEAR pad taken
+        // to the *body-relative* 80-bit boundary (bit 2320) instead of
+        // the run-relative one (bit 2384). This is the layout the buggy
+        // encoder produced; a conforming decoder must not reconstruct
+        // the intended payload from it.
+        let mut body = Vec::new();
+        let mut bp = 0usize;
+        push_code(&mut body, &mut bp, u32::from(b'A'), 9);
+        for i in 0..255u32 {
+            push_code(&mut body, &mut bp, i % 250 + 1, 9);
+        }
+        push_code(&mut body, &mut bp, CLEAR_CODE as u32, 10);
+        // Buggy layout: pad to next multiple of 80 from the body start.
+        let rem = bp % 80;
+        if rem != 0 {
+            bp += 80 - rem;
+        }
+        assert_eq!(bp, 2320);
+        while body.len() < bp.div_ceil(8) {
+            body.push(0);
+        }
+        push_code(&mut body, &mut bp, u32::from(b'Z'), 9);
+        while body.len() < bp.div_ceil(8) {
+            body.push(0);
+        }
+
+        let mut stream = vec![0x1F, 0x9D, BLOCK_MODE | 10];
+        stream.extend_from_slice(&body);
+        // Either the decode errors out or the payload desyncs — what it
+        // must not do is silently reproduce the intended data.
+        match decode(&stream) {
+            Err(_) => {}
+            Ok(decoded) => {
+                let mut expected = vec![b'A'];
+                expected.extend((0..255u32).map(|i| (i % 250 + 1) as u8));
+                expected.push(b'Z');
+                assert_ne!(decoded, expected);
+            }
+        }
     }
 
     #[test]

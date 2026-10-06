@@ -114,7 +114,12 @@ fn is_sevenz_empty_stream_entry(
 
 /// ncompress `compress -b 9` has a known bug where the roundtrip is lossy
 /// for certain data patterns (the system `uncompress` itself also fails to
-/// recover the original data).  This is an external tool issue, not ours.
+/// recover the original data).  Root cause: the ncompress encoder guards
+/// the width bump with `n_bits < maxbits` (compress42.c:1402) while its
+/// decoder bumps unconditionally on `free_ent > maxcode` (compress42.c:1698,
+/// the "phantom bump"), so a -b9 stream that fills the dictionary is
+/// written at 9 bits but read back at 10.  This is an external tool issue,
+/// not ours.
 fn is_lzw_bits9_roundtrip_loss(algo: Algorithm, pattern: TestPattern, error: &str) -> bool {
     algo == Algorithm::LzwBits9
         && pattern == TestPattern::OriginalCompress
