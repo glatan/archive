@@ -48,7 +48,7 @@ MSB-first でパックされる (RFC 2118 §4.2)。
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
 | 16 | 履歴バッファ 8192 バイト、初期値ゼロ。FLUSHED でゼロ初期化 + 位置リセット | RFC 2118 §1, §3, §3.1 Bit A | ✅ | `reset` |
-| 17 | 非圧縮パケットは履歴を更新しない。RFC 2118 §3 "Data Expansion" は expansion 送信後に sender が履歴を flush して次パケットで FLUSHED を立てることを要求しており、FreeRDP (Apache-2.0) も非圧縮パケットの履歴更新を行わない | RFC 2118 §3 + FreeRDP 挙動 | ✅ | `expansion_fallback` |
+| 17 | 非圧縮パケットは履歴を更新しない。RFC 2118 §3 "Data Expansion" では expansion 送信後に sender が履歴を flush して次パケットで FLUSHED を立てることが規定されており、FreeRDP (Apache-2.0) も非圧縮パケットの履歴更新を行わない | RFC 2118 §3 + FreeRDP 挙動 | ✅ | `expansion_fallback` |
 | 18 | エンコーダは expansion (圧縮結果 >= 入力) の場合 C=0 の非圧縮パケットを出し、次パケットに FLUSHED を立てる | RFC 2118 §3 "Data Expansion" | ✅ | `expansion_fallback` |
 | 19 | エンコーダは `pos + len > 8192` の場合 FRONT を立てて書き込み位置を 0 に戻す | RFC 2118 §3.1 Bit B | ✅ | `front_wrap` |
 | 20 | 1 パケットのペイロードは最大 8192 バイト (履歴サイズ)。超過入力は InvalidData。マルチパケット化は呼び出し側のパケット化責任 | RFC 2118 §1, §3 | ✅ | `payload_too_large`、`oversized_input_rejected` (統合) |

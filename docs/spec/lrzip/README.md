@@ -2,12 +2,12 @@
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | upstream [`ckolivas/lrzip`](https://github.com/ckolivas/lrzip) の [`doc/magic.header.txt`](https://github.com/ckolivas/lrzip/blob/master/doc/magic.header.txt) + ソースコード (0.6x 系、ローカルスナップショット: `docs/spec/sources/lrzip_magic.header.txt`)。本 crate は crate-local subset のため完全互換は主張しない |
+| 基準仕様 | upstream [`ckolivas/lrzip`](https://github.com/ckolivas/lrzip) の [`doc/magic.header.txt`](https://github.com/ckolivas/lrzip/blob/master/doc/magic.header.txt) + ソースコード (0.6x 系、ローカルスナップショット: `docs/spec/sources/lrzip_magic.header.txt`)。本 crate は crate-local subset のため完全互換は保証しない |
 | 参照実装 | upstream `lrzip` (Con Kolivas 他、GPL-2.0-or-later、動作参照 — format facts のみ、コード取り込みなし。GPL-2.0+→GPL-3→AGPL-13 の変換パスあり)。system `lrzip` は oracle (下記「相互運用の確認範囲」行参照)。詳細: THIRD_PARTY_NOTICES lrzip / rzip 項 |
 | 形式概要 | crate-local な `.lrz` framing を持ち、shared long-range match finder の上に lrzip-specific variable-width match offset token を載せる。system `lrzip` との完全互換 reimplementation は目標外 |
 | 内部構成 | crate-local shared `rzip`-style token/chunk logic を再利用し、その上に `LZMA` / `bzip2` / `LZO` / `gzip` / `ZPAQ` / `none` バックエンドを重ねる |
 | `magic.header.txt` でカバーしない残余の de facto 事実 | ctype 数値写像 (none/bzip2/lzo/lzma/gzip/zpaq)、stream header は CTYPE_NONE プレースホルダで実 ctype は block header 側にだけ置く layout、empty stream0 = CRC + 0-length literal token、stream-0 の token エンコーディング、可変幅 match offset、chunk sizing (~100MiB)、生データフォールバック方針 — いずれも upstream ソース由来の format fact であり、書面仕様が存在しないため例外として記録する |
-| system `lrzip` 相互運用の確認範囲 | 現在の実測確認は system `lrzip` 生成の simple / match-rich LZMA archive decode と、crate 出力を system `lrzip -d` が decode できる LZMA / `bzip2` / `LZO` / `gzip` / `ZPAQ` / `none` backend matrix と MD5 flag 付き出力まで。未検証の option matrix や large-payload outer framing 全体の完全互換は主張しない |
+| system `lrzip` 相互運用の確認範囲 | 現在の実測確認は system `lrzip` 生成の simple / match-rich LZMA archive decode と、crate 出力を system `lrzip -d` が decode できる LZMA / `bzip2` / `LZO` / `gzip` / `ZPAQ` / `none` backend matrix と MD5 flag 付き出力まで。未検証の option matrix や large-payload outer framing 全体との完全互換は保証の対象外とする |
 
 ## 対応バリアント・仕様版
 
@@ -76,7 +76,7 @@
 | 39 | v0.6 RCD 構造 (RCD0 幅 1-8、EOF flag、chunk decompressed size、stream header ctype/c_len/u_len/last_head) | magic.header.txt v0.6 RCD | ✅ | `decode.rs` RCD パース実装 |
 | 40 | v0.6 data blocks: stream0 末端の empty literal (type 0, len 0) + CRC32 | magic.header.txt v0.6 Data blocks | ✅ | `decode_chunk_streams` で `legacy_crc32` 検証、`test_crc32_verified` |
 | 41 | magic bytes 6-13 の Source File Size は unknown 時 0 (upstream 記載) | magic.header.txt | ✅ | 実装済み — `total_size == 0` は unknown として size 検査を skip (decode / streaming reader 双方)。`test_zero_total_size_is_unknown` |
-| 42 | v0.7 節 (byte 14 streaming flag、byte 23 last-block、LRZC、CryptoDesc、minor=0x07) | magic.header.txt v0.7 | ❌ | intentional scope。対象を 0.6x に限定しているため、minor > 6 は `Error::Unsupported` として拒絶する (`test_decode_rejects_minor_above_6`) |
+| 42 | v0.7 節 (byte 14 streaming flag、byte 23 last-block、LRZC、CryptoDesc、minor=0x07) | magic.header.txt v0.7 | ❌ | intentional scope。対象を 0.6x に限定しているため、minor > 6 は `Error::Unsupported` で拒否する (`test_decode_rejects_minor_above_6`) |
 
 ---
 

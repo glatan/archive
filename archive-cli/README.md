@@ -32,7 +32,7 @@ archive list sample.tar.gz --json             # JSON 出力
 archive list sample.tar.gz --no-pager         # pager を無効化
 ```
 
-TTY 出力時は自動的に `$PAGER` (デフォルト `less -FRX`) を通す。
+TTY 出力時は自動的に `$PAGER` (デフォルト `less -FRX`) を経由して出力する。
 1 画面に収まる場合は即座に表示し、長い場合はスクロールできる。
 `--no-pager` の指定時やパイプへの出力時は pager を使用しない。
 

@@ -21,7 +21,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 1 | `.deb` は `ar` アーカイブ (`!<arch>\n` magic) として読める | deb(5): "the file is an ar archive" | ✅ | `decode()` は `ar::decode` に委譲, `test_deb_decode_minimal` |
+| 1 | `.deb` は `ar` アーカイブ (`!<arch>\n` magic) として読める | deb(5): "the file is an ar archive" | ✅ | `decode()` は `ar::decode` に委譲、`test_deb_decode_minimal` |
 | 2 | GNU thin archive (`!<thin>\n`) は package として reject | deb(5): member payload must be present | ✅ | `rejects_thin_archive` |
 | 3 | 先頭 member が `debian-binary` であること | deb(5): "The first member is named debian-binary" | ✅ | `rejects_debian_binary_not_first` |
 | 4 | `debian-binary` member 不在 → reject | deb(5): required member | ✅ | `rejects_missing_debian_binary` |

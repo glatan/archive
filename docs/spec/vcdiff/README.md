@@ -84,6 +84,6 @@
 - 統合テストの `*_xdelta3.vcd` は `xdelta3 -e` で生成した既知解答ベクタ (decode のみ検証): appheader + Adler-32 付き source ウィンドウ (fox)、source 無し単一ウィンドウ (fox_nosrc)、near/same キャッシュと大サイズ COPY を含む 32KiB 差分 (big)。
 - `VCD_CODETABLE` (アプリ定義コードテーブル) は参照実装 xdelta3 自身も `XD3_UNIMPLEMENTED` で拒否するため、本実装も Unsupported 拒否を intentional scope とする。`VCD_DECOMPRESS` (二次圧縮) も同様に Unsupported。`VCD_TARGET` は RFC 3284 §4.2 に従い decode/encode (`encode_with_windows`) とも対応済み。
 - `VCD_APPHEADER` / `VCD_ADLER32` は RFC 3284 にはない xdelta3 拡張だが、実際の xdelta3 出力に恒常的に現れるため受理する (RFC が許容しない未割当ビットではなく、de-facto 拡張として扱う)。
-- ウィンドウ内 COPY は前方 1 バイト単位の複写として実装しており、RFC §3 が許可する「複写先と重なるオーバーラップ」を正しく扱う。
+- ウィンドウ内 COPY は前方 1 バイト単位の複写として実装しており、RFC §3 で許容されている「複写先と重なるオーバーラップ」を正しく扱う。
 - 特許メモ: RFC 3284 §14 の IPR 節に関連し、IETF Datatracker には AT&T による IPR disclosure #40 (draft-korn-vcdiff) が存在する。内容は HTTP/1.1 上のデータ転送用途に限定した RAND 的宣言で、汎用差分圧縮ライブラリとしての本実装への実務上の影響は小さいと判断するが、透明性のため記録する。
 - 参照ツールの範囲メモ: fixture 生成・動作確認に用いたのは .local/xdelta3_ref 内の xdelta3 (Apache-2.0) のみ。同リポジトリに含まれる xdelta1 系ソース (GPL-2.0) は参照・移植の対象外とする。

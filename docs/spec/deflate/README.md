@@ -76,7 +76,7 @@
 | 58 | 距離コードの特別規則: 距離コード 0 個 (コード長全ゼロ) は all-literals ストリームとして受理。距離コード 1 個のみの場合は 0bit ではなく 1bit で符号化し、残りは未使用コード | RFC 1951 §3.2.7 | ✅ | `HuffmanTable::from_lengths` は全ゼロ距離長を空テーブルとして受理 (距離コード使用時のみ `empty Huffman table` で拒否)。`test_dynamic_huffman_all_literals_empty_dist_tree`, `test_dynamic_huffman_empty_dist_tree_rejects_match`, `test_encode_dynamic_all_literals_roundtrip`, `test_dynamic_huffman_direct` 系 |
 | 59 | コード長リピートコード (16/17/18) は HLIT+257 → HDIST+1 の境界をまたいで適用される。全コード長は HLIT+HDIST+258 要素の単一シーケンス | RFC 1951 §3.2.7 | ✅ | `decode_dynamic_huffman` は lit/dist を単一 `lengths` バッファとして処理 |
 | 60 | マルチバイト整数は LSB-first (little-endian) で格納される (LEN/NLEN 等) | RFC 1951 §3.1 | ✅ | `read_u16_le` 等 |
-| 61 | HDIST=31/32 の受理 (dist code 30/31 のコード長が 0 なら RFC 上は合法) | RFC 1951 §3.2.7 / §3.3 | ✅ | 予約された距離コード 30/31 のコード長が非ゼロであれば拒絶し、コード長 0 であれば受理する。`test_dynamic_huffman_hdist_31_zero_lengths_accepted`, `test_dynamic_huffman_hdist_32_zero_lengths_accepted`, `test_dynamic_huffman_hdist_31_nonzero_reserved_length_rejected` |
+| 61 | HDIST=31/32 の受理 (dist code 30/31 のコード長が 0 なら RFC 上は合法) | RFC 1951 §3.2.7 / §3.3 | ✅ | 予約された距離コード 30/31 のコード長が非ゼロであれば拒否し、コード長 0 であれば受理する。`test_dynamic_huffman_hdist_31_zero_lengths_accepted`, `test_dynamic_huffman_hdist_32_zero_lengths_accepted`, `test_dynamic_huffman_hdist_31_nonzero_reserved_length_rejected` |
 
 ---
 

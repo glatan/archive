@@ -113,7 +113,7 @@ archive inspect sample.7z               # フォーマット検出
 archive test sample.bz2                  # 整合性検証
 ```
 
-`list` コマンドは TTY 出力時に自動で pager (`$PAGER`, デフォルト `less -FRX`) を通す。
+`list` コマンドは TTY 出力時に自動で pager (`$PAGER`、デフォルト `less -FRX`) を経由して出力する。
 暗号化 zip/7z は `--password` オプションに対応し、`--json` で機械可読な出力を得る。
 
 詳細: [`archive-cli/README.md`](archive-cli/README.md)
