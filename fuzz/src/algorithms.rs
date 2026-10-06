@@ -9,12 +9,13 @@
 //! `"fuzz_test"` is packed/unpacked as the archive payload.
 
 use archive::archive::{
-    ar, arc, arj, cpio, deb, git_pack, lha, mscab, mtree, rpm, sevenz, squashfs, tar, warc, xar,
-    zim, zip,
+    ar, arc, arj, cpio, cramfs, crx3, deb, erofs, git_pack, iso9660, lha, mscab, mscfb, mtree, pea,
+    romfs, rpm, sevenz, squashfs, tar, warc, xar, zim, zip, zpaq as zpaq_archive,
 };
 use archive::compress::*;
 use archive::error::Error;
 use std::fmt;
+use std::sync::OnceLock;
 
 /// Compression algorithm or archive format under test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -28,16 +29,27 @@ pub enum Algorithm {
     ZstdBest,
     ZstdNoChecksum,
     ZstdSeekable,
+    ZstdDict,
     Bzip2,
     Bzip2Fast,
     Bzip2Best,
     Lzip,
     LzipFast,
     LzipBest,
+    LzipDict,
     LzmaAlone,
     Xz,
     XzFast,
     XzBest,
+    XzDelta,
+    XzX86,
+    XzPpc,
+    XzIa64,
+    XzSparc,
+    XzArm,
+    XzArmThumb,
+    XzArm64,
+    XzRiscV,
     Lzw,
     LzwBits9,
     Lz4,
@@ -45,17 +57,24 @@ pub enum Algorithm {
     Lz4Best,
     Lz4SmallBlock,
     Lz4Block,
+    Lz4Dict,
+    Lz4Legacy,
+    Lz4BlockDependent,
     Xpress,
     XpressHuff,
     Lznt1,
     Lzf,
     Fastlz,
+    PackBits,
     Zx0,
     Zx1,
     Zx2,
     Zx5,
     Vcdiff,
+    VcdiffSrc,
     Mppc,
+    MppcRdp4,
+    MppcRdp5,
     Lzs,
     Lzsa,
     Lzsa2,
@@ -78,12 +97,14 @@ pub enum Algorithm {
     Brotli,
     BrotliFast,
     BrotliBest,
+    BrotliMeta,
     Snappy,
     Rzip,
     Zlib,
     Zpaq,
     ZpaqLevel2,
     ZpaqLevel3,
+    ZpaqArchive,
     Ar,
     ArBsd,
     Deb,
@@ -94,25 +115,65 @@ pub enum Algorithm {
     Mtree,
     Warc,
     GitPack,
+    GitPackDelta,
+    GitPackSha256,
     Xar,
     Lha,
+    LhaLh4,
+    LhaLh5,
+    LhaLh6,
+    LhaLh7,
+    LhaLzs,
+    LhaLz5,
+    LhaPm1,
+    LhaPm2,
     Arj,
+    Arj1,
+    Arj2,
+    Arj3,
+    Arj4,
+    ArjGarbled,
     Arc,
     Zip,
     ZipStore,
     ZipBzip2,
     ZipZstd,
+    ZipDeflate64,
+    ZipLzma,
+    ZipXz,
+    ZipPpmd,
+    ZipShrunk,
+    ZipImplode,
+    ZipReduce,
     SevenZ,
     SevenZCopy,
     SevenZLzma,
     SevenZPpmd,
     SevenZDeflate,
     SevenZBzip2,
+    SevenZDeflate64,
+    SevenZBrotli,
+    SevenZX86,
+    SevenZBcj2,
+    SevenZDelta,
     TarGnu,
     TarUstar,
     TarPax,
     Cpio,
     CpioCrc,
+    CpioOdc,
+    CpioBin,
+    Cramfs,
+    Romfs,
+    Erofs,
+    Iso9660,
+    IsoRr,
+    Mscfb,
+    MscfbV4,
+    Pea,
+    PeaStore,
+    PeaSha256,
+    Crx3,
 }
 
 impl Algorithm {
@@ -127,16 +188,27 @@ impl Algorithm {
         Algorithm::ZstdBest,
         Algorithm::ZstdNoChecksum,
         Algorithm::ZstdSeekable,
+        Algorithm::ZstdDict,
         Algorithm::Bzip2,
         Algorithm::Bzip2Fast,
         Algorithm::Bzip2Best,
         Algorithm::Lzip,
         Algorithm::LzipFast,
         Algorithm::LzipBest,
+        Algorithm::LzipDict,
         Algorithm::LzmaAlone,
         Algorithm::Xz,
         Algorithm::XzFast,
         Algorithm::XzBest,
+        Algorithm::XzDelta,
+        Algorithm::XzX86,
+        Algorithm::XzPpc,
+        Algorithm::XzIa64,
+        Algorithm::XzSparc,
+        Algorithm::XzArm,
+        Algorithm::XzArmThumb,
+        Algorithm::XzArm64,
+        Algorithm::XzRiscV,
         Algorithm::Lzw,
         Algorithm::LzwBits9,
         Algorithm::Lz4,
@@ -144,17 +216,24 @@ impl Algorithm {
         Algorithm::Lz4Best,
         Algorithm::Lz4SmallBlock,
         Algorithm::Lz4Block,
+        Algorithm::Lz4Dict,
+        Algorithm::Lz4Legacy,
+        Algorithm::Lz4BlockDependent,
         Algorithm::Xpress,
         Algorithm::XpressHuff,
         Algorithm::Lznt1,
         Algorithm::Lzf,
         Algorithm::Fastlz,
+        Algorithm::PackBits,
         Algorithm::Zx0,
         Algorithm::Zx1,
         Algorithm::Zx2,
         Algorithm::Zx5,
         Algorithm::Vcdiff,
+        Algorithm::VcdiffSrc,
         Algorithm::Mppc,
+        Algorithm::MppcRdp4,
+        Algorithm::MppcRdp5,
         Algorithm::Lzs,
         Algorithm::Lzsa,
         Algorithm::Lzsa2,
@@ -177,12 +256,14 @@ impl Algorithm {
         Algorithm::Brotli,
         Algorithm::BrotliFast,
         Algorithm::BrotliBest,
+        Algorithm::BrotliMeta,
         Algorithm::Snappy,
         Algorithm::Rzip,
         Algorithm::Zlib,
         Algorithm::Zpaq,
         Algorithm::ZpaqLevel2,
         Algorithm::ZpaqLevel3,
+        Algorithm::ZpaqArchive,
         Algorithm::Ar,
         Algorithm::ArBsd,
         Algorithm::Deb,
@@ -192,21 +273,66 @@ impl Algorithm {
         Algorithm::Zim,
         Algorithm::Mtree,
         Algorithm::Warc,
+        Algorithm::GitPack,
+        Algorithm::GitPackDelta,
+        Algorithm::GitPackSha256,
+        Algorithm::Xar,
+        Algorithm::Lha,
+        Algorithm::LhaLh4,
+        Algorithm::LhaLh5,
+        Algorithm::LhaLh6,
+        Algorithm::LhaLh7,
+        Algorithm::LhaLzs,
+        Algorithm::LhaLz5,
+        Algorithm::LhaPm1,
+        Algorithm::LhaPm2,
+        Algorithm::Arj,
+        Algorithm::Arj1,
+        Algorithm::Arj2,
+        Algorithm::Arj3,
+        Algorithm::Arj4,
+        Algorithm::ArjGarbled,
+        Algorithm::Arc,
         Algorithm::Zip,
         Algorithm::ZipStore,
         Algorithm::ZipBzip2,
         Algorithm::ZipZstd,
+        Algorithm::ZipDeflate64,
+        Algorithm::ZipLzma,
+        Algorithm::ZipXz,
+        Algorithm::ZipPpmd,
+        Algorithm::ZipShrunk,
+        Algorithm::ZipImplode,
+        Algorithm::ZipReduce,
         Algorithm::SevenZ,
         Algorithm::SevenZCopy,
         Algorithm::SevenZLzma,
         Algorithm::SevenZPpmd,
         Algorithm::SevenZDeflate,
         Algorithm::SevenZBzip2,
+        Algorithm::SevenZDeflate64,
+        Algorithm::SevenZBrotli,
+        Algorithm::SevenZX86,
+        Algorithm::SevenZBcj2,
+        Algorithm::SevenZDelta,
         Algorithm::TarGnu,
         Algorithm::TarUstar,
         Algorithm::TarPax,
         Algorithm::Cpio,
         Algorithm::CpioCrc,
+        Algorithm::CpioOdc,
+        Algorithm::CpioBin,
+        Algorithm::Cramfs,
+        Algorithm::Romfs,
+        Algorithm::Erofs,
+        Algorithm::Iso9660,
+        Algorithm::IsoRr,
+        Algorithm::Mscfb,
+        Algorithm::MscfbV4,
+        Algorithm::Pea,
+        Algorithm::PeaStore,
+        Algorithm::PeaSha256,
+        Algorithm::Crx3,
     ];
 
     /// CLI-facing name used in `--algorithm` and log output.
@@ -221,16 +347,27 @@ impl Algorithm {
             Algorithm::ZstdBest => "zstd-best",
             Algorithm::ZstdNoChecksum => "zstd-nochecksum",
             Algorithm::ZstdSeekable => "zstd-seekable",
+            Algorithm::ZstdDict => "zstd-dict",
             Algorithm::Bzip2 => "bzip2",
             Algorithm::Bzip2Fast => "bzip2-fast",
             Algorithm::Bzip2Best => "bzip2-best",
             Algorithm::Lzip => "lzip",
             Algorithm::LzipFast => "lzip-fast",
             Algorithm::LzipBest => "lzip-best",
+            Algorithm::LzipDict => "lzip-dict",
             Algorithm::LzmaAlone => "lzma",
             Algorithm::Xz => "xz",
             Algorithm::XzFast => "xz-fast",
             Algorithm::XzBest => "xz-best",
+            Algorithm::XzDelta => "xz-delta",
+            Algorithm::XzX86 => "xz-x86",
+            Algorithm::XzPpc => "xz-powerpc",
+            Algorithm::XzIa64 => "xz-ia64",
+            Algorithm::XzSparc => "xz-sparc",
+            Algorithm::XzArm => "xz-arm",
+            Algorithm::XzArmThumb => "xz-armthumb",
+            Algorithm::XzArm64 => "xz-arm64",
+            Algorithm::XzRiscV => "xz-riscv",
             Algorithm::Lzw => "lzw",
             Algorithm::LzwBits9 => "lzw-bits9",
             Algorithm::Lz4 => "lz4",
@@ -238,17 +375,24 @@ impl Algorithm {
             Algorithm::Lz4Best => "lz4-best",
             Algorithm::Lz4SmallBlock => "lz4-small-block",
             Algorithm::Lz4Block => "lz4-block",
+            Algorithm::Lz4Dict => "lz4-dict",
+            Algorithm::Lz4Legacy => "lz4-legacy",
+            Algorithm::Lz4BlockDependent => "lz4-block-dependent",
             Algorithm::Xpress => "xpress",
             Algorithm::XpressHuff => "xpress-huff",
             Algorithm::Lznt1 => "lznt1",
             Algorithm::Lzf => "lzf",
             Algorithm::Fastlz => "fastlz",
+            Algorithm::PackBits => "packbits",
             Algorithm::Zx0 => "zx0",
             Algorithm::Zx1 => "zx1",
             Algorithm::Zx2 => "zx2",
             Algorithm::Zx5 => "zx5",
             Algorithm::Vcdiff => "vcdiff",
+            Algorithm::VcdiffSrc => "vcdiff-source",
             Algorithm::Mppc => "mppc",
+            Algorithm::MppcRdp4 => "mppc-rdp4",
+            Algorithm::MppcRdp5 => "mppc-rdp5",
             Algorithm::Lzs => "lzs",
             Algorithm::Lzsa => "lzsa",
             Algorithm::Lzsa2 => "lzsa2",
@@ -271,12 +415,14 @@ impl Algorithm {
             Algorithm::Brotli => "brotli",
             Algorithm::BrotliFast => "brotli-fast",
             Algorithm::BrotliBest => "brotli-best",
+            Algorithm::BrotliMeta => "brotli-metadata",
             Algorithm::Snappy => "snappy",
             Algorithm::Rzip => "rzip",
             Algorithm::Zlib => "zlib",
             Algorithm::Zpaq => "zpaq",
             Algorithm::ZpaqLevel2 => "zpaq-level2",
             Algorithm::ZpaqLevel3 => "zpaq-level3",
+            Algorithm::ZpaqArchive => "zpaq-archive",
             Algorithm::Ar => "ar",
             Algorithm::ArBsd => "ar-bsd",
             Algorithm::Deb => "deb",
@@ -287,127 +433,86 @@ impl Algorithm {
             Algorithm::Mtree => "mtree",
             Algorithm::Warc => "warc",
             Algorithm::GitPack => "git-pack",
+            Algorithm::GitPackDelta => "git-pack-delta",
+            Algorithm::GitPackSha256 => "git-pack-sha256",
             Algorithm::Xar => "xar",
             Algorithm::Lha => "lha",
+            Algorithm::LhaLh4 => "lha-lh4",
+            Algorithm::LhaLh5 => "lha-lh5",
+            Algorithm::LhaLh6 => "lha-lh6",
+            Algorithm::LhaLh7 => "lha-lh7",
+            Algorithm::LhaLzs => "lha-lzs",
+            Algorithm::LhaLz5 => "lha-lz5",
+            Algorithm::LhaPm1 => "lha-pm1",
+            Algorithm::LhaPm2 => "lha-pm2",
             Algorithm::Arj => "arj",
+            Algorithm::Arj1 => "arj-1",
+            Algorithm::Arj2 => "arj-2",
+            Algorithm::Arj3 => "arj-3",
+            Algorithm::Arj4 => "arj-4",
+            Algorithm::ArjGarbled => "arj-garbled",
             Algorithm::Arc => "arc",
             Algorithm::Zip => "zip",
             Algorithm::ZipStore => "zip-store",
             Algorithm::ZipBzip2 => "zip-bzip2",
             Algorithm::ZipZstd => "zip-zstd",
+            Algorithm::ZipDeflate64 => "zip-deflate64",
+            Algorithm::ZipLzma => "zip-lzma",
+            Algorithm::ZipXz => "zip-xz",
+            Algorithm::ZipPpmd => "zip-ppmd",
+            Algorithm::ZipShrunk => "zip-shrunk",
+            Algorithm::ZipImplode => "zip-implode",
+            Algorithm::ZipReduce => "zip-reduce",
             Algorithm::SevenZ => "7z",
             Algorithm::SevenZCopy => "7z-copy",
             Algorithm::SevenZLzma => "7z-lzma",
             Algorithm::SevenZPpmd => "7z-ppmd",
             Algorithm::SevenZDeflate => "7z-deflate",
             Algorithm::SevenZBzip2 => "7z-bzip2",
+            Algorithm::SevenZDeflate64 => "7z-deflate64",
+            Algorithm::SevenZBrotli => "7z-brotli",
+            Algorithm::SevenZX86 => "7z-x86",
+            Algorithm::SevenZBcj2 => "7z-bcj2",
+            Algorithm::SevenZDelta => "7z-delta",
             Algorithm::TarGnu => "tar-gnu",
             Algorithm::TarUstar => "tar-ustar",
             Algorithm::TarPax => "tar-pax",
             Algorithm::Cpio => "cpio",
             Algorithm::CpioCrc => "cpio-crc",
+            Algorithm::CpioOdc => "cpio-odc",
+            Algorithm::CpioBin => "cpio-bin",
+            Algorithm::Cramfs => "cramfs",
+            Algorithm::Romfs => "romfs",
+            Algorithm::Erofs => "erofs",
+            Algorithm::Iso9660 => "iso9660",
+            Algorithm::IsoRr => "iso9660-rr",
+            Algorithm::Mscfb => "mscfb",
+            Algorithm::MscfbV4 => "mscfb-v4",
+            Algorithm::Pea => "pea",
+            Algorithm::PeaStore => "pea-store",
+            Algorithm::PeaSha256 => "pea-sha256",
+            Algorithm::Crx3 => "crx3",
         }
     }
 
     /// Parse a CLI name back into an [`Algorithm`]. Returns `None` for unknown names.
     pub fn from_name(name: &str) -> Option<Algorithm> {
-        match name {
-            "deflate" => Some(Algorithm::Deflate),
-            "gzip" => Some(Algorithm::Gzip),
-            "gzip-fast" => Some(Algorithm::GzipFast),
-            "gzip-store" => Some(Algorithm::GzipStore),
-            "zstd" => Some(Algorithm::Zstd),
-            "zstd-fast" => Some(Algorithm::ZstdFast),
-            "zstd-best" => Some(Algorithm::ZstdBest),
-            "zstd-nochecksum" => Some(Algorithm::ZstdNoChecksum),
-            "zstd-seekable" => Some(Algorithm::ZstdSeekable),
-            "bzip2" => Some(Algorithm::Bzip2),
-            "bzip2-fast" => Some(Algorithm::Bzip2Fast),
-            "bzip2-best" => Some(Algorithm::Bzip2Best),
-            "lzip" => Some(Algorithm::Lzip),
-            "lzip-fast" => Some(Algorithm::LzipFast),
-            "lzip-best" => Some(Algorithm::LzipBest),
-            "lzma" | "lzma-alone" => Some(Algorithm::LzmaAlone),
-            "xz" => Some(Algorithm::Xz),
-            "xz-fast" => Some(Algorithm::XzFast),
-            "xz-best" => Some(Algorithm::XzBest),
-            "lzw" => Some(Algorithm::Lzw),
-            "lzw-bits9" => Some(Algorithm::LzwBits9),
-            "lz4" => Some(Algorithm::Lz4),
-            "lz4-fast" => Some(Algorithm::Lz4Fast),
-            "lz4-best" => Some(Algorithm::Lz4Best),
-            "lz4-small-block" => Some(Algorithm::Lz4SmallBlock),
-            "lz4-block" => Some(Algorithm::Lz4Block),
-            "xpress" => Some(Algorithm::Xpress),
-            "xpress-huff" => Some(Algorithm::XpressHuff),
-            "lznt1" => Some(Algorithm::Lznt1),
-            "lzf" => Some(Algorithm::Lzf),
-            "fastlz" => Some(Algorithm::Fastlz),
-            "zx0" => Some(Algorithm::Zx0),
-            "zx1" => Some(Algorithm::Zx1),
-            "zx2" => Some(Algorithm::Zx2),
-            "zx5" => Some(Algorithm::Zx5),
-            "vcdiff" => Some(Algorithm::Vcdiff),
-            "mppc" => Some(Algorithm::Mppc),
-            "lzs" => Some(Algorithm::Lzs),
-            "lzsa" => Some(Algorithm::Lzsa),
-            "lzsa2" => Some(Algorithm::Lzsa2),
-            "lzrw1" => Some(Algorithm::Lzrw1),
-            "lzrw1a" => Some(Algorithm::Lzrw1a),
-            "lzrw2" => Some(Algorithm::Lzrw2),
-            "lzrw3" => Some(Algorithm::Lzrw3),
-            "lzrw3a" => Some(Algorithm::Lzrw3a),
-            "lzxd" => Some(Algorithm::Lzxd),
-            "cmpsc" => Some(Algorithm::Cmpsc),
-            "lzo" => Some(Algorithm::Lzo),
-            "lzo-fast" => Some(Algorithm::LzoFast),
-            "lzo-best" => Some(Algorithm::LzoBest),
-            "lrzip" | "lrzip-lzma" => Some(Algorithm::LrzipLzma),
-            "lrzip-bzip2" => Some(Algorithm::LrzipBzip2),
-            "lrzip-gzip" => Some(Algorithm::LrzipGzip),
-            "lrzip-lzo" => Some(Algorithm::LrzipLzo),
-            "lrzip-none" => Some(Algorithm::LrzipNone),
-            "lrzip-zpaq" => Some(Algorithm::LrzipZpaq),
-            "brotli" => Some(Algorithm::Brotli),
-            "brotli-fast" => Some(Algorithm::BrotliFast),
-            "brotli-best" => Some(Algorithm::BrotliBest),
-            "snappy" => Some(Algorithm::Snappy),
-            "rzip" => Some(Algorithm::Rzip),
-            "zlib" => Some(Algorithm::Zlib),
-            "zpaq" => Some(Algorithm::Zpaq),
-            "zpaq-level2" => Some(Algorithm::ZpaqLevel2),
-            "zpaq-level3" => Some(Algorithm::ZpaqLevel3),
-            "ar" | "ar-gnu" => Some(Algorithm::Ar),
-            "ar-bsd" => Some(Algorithm::ArBsd),
-            "deb" => Some(Algorithm::Deb),
-            "rpm" => Some(Algorithm::Rpm),
-            "squashfs" | "sqfs" => Some(Algorithm::Squashfs),
-            "mscab" | "cab" => Some(Algorithm::Mscab),
-            "zim" => Some(Algorithm::Zim),
-            "mtree" => Some(Algorithm::Mtree),
-            "warc" => Some(Algorithm::Warc),
-            "git-pack" | "pack" => Some(Algorithm::GitPack),
-            "xar" => Some(Algorithm::Xar),
-            "lha" | "lzh" => Some(Algorithm::Lha),
-            "arj" => Some(Algorithm::Arj),
-            "arc" => Some(Algorithm::Arc),
-            "zip" => Some(Algorithm::Zip),
-            "zip-store" => Some(Algorithm::ZipStore),
-            "zip-bzip2" => Some(Algorithm::ZipBzip2),
-            "zip-zstd" => Some(Algorithm::ZipZstd),
-            "7z" | "sevenz" => Some(Algorithm::SevenZ),
-            "7z-copy" => Some(Algorithm::SevenZCopy),
-            "7z-lzma" => Some(Algorithm::SevenZLzma),
-            "7z-ppmd" => Some(Algorithm::SevenZPpmd),
-            "7z-deflate" => Some(Algorithm::SevenZDeflate),
-            "7z-bzip2" => Some(Algorithm::SevenZBzip2),
-            "tar" | "tar-gnu" => Some(Algorithm::TarGnu),
-            "tar-ustar" => Some(Algorithm::TarUstar),
-            "tar-pax" => Some(Algorithm::TarPax),
-            "cpio" => Some(Algorithm::Cpio),
-            "cpio-crc" => Some(Algorithm::CpioCrc),
-            _ => None,
-        }
+        Algorithm::ALL
+            .iter()
+            .find(|algo| algo.name() == name)
+            .copied()
+            .or(match name {
+                "lzma" | "lzma-alone" => Some(Algorithm::LzmaAlone),
+                "lrzip" => Some(Algorithm::LrzipLzma),
+                "ar-gnu" => Some(Algorithm::Ar),
+                "sqfs" => Some(Algorithm::Squashfs),
+                "cab" => Some(Algorithm::Mscab),
+                "pack" => Some(Algorithm::GitPack),
+                "lzh" => Some(Algorithm::Lha),
+                "sevenz" => Some(Algorithm::SevenZ),
+                "tar" => Some(Algorithm::TarGnu),
+                _ => None,
+            })
     }
 }
 
@@ -431,12 +536,26 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
         ),
         // Small frames so multi-frame streams are exercised on modest inputs.
         Algorithm::ZstdSeekable => zstd::seekable::encode(data, 64 * 1024),
+        Algorithm::ZstdDict => zstd::encode::encode_with_dict(data, zstd_dict()),
         Algorithm::Bzip2 => bzip2::encode::encode(data),
         Algorithm::Bzip2Fast => bzip2::encode::encode_with_level(data, 1),
         Algorithm::Bzip2Best => bzip2::encode::encode_with_level(data, 9),
         Algorithm::Lzip | Algorithm::LzipFast | Algorithm::LzipBest => lzip::encode::encode(data),
+        // Non-default dictionary size (64 KiB) exercises the member header's
+        // dictionary-size field on both sides.
+        Algorithm::LzipDict => lzip::encode::encode_with_dict_size(data, 0x10, 65536)
+            .expect("lzip dict encode should succeed"),
         Algorithm::LzmaAlone => lzma_alone::encode::encode(data),
         Algorithm::Xz | Algorithm::XzFast | Algorithm::XzBest => xz::encode::encode(data),
+        Algorithm::XzDelta => xz_filter(data, xz::filters::Filter::Delta { distance: 4 }),
+        Algorithm::XzX86 => xz_filter(data, xz::filters::Filter::X86 { start_offset: 0 }),
+        Algorithm::XzPpc => xz_filter(data, xz::filters::Filter::PowerPc { start_offset: 0 }),
+        Algorithm::XzIa64 => xz_filter(data, xz::filters::Filter::Ia64 { start_offset: 0 }),
+        Algorithm::XzSparc => xz_filter(data, xz::filters::Filter::Sparc { start_offset: 0 }),
+        Algorithm::XzArm => xz_filter(data, xz::filters::Filter::Arm { start_offset: 0 }),
+        Algorithm::XzArmThumb => xz_filter(data, xz::filters::Filter::ArmThumb { start_offset: 0 }),
+        Algorithm::XzArm64 => xz_filter(data, xz::filters::Filter::Arm64 { start_offset: 0 }),
+        Algorithm::XzRiscV => xz_filter(data, xz::filters::Filter::RiscV { start_offset: 0 }),
         Algorithm::Lzw => lzw::encode::encode(data),
         Algorithm::LzwBits9 => lzw::encode::encode_with_options(data, 9),
         Algorithm::Lz4 | Algorithm::Lz4Fast | Algorithm::Lz4Best => lz4::encode::encode(data),
@@ -444,18 +563,28 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
             lz4::encode::encode_with_options(data, lz4::encode::BlockMaxSize::KB64, true)
         }
         Algorithm::Lz4Block => lz4::encode::encode_block(data),
+        Algorithm::Lz4Dict => lz4::encode::encode_with_dict(data, lz4_dict()),
+        Algorithm::Lz4Legacy => lz4::encode::encode_legacy(data),
+        Algorithm::Lz4BlockDependent => lz4::encode::encode_block_dependent(data),
         Algorithm::Xpress => xca::lz77::encode(data),
         Algorithm::XpressHuff => xca::huffman::encode(data),
         Algorithm::Lznt1 => xca::lznt1::encode(data),
         Algorithm::Lzf => lzf::encode(data),
         Algorithm::Fastlz => fastlz::encode(data),
+        Algorithm::PackBits => packbits::encode(data),
         Algorithm::Zx0 => zx0::encode(data),
         Algorithm::Zx1 => zx1::encode(data),
         Algorithm::Zx2 => zx2::encode(data),
         Algorithm::Zx5 => zx5::encode(data),
         Algorithm::Vcdiff => vcdiff::encode(data),
-        Algorithm::Mppc => mppc::encode(data).unwrap_or_default(),
-        Algorithm::Lzs => lzs::encode(data).unwrap_or_default(),
+        Algorithm::VcdiffSrc => vcdiff::encode_with_source(delta_source(), data),
+        Algorithm::Mppc => mppc::encode(data).expect("mppc encode should succeed"),
+        // RDP packets travel as (flags, payload); the flags byte selects the
+        // dictionary variant on decode. Framed as [flags][payload] so the
+        // self/corrupt patterns can replay it.
+        Algorithm::MppcRdp4 => mppc_rdp_framed(mppc::CompressionType::Rdp4, data),
+        Algorithm::MppcRdp5 => mppc_rdp_framed(mppc::CompressionType::Rdp5, data),
+        Algorithm::Lzs => lzs::encode(data).expect("lzs encode should succeed"),
         Algorithm::Lzsa => lzsa::encode(data),
         Algorithm::Lzsa2 => lzsa::encode_lzsa2(data),
         Algorithm::Lzrw1 => lzrw1::encode(data),
@@ -487,12 +616,18 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
         Algorithm::Brotli | Algorithm::BrotliFast | Algorithm::BrotliBest => {
             brotli::encode::encode(data)
         }
+        Algorithm::BrotliMeta => brotli::encode::encode_with_metadata(data, b"fuzz-metadata"),
         Algorithm::Snappy => snappy::encode::encode(data),
         Algorithm::Rzip => rzip::encode::encode(data),
         Algorithm::Zlib => zlib::encode::encode(data),
         Algorithm::Zpaq => zpaq::encode::encode(data, 1),
         Algorithm::ZpaqLevel2 => zpaq::encode::encode(data, 2),
         Algorithm::ZpaqLevel3 => zpaq::encode::encode(data, 3),
+        Algorithm::ZpaqArchive => {
+            let mut enc = zpaq_archive::encode::ZpaqEncoder::new(1);
+            enc.add_file("fuzz_test", data);
+            enc.finish().expect("zpaq archive encode should succeed")
+        }
         Algorithm::Ar => {
             let mut enc = ar::encode::ArEncoder::new();
             enc.add_file("fuzz_test", data);
@@ -524,6 +659,18 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
             enc.add_object(git_pack::ObjectType::Blob, data);
             enc.finish()
         }
+        Algorithm::GitPackDelta => {
+            let mut enc = git_pack::encode::GitPackEncoder::new();
+            let base = enc.add_object(git_pack::ObjectType::Blob, b"fuzz-base-blob");
+            enc.add_delta_object(data, base)
+                .expect("git-pack delta encode should succeed");
+            enc.finish()
+        }
+        Algorithm::GitPackSha256 => {
+            let mut enc = git_pack::encode::GitPackEncoder::new_sha256();
+            enc.add_object(git_pack::ObjectType::Blob, data);
+            enc.finish()
+        }
         Algorithm::Xar => {
             let mut enc = xar::encode::XarEncoder::new();
             enc.add_file("fuzz_test", data);
@@ -536,10 +683,30 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
                 .expect("lha encode should succeed");
             enc.finish()
         }
+        Algorithm::LhaLh4 => lha_with_method(b"-lh4-", data),
+        Algorithm::LhaLh5 => lha_with_method(b"-lh5-", data),
+        Algorithm::LhaLh6 => lha_with_method(b"-lh6-", data),
+        Algorithm::LhaLh7 => lha_with_method(b"-lh7-", data),
+        Algorithm::LhaLzs => lha_with_method(b"-lzs-", data),
+        Algorithm::LhaLz5 => lha_with_method(b"-lz5-", data),
+        Algorithm::LhaPm1 => lha_with_method(b"-pm1-", data),
+        Algorithm::LhaPm2 => lha_with_method(b"-pm2-", data),
         Algorithm::Arj => {
             let mut enc = arj::encode::ArjEncoder::new();
             enc.add_file("fuzz_test", data, 0)
                 .expect("arj encode should succeed");
+            enc.finish()
+        }
+        Algorithm::Arj1 => arj_with_method(1, data),
+        Algorithm::Arj2 => arj_with_method(2, data),
+        Algorithm::Arj3 => arj_with_method(3, data),
+        Algorithm::Arj4 => arj_with_method(4, data),
+        Algorithm::ArjGarbled => {
+            let mut enc = arj::encode::ArjEncoder::with_method(1)
+                .and_then(|e| e.with_password(b"secret", 0x5A))
+                .expect("arj garbled encoder should be accepted");
+            enc.add_file("fuzz_test", data, 0)
+                .expect("arj garbled encode should succeed");
             enc.finish()
         }
         Algorithm::Arc => {
@@ -593,6 +760,15 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
             );
             enc.finish().expect("zip-zstd encode should succeed")
         }
+        Algorithm::ZipDeflate64 => {
+            zip_with_compression(data, zip::encode::ZipCompression::Deflate64)
+        }
+        Algorithm::ZipLzma => zip_with_compression(data, zip::encode::ZipCompression::Lzma),
+        Algorithm::ZipXz => zip_with_compression(data, zip::encode::ZipCompression::Xz),
+        Algorithm::ZipPpmd => zip_with_compression(data, zip::encode::ZipCompression::Ppmd),
+        Algorithm::ZipShrunk => zip_with_compression(data, zip::encode::ZipCompression::Shrunk),
+        Algorithm::ZipImplode => zip_with_compression(data, zip::encode::ZipCompression::Implode),
+        Algorithm::ZipReduce => zip_with_compression(data, zip::encode::ZipCompression::Reduce(3)),
         Algorithm::SevenZ => {
             let mut enc = sevenz::encode::SevenZEncoder::new();
             enc.add_file("fuzz_test", data);
@@ -633,6 +809,25 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
             enc.add_file("fuzz_test", data);
             enc.finish().expect("7z-bzip2 encode should succeed")
         }
+        Algorithm::SevenZDeflate64 => {
+            sevenz_with(data, sevenz::encode::SevenZMethod::Deflate64, &[])
+        }
+        Algorithm::SevenZBrotli => sevenz_with(data, sevenz::encode::SevenZMethod::Brotli, &[]),
+        Algorithm::SevenZX86 => sevenz_with(
+            data,
+            sevenz::encode::SevenZMethod::Lzma2 { dict_size: 1 << 23 },
+            &[sevenz::encode::SevenZFilter::X86Bcj],
+        ),
+        Algorithm::SevenZBcj2 => sevenz_with(
+            data,
+            sevenz::encode::SevenZMethod::Lzma2 { dict_size: 1 << 23 },
+            &[sevenz::encode::SevenZFilter::X86Bcj2],
+        ),
+        Algorithm::SevenZDelta => sevenz_with(
+            data,
+            sevenz::encode::SevenZMethod::Lzma2 { dict_size: 1 << 23 },
+            &[sevenz::encode::SevenZFilter::Delta { distance: 4 }],
+        ),
         Algorithm::TarGnu => {
             let mut enc = tar::encode::TarEncoder::new();
             enc.add_file("fuzz_test", data);
@@ -659,7 +854,174 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
             enc.add_file("fuzz_test", data);
             enc.finish()
         }
+        Algorithm::CpioOdc => {
+            let mut enc = cpio::encode::CpioEncoder::new_odc();
+            enc.add_file("fuzz_test", data);
+            enc.finish()
+        }
+        Algorithm::CpioBin => {
+            let mut enc = cpio::encode::CpioEncoder::new_bin();
+            enc.add_file("fuzz_test", data);
+            enc.finish()
+        }
+        Algorithm::Cramfs => {
+            let mut enc = cramfs::encode::CramfsEncoder::new();
+            enc.add_file("fuzz_test", data);
+            enc.finish().expect("cramfs encode should succeed")
+        }
+        Algorithm::Romfs => {
+            let mut enc = romfs::encode::RomfsEncoder::new();
+            enc.add_file("fuzz_test", data);
+            enc.finish().expect("romfs encode should succeed")
+        }
+        Algorithm::Erofs => {
+            let mut enc = erofs::encode::ErofsEncoder::new();
+            enc.add_file("fuzz_test", data);
+            enc.finish().expect("erofs encode should succeed")
+        }
+        Algorithm::Iso9660 => {
+            let mut enc = iso9660::encode::IsoEncoder::new();
+            enc.add_file("fuzz_test", data);
+            enc.finish().expect("iso9660 encode should succeed")
+        }
+        Algorithm::IsoRr => {
+            let mut enc = iso9660::encode::IsoEncoder::new().with_rock_ridge();
+            enc.add_file("fuzz_test", data);
+            enc.finish().expect("iso9660-rr encode should succeed")
+        }
+        Algorithm::Mscfb => {
+            let mut enc = mscfb::encode::CfbEncoder::new();
+            enc.add_stream("fuzz_test", data);
+            enc.finish().expect("mscfb encode should succeed")
+        }
+        Algorithm::MscfbV4 => {
+            let mut enc = mscfb::encode::CfbEncoder::version4();
+            enc.add_stream("fuzz_test", data);
+            enc.finish().expect("mscfb-v4 encode should succeed")
+        }
+        Algorithm::Pea => {
+            let mut enc = pea::encode::PeaEncoder::new();
+            enc.add_file("fuzz_test", data);
+            enc.finish().expect("pea encode should succeed")
+        }
+        Algorithm::PeaStore => {
+            let mut enc =
+                pea::encode::PeaEncoder::new().compression(pea::encode::PeaCompression::Store);
+            enc.add_file("fuzz_test", data);
+            enc.finish().expect("pea-store encode should succeed")
+        }
+        Algorithm::PeaSha256 => {
+            let mut enc = pea::encode::PeaEncoder::new()
+                .stream_control(pea::decode::PeaAlgo::Sha256)
+                .object_control(pea::decode::PeaAlgo::Sha256)
+                .volume_control(pea::decode::PeaAlgo::Sha256);
+            enc.add_file("fuzz_test", data);
+            enc.finish().expect("pea-sha256 encode should succeed")
+        }
+        Algorithm::Crx3 => crx3_fixture(data),
     }
+}
+
+fn zip_with_compression(data: &[u8], compression: zip::encode::ZipCompression) -> Vec<u8> {
+    let mut enc = zip::encode::ZipEncoder::new();
+    enc.add_file_with_options(
+        "fuzz_test",
+        data,
+        &zip::encode::ZipEntryOptions {
+            compression,
+            ..Default::default()
+        },
+    );
+    enc.finish().expect("zip encode should succeed")
+}
+
+fn sevenz_with(
+    data: &[u8],
+    method: sevenz::encode::SevenZMethod,
+    filters: &[sevenz::encode::SevenZFilter],
+) -> Vec<u8> {
+    let mut enc = sevenz::encode::SevenZEncoder::new();
+    enc.set_method(method);
+    if !filters.is_empty() {
+        enc.set_filters(filters.to_vec());
+    }
+    enc.add_file("fuzz_test", data);
+    enc.finish().expect("7z encode should succeed")
+}
+
+fn lha_with_method(method: &[u8; 5], data: &[u8]) -> Vec<u8> {
+    let mut enc = lha::encode::LhaEncoder::new()
+        .with_method(method)
+        .expect("lha write method should be accepted");
+    enc.add_file("fuzz_test", data, 0)
+        .expect("lha encode should succeed");
+    enc.finish()
+}
+
+fn arj_with_method(method: u8, data: &[u8]) -> Vec<u8> {
+    let mut enc =
+        arj::encode::ArjEncoder::with_method(method).expect("arj method should be accepted");
+    enc.add_file("fuzz_test", data, 0)
+        .expect("arj encode should succeed");
+    enc.finish()
+}
+
+fn xz_filter(data: &[u8], filter: xz::filters::Filter) -> Vec<u8> {
+    xz::encode::encode_with_filters(data, &[filter]).expect("xz filter encode should succeed")
+}
+
+fn mppc_rdp_framed(ty: mppc::CompressionType, data: &[u8]) -> Vec<u8> {
+    let (flags, packet) = mppc::encode_rdp(ty, data).expect("mppc rdp encode should succeed");
+    let mut out = Vec::with_capacity(packet.len() + 1);
+    out.push(flags);
+    out.extend_from_slice(&packet);
+    out
+}
+
+/// Build a synthetic CRX3 container: `Cr24` magic + version 3 + an empty
+/// `SignedData` header, followed by a ZIP archive holding the payload.
+fn crx3_fixture(data: &[u8]) -> Vec<u8> {
+    let mut enc = zip::encode::ZipEncoder::new();
+    enc.add_file("fuzz_test", data);
+    let inner = enc.finish().expect("crx3 inner zip encode should succeed");
+    let mut out = Vec::with_capacity(12 + inner.len());
+    out.extend_from_slice(b"Cr24");
+    out.extend_from_slice(&3u32.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&inner);
+    out
+}
+
+/// Fixed reference content shared by the VCDIFF source-window round-trip.
+fn delta_source() -> &'static [u8] {
+    static SOURCE: OnceLock<Vec<u8>> = OnceLock::new();
+    SOURCE.get_or_init(|| (0..8192u32).map(|i| ((i * 31 + 7) % 251) as u8).collect())
+}
+
+/// Fixed LZ4 prefix dictionary shared by the dict round-trip.
+fn lz4_dict() -> &'static lz4::decode::Lz4Dict {
+    static DICT: OnceLock<lz4::decode::Lz4Dict> = OnceLock::new();
+    DICT.get_or_init(|| {
+        let content: Vec<u8> = (0..4096u32).map(|i| ((i * 17 + 3) % 251) as u8).collect();
+        lz4::decode::Lz4Dict::new(&content)
+    })
+}
+
+/// Fixed trained zstd dictionary shared by the dict round-trip.
+fn zstd_dict() -> &'static zstd::decode::ZstdDict {
+    static DICT: OnceLock<zstd::decode::ZstdDict> = OnceLock::new();
+    DICT.get_or_init(|| {
+        let samples: Vec<Vec<u8>> = (0..16u32)
+            .map(|s| {
+                (0..2048u32)
+                    .map(|i| ((i * 13 + s * 97) % 251) as u8)
+                    .collect()
+            })
+            .collect();
+        let refs: Vec<&[u8]> = samples.iter().map(Vec::as_slice).collect();
+        zstd::train::train_dictionary(&refs, &zstd::train::TrainOptions::default())
+            .expect("zstd dictionary training should succeed")
+    })
 }
 
 /// Decode `data` using the specified algorithm, returning the original bytes.
@@ -671,28 +1033,54 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
             zstd::decode::decode(data)
         }
         Algorithm::ZstdSeekable => zstd::seekable::decode(data),
+        Algorithm::ZstdDict => zstd::decode::decode_with_dict(data, zstd_dict()),
         Algorithm::Bzip2 | Algorithm::Bzip2Fast | Algorithm::Bzip2Best => {
             bzip2::decode::decode(data)
         }
-        Algorithm::Lzip | Algorithm::LzipFast | Algorithm::LzipBest => lzip::decode::decode(data),
-        Algorithm::LzmaAlone => lzma_alone::decode::decode(data),
-        Algorithm::Xz | Algorithm::XzFast | Algorithm::XzBest => xz::decode::decode(data),
-        Algorithm::Lzw | Algorithm::LzwBits9 => lzw::decode::decode(data),
-        Algorithm::Lz4 | Algorithm::Lz4Fast | Algorithm::Lz4Best | Algorithm::Lz4SmallBlock => {
-            lz4::decode::decode(data)
+        Algorithm::Lzip | Algorithm::LzipFast | Algorithm::LzipBest | Algorithm::LzipDict => {
+            lzip::decode::decode(data)
         }
+        Algorithm::LzmaAlone => lzma_alone::decode::decode(data),
+        Algorithm::Xz
+        | Algorithm::XzFast
+        | Algorithm::XzBest
+        | Algorithm::XzDelta
+        | Algorithm::XzX86
+        | Algorithm::XzPpc
+        | Algorithm::XzIa64
+        | Algorithm::XzSparc
+        | Algorithm::XzArm
+        | Algorithm::XzArmThumb
+        | Algorithm::XzArm64
+        | Algorithm::XzRiscV => xz::decode::decode(data),
+        Algorithm::Lzw | Algorithm::LzwBits9 => lzw::decode::decode(data),
+        Algorithm::Lz4
+        | Algorithm::Lz4Fast
+        | Algorithm::Lz4Best
+        | Algorithm::Lz4SmallBlock
+        | Algorithm::Lz4Legacy
+        | Algorithm::Lz4BlockDependent => lz4::decode::decode(data),
         Algorithm::Lz4Block => lz4::decode::decode_block(data, 64 << 20),
+        Algorithm::Lz4Dict => lz4::decode::decode_with_dict(data, lz4_dict()),
         Algorithm::Xpress => xca::lz77::decode(data),
         Algorithm::XpressHuff => xca::huffman::decode(data),
         Algorithm::Lznt1 => xca::lznt1::decode(data),
         Algorithm::Lzf => lzf::decode(data),
         Algorithm::Fastlz => fastlz::decode(data),
+        Algorithm::PackBits => packbits::decode(data),
         Algorithm::Zx0 => zx0::decode(data),
         Algorithm::Zx1 => zx1::decode(data),
         Algorithm::Zx2 => zx2::decode(data),
         Algorithm::Zx5 => zx5::decode(data),
         Algorithm::Vcdiff => vcdiff::decode(data),
+        Algorithm::VcdiffSrc => vcdiff::decode_with_source(delta_source(), data),
         Algorithm::Mppc => mppc::decode(data),
+        Algorithm::MppcRdp4 | Algorithm::MppcRdp5 => {
+            let (&flags, body) = data
+                .split_first()
+                .ok_or(Error::InvalidData("mppc rdp: missing flags byte"))?;
+            mppc::decode_rdp(flags, body)
+        }
         Algorithm::Lzs => lzs::decode(data),
         Algorithm::Lzsa | Algorithm::Lzsa2 => lzsa::decode(data),
         Algorithm::Lzrw1 => lzrw1::decode(data),
@@ -709,12 +1097,17 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
         | Algorithm::LrzipLzo
         | Algorithm::LrzipNone
         | Algorithm::LrzipZpaq => lrzip::decode::decode(data),
-        Algorithm::Brotli | Algorithm::BrotliFast | Algorithm::BrotliBest => {
-            brotli::decode::decode(data)
-        }
+        Algorithm::Brotli
+        | Algorithm::BrotliFast
+        | Algorithm::BrotliBest
+        | Algorithm::BrotliMeta => brotli::decode::decode(data),
         Algorithm::Snappy => snappy::decode::decode(data),
         Algorithm::Rzip => rzip::decode::decode(data),
         Algorithm::Zlib => zlib::decode::decode(data),
+        Algorithm::ZpaqArchive => {
+            let entries = zpaq_archive::decode::decode(data)?;
+            Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
+        }
         Algorithm::Zpaq | Algorithm::ZpaqLevel2 | Algorithm::ZpaqLevel3 => {
             // The upstream `zpaq` CLI produces JIDAC journaling
             // archives whose metadata segments would pollute a raw
@@ -760,9 +1153,15 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
             let _ = mtree::decode::decode(data)?;
             Ok(Vec::new())
         }
-        Algorithm::GitPack => {
+        Algorithm::GitPack | Algorithm::GitPackSha256 => {
             let entries = git_pack::decode::decode(data)?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| {
+                archive::traits::ArchiveEntry::data(&e).to_vec()
+            }))
+        }
+        Algorithm::GitPackDelta => {
+            let entries = git_pack::decode::decode(data)?;
+            Ok(entries.into_iter().last().map_or(Vec::new(), |e| {
                 archive::traits::ArchiveEntry::data(&e).to_vec()
             }))
         }
@@ -777,19 +1176,41 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
             let entries = warc::decode::decode(data)?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
         }
-        Algorithm::Lha => {
+        Algorithm::Lha
+        | Algorithm::LhaLh4
+        | Algorithm::LhaLh5
+        | Algorithm::LhaLh6
+        | Algorithm::LhaLh7
+        | Algorithm::LhaLzs
+        | Algorithm::LhaLz5
+        | Algorithm::LhaPm1
+        | Algorithm::LhaPm2 => {
             let entries = lha::decode::decode(data)?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
         }
-        Algorithm::Arj => {
+        Algorithm::Arj | Algorithm::Arj1 | Algorithm::Arj2 | Algorithm::Arj3 | Algorithm::Arj4 => {
             let entries = arj::decode::decode(data)?;
+            Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::ArjGarbled => {
+            let entries = arj::decode::decode_with_password(data, "secret")?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
         }
         Algorithm::Arc => {
             let entries = arc::decode::decode(data)?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
         }
-        Algorithm::Zip | Algorithm::ZipStore | Algorithm::ZipBzip2 | Algorithm::ZipZstd => {
+        Algorithm::Zip
+        | Algorithm::ZipStore
+        | Algorithm::ZipBzip2
+        | Algorithm::ZipZstd
+        | Algorithm::ZipDeflate64
+        | Algorithm::ZipLzma
+        | Algorithm::ZipXz
+        | Algorithm::ZipPpmd
+        | Algorithm::ZipShrunk
+        | Algorithm::ZipImplode
+        | Algorithm::ZipReduce => {
             let entries = zip::decode::decode(data)?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
         }
@@ -798,7 +1219,12 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
         | Algorithm::SevenZLzma
         | Algorithm::SevenZPpmd
         | Algorithm::SevenZDeflate
-        | Algorithm::SevenZBzip2 => {
+        | Algorithm::SevenZBzip2
+        | Algorithm::SevenZDeflate64
+        | Algorithm::SevenZBrotli
+        | Algorithm::SevenZX86
+        | Algorithm::SevenZBcj2
+        | Algorithm::SevenZDelta => {
             let entries = sevenz::decode::decode(data)?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
         }
@@ -806,31 +1232,217 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
             let entries = tar::decode::decode(data)?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
         }
-        Algorithm::Cpio | Algorithm::CpioCrc => {
+        Algorithm::Cpio | Algorithm::CpioCrc | Algorithm::CpioOdc | Algorithm::CpioBin => {
             let entries = cpio::decode::decode(data)?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::Cramfs => {
+            let image = cramfs::decode::decode(data)?;
+            Ok(image
+                .entries
+                .into_iter()
+                .find(|e| e.kind == cramfs::decode::CramfsKind::File)
+                .map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::Romfs => {
+            let image = romfs::decode::decode(data)?;
+            Ok(image
+                .entries
+                .into_iter()
+                .find(|e| e.kind == romfs::decode::RomfsKind::File)
+                .map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::Erofs => {
+            let image = erofs::decode::decode(data)?;
+            Ok(image
+                .entries
+                .into_iter()
+                .find(|e| e.kind == erofs::decode::ErofsKind::File)
+                .map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::Iso9660 | Algorithm::IsoRr => {
+            let image = iso9660::decode::decode(data)?;
+            Ok(image
+                .entries
+                .into_iter()
+                .find(|e| e.kind == iso9660::decode::IsoKind::File)
+                .map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::Mscfb | Algorithm::MscfbV4 => {
+            let entries = mscfb::decode::decode(data)?;
+            Ok(entries
+                .into_iter()
+                .find(|e| e.name == "fuzz_test")
+                .map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::Pea | Algorithm::PeaStore | Algorithm::PeaSha256 => {
+            let image = pea::decode::decode(data)?;
+            Ok(image
+                .entries
+                .into_iter()
+                .find(|e| !e.is_dir)
+                .map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::Crx3 => {
+            let image = crx3::decode::decode(data)?;
+            Ok(image
+                .entries
+                .into_iter()
+                .next()
+                .map_or(Vec::new(), |e| e.data))
         }
     }
 }
 
 pub const fn special_case_labels(algo: Algorithm) -> &'static [&'static str] {
     match algo {
-        Algorithm::Ar => &["gnu-long-name"],
-        Algorithm::ArBsd => &["bsd-long-name"],
-        Algorithm::TarGnu => &["gnu-long-name"],
-        Algorithm::TarPax => &["pax-metadata"],
-        Algorithm::Cpio => &["newc-metadata"],
-        Algorithm::CpioCrc => &["newcrc-metadata"],
-        Algorithm::Zip => &["stored-comment", "cp437-comment", "aes256", "traditional"],
+        Algorithm::Ar => &["gnu-long-name", "multi-entry"],
+        Algorithm::ArBsd => &["bsd-long-name", "multi-entry"],
+        Algorithm::TarGnu => &["gnu-long-name", "multi-entry"],
+        Algorithm::TarUstar => &["multi-entry"],
+        Algorithm::TarPax => &["pax-metadata", "multi-entry"],
+        Algorithm::Cpio => &["newc-metadata", "multi-entry"],
+        Algorithm::CpioCrc => &["newcrc-metadata", "multi-entry"],
+        Algorithm::CpioOdc | Algorithm::CpioBin => &["multi-entry"],
+        Algorithm::Zip => &[
+            "stored-comment",
+            "cp437-comment",
+            "aes256",
+            "traditional",
+            "multi-entry",
+        ],
         Algorithm::SevenZ => &[
             "copy-method",
             "ppmd",
             "encrypted",
             "encoded-header",
             "encrypted-header",
+            "multi-entry",
         ],
+        Algorithm::Lha | Algorithm::Arj | Algorithm::Arc | Algorithm::Xar => &["multi-entry"],
+        Algorithm::Mscfb | Algorithm::MscfbV4 => &["multi-entry"],
+        Algorithm::Pea | Algorithm::PeaStore | Algorithm::PeaSha256 => &["multi-entry"],
+        Algorithm::Cramfs | Algorithm::Romfs | Algorithm::Erofs => &["multi-entry"],
+        Algorithm::Iso9660 | Algorithm::IsoRr => &["multi-entry"],
+        Algorithm::ZpaqArchive | Algorithm::GitPack => &["multi-entry"],
+        _ if is_codec(algo) => &["determinism"],
         _ => &[],
     }
+}
+
+/// Pure codec (compress::*) variants — those whose encoders take no archive
+/// metadata (timestamps, names) and are therefore expected to be
+/// byte-for-byte deterministic for identical input.
+const fn is_codec(algo: Algorithm) -> bool {
+    matches!(
+        algo,
+        Algorithm::Deflate
+            | Algorithm::Gzip
+            | Algorithm::GzipFast
+            | Algorithm::GzipStore
+            | Algorithm::Zstd
+            | Algorithm::ZstdFast
+            | Algorithm::ZstdBest
+            | Algorithm::ZstdNoChecksum
+            | Algorithm::ZstdSeekable
+            | Algorithm::ZstdDict
+            | Algorithm::Bzip2
+            | Algorithm::Bzip2Fast
+            | Algorithm::Bzip2Best
+            | Algorithm::Lzip
+            | Algorithm::LzipFast
+            | Algorithm::LzipBest
+            | Algorithm::LzipDict
+            | Algorithm::LzmaAlone
+            | Algorithm::Xz
+            | Algorithm::XzFast
+            | Algorithm::XzBest
+            | Algorithm::XzDelta
+            | Algorithm::XzX86
+            | Algorithm::XzPpc
+            | Algorithm::XzIa64
+            | Algorithm::XzSparc
+            | Algorithm::XzArm
+            | Algorithm::XzArmThumb
+            | Algorithm::XzArm64
+            | Algorithm::XzRiscV
+            | Algorithm::Lzw
+            | Algorithm::LzwBits9
+            | Algorithm::Lz4
+            | Algorithm::Lz4Fast
+            | Algorithm::Lz4Best
+            | Algorithm::Lz4SmallBlock
+            | Algorithm::Lz4Block
+            | Algorithm::Lz4Dict
+            | Algorithm::Lz4Legacy
+            | Algorithm::Lz4BlockDependent
+            | Algorithm::Xpress
+            | Algorithm::XpressHuff
+            | Algorithm::Lznt1
+            | Algorithm::Lzf
+            | Algorithm::Fastlz
+            | Algorithm::PackBits
+            | Algorithm::Zx0
+            | Algorithm::Zx1
+            | Algorithm::Zx2
+            | Algorithm::Zx5
+            | Algorithm::Vcdiff
+            | Algorithm::VcdiffSrc
+            | Algorithm::Mppc
+            | Algorithm::MppcRdp4
+            | Algorithm::MppcRdp5
+            | Algorithm::Lzs
+            | Algorithm::Lzsa
+            | Algorithm::Lzsa2
+            | Algorithm::Lzrw1
+            | Algorithm::Lzrw1a
+            | Algorithm::Lzrw2
+            | Algorithm::Lzrw3
+            | Algorithm::Lzrw3a
+            | Algorithm::Lzxd
+            | Algorithm::Cmpsc
+            | Algorithm::Lzo
+            | Algorithm::LzoFast
+            | Algorithm::LzoBest
+            | Algorithm::LrzipLzma
+            | Algorithm::LrzipBzip2
+            | Algorithm::LrzipGzip
+            | Algorithm::LrzipLzo
+            | Algorithm::LrzipNone
+            | Algorithm::LrzipZpaq
+            | Algorithm::Brotli
+            | Algorithm::BrotliFast
+            | Algorithm::BrotliBest
+            | Algorithm::BrotliMeta
+            | Algorithm::Snappy
+            | Algorithm::Rzip
+            | Algorithm::Zlib
+            | Algorithm::Zpaq
+            | Algorithm::ZpaqLevel2
+            | Algorithm::ZpaqLevel3
+    )
+}
+
+/// Variants that share the base codec's encode/decode path and differ only
+/// in the external tool's compression level (e.g. `zstd -1` vs `zstd -19`).
+/// They exist for original-tool interop coverage; self/corrupt work on them
+/// duplicates the base variant.
+pub const fn is_level_alias(algo: Algorithm) -> bool {
+    matches!(
+        algo,
+        Algorithm::ZstdFast
+            | Algorithm::ZstdBest
+            | Algorithm::Lz4Fast
+            | Algorithm::Lz4Best
+            | Algorithm::LzoFast
+            | Algorithm::LzoBest
+            | Algorithm::LzipFast
+            | Algorithm::LzipBest
+            | Algorithm::XzFast
+            | Algorithm::XzBest
+            | Algorithm::BrotliFast
+            | Algorithm::BrotliBest
+    )
 }
 
 pub fn run_special_case(algo: Algorithm, label: &str, data: &[u8]) -> Result<Vec<u8>, String> {
@@ -1056,7 +1668,312 @@ pub fn run_special_case(algo: Algorithm, label: &str, data: &[u8]) -> Result<Vec
                 .map_err(|e| e.to_string())?;
             Ok(entries[0].data.clone())
         }
+        _ if label == "multi-entry" => run_multi_entry_case(algo, data),
+        (_, "determinism") => {
+            // Codec encoders must be byte-for-byte deterministic: encode the
+            // same input twice and require identical output. Non-determinism
+            // here (embedded timestamps, HashMap ordering, rng seeds) breaks
+            // reproducible artifacts and can hide decode-side divergence.
+            let first = encode_with(algo, data);
+            let second = encode_with(algo, data);
+            if first != second {
+                return Err(format!(
+                    "non-deterministic encoder for {algo}: {} vs {} bytes",
+                    first.len(),
+                    second.len()
+                ));
+            }
+            Ok(data.to_vec())
+        }
         _ => Err(format!("unknown special case for {algo}: {label}")),
+    }
+}
+
+/// Extra entry names for multi-entry special cases. Varies with the input
+/// so name-table and sorting paths see different strings.
+fn extra_entry_names(data: &[u8]) -> [String; 2] {
+    let a = usize::from(data.first().copied().unwrap_or(0));
+    let b = usize::from(data.get(1).copied().unwrap_or(0));
+    [
+        format!("entry_{:02x}", a % 97),
+        format!("sub_{:02x}.bin", b % 53),
+    ]
+}
+
+/// Pack two extra files plus the payload as `fuzz_test`, then verify the
+/// archive holds all three entries and return the payload bytes.
+fn run_multi_entry_case(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, String> {
+    let [n1, n2] = extra_entry_names(data);
+    match algo {
+        Algorithm::Ar | Algorithm::ArBsd => {
+            let mut enc = if algo == Algorithm::ArBsd {
+                ar::encode::ArEncoder::new_bsd()
+            } else {
+                ar::encode::ArEncoder::new()
+            };
+            enc.add_file(&n1, b"first");
+            enc.add_file(&n2, b"second");
+            enc.add_file("fuzz_test", data);
+            let archive = enc.finish().map_err(|e| e.to_string())?;
+            let entries = ar::decode::decode(&archive).map_err(|e| e.to_string())?;
+            if entries.len() != 3 {
+                return Err(format!("ar multi-entry lost entries: {}", entries.len()));
+            }
+            Ok(entries[2].data.clone())
+        }
+        Algorithm::TarGnu | Algorithm::TarUstar | Algorithm::TarPax => {
+            let mut enc = if algo == Algorithm::TarPax {
+                tar::encode::TarEncoder::new_pax()
+            } else {
+                tar::encode::TarEncoder::new()
+            };
+            enc.add_file(&n1, b"first");
+            enc.add_file(&n2, b"second");
+            enc.add_file("fuzz_test", data);
+            let entries = tar::decode::decode(&enc.finish()).map_err(|e| e.to_string())?;
+            if entries.len() != 3 {
+                return Err(format!("tar multi-entry lost entries: {}", entries.len()));
+            }
+            Ok(entries[2].data.clone())
+        }
+        Algorithm::Cpio | Algorithm::CpioCrc | Algorithm::CpioOdc | Algorithm::CpioBin => {
+            let mut enc = match algo {
+                Algorithm::CpioCrc => cpio::encode::CpioEncoder::new_crc(),
+                Algorithm::CpioOdc => cpio::encode::CpioEncoder::new_odc(),
+                Algorithm::CpioBin => cpio::encode::CpioEncoder::new_bin(),
+                _ => cpio::encode::CpioEncoder::new(),
+            };
+            enc.add_file(&n1, b"first");
+            enc.add_file(&n2, b"second");
+            enc.add_file("fuzz_test", data);
+            let entries = cpio::decode::decode(&enc.finish()).map_err(|e| e.to_string())?;
+            if entries.len() != 3 {
+                return Err(format!("cpio multi-entry lost entries: {}", entries.len()));
+            }
+            Ok(entries[2].data.clone())
+        }
+        Algorithm::Zip => {
+            let mut enc = zip::encode::ZipEncoder::new();
+            enc.add_file(&n1, b"first");
+            enc.add_file(&n2, b"second");
+            enc.add_file("fuzz_test", data);
+            let archive = enc.finish().map_err(|e| e.to_string())?;
+            let entries = zip::decode::decode(&archive).map_err(|e| e.to_string())?;
+            if entries.len() != 3 {
+                return Err(format!("zip multi-entry lost entries: {}", entries.len()));
+            }
+            Ok(entries[2].data.clone())
+        }
+        Algorithm::SevenZ => {
+            let mut enc = sevenz::encode::SevenZEncoder::new();
+            enc.add_file(&n1, b"first");
+            enc.add_file(&n2, b"second");
+            enc.add_file("fuzz_test", data);
+            let archive = enc.finish().map_err(|e| e.to_string())?;
+            let entries = sevenz::decode::decode(&archive).map_err(|e| e.to_string())?;
+            entries
+                .into_iter()
+                .find(|e| e.name == "fuzz_test")
+                .map(|e| e.data)
+                .ok_or_else(|| "7z multi-entry lost fuzz_test".to_string())
+        }
+        Algorithm::Lha => {
+            let mut enc = lha::encode::LhaEncoder::new();
+            enc.add_file(&n1, b"first", 0).map_err(|e| e.to_string())?;
+            enc.add_file(&n2, b"second", 0).map_err(|e| e.to_string())?;
+            enc.add_file("fuzz_test", data, 0)
+                .map_err(|e| e.to_string())?;
+            let entries = lha::decode::decode(&enc.finish()).map_err(|e| e.to_string())?;
+            entries
+                .into_iter()
+                .find(|e| e.name == "fuzz_test")
+                .map(|e| e.data)
+                .ok_or_else(|| "lha multi-entry lost fuzz_test".to_string())
+        }
+        Algorithm::Arj => {
+            let mut enc = arj::encode::ArjEncoder::new();
+            enc.add_file(&n1, b"first", 0).map_err(|e| e.to_string())?;
+            enc.add_file(&n2, b"second", 0).map_err(|e| e.to_string())?;
+            enc.add_file("fuzz_test", data, 0)
+                .map_err(|e| e.to_string())?;
+            let entries = arj::decode::decode(&enc.finish()).map_err(|e| e.to_string())?;
+            entries
+                .into_iter()
+                .find(|e| e.name == "fuzz_test")
+                .map(|e| e.data)
+                .ok_or_else(|| "arj multi-entry lost fuzz_test".to_string())
+        }
+        Algorithm::Arc => {
+            let mut enc = arc::encode::ArcEncoder::new();
+            for (i, (name, payload)) in [
+                (n1.as_str(), b"first".as_slice()),
+                (n2.as_str(), b"second"),
+                ("fuzz_test", data),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                enc.add_file_with_method(name, payload, 0, 0, [1u8, 2, 8][i])
+                    .map_err(|e| e.to_string())?;
+            }
+            let entries = arc::decode::decode(&enc.finish()).map_err(|e| e.to_string())?;
+            entries
+                .into_iter()
+                .find(|e| e.name == "fuzz_test")
+                .map(|e| e.data)
+                .ok_or_else(|| "arc multi-entry lost fuzz_test".to_string())
+        }
+        Algorithm::Xar => {
+            let mut enc = xar::encode::XarEncoder::new();
+            enc.add_file(&n1, b"first");
+            enc.add_file(&n2, b"second");
+            enc.add_file("fuzz_test", data);
+            let entries = xar::decode::decode(&enc.finish()).map_err(|e| e.to_string())?;
+            entries
+                .into_iter()
+                .find(|e| !e.is_dir && e.name == "fuzz_test")
+                .map(|e| e.data)
+                .ok_or_else(|| "xar multi-entry lost fuzz_test".to_string())
+        }
+        Algorithm::Mscfb | Algorithm::MscfbV4 => {
+            let mut enc = if algo == Algorithm::MscfbV4 {
+                mscfb::encode::CfbEncoder::version4()
+            } else {
+                mscfb::encode::CfbEncoder::new()
+            };
+            enc.add_storage("dir1");
+            enc.add_stream(&n1, b"first");
+            enc.add_stream(&n2, b"second");
+            enc.add_stream("fuzz_test", data);
+            let archive = enc.finish().map_err(|e| e.to_string())?;
+            let entries = mscfb::decode::decode(&archive).map_err(|e| e.to_string())?;
+            entries
+                .into_iter()
+                .find(|e| e.name == "fuzz_test")
+                .map(|e| e.data)
+                .ok_or_else(|| "mscfb multi-entry lost fuzz_test".to_string())
+        }
+        Algorithm::Pea | Algorithm::PeaStore | Algorithm::PeaSha256 => {
+            let mut enc = pea::encode::PeaEncoder::new();
+            match algo {
+                Algorithm::PeaStore => {
+                    enc = enc.compression(pea::encode::PeaCompression::Store);
+                }
+                Algorithm::PeaSha256 => {
+                    enc = enc
+                        .stream_control(pea::decode::PeaAlgo::Sha256)
+                        .object_control(pea::decode::PeaAlgo::Sha256)
+                        .volume_control(pea::decode::PeaAlgo::Sha256);
+                }
+                _ => {}
+            }
+            enc.add_dir("dir1");
+            enc.add_file(&n1, b"first");
+            enc.add_file(&n2, b"second");
+            enc.add_file("fuzz_test", data);
+            let archive = enc.finish().map_err(|e| e.to_string())?;
+            let image = pea::decode::decode(&archive).map_err(|e| e.to_string())?;
+            image
+                .entries
+                .into_iter()
+                .find(|e| !e.is_dir && e.name == "fuzz_test")
+                .map(|e| e.data)
+                .ok_or_else(|| "pea multi-entry lost fuzz_test".to_string())
+        }
+        Algorithm::Cramfs => {
+            let mut enc = cramfs::encode::CramfsEncoder::new();
+            enc.add_dir("dir1");
+            enc.add_file(&n1, b"first");
+            enc.add_file(&n2, b"second");
+            enc.add_file("fuzz_test", data);
+            let archive = enc.finish().map_err(|e| e.to_string())?;
+            let image = cramfs::decode::decode(&archive).map_err(|e| e.to_string())?;
+            image
+                .entries
+                .into_iter()
+                .find(|e| e.kind == cramfs::decode::CramfsKind::File && e.name == "fuzz_test")
+                .map(|e| e.data)
+                .ok_or_else(|| "cramfs multi-entry lost fuzz_test".to_string())
+        }
+        Algorithm::Romfs => {
+            let mut enc = romfs::encode::RomfsEncoder::new();
+            enc.add_directory("dir1");
+            enc.add_file(&n1, b"first");
+            enc.add_file(&n2, b"second");
+            enc.add_file("fuzz_test", data);
+            let archive = enc.finish().map_err(|e| e.to_string())?;
+            let image = romfs::decode::decode(&archive).map_err(|e| e.to_string())?;
+            image
+                .entries
+                .into_iter()
+                .find(|e| e.kind == romfs::decode::RomfsKind::File && e.name == "fuzz_test")
+                .map(|e| e.data)
+                .ok_or_else(|| "romfs multi-entry lost fuzz_test".to_string())
+        }
+        Algorithm::Erofs => {
+            let mut enc = erofs::encode::ErofsEncoder::new();
+            enc.add_dir("dir1");
+            enc.add_file(&n1, b"first");
+            enc.add_file(&n2, b"second");
+            enc.add_file("fuzz_test", data);
+            let archive = enc.finish().map_err(|e| e.to_string())?;
+            let image = erofs::decode::decode(&archive).map_err(|e| e.to_string())?;
+            image
+                .entries
+                .into_iter()
+                .find(|e| e.kind == erofs::decode::ErofsKind::File && e.name == "fuzz_test")
+                .map(|e| e.data)
+                .ok_or_else(|| "erofs multi-entry lost fuzz_test".to_string())
+        }
+        Algorithm::Iso9660 | Algorithm::IsoRr => {
+            let mut enc = if algo == Algorithm::IsoRr {
+                iso9660::encode::IsoEncoder::new().with_rock_ridge()
+            } else {
+                iso9660::encode::IsoEncoder::new()
+            };
+            enc.add_directory("dir1");
+            enc.add_file(&n1, b"first");
+            enc.add_file(&n2, b"second");
+            enc.add_file("fuzz_test", data);
+            let archive = enc.finish().map_err(|e| e.to_string())?;
+            let image = iso9660::decode::decode(&archive).map_err(|e| e.to_string())?;
+            // ISO9660 level-1 names rewrite `fuzz_test` (d-characters, 8.3
+            // limit), so identify the payload entry by content instead.
+            image
+                .entries
+                .into_iter()
+                .find(|e| e.kind == iso9660::decode::IsoKind::File && e.data == data)
+                .map(|e| e.data)
+                .ok_or_else(|| "iso9660 multi-entry lost file entry".to_string())
+        }
+        Algorithm::ZpaqArchive => {
+            let mut enc = zpaq_archive::encode::ZpaqEncoder::new(1);
+            enc.add_file(&n1, b"first");
+            enc.add_file(&n2, b"second");
+            enc.add_file("fuzz_test", data);
+            let archive = enc.finish().map_err(|e| e.to_string())?;
+            let entries = zpaq_archive::decode::decode(&archive).map_err(|e| e.to_string())?;
+            entries
+                .into_iter()
+                .find(|e| e.filename == b"fuzz_test")
+                .map(|e| e.data)
+                .ok_or_else(|| "zpaq multi-entry lost fuzz_test".to_string())
+        }
+        Algorithm::GitPack => {
+            let mut enc = git_pack::encode::GitPackEncoder::new();
+            enc.add_object(git_pack::ObjectType::Blob, b"first");
+            enc.add_object(git_pack::ObjectType::Blob, b"second");
+            enc.add_object(git_pack::ObjectType::Blob, data);
+            let entries = git_pack::decode::decode(&enc.finish()).map_err(|e| e.to_string())?;
+            if entries.len() != 3 {
+                return Err(format!(
+                    "git-pack multi-entry lost objects: {}",
+                    entries.len()
+                ));
+            }
+            Ok(archive::traits::ArchiveEntry::data(&entries[2]).to_vec())
+        }
+        _ => Err(format!("no multi-entry special case for {algo}")),
     }
 }
 
@@ -1334,22 +2251,15 @@ mod tests {
     }
 
     #[test]
-    fn roundtrips_new_archive_targets() {
+    fn all_algorithms_roundtrip() {
         let payload = b"archive fuzz payload";
-        for algo in [
-            Algorithm::Ar,
-            Algorithm::ArBsd,
-            Algorithm::Zip,
-            Algorithm::ZipStore,
-            Algorithm::ZipBzip2,
-            Algorithm::ZipZstd,
-            Algorithm::SevenZ,
-            Algorithm::SevenZCopy,
-            Algorithm::SevenZLzma,
-            Algorithm::SevenZPpmd,
-        ] {
+        for &algo in Algorithm::ALL {
             let encoded = encode_with(algo, payload);
-            let decoded = decode_with(algo, &encoded).unwrap();
+            let decoded =
+                decode_with(algo, &encoded).unwrap_or_else(|e| panic!("{algo} decode failed: {e}"));
+            if algo == Algorithm::Mtree {
+                continue;
+            }
             assert_eq!(decoded, payload, "{algo}");
         }
     }
@@ -1357,18 +2267,10 @@ mod tests {
     #[test]
     fn special_cases_roundtrip_payload() {
         let payload = b"special case payload";
-        for algo in [
-            Algorithm::Ar,
-            Algorithm::ArBsd,
-            Algorithm::TarGnu,
-            Algorithm::TarPax,
-            Algorithm::Cpio,
-            Algorithm::CpioCrc,
-            Algorithm::Zip,
-            Algorithm::SevenZ,
-        ] {
+        for &algo in Algorithm::ALL {
             for &label in special_case_labels(algo) {
-                let decoded = run_special_case(algo, label, payload).unwrap();
+                let decoded = run_special_case(algo, label, payload)
+                    .unwrap_or_else(|e| panic!("{algo}::{label} failed: {e}"));
                 assert_eq!(decoded, payload, "{algo}::{label}");
             }
         }

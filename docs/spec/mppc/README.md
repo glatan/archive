@@ -87,4 +87,4 @@ MSB-first でパックされる (RFC 2118 §4.2)。
 - エンコーダは greedy 単一ハッシュのベースライン品質 (圧縮率最適化は意図しない)。
 - RFC 2118 §1.1 の licensing statement (MPPC は PPP 実装製品かつ相互運用目的でのみ使用可、というフィールドオブユース制限) を記録する。本 crate は PPP 非実装の汎用ライブラリとして codec を単体公開しており、透明性のため THIRD_PARTY_NOTICES にも明記 (法的助言ではない)。この文言の実効的根拠だった Stac 特許群は失効済みで inert とみなす判断は `docs/IMPLEMENTATION_POLICY.md` の「仕様文書中の field-of-use 文言の扱い」節を参照。
 - `decode(input)` は入力全体を 1 パケットとして扱う。パケット長フィールドが wire 上に存在しないため、連接ストリームの split は仕様上不可能 (パケット境界はリンク層情報)。
-- fuzz ハーネスは MPPC の 1 パケット上限に合わせて入力を 8192 バイトに丸める (`fuzz/src/runner.rs` の `Algorithm::Mppc` 特例)。
+- fuzz ハーネスは MPPC の 1 パケット上限に合わせて入力を丸める (`fuzz/src/runner.rs` の特例)。`mppc` / `mppc-rdp4` (RDP4、履歴 8KiB) は 8192 バイト、`mppc-rdp5` (RDP5、履歴 64KiB) は 65536 バイトが上限。

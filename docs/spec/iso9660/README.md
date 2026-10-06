@@ -72,7 +72,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
 | 36 | El Torito boot record VD (type 0, sysid EL TORITO SPECIFICATION) + boot catalog 解釈: validation entry (key bytes/checksum/platform/id) + initial/section entries (indicator/media/segment/sectors/load LBA + image 抽出) を `IsoImage.el_torito` で公開 | El Torito 1.0 §2-2.5 (`sources/eltorito_spec_1.0.pdf`) | ✅ | `decodes_el_torito`, `el_torito_section_entries`, `rejects_bad_el_torito_validation`, `rejects_bad_el_torito_checksum`, `rejects_out_of_range_el_torito_catalog`, `skips_non_eltorito_boot_record`, `test_iso9660_eltorito_image` (bsdtar `-o boot=` 実 fixture `bsdtar-eltorito.iso` で payload 照合) |
-| 40 | ISO 9660 write | ECMA-119 + SUSP/RRIP 1.12 | ✅ | `IsoEncoder`/`encode()` で image 生成 (level 1 = 8.3 / level 2 = 30 文字の識別子 mangling、both-endian、path table、`with_rock_ridge` で SUSP `SP`/`ER` + RRIP `PX`/`NM`/`TF`/`SL`)。`roundtrip_*` 各テスト。Joliet SVD・El Torito・multi-extent・XA record・RRIP `PN`/`LN`・zisofs・interleaved の出力は encoder の scope 外 |
+| 40 | ISO 9660 write | ECMA-119 + SUSP/RRIP 1.12 | ✅ | `IsoEncoder`/`encode()` で image 生成 (level 1 = 8.3 / level 2 = 30 文字の識別子 mangling、both-endian、path table、`with_rock_ridge` で SUSP `SP`/`ER` + RRIP `PX`/`NM`/`TF`/`SL`)。`roundtrip_*` 各テスト。Joliet SVD・El Torito・multi-extent・XA record・RRIP `PN`/`LN`・zisofs・interleaved の出力は encoder の scope 外。fuzz harness `iso9660`/`iso9660-rr` (Rock Ridge) で roundtrip + corrupt 対象 |
 
 ## 意図的な scope 制約
 

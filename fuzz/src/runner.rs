@@ -9,9 +9,11 @@ use crate::checksum;
 use crate::corpus;
 use crate::datagen;
 use crate::external;
+use crate::fixtures;
 use crate::known_issues;
 use crate::minimizer;
 use crate::report::{self, FailureInfo, Stats, TestPattern};
+use crate::watchdog;
 use rand::RngExt;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
@@ -27,6 +29,7 @@ pub enum PatternFilter {
     Self_,
     OriginalCompress,
     OriginalDecompress,
+    Corrupt,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +49,7 @@ pub struct RunConfig {
     pub jobs: usize,
     pub output_dir: String,
     pub corpus_dir: String,
+    pub fixtures_dir: String,
 }
 
 struct RunState<'a> {
@@ -64,6 +68,55 @@ struct TestOutcome {
     decoded: Vec<u8>,
     encoded_size: usize,
     elapsed_millis: u128,
+}
+
+/// A case failure. For the corrupt pattern it also carries the exact mutated
+/// encoded stream that triggered the failure, so the artifact can store it as
+/// a `.mut.bin` sidecar and replay/minimization can target it directly.
+struct CaseError {
+    message: String,
+    mutated_stream: Option<Vec<u8>>,
+    mutation: Option<String>,
+}
+
+impl CaseError {
+    fn simple(message: String) -> Self {
+        Self {
+            message,
+            mutated_stream: None,
+            mutation: None,
+        }
+    }
+}
+
+impl From<String> for CaseError {
+    fn from(message: String) -> Self {
+        Self::simple(message)
+    }
+}
+
+thread_local! {
+    /// Panic source location recorded by [`install_panic_hook`] for the
+    /// current worker thread, consumed by [`panic_message`].
+    static LAST_PANIC_LOC: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Chain a panic hook that records `file:line` of every panic so failure
+/// signatures can distinguish independent panic sites. Idempotent.
+fn install_panic_hook() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            LAST_PANIC_LOC.with(|cell| {
+                *cell.borrow_mut() = info
+                    .location()
+                    .map(|loc| format!("{}:{}", loc.file(), loc.line()));
+            });
+            default_hook(info);
+        }));
+    });
 }
 
 const MIN_RUNTIME_ORACLE_MS: u128 = 2_000;
@@ -86,6 +139,9 @@ pub fn run(config: &RunConfig) -> Stats {
             output_dir.display()
         )
     });
+    watchdog::init(&run_dir);
+    fixtures::init(Path::new(&config.fixtures_dir));
+    install_panic_hook();
     report::write_run_manifest(
         &run_dir,
         report::RunManifestInfo {
@@ -120,23 +176,13 @@ pub fn run(config: &RunConfig) -> Stats {
     eprintln!("[info] jobs: {}", config.jobs.max(1));
 
     for &algo in &config.algorithms {
-        match algo {
-            Algorithm::Deflate
-            | Algorithm::GzipStore
-            | Algorithm::Zlib
-            | Algorithm::Lz4SmallBlock
-            | Algorithm::Snappy
-            | Algorithm::Rzip
-            | Algorithm::ZipBzip2
-            | Algorithm::ZipZstd => {}
-            _ => {
-                let status = if available_tools.contains(&algo) {
-                    "available"
-                } else {
-                    "NOT FOUND (external tests skipped)"
-                };
-                eprintln!("[info] {algo}: external tool {status}");
-            }
+        if external::has_tool_spec(algo) {
+            let status = if available_tools.contains(&algo) {
+                "available"
+            } else {
+                "NOT FOUND (external tests skipped)"
+            };
+            eprintln!("[info] {algo}: external tool {status}");
         }
     }
     eprintln!();
@@ -251,7 +297,7 @@ fn run_iteration(
 
     for pattern in patterns {
         let elapsed = state.start.elapsed().as_secs();
-        match execute_case(algo, pattern, data) {
+        match execute_case(algo, pattern, data, iteration) {
             Ok(outcome) => {
                 if let Err(oracle_error) =
                     check_resource_oracles(algo, pattern, data.len(), &outcome)
@@ -277,6 +323,8 @@ fn run_iteration(
                         error: &oracle_error,
                         case_label: case_label.map(ToOwned::to_owned),
                         signature: report::failure_signature(algo, pattern, &oracle_error),
+                        mutated_stream: None,
+                        mutation: None,
                     };
                     stats
                         .lock()
@@ -299,8 +347,9 @@ fn run_iteration(
                     .unwrap_or_else(|e| e.into_inner())
                     .record_pass(pattern);
             }
-            Err(error_str) => {
-                if let Some(reason) = known_issues::classify(algo, pattern, data, &error_str) {
+            Err(case_err) => {
+                if let Some(reason) = known_issues::classify(algo, pattern, data, &case_err.message)
+                {
                     report::log_progress_status(
                         algo,
                         pattern,
@@ -329,6 +378,7 @@ fn run_iteration(
                 );
 
                 let original_size = data.len();
+                let error_str = case_err.message.clone();
                 let original_signature = report::failure_signature(algo, pattern, &error_str);
                 // Atomically claim the signature bucket so a duplicate
                 // failure — including one raised by another job — skips
@@ -369,14 +419,59 @@ fn run_iteration(
                     continue;
                 }
 
-                let minimized = minimizer::minimize_failure(
-                    data,
-                    |candidate| reproduces_signature(algo, pattern, candidate, &original_signature),
-                    MINIMIZE_BUDGET,
-                );
-                let minimized_error = execute_case(algo, pattern, &minimized)
-                    .err()
-                    .unwrap_or_else(|| error_str.clone());
+                // A corrupt failure is caused by the mutated encoded stream,
+                // not by the original input: minimize the reproducer itself
+                // and keep the original input as provenance in `.bin`.
+                let minimized_mutated = case_err.mutated_stream.as_ref().map(|mutated| {
+                    let decoded_limit = corrupt_decoded_limit(original_size);
+                    // Minimization probes the mutated stream directly —
+                    // outside the per-case guard — so it needs its own
+                    // in-flight entry; each probe refreshes it via
+                    // note_data without further file I/O.
+                    let _inflight = watchdog::enter(algo, pattern, iteration, mutated);
+                    minimizer::minimize_failure(
+                        mutated,
+                        |candidate| {
+                            reproduces_corrupt_signature(
+                                algo,
+                                candidate,
+                                &original_signature,
+                                decoded_limit,
+                            )
+                        },
+                        MINIMIZE_BUDGET,
+                    )
+                });
+                let minimized = if minimized_mutated.is_some() {
+                    data.to_vec()
+                } else {
+                    let _inflight = watchdog::enter(algo, pattern, iteration, data);
+                    minimizer::minimize_failure(
+                        data,
+                        |candidate| {
+                            reproduces_signature(
+                                algo,
+                                pattern,
+                                candidate,
+                                iteration,
+                                &original_signature,
+                            )
+                        },
+                        MINIMIZE_BUDGET,
+                    )
+                };
+                let minimized_error = match &minimized_mutated {
+                    Some(mutated) => {
+                        let _inflight = watchdog::enter(algo, pattern, iteration, mutated);
+                        corrupt_probe(algo, mutated, corrupt_decoded_limit(original_size))
+                            .err()
+                            .unwrap_or_else(|| error_str.clone())
+                    }
+                    None => execute_case(algo, pattern, &minimized, iteration)
+                        .err()
+                        .map(|e| e.message)
+                        .unwrap_or_else(|| error_str.clone()),
+                };
                 let minimized_signature =
                     report::failure_signature(algo, pattern, &minimized_error);
                 // The claim covers `minimized_signature` only if minimization
@@ -404,6 +499,8 @@ fn run_iteration(
                     error: &minimized_error,
                     case_label: case_label.map(ToOwned::to_owned),
                     signature: minimized_signature,
+                    mutated_stream: minimized_mutated.as_deref(),
+                    mutation: case_err.mutation.clone(),
                 };
 
                 stats
@@ -416,14 +513,23 @@ fn run_iteration(
     }
 }
 
-fn execute_case(algo: Algorithm, pattern: TestPattern, data: &[u8]) -> Result<TestOutcome, String> {
-    // MPPC is a packet codec: one packet carries at most 8192 bytes of
+fn execute_case(
+    algo: Algorithm,
+    pattern: TestPattern,
+    data: &[u8],
+    iteration: u64,
+) -> Result<TestOutcome, CaseError> {
+    // MPPC is a packet codec: one packet carries at most `history` bytes of
     // payload, so cap the input instead of misrepresenting larger inputs.
-    let data = if algo == Algorithm::Mppc {
-        &data[..data.len().min(8192)]
-    } else {
-        data
+    let packet_cap = match algo {
+        Algorithm::Mppc | Algorithm::MppcRdp4 => 8192,
+        Algorithm::MppcRdp5 => 65536,
+        _ => usize::MAX,
     };
+    let data = &data[..data.len().min(packet_cap)];
+    // Register before any library call so a hang or uncatchable abort leaves
+    // a persisted breadcrumb the watchdog (or a post-mortem) can identify.
+    let _inflight = watchdog::enter(algo, pattern, iteration, data);
     let fingerprint = checksum::fingerprint(data);
     let started = Instant::now();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -433,23 +539,35 @@ fn execute_case(algo: Algorithm, pattern: TestPattern, data: &[u8]) -> Result<Te
 
     match result {
         Ok(Ok((decoded, encoded_size))) => {
-            checksum::verify(&fingerprint, &decoded).map_err(|e| e.to_string())?;
+            checksum::verify(&fingerprint, &decoded)
+                .map_err(|e| CaseError::simple(e.to_string()))?;
             Ok(TestOutcome {
                 decoded,
                 encoded_size,
                 elapsed_millis,
             })
         }
-        Ok(Err(err)) => Err(err.to_string()),
-        Err(panic_info) => {
-            if let Some(s) = panic_info.downcast_ref::<String>() {
-                Err(format!("PANIC: {s}"))
-            } else if let Some(s) = panic_info.downcast_ref::<&str>() {
-                Err(format!("PANIC: {s}"))
-            } else {
-                Err("PANIC: unknown".to_string())
-            }
-        }
+        Ok(Err(err)) => Err(err),
+        Err(panic_info) => Err(CaseError::simple(format!(
+            "PANIC: {}",
+            panic_message(&panic_info)
+        ))),
+    }
+}
+
+fn panic_message(panic_info: &dyn std::any::Any) -> String {
+    let msg = if let Some(s) = panic_info.downcast_ref::<String>() {
+        s.clone()
+    } else if let Some(s) = panic_info.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else {
+        "unknown".to_string()
+    };
+    // Append the panic site so signatures distinguish independent panic
+    // locations instead of collapsing them into one normalized bucket.
+    match LAST_PANIC_LOC.with(|cell| cell.borrow_mut().take()) {
+        Some(loc) => format!("{msg} @ {loc}"),
+        None => msg,
     }
 }
 
@@ -457,11 +575,26 @@ fn reproduces_signature(
     algo: Algorithm,
     pattern: TestPattern,
     data: &[u8],
+    iteration: u64,
     signature: &str,
 ) -> bool {
-    match execute_case(algo, pattern, data) {
+    match execute_case(algo, pattern, data, iteration) {
         Ok(_) => false,
-        Err(err) => report::failure_signature(algo, pattern, &err) == signature,
+        Err(err) => report::failure_signature(algo, pattern, &err.message) == signature,
+    }
+}
+
+/// Whether decoding `candidate` (a mutated encoded stream) still fails with
+/// the same signature, used to minimize corrupt-pattern reproducers.
+fn reproduces_corrupt_signature(
+    algo: Algorithm,
+    candidate: &[u8],
+    signature: &str,
+    decoded_limit: usize,
+) -> bool {
+    match corrupt_probe(algo, candidate, decoded_limit) {
+        Ok(()) => false,
+        Err(err) => report::failure_signature(algo, TestPattern::Corrupt, &err) == signature,
     }
 }
 
@@ -479,7 +612,14 @@ fn run_special_cases(state: &RunState, stats: &Mutex<Stats>, iteration: &mut u64
                 return;
             }
             let elapsed = state.start.elapsed().as_secs();
-            match algorithms::run_special_case(algo, label, payload) {
+            // Special cases may panic or hang inside library encode/decode;
+            // capture panics as failures and leave a watchdog breadcrumb.
+            let _inflight = watchdog::enter(algo, TestPattern::Self_, *iteration, payload);
+            let case_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                algorithms::run_special_case(algo, label, payload)
+            }))
+            .unwrap_or_else(|panic| Err(format!("PANIC: {}", panic_message(&panic))));
+            match case_result {
                 Ok(decoded) if decoded == payload => {
                     report::log_progress_status(
                         algo,
@@ -510,6 +650,8 @@ fn run_special_cases(state: &RunState, stats: &Mutex<Stats>, iteration: &mut u64
                         error: &error,
                         case_label: Some(format!("special-{label}")),
                         signature: report::failure_signature(algo, TestPattern::Self_, &error),
+                        mutated_stream: None,
+                        mutation: None,
                     };
                     stats
                         .lock()
@@ -539,6 +681,8 @@ fn run_special_cases(state: &RunState, stats: &Mutex<Stats>, iteration: &mut u64
                         error: &error,
                         case_label: Some(format!("special-{label}")),
                         signature: report::failure_signature(algo, TestPattern::Self_, &error),
+                        mutated_stream: None,
+                        mutation: None,
                     };
                     stats
                         .lock()
@@ -576,12 +720,19 @@ fn check_resource_oracles(
     input_size: usize,
     outcome: &TestOutcome,
 ) -> Result<(), String> {
-    let max_runtime = MIN_RUNTIME_ORACLE_MS.max((input_size / RUNTIME_SIZE_DIVISOR) as u128);
-    if outcome.elapsed_millis > max_runtime {
-        return Err(format!(
-            "resource oracle: runtime too high for {algo} {pattern}: {}ms > {}ms",
-            outcome.elapsed_millis, max_runtime
-        ));
+    // The corrupt pattern runs a fixed schedule of many decode attempts, so
+    // per-case wall time scales with the schedule rather than input size and
+    // the runtime oracle would false-positive on heavy decoders. Genuine
+    // stalls are covered by the watchdog; oversized decode output is checked
+    // per attempt inside `run_corrupt_case`.
+    if pattern != TestPattern::Corrupt {
+        let max_runtime = MIN_RUNTIME_ORACLE_MS.max((input_size / RUNTIME_SIZE_DIVISOR) as u128);
+        if outcome.elapsed_millis > max_runtime {
+            return Err(format!(
+                "resource oracle: runtime too high for {algo} {pattern}: {}ms > {}ms",
+                outcome.elapsed_millis, max_runtime
+            ));
+        }
     }
 
     let encoded_limit = input_size
@@ -594,10 +745,13 @@ fn check_resource_oracles(
         ));
     }
 
+    // For the corrupt pattern `decoded` echoes the input verbatim, so the
+    // decoded-size check can never fire; mutated-decode output is bounded by
+    // `run_corrupt_case` itself.
     let decoded_limit = input_size
         .saturating_mul(MAX_ENCODED_SIZE_MULTIPLIER)
         .max(4096);
-    if outcome.decoded.len() > decoded_limit {
+    if pattern != TestPattern::Corrupt && outcome.decoded.len() > decoded_limit {
         return Err(format!(
             "resource oracle: decoded size too large for {algo} {pattern}: {} > {}",
             outcome.decoded.len(),
@@ -636,6 +790,12 @@ fn handle_failure_artifact(
             info.case_label.as_deref().unwrap_or("generated")
         );
         let _ = harvest_corpus_entry(state, info.algo, &label, info.data);
+        // For corrupt failures the minimized mutated stream is itself an
+        // interesting seed: harvesting it feeds dense encoded-structure
+        // inputs back into guided mutation.
+        if let Some(mutated) = info.mutated_stream {
+            let _ = harvest_corpus_entry(state, info.algo, &format!("{label}-mut"), mutated);
+        }
     } else {
         report::log_progress_status(
             info.algo,
@@ -739,34 +899,27 @@ fn get_patterns(
     available_tools: &HashSet<Algorithm>,
 ) -> Vec<TestPattern> {
     let has_tool = available_tools.contains(&algo);
-    let no_external = matches!(
-        algo,
-        Algorithm::Deflate
-            | Algorithm::GzipStore
-            | Algorithm::Zlib
-            | Algorithm::Lz4SmallBlock
-            | Algorithm::Snappy
-            | Algorithm::Rzip
-            | Algorithm::ZipBzip2
-            | Algorithm::ZipZstd
-    );
 
     match filter {
         PatternFilter::All => {
-            let mut patterns = vec![TestPattern::Self_];
-            if has_tool && !no_external {
+            // Level aliases share the base encode/decode path; only the
+            // external tool spec differs (e.g. `zstd -1` vs `zstd -19`), so
+            // running self/corrupt on them would duplicate the base variant.
+            let mut patterns = if algorithms::is_level_alias(algo) {
+                Vec::new()
+            } else {
+                vec![TestPattern::Self_, TestPattern::Corrupt]
+            };
+            if has_tool {
                 patterns.push(TestPattern::OriginalCompress);
                 patterns.push(TestPattern::OriginalDecompress);
             }
             patterns
         }
         PatternFilter::Self_ => vec![TestPattern::Self_],
-        PatternFilter::OriginalCompress if has_tool && !no_external => {
-            vec![TestPattern::OriginalCompress]
-        }
-        PatternFilter::OriginalDecompress if has_tool && !no_external => {
-            vec![TestPattern::OriginalDecompress]
-        }
+        PatternFilter::Corrupt => vec![TestPattern::Corrupt],
+        PatternFilter::OriginalCompress if has_tool => vec![TestPattern::OriginalCompress],
+        PatternFilter::OriginalDecompress if has_tool => vec![TestPattern::OriginalDecompress],
         _ => Vec::new(),
     }
 }
@@ -775,7 +928,7 @@ fn run_single_test(
     algo: Algorithm,
     pattern: TestPattern,
     data: &[u8],
-) -> Result<(Vec<u8>, usize), String> {
+) -> Result<(Vec<u8>, usize), CaseError> {
     match pattern {
         TestPattern::Self_ => {
             let encoded = algorithms::encode_with(algo, data);
@@ -786,11 +939,11 @@ fn run_single_test(
             if algo == Algorithm::Mtree {
                 algorithms::decode_with(algo, &encoded)
                     .map(|_| (data.to_vec(), encoded_size))
-                    .map_err(|e| format!("{e}"))
+                    .map_err(|e| CaseError::simple(format!("{e}")))
             } else {
                 algorithms::decode_with(algo, &encoded)
                     .map(|decoded| (decoded, encoded_size))
-                    .map_err(|e| format!("{e}"))
+                    .map_err(|e| CaseError::simple(format!("{e}")))
             }
         }
         TestPattern::OriginalCompress => {
@@ -798,18 +951,330 @@ fn run_single_test(
             let encoded_size = compressed.len();
             algorithms::decode_with(algo, &compressed)
                 .map(|decoded| (decoded, encoded_size))
-                .map_err(|e| format!("{e}"))
+                .map_err(|e| CaseError::simple(format!("{e}")))
         }
         TestPattern::OriginalDecompress => {
             let encoded = algorithms::encode_with(algo, data);
             let encoded_size = encoded.len();
-            external::decompress(algo, &encoded).map(|decoded| (decoded, encoded_size))
+            external::decompress(algo, &encoded)
+                .map(|decoded| (decoded, encoded_size))
+                .map_err(CaseError::from)
         }
+        TestPattern::Corrupt => run_corrupt_case(algo, data),
     }
 }
 
-pub fn replay_failure(path: &Path) -> Result<(), String> {
-    let loaded = report::load_failure(path)?;
+/// Number of randomly mutated decode attempts per corrupt-pattern case.
+const CORRUPT_ATTEMPTS: usize = 4;
+/// Interior truncation offsets sampled for streams too large to sweep
+/// exhaustively; fixed edge and near-tail offsets are added on top.
+const TRUNCATION_POINTS: usize = 24;
+/// Head/tail byte span treated as field territory for boundary-value writes.
+const BOUNDARY_FIELD_SPAN: usize = 32;
+/// Boundary values written (little-endian u32) into field positions.
+const BOUNDARY_VALUES: [u32; 4] = [0, 0xFF, 0xFFFF, 0xFFFF_FFFF];
+
+/// Decode-mutation robustness check: encode the input, then feed the decoder
+/// deterministic corruptions — random mutations, prefix truncations, and
+/// boundary-value writes into head/tail field regions — plus one rotating
+/// real tool-produced fixture under the same schedule. Every corruption must
+/// be handled without a panic and without emitting a suspiciously large
+/// output; graceful `Err` results are the expected outcome for most
+/// mutations. On failure the exact mutated stream and a mutation descriptor
+/// are returned in [`CaseError`] so the artifact stores a directly
+/// replayable `.mut.bin` reproducer.
+fn run_corrupt_case(algo: Algorithm, data: &[u8]) -> Result<(Vec<u8>, usize), CaseError> {
+    let encoded = algorithms::encode_with(algo, data);
+    let encoded_size = encoded.len();
+    let mut rng = StdRng::seed_from_u64(corrupt_seed(data));
+    let mutated_cap = encoded_size.saturating_add(256).clamp(1, 16 << 20);
+    let decoded_limit = corrupt_decoded_limit(data.len());
+
+    let check = |candidate: &[u8], mutation: String, limit: usize| -> Result<(), CaseError> {
+        corrupt_probe(algo, candidate, limit).map_err(|message| CaseError {
+            message,
+            mutated_stream: Some(candidate.to_vec()),
+            mutation: Some(mutation),
+        })
+    };
+
+    // Applies the full corruption schedule to `base`, whose bytes came from
+    // `origin` ("self" for the encoded stream, "fixture" for a real file).
+    let sweep = |rng: &mut StdRng,
+                 base: &[u8],
+                 origin: &str,
+                 cap: usize,
+                 limit: usize|
+     -> Result<(), CaseError> {
+        for attempt in 0..CORRUPT_ATTEMPTS {
+            let candidate = datagen::mutate(rng, base, 0, cap);
+            check(&candidate, format!("{origin}/mutate#{attempt}"), limit)?;
+        }
+
+        // Prefix truncations: every offset for small streams, a
+        // deterministic sample (edges + log-spaced interior) for larger.
+        for n in truncation_points(base.len()) {
+            check(&base[..n], format!("{origin}/truncate@{n}"), limit)?;
+        }
+
+        // Boundary-value writes into the head/tail field region where
+        // length, magic, offset, and checksum fields typically live.
+        for pos in field_positions(base.len()) {
+            for &value in &BOUNDARY_VALUES {
+                let mut candidate = base.to_vec();
+                candidate[pos..pos + 4].copy_from_slice(&value.to_le_bytes());
+                check(
+                    &candidate,
+                    format!("{origin}/boundary@{pos}=0x{value:08x}"),
+                    limit,
+                )?;
+            }
+        }
+        Ok(())
+    };
+
+    sweep(&mut rng, &encoded, "self", mutated_cap, decoded_limit)?;
+
+    // A real tool-produced fixture exercises decoder paths a self-encoded
+    // stream never reaches (vendor extensions, unusual flags, real
+    // multi-entry layouts). Rotate deterministically through the corpus.
+    let fixture_list = fixtures::load(algo);
+    if !fixture_list.is_empty() {
+        let index = rng.random_range(0..fixture_list.len());
+        let fixture = fixture_list[index].clone();
+        let origin = format!("fixture#{index}");
+        // Baseline the pristine fixture first. A panic is a finding in its
+        // own right; a graceful reject means the file is not a decodable
+        // stream for this algorithm (the corpus also carries loose test
+        // data such as *.expected files), so probing its mutations would
+        // only produce more rejects.
+        match decode_outcome(algo, &fixture) {
+            Err(message) => {
+                return Err(CaseError {
+                    message,
+                    mutated_stream: Some(fixture),
+                    mutation: Some(format!("{origin}/pristine")),
+                });
+            }
+            Ok(DecodeOutcome::Rejected) => {}
+            Ok(DecodeOutcome::Decoded(pristine_size)) => {
+                // Bound mutated decodes by the fixture's own dimensions: a
+                // large fixture legitimately decodes far more than the
+                // small fuzz input that selected it.
+                let fixture_limit =
+                    corrupt_decoded_limit(fixture.len()).max(pristine_size.saturating_mul(4));
+                let fixture_cap = fixture.len().saturating_add(256).clamp(1, 16 << 20);
+                sweep(&mut rng, &fixture, &origin, fixture_cap, fixture_limit)?;
+            }
+        }
+    }
+
+    // Echo the input so fingerprint verification passes, same as mtree.
+    Ok((data.to_vec(), encoded_size))
+}
+
+/// Decoder robustness bound for a corrupt-pattern input: decoded output
+/// larger than this is treated as a resource-exhaustion failure.
+pub(crate) fn corrupt_decoded_limit(input_len: usize) -> usize {
+    input_len.saturating_mul(256).clamp(64 << 10, 64 << 20)
+}
+
+/// Outcome of a single decoder call on a (possibly corrupted) stream.
+enum DecodeOutcome {
+    /// Decoded successfully; carries the output size.
+    Decoded(usize),
+    /// The decoder returned a graceful error — the expected result for
+    /// most malformed inputs.
+    Rejected,
+}
+
+/// Run the decoder on `candidate`, catching panics. Also used to baseline
+/// pristine fixtures before corrupting them. The in-flight watchdog entry
+/// is pointed at these bytes so a hang reports the exact reproducer rather
+/// than the pre-mutation input.
+fn decode_outcome(algo: Algorithm, candidate: &[u8]) -> Result<DecodeOutcome, String> {
+    watchdog::note_data(candidate);
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        algorithms::decode_with(algo, candidate)
+    })) {
+        Ok(Ok(decoded)) => Ok(DecodeOutcome::Decoded(decoded.len())),
+        Ok(Err(_)) => Ok(DecodeOutcome::Rejected),
+        Err(panic_info) => Err(format!("PANIC: {}", panic_message(&panic_info))),
+    }
+}
+
+/// Probe a mutated encoded stream: the decoder must return (`Ok` or `Err`)
+/// without panicking and must not decode beyond `decoded_limit`.
+fn corrupt_probe(algo: Algorithm, candidate: &[u8], decoded_limit: usize) -> Result<(), String> {
+    match decode_outcome(algo, candidate)? {
+        DecodeOutcome::Decoded(size) if size > decoded_limit => Err(format!(
+            "resource oracle: corrupt decode produced {size} bytes > {decoded_limit}"
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Deterministic truncation offsets for a stream of `len` bytes.
+fn truncation_points(len: usize) -> Vec<usize> {
+    const FULL_SWEEP_LIMIT: usize = 64;
+    if len <= FULL_SWEEP_LIMIT {
+        return (0..len).collect();
+    }
+    let mut points: Vec<usize> = vec![0, 1, 2, 3, 4, 8, 16, 32];
+    // Log-spaced interior points plus near-tail offsets.
+    let mut n = FULL_SWEEP_LIMIT;
+    while n < len && points.len() < TRUNCATION_POINTS {
+        points.push(n);
+        n = n.saturating_mul(2);
+    }
+    for offset in 1..=8usize {
+        if let Some(n) = len.checked_sub(offset)
+            && n > 0
+        {
+            points.push(n);
+        }
+    }
+    points.push(len / 2);
+    points.sort_unstable();
+    points.dedup();
+    points
+}
+
+/// Byte offsets where boundary values are written: every 4-byte-aligned
+/// position within [`BOUNDARY_FIELD_SPAN`] of the head and of the tail.
+fn field_positions(len: usize) -> Vec<usize> {
+    if len < 4 {
+        return Vec::new();
+    }
+    let mut positions: Vec<usize> = (0..len.min(BOUNDARY_FIELD_SPAN))
+        .step_by(4)
+        .filter(|&pos| pos + 4 <= len)
+        .collect();
+    // Tail slots covering the final BOUNDARY_FIELD_SPAN bytes, anchored at
+    // the last writable u32 so the stream end (trailer checksums and size
+    // fields) is always covered.
+    let tail_low = len.saturating_sub(BOUNDARY_FIELD_SPAN);
+    let mut pos = len - 4;
+    loop {
+        if pos + 4 <= tail_low {
+            break;
+        }
+        positions.push(pos);
+        if pos < 4 {
+            break;
+        }
+        pos -= 4;
+    }
+    positions.sort_unstable();
+    positions.dedup();
+    positions
+}
+
+/// Deterministic seed for the corrupt pattern so `--replay` and the
+/// minimizer re-derive identical mutations for a given input.
+fn corrupt_seed(data: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for &b in data.iter().take(4096) {
+        hash = (hash ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    for &b in data.iter().rev().take(4096) {
+        hash = (hash ^ u64::from(b)).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    }
+    hash ^ (data.len() as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+}
+
+/// Replay a single artifact or every `*.json` artifact in a directory.
+/// Returns `Err` when at least one recorded failure still reproduces.
+pub fn replay_path(path: &Path, fixtures_dir: &Path) -> Result<(), String> {
+    // `--replay foo.mut.bin` names a corrupt sidecar directly; resolve it
+    // to the companion artifact so the report metadata is loaded too.
+    let resolved;
+    let path = if path
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().ends_with(".mut.bin"))
+    {
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        resolved = path.with_file_name(format!("{}.json", name.trim_end_matches(".mut.bin")));
+        resolved.as_path()
+    } else {
+        path
+    };
+    if !path.is_dir() {
+        return replay_failure(path, fixtures_dir);
+    }
+    let mut artifacts: Vec<PathBuf> = std::fs::read_dir(path)
+        .map_err(|e| format!("read replay dir {} failed: {e}", path.display()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|p| p.extension().and_then(|ext| ext.to_str()) == Some("json"))
+        .collect();
+    artifacts.sort();
+    if artifacts.is_empty() {
+        return Err(format!(
+            "no failure artifacts (*.json) in {}",
+            path.display()
+        ));
+    }
+    let mut reproduced = 0usize;
+    let mut unavailable = 0usize;
+    let mut attempted = 0usize;
+    let mut skipped = 0usize;
+    for artifact in &artifacts {
+        // Skip non-failure JSON files co-located in run directories
+        // (manifest/summary/matrix, in-flight breadcrumbs); watchdog hang
+        // reports are replayable through their own schema.
+        let replayable =
+            report::load_failure(artifact).is_ok() || report::load_hang(artifact).is_ok();
+        if !replayable {
+            skipped += 1;
+            continue;
+        }
+        attempted += 1;
+        eprintln!("[replay-dir] {}", artifact.display());
+        match replay_failure(artifact, fixtures_dir) {
+            Ok(()) => {}
+            // Errors from inside the library call mean the failure still
+            // reproduces; load/read failures mean the artifact itself is
+            // unusable, which must not masquerade as a live bug.
+            Err(err) if err.starts_with("replay ") => {
+                reproduced += 1;
+                eprintln!("[replay-dir]   {err}");
+            }
+            Err(err) => {
+                unavailable += 1;
+                eprintln!("[replay-dir]   not replayable: {err}");
+            }
+        }
+    }
+    if attempted == 0 {
+        return Err(format!(
+            "no failure artifacts (*.json with companion .bin) in {}",
+            path.display()
+        ));
+    }
+    let cleared = attempted - reproduced - unavailable;
+    eprintln!(
+        "[replay-dir] {attempted} artifacts: {reproduced} reproduced, {cleared} no longer reproduce, {unavailable} not replayable ({skipped} non-failure files skipped)"
+    );
+    if reproduced == 0 {
+        Ok(())
+    } else {
+        Err(format!("{reproduced} failures still reproduce"))
+    }
+}
+
+pub fn replay_failure(path: &Path, fixtures_dir: &Path) -> Result<(), String> {
+    let loaded = match report::load_failure(path) {
+        Ok(loaded) => loaded,
+        // A `hang-*.json` artifact is not a FailureReport — the process
+        // died before one could be written — so it needs its own loader.
+        Err(load_err) => return replay_hang_artifact(path, load_err),
+    };
+    // Replaying a hang artifact can itself hang; enable the watchdog so the
+    // process aborts with evidence instead of blocking forever.
+    watchdog::init(path.parent().unwrap_or_else(|| Path::new(".")));
+    fixtures::init(fixtures_dir);
+    install_panic_hook();
     let algo = Algorithm::from_name(&loaded.report.algorithm).ok_or_else(|| {
         format!(
             "unknown algorithm in failure report: {}",
@@ -833,12 +1298,109 @@ pub fn replay_failure(path: &Path) -> Result<(), String> {
         loaded.report.original_size.max(loaded.data.len())
     );
 
-    match execute_case(algo, pattern, &loaded.data) {
+    // A corrupt failure stores the exact mutated stream in a `.mut.bin`
+    // sidecar: replay decodes it directly instead of re-deriving mutations,
+    // so replay does not depend on fixtures or the encode path at all.
+    if let Some(mut_file) = &loaded.report.mut_file {
+        let dir = path.parent().unwrap_or_else(|| Path::new("."));
+        let mut_path = dir.join(mut_file);
+        let mutated = std::fs::read(&mut_path)
+            .map_err(|e| format!("read mutated stream {} failed: {e}", mut_path.display()))?;
+        eprintln!(
+            "[replay] mutated stream {} ({} bytes, mutation: {})",
+            mut_file,
+            mutated.len(),
+            loaded.report.mutation.as_deref().unwrap_or("unknown")
+        );
+        let limit = corrupt_decoded_limit(loaded.report.original_size.max(loaded.data.len()));
+        // Register in-flight so a replayed hang aborts with evidence
+        // instead of blocking forever.
+        let _inflight = watchdog::enter(
+            algo,
+            TestPattern::Corrupt,
+            loaded.report.iteration,
+            &mutated,
+        );
+        return match corrupt_probe(algo, &mutated, limit) {
+            Ok(()) => {
+                eprintln!("[replay] success: failure no longer reproduces");
+                Ok(())
+            }
+            Err(err) => Err(replay_verdict(
+                algo,
+                TestPattern::Corrupt,
+                &loaded.report.signature,
+                &err,
+            )),
+        };
+    }
+
+    match execute_case(algo, pattern, &loaded.data, loaded.report.iteration) {
         Ok(_) => {
             eprintln!("[replay] success: failure no longer reproduces");
             Ok(())
         }
-        Err(err) => Err(format!("replay reproduced error: {err}")),
+        Err(err) => Err(replay_verdict(
+            algo,
+            pattern,
+            &loaded.report.signature,
+            &err.message,
+        )),
+    }
+}
+
+/// Compare a replayed failure against the recorded signature. A matching
+/// signature is a clean reproduction; a *different* signature means the
+/// original bug may be fixed but another one fires on the same input, which
+/// still counts as a reproduced failure with a distinct message.
+fn replay_verdict(algo: Algorithm, pattern: TestPattern, recorded: &str, error: &str) -> String {
+    let signature = report::failure_signature(algo, pattern, error);
+    if !recorded.is_empty() && signature != recorded {
+        format!("replay produced a different failure signature: {signature} (recorded: {recorded})")
+    } else {
+        format!("replay reproduced error: {error}")
+    }
+}
+
+/// Replay a watchdog hang artifact. The recorded `.bin` holds the in-flight
+/// bytes at hang time — for `corrupt` that is the mutated encoded stream,
+/// for other patterns the original fuzz input. The watchdog is armed again
+/// so a still-hanging input aborts with fresh evidence.
+fn replay_hang_artifact(path: &Path, load_err: String) -> Result<(), String> {
+    let meta = report::load_hang(path).map_err(|_| load_err)?;
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    watchdog::init(dir);
+    install_panic_hook();
+    let algo = Algorithm::from_name(&meta.algorithm)
+        .ok_or_else(|| format!("unknown algorithm in hang report: {}", meta.algorithm))?;
+    let pattern = TestPattern::from_label(&meta.pattern)
+        .ok_or_else(|| format!("unknown pattern in hang report: {}", meta.pattern))?;
+    let data = std::fs::read(dir.join(&meta.bin_file))
+        .map_err(|e| format!("read hang input failed: {e}"))?;
+    eprintln!(
+        "[replay] hang artifact: algorithm={} pattern={} iteration={} size={}",
+        meta.algorithm,
+        meta.pattern,
+        meta.iteration,
+        data.len()
+    );
+    if pattern == TestPattern::Corrupt {
+        // The recorded bytes are the decoder input itself.
+        let _inflight = watchdog::enter(algo, pattern, meta.iteration, &data);
+        return match decode_outcome(algo, &data) {
+            Ok(_) => {
+                eprintln!("[replay] success: hang no longer reproduces");
+                Ok(())
+            }
+            Err(err) => Err(format!("replay reproduced error: {err}")),
+        };
+    }
+    match execute_case(algo, pattern, &data, meta.iteration) {
+        Ok(_) => {
+            eprintln!("[replay] success: hang no longer reproduces");
+            Ok(())
+        }
+        Err(err) => Err(format!("replay reproduced error: {}", err.message)),
     }
 }
 
@@ -848,6 +1410,7 @@ const fn pattern_label(pattern: PatternFilter) -> &'static str {
         PatternFilter::Self_ => "self",
         PatternFilter::OriginalCompress => "original-compress",
         PatternFilter::OriginalDecompress => "original-decompress",
+        PatternFilter::Corrupt => "corrupt",
     }
 }
 
@@ -926,6 +1489,7 @@ mod tests {
             get_patterns(Algorithm::Zip, PatternFilter::All, &available),
             vec![
                 TestPattern::Self_,
+                TestPattern::Corrupt,
                 TestPattern::OriginalCompress,
                 TestPattern::OriginalDecompress,
             ]
@@ -954,6 +1518,7 @@ mod tests {
             jobs: 1,
             output_dir: tmp.display().to_string(),
             corpus_dir: tmp.join("corpus").display().to_string(),
+            fixtures_dir: tmp.join("fixtures").display().to_string(),
         };
         let available_tools = HashSet::new();
         let state = RunState {
@@ -985,6 +1550,8 @@ mod tests {
                 TestPattern::Self_,
                 "checksum mismatch 1 2",
             ),
+            mutated_stream: None,
+            mutation: None,
         };
 
         let stats = Mutex::new(Stats::default());

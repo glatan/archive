@@ -129,7 +129,7 @@ cargo run --release -p archive-fuzz -- --mode coverage-guided --jobs 2      # co
 cargo run --release -p archive-fuzz -- --replay fuzz/failures/run-.../f.json  # 再現
 ```
 
-3 種のテストパターン (`self` / `original-compress` / `original-decompress`) + special case matrix + resource oracle。
+4 種のテストパターン (`self` / `original-compress` / `original-decompress` / `corrupt`) + special case matrix + resource oracle。
 failure は最小化・重複排除後に `.json` + `.bin` ペアとして保存され、リグレッションテストに変換可能。
 
 詳細: [`fuzz/README.md`](fuzz/README.md)

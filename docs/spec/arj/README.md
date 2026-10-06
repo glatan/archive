@@ -63,7 +63,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 17 | `0x60 0xEA` signature で自動検出、`list`/`extract`/`test`/`inspect`/`pack` に対応 | CLI 規約 | ✅ | `detect_arj` (同上: spawn 統合テスト基盤は未整備) |
-| 18 | fuzz harness `arj` で encode→decode 往復 | fuzz 規約 | ✅ | `Algorithm::Arj` |
+| 18 | fuzz harness `arj` で encode→decode 往復。`arj-1`〜`arj-4` が compression method 別、`arj-garbled` が garbled (password) エントリをカバー | fuzz 規約 | ✅ | `Algorithm::Arj` 他 |
 
 ### 既知制約 (intentional scope)
 

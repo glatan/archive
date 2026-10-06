@@ -79,6 +79,6 @@ RUN --mount=type=cache,id=cargo-registry,target=/root/.cargo/registry \
     --mount=type=cache,id=cargo-git,target=/root/.cargo/git \
     --mount=type=cache,id=fuzz-target,target=/workspace/target \
     cargo clean -p archive -p archive-fuzz && \
-    cargo build --release -p archive-fuzz && \
-    cp target/release/archive-fuzz /usr/local/bin/
+    cargo build --profile fuzz -p archive-fuzz && \
+    cp target/fuzz/archive-fuzz /usr/local/bin/
 ENTRYPOINT ["/usr/local/bin/archive-fuzz"]

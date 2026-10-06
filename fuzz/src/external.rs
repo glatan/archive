@@ -31,7 +31,9 @@ enum ArchiveSpec {
     Tar {
         format_args: &'static [&'static str],
     },
-    Cpio,
+    Cpio {
+        format: &'static str,
+    },
     /// Upstream `zpaq` CLI (file-based JIDAC archiver). `method` is the
     /// `-mN` compression-level flag (0..5) selecting upstream model
     /// configs.
@@ -82,6 +84,7 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
             decompress_cmd: "zstd",
             decompress_args: &["-dc"],
         })),
+        Algorithm::ZstdDict => None,
         Algorithm::Bzip2 => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "bzip2",
             compress_args: &["-c"],
@@ -118,6 +121,12 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
             decompress_cmd: "lzip",
             decompress_args: &["-dc"],
         })),
+        Algorithm::LzipDict => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "lzip",
+            compress_args: &["-s64KiB", "-c"],
+            decompress_cmd: "lzip",
+            decompress_args: &["-dc"],
+        })),
         Algorithm::LzmaAlone => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "xz",
             compress_args: &["--format=lzma", "-c"],
@@ -142,6 +151,30 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
             decompress_cmd: "xz",
             decompress_args: &["-dc"],
         })),
+        Algorithm::XzDelta => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "xz",
+            compress_args: &["--check=crc32", "--delta=dist=4", "--lzma2", "-c"],
+            decompress_cmd: "xz",
+            decompress_args: &["-dc"],
+        })),
+        Algorithm::XzX86 => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "xz",
+            compress_args: &["--check=crc32", "--x86", "--lzma2", "-c"],
+            decompress_cmd: "xz",
+            decompress_args: &["-dc"],
+        })),
+        Algorithm::XzArm64 => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "xz",
+            compress_args: &["--check=crc32", "--arm64", "--lzma2", "-c"],
+            decompress_cmd: "xz",
+            decompress_args: &["-dc"],
+        })),
+        Algorithm::XzPpc
+        | Algorithm::XzIa64
+        | Algorithm::XzSparc
+        | Algorithm::XzArm
+        | Algorithm::XzArmThumb
+        | Algorithm::XzRiscV => None,
         Algorithm::Lzw => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "compress",
             compress_args: &["-c", "-f"],
@@ -172,7 +205,19 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
             decompress_cmd: "lz4",
             decompress_args: &["-dc"],
         })),
-        Algorithm::Lz4SmallBlock | Algorithm::Lz4Block => None,
+        Algorithm::Lz4SmallBlock | Algorithm::Lz4Block | Algorithm::Lz4Dict => None,
+        Algorithm::Lz4Legacy => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "lz4",
+            compress_args: &["-l", "-c"],
+            decompress_cmd: "lz4",
+            decompress_args: &["-dc"],
+        })),
+        Algorithm::Lz4BlockDependent => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "lz4",
+            compress_args: &["-BD", "-c"],
+            decompress_cmd: "lz4",
+            decompress_args: &["-dc"],
+        })),
         Algorithm::Lzo => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "lzop",
             compress_args: &["-c"],
@@ -245,12 +290,15 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
             decompress_cmd: "brotli",
             decompress_args: &["-dc"],
         })),
+        // Metadata blocks are spec-valid but system brotli rejects them.
+        Algorithm::BrotliMeta => None,
         Algorithm::Snappy => None,
         Algorithm::Rzip => None,
         Algorithm::Zlib => None,
         Algorithm::Zpaq => Some(ExternalSpec::Archive(ArchiveSpec::Zpaq { method: "-m1" })),
         Algorithm::ZpaqLevel2 => Some(ExternalSpec::Archive(ArchiveSpec::Zpaq { method: "-m3" })),
         Algorithm::ZpaqLevel3 => Some(ExternalSpec::Archive(ArchiveSpec::Zpaq { method: "-m5" })),
+        Algorithm::ZpaqArchive => None,
         Algorithm::Ar | Algorithm::ArBsd => Some(ExternalSpec::Archive(ArchiveSpec::Ar)),
         Algorithm::Deb => None,
         Algorithm::Rpm => None,
@@ -258,20 +306,34 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
         Algorithm::Mscab => None,
         Algorithm::Zim => None,
         Algorithm::Mtree => None,
-        Algorithm::GitPack => None,
+        Algorithm::GitPack | Algorithm::GitPackDelta | Algorithm::GitPackSha256 => None,
         Algorithm::Xar => None,
         Algorithm::Warc => None,
-        Algorithm::Lha => None,
-        Algorithm::Arj => None,
+        Algorithm::Lha
+        | Algorithm::LhaLh4
+        | Algorithm::LhaLh5
+        | Algorithm::LhaLh6
+        | Algorithm::LhaLh7
+        | Algorithm::LhaLzs
+        | Algorithm::LhaLz5
+        | Algorithm::LhaPm1
+        | Algorithm::LhaPm2 => None,
+        Algorithm::Arj
+        | Algorithm::Arj1
+        | Algorithm::Arj2
+        | Algorithm::Arj3
+        | Algorithm::Arj4
+        | Algorithm::ArjGarbled => None,
         Algorithm::Arc => None,
         Algorithm::Xpress | Algorithm::XpressHuff | Algorithm::Lznt1 => None,
         Algorithm::Lzf => None,
         Algorithm::Fastlz => None,
+        Algorithm::PackBits => None,
         Algorithm::Zx0 | Algorithm::Zx1 | Algorithm::Zx2 | Algorithm::Zx5 => None,
         // xdelta3 requires a source file argument; plain-pipe external
         // interop is not wired, matching the other raw codecs.
-        Algorithm::Vcdiff => None,
-        Algorithm::Mppc => None,
+        Algorithm::Vcdiff | Algorithm::VcdiffSrc => None,
+        Algorithm::Mppc | Algorithm::MppcRdp4 | Algorithm::MppcRdp5 => None,
         Algorithm::Lzs => None,
         Algorithm::ZstdSeekable => None,
         Algorithm::Lzsa | Algorithm::Lzsa2 => None,
@@ -285,7 +347,17 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
         Algorithm::ZipStore => Some(ExternalSpec::Archive(ArchiveSpec::Zip {
             extra_compress_args: &["-0", "-q"],
         })),
-        Algorithm::ZipBzip2 | Algorithm::ZipZstd => None,
+        // Info-ZIP cannot produce or verify the remaining methods; they are
+        // covered by the self and corrupt patterns.
+        Algorithm::ZipBzip2
+        | Algorithm::ZipZstd
+        | Algorithm::ZipDeflate64
+        | Algorithm::ZipLzma
+        | Algorithm::ZipXz
+        | Algorithm::ZipPpmd
+        | Algorithm::ZipShrunk
+        | Algorithm::ZipImplode
+        | Algorithm::ZipReduce => None,
         Algorithm::SevenZ => Some(ExternalSpec::Archive(ArchiveSpec::SevenZ {
             extra_compress_args: &["-y"],
         })),
@@ -304,14 +376,42 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
         Algorithm::SevenZBzip2 => Some(ExternalSpec::Archive(ArchiveSpec::SevenZ {
             extra_compress_args: &["-m0=BZip2", "-y"],
         })),
+        Algorithm::SevenZDeflate64
+        | Algorithm::SevenZBrotli
+        | Algorithm::SevenZX86
+        | Algorithm::SevenZBcj2
+        | Algorithm::SevenZDelta => None,
         Algorithm::TarGnu | Algorithm::TarUstar => {
             Some(ExternalSpec::Archive(ArchiveSpec::Tar { format_args: &[] }))
         }
         Algorithm::TarPax => Some(ExternalSpec::Archive(ArchiveSpec::Tar {
             format_args: &["--format=posix"],
         })),
-        Algorithm::Cpio | Algorithm::CpioCrc => Some(ExternalSpec::Archive(ArchiveSpec::Cpio)),
+        Algorithm::Cpio | Algorithm::CpioCrc => {
+            Some(ExternalSpec::Archive(ArchiveSpec::Cpio { format: "newc" }))
+        }
+        Algorithm::CpioOdc => Some(ExternalSpec::Archive(ArchiveSpec::Cpio { format: "odc" })),
+        Algorithm::CpioBin => Some(ExternalSpec::Archive(ArchiveSpec::Cpio { format: "bin" })),
+        // No pipe-style external oracle exists for these formats; self and
+        // corrupt patterns cover them.
+        Algorithm::Cramfs
+        | Algorithm::Romfs
+        | Algorithm::Erofs
+        | Algorithm::Iso9660
+        | Algorithm::IsoRr
+        | Algorithm::Mscfb
+        | Algorithm::MscfbV4
+        | Algorithm::Pea
+        | Algorithm::PeaStore
+        | Algorithm::PeaSha256
+        | Algorithm::Crx3 => None,
     }
+}
+
+/// Whether an external tool spec is wired for `algo` (regardless of whether
+/// the binary is actually installed).
+pub fn has_tool_spec(algo: Algorithm) -> bool {
+    tool_spec(algo).is_some()
 }
 
 pub fn check_available_tools() -> HashSet<Algorithm> {
@@ -349,7 +449,7 @@ fn is_available(algo: Algorithm) -> bool {
         }
         Some(ExternalSpec::Archive(ArchiveSpec::SevenZ { .. })) => sevenz_binary().is_some(),
         Some(ExternalSpec::Archive(ArchiveSpec::Tar { .. })) => which_exists("tar"),
-        Some(ExternalSpec::Archive(ArchiveSpec::Cpio)) => which_exists("cpio"),
+        Some(ExternalSpec::Archive(ArchiveSpec::Cpio { .. })) => which_exists("cpio"),
         Some(ExternalSpec::Archive(ArchiveSpec::Zpaq { .. })) => which_exists("zpaq"),
         None => false,
     }
@@ -527,7 +627,7 @@ fn run_archive_compress(spec: ArchiveSpec, data: &[u8]) -> Result<Vec<u8>, Strin
         ArchiveSpec::Zip { .. } => temp.path().join("sample.zip"),
         ArchiveSpec::SevenZ { .. } => temp.path().join("sample.7z"),
         ArchiveSpec::Tar { .. } => temp.path().join("sample.tar"),
-        ArchiveSpec::Cpio => temp.path().join("sample.cpio"),
+        ArchiveSpec::Cpio { .. } => temp.path().join("sample.cpio"),
         ArchiveSpec::Zpaq { .. } => temp.path().join("sample.zpaq"),
     };
 
@@ -559,12 +659,13 @@ fn run_archive_compress(spec: ArchiveSpec, data: &[u8]) -> Result<Vec<u8>, Strin
             args.extend_from_slice(&["-cf", archive_name, input_name]);
             run_command_in_dir("tar", &args, temp.path())?
         }
-        ArchiveSpec::Cpio => {
+        ArchiveSpec::Cpio { format } => {
             let archive_path_str = archive_path.to_str().ok_or("invalid archive path")?;
             let shell_cmd = format!(
-                "cd {} && echo {} | cpio -o -H newc > {}",
+                "cd {} && echo {} | cpio -o -H {} > {}",
                 temp.path().display(),
                 input_name,
+                format,
                 archive_path_str
             );
             run_command_in_dir("sh", &["-c", &shell_cmd], temp.path())?
@@ -589,7 +690,7 @@ fn run_archive_decompress(spec: ArchiveSpec, data: &[u8]) -> Result<Vec<u8>, Str
         ArchiveSpec::Zip { .. } => temp.path().join("sample.zip"),
         ArchiveSpec::SevenZ { .. } => temp.path().join("sample.7z"),
         ArchiveSpec::Tar { .. } => temp.path().join("sample.tar"),
-        ArchiveSpec::Cpio => temp.path().join("sample.cpio"),
+        ArchiveSpec::Cpio { .. } => temp.path().join("sample.cpio"),
         ArchiveSpec::Zpaq { .. } => temp.path().join("sample.zpaq"),
     };
     fs::write(&archive_path, data).map_err(|e| format!("write temp archive failed: {e}"))?;
@@ -617,7 +718,7 @@ fn run_archive_decompress(spec: ArchiveSpec, data: &[u8]) -> Result<Vec<u8>, Str
             &["-xf", archive_str, "-O", archive_entry_name()],
             temp.path(),
         ),
-        ArchiveSpec::Cpio => {
+        ArchiveSpec::Cpio { .. } => {
             let shell_cmd = format!(
                 "cd {} && cpio -i --to-stdout {} < {}",
                 temp.path().display(),

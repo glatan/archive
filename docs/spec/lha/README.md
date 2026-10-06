@@ -85,7 +85,7 @@ decode の権利クリーン参照: `-lh4-`〜`-lh7-` は奥村氏の `ar002` (p
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 17 | offset 2 の `-l?-` または `-pm?-` マーカー + offset 20 の level byte (0-3) で自動検出、`list`/`extract`/`test`/`inspect`/`pack` に対応 | CLI 規約 | ✅ | `detect_lha` |
-| 18 | fuzz harness `lha` で encode→decode 往復 | fuzz 規約 | ✅ | `Algorithm::Lha` |
+| 18 | fuzz harness `lha` で encode→decode 往復。`lha-lh4`/`lha-lh5`/`lha-lh6`/`lha-lh7`/`lha-lzs`/`lha-lz5`/`lha-pm1`/`lha-pm2` バリアントが各 compression method をカバー | fuzz 規約 | ✅ | `Algorithm::Lha` 他 |
 
 ### 既知制約 (intentional scope)
 
