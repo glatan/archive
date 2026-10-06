@@ -83,7 +83,7 @@
 | [bzip2](bzip2/README.md) | bzip2 1.0.x 参照実装 (de facto) | 70 | 0 | 0 | 70 |
 | [lzip](lzip/README.md) | lzip マニュアル | 41 | 0 | 0 | 41 |
 | [`.lzma`](lzma_alone/README.md) | lzma-file-format.txt (tukaani/xz doc) | 27 | 0 | 0 | 27 |
-| [LZW](lzw/README.md) | ncompress `compress42.c` (de facto) | 23 | 0 | 0 | 23 |
+| [LZW](lzw/README.md) | ncompress `compress42.c` (de facto) | 26 | 0 | 0 | 26 |
 | [LZ4](lz4/README.md) | LZ4 Frame/Block Format | 59 | 0 | 0 | 59 |
 | [LZO](lzo/README.md) | kernel `Documentation/lzo.txt` + lzop format | 42 | 0 | 0 | 42 |
 | [Snappy](snappy/README.md) | snappy format_description / framing_format | 37 | 0 | 0 | 37 |

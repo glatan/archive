@@ -98,7 +98,16 @@ pub fn encode_with_options(input: &[u8], max_bits: u8) -> Vec<u8> {
 /// reserves clear code 256 and emits it with the group-of-8 padding
 /// when the dictionary fills or when the adaptive ratio check
 /// (CHECK_GAP input-byte intervals, compress42.c `cl_block()`) detects
-/// a worsening compression ratio.
+/// a worsening compression ratio. The dict-full CLEAR is emitted the
+/// moment the dictionary becomes exactly full — emit #256 of the run —
+/// so a run never exceeds 256 codes at max_bits=9. compress42.c's
+/// decoder widens with no `n_bits < maxbits` guard (the `phantom
+/// bump`, decompress L1698-1710): it would read a run's 257th code
+/// at 10 bits even in a -b9 stream, so a later CLEAR would land off
+/// the decoder's resync lattice. Group-of-8 alignment is measured
+/// from the current block-run origin (compress42.c `boff`): the
+/// landing of the most recent width bump or clear pad, which is the
+/// body start for the first run.
 pub(crate) fn encode_body(input: &[u8], max_bits: u8, block_mode: bool) -> Vec<u8> {
     let max_bits = max_bits.clamp(9, 16);
     let max_code = (1u32 << max_bits) - 1;
@@ -124,6 +133,14 @@ pub(crate) fn encode_body(input: &[u8], max_bits: u8, block_mode: bool) -> Vec<u
     let mut code_bits: u32 = 9;
     let mut bit_buf: u64 = 0;
     let mut bit_count: u32 = 0;
+
+    // Byte offset (relative to `output`) where the current block run's
+    // group-of-8 lattice begins — compress42.c's `boff`. Both the
+    // group-of-8 pad after a CLEAR and the decoder's resync are
+    // measured from the previous resync landing, not from the body
+    // start. Width bumps and CLEAR pads re-origin the lattice to their
+    // landing point.
+    let mut run_start: usize = 0;
 
     // Helper: flush bits to output
     let flush_bits = |bit_buf: &mut u64, bit_count: &mut u32, output: &mut Vec<u8>| {
@@ -205,6 +222,7 @@ pub(crate) fn encode_body(input: &[u8], max_bits: u8, block_mode: bool) -> Vec<u
                       code_bits: &mut u32,
                       next_code: &mut u32,
                       hash_prefix: &mut [u32],
+                      run_start: &mut usize,
                       output: &mut Vec<u8>| {
         write_code(CLEAR_CODE as u32, *code_bits, bit_buf, bit_count, output);
 
@@ -217,13 +235,20 @@ pub(crate) fn encode_body(input: &[u8], max_bits: u8, block_mode: bool) -> Vec<u
             *bit_buf = 0;
             *bit_count = 0;
         }
-        // Pad output to code_bits-byte alignment
+        // Pad output so the current run fills a whole number of
+        // code_bits-byte groups. The group lattice is measured from
+        // the block-run start (compress42.c `boff`) — the landing of
+        // the previous width bump or clear pad — not from the body
+        // start. A CLEAR arriving mid-run after a width bump would
+        // otherwise be padded to the wrong offset.
         let group_bytes = *code_bits as usize;
-        let remainder = output.len() % group_bytes;
+        let remainder = (output.len() - *run_start) % group_bytes;
         if remainder != 0 {
             let pad = group_bytes - remainder;
             output.resize(output.len() + pad, 0);
         }
+        // The padded landing point re-origins the group lattice.
+        *run_start = output.len();
 
         // Reset dictionary
         clear_table(hash_prefix);
@@ -274,25 +299,67 @@ pub(crate) fn encode_body(input: &[u8], max_bits: u8, block_mode: bool) -> Vec<u
                 // The encoder widens after the newly allocated code would no
                 // longer fit in the current width.
                 if should_bump_encode_code_width(next_code, code_bits, max_bits as u32) {
+                    // compress42.c L1404-1405: before widening, pad the
+                    // output with zero bits up to the next old-width
+                    // group-of-8 boundary measured from the block-run
+                    // origin `boff`, then re-origin the lattice at the
+                    // landing. In block mode the bump always lands
+                    // exactly on the lattice (2^k - 256 codes into the
+                    // run ≡ 0 mod 8) so the pad is a no-op; in non-block
+                    // mode the bump lands mid-group and real pad bits
+                    // are emitted.
+                    let group_bits = code_bits as usize * 8;
+                    let pos_bits = output.len() * 8 + bit_count as usize;
+                    let rem = (pos_bits - run_start * 8) % group_bits;
+                    if rem != 0 {
+                        // bit_buf's bits above bit_count are always zero,
+                        // so crediting pad bits and flushing emits zeros.
+                        bit_count += (group_bits - rem) as u32;
+                        flush_bits(&mut bit_buf, &mut bit_count, &mut output);
+                    }
+                    // Group landings are byte-aligned.
+                    debug_assert_eq!(bit_count, 0);
+                    run_start = output.len();
                     code_bits += 1;
                 }
-            } else if block_mode {
-                // Dictionary full — emit clear code and reset
-                emit_clear(
-                    &mut bit_buf,
-                    &mut bit_count,
-                    &mut code_bits,
-                    &mut next_code,
-                    &mut hash_prefix,
-                    &mut output,
-                );
-                // Reset the ratio baseline, as compress42.c `cl_block()`
-                // does after every clear, so the next ratio check
-                // cannot trigger immediately after this clear.
-                old_ratio = 0;
+
+                // compress42.c's decoder widens whenever free_ent exceeds
+                // the current-width maxcode — WITHOUT an n_bits < maxbits
+                // guard (decompress L1698-1710, the "phantom bump"): even
+                // in a max_bits=9 stream it switches to 10-bit reads once
+                // a run's 256th code has been consumed. Emitting the
+                // dict-full CLEAR only on the *next* miss (emit #257)
+                // would cross that boundary: the decoder then reads CLEAR
+                // at 10 bits and resyncs onto an 80-bit group lattice the
+                // encoder never wrote, rejecting the stream as corrupt
+                // (gzip "corrupt input"). Emit CLEAR immediately when the
+                // dictionary becomes exactly full instead, so it is emit
+                // #256 — the last code the decoder reads at the current
+                // width — and no run ever exceeds 256 codes at
+                // max_bits=9. (ncompress's own -b9 encoder lacks this —
+                // it keeps writing 9-bit codes past the boundary, which
+                // is why `compress -b9` output is undecodable even by
+                // ncompress itself: fuzz known issue B.)
+                if block_mode && next_code > max_code {
+                    emit_clear(
+                        &mut bit_buf,
+                        &mut bit_count,
+                        &mut code_bits,
+                        &mut next_code,
+                        &mut hash_prefix,
+                        &mut run_start,
+                        &mut output,
+                    );
+                    // Reset the ratio baseline, as compress42.c `cl_block()`
+                    // does after every clear, so the next ratio check
+                    // cannot trigger immediately after this clear.
+                    old_ratio = 0;
+                }
             }
             // Non-block mode: when the dictionary is full, simply stop
-            // inserting (no clear code exists).
+            // inserting (no clear code exists). In block mode the
+            // dictionary can never be full at miss-entry — it was
+            // cleared immediately when it filled.
 
             // compress42.c `cl_block()` (lines 1418-1446): every
             // CHECK_GAP input bytes, recompute the compression ratio as
@@ -314,6 +381,7 @@ pub(crate) fn encode_body(input: &[u8], max_bits: u8, block_mode: bool) -> Vec<u
                         &mut code_bits,
                         &mut next_code,
                         &mut hash_prefix,
+                        &mut run_start,
                         &mut output,
                     );
                     old_ratio = 0;
@@ -406,6 +474,195 @@ pub fn encode_writer<W: std::io::Write>(input: &[u8], mut writer: W) -> std::io:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compress::lzw::should_bump_decode_code_width;
+
+    /// Deterministic pseudo-random bytes (xorshift32) for tests.
+    fn prng_bytes(n: usize) -> Vec<u8> {
+        let mut x = 0x9E37_79B9u32;
+        (0..n)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                (x >> 16) as u8
+            })
+            .collect()
+    }
+
+    /// Reference model of the compress42.c/gzip `unlzw` codestream walk
+    /// for a headerless block-mode body: the group-of-8 resync lattice
+    /// is measured from the block-run origin — compress42.c's `boff`,
+    /// the landing of the most recent width bump or CLEAR pad —
+    /// not from the body start.
+    ///
+    /// Returns the decoded payload and the code width at which each
+    /// CLEAR code was encountered. Panics on malformed input, like
+    /// `uncompress: corrupt input`.
+    fn reference_unlzw(body: &[u8], max_bits: u8) -> (Vec<u8>, Vec<u32>) {
+        let (out, clear_widths, _) = reference_unlzw_impl(body, max_bits, false);
+        (out, clear_widths)
+    }
+
+    /// gzip/ncompress-faithful variant of `reference_unlzw` WITHOUT the
+    /// `code_bits < max_bits` guard on the width bump: compress42.c's
+    /// decompress bumps `n_bits` whenever `free_ent > maxcode`
+    /// (L1698-1710), even past `maxbits` — the "phantom bump". At
+    /// maxbits=9 the real decoder therefore reads only the first 256
+    /// codes of a run at 9 bits and switches to 10 bits from code #257,
+    /// so a conforming stream must never let a block run exceed 256
+    /// codes. Our own decoder deliberately keeps the cap instead (the
+    /// only real-world -b9 producer, ncompress, writes no-bump output),
+    /// which is why a separate model is needed here: `reference_unlzw`
+    /// shares the encoder's blind spot and cannot see the phantom bump.
+    ///
+    /// Returns the decoded payload and the number of codes read in each
+    /// block run (a run ends at its CLEAR or at EOF; the CLEAR counts
+    /// toward its run).
+    fn reference_unlzw_gzip(body: &[u8], max_bits: u8) -> (Vec<u8>, Vec<u32>) {
+        let (out, _, run_lengths) = reference_unlzw_impl(body, max_bits, true);
+        (out, run_lengths)
+    }
+
+    /// Shared codestream walk behind `reference_unlzw` and
+    /// `reference_unlzw_gzip`. `phantom_bump` selects the width-bump
+    /// rule: `false` mirrors our decoder (`code_bits < max_bits` cap);
+    /// `true` mirrors compress42.c/gzip (`free_ent > maxcode` with no
+    /// maxbits guard, `maxcode` becoming `maxmaxcode` once `n_bits`
+    /// reaches `maxbits`).
+    ///
+    /// Returns (decoded payload, CLEAR widths, per-run code counts).
+    fn reference_unlzw_impl(
+        body: &[u8],
+        max_bits: u8,
+        phantom_bump: bool,
+    ) -> (Vec<u8>, Vec<u32>, Vec<u32>) {
+        // compress42.c `maxmaxcode` = 1<<maxbits; `free_ent` (== our
+        // `next_code`) is capped just below it.
+        let maxmaxcode = 1u32 << max_bits;
+        let cap = maxmaxcode as usize;
+        let mut prefix = vec![0u16; cap];
+        let mut suffix = vec![0u8; cap];
+        for (i, s) in suffix.iter_mut().enumerate().take(256) {
+            *s = i as u8;
+        }
+
+        let mut next_code: u32 = FIRST_CODE as u32;
+        let mut code_bits: u32 = 9;
+        // compress42.c `maxcode`: (1<<n_bits)-1 normally, maxmaxcode once
+        // n_bits reaches maxbits (set on the bump, not at init — which is
+        // exactly why a maxbits=9 stream still bumps 9->10).
+        let mut maxcode: u32 = (1u32 << code_bits) - 1;
+        let mut bit_pos: usize = 0;
+        let mut run_start: usize = 0;
+        let mut run_codes: u32 = 0;
+        let mut clear_widths = Vec::new();
+        let mut run_lengths = Vec::new();
+        let mut out = Vec::new();
+        let mut stack: Vec<u8> = Vec::new();
+        let mut prev: Option<u16> = None;
+
+        // Advance `pos` to the next `group_bits`-multiple boundary
+        // measured from `run_start` (compress42.c resync formula), then
+        // re-origin the lattice at the landing.
+        macro_rules! resync {
+            () => {{
+                let group_bits = code_bits as usize * 8;
+                let rem = (bit_pos - run_start) % group_bits;
+                if rem != 0 {
+                    bit_pos += group_bits - rem;
+                }
+                run_start = bit_pos;
+            }};
+        }
+
+        loop {
+            // compress42.c checks `free_ent > maxcode` before reading
+            // each code; the phantom variant applies it literally, the
+            // capped variant applies our decoder's semantics.
+            let bump = if phantom_bump {
+                next_code > maxcode
+            } else {
+                should_bump_decode_code_width(next_code, code_bits, max_bits as u32)
+            };
+            if bump {
+                // Resync at the OLD width before widening.
+                resync!();
+                code_bits += 1;
+                if phantom_bump {
+                    maxcode = if code_bits == max_bits as u32 {
+                        maxmaxcode
+                    } else {
+                        (1u32 << code_bits) - 1
+                    };
+                }
+            }
+
+            let cb = code_bits as usize;
+            if bit_pos + cb > body.len() * 8 {
+                if run_codes > 0 {
+                    run_lengths.push(run_codes);
+                }
+                break;
+            }
+            let mut code = 0u32;
+            for i in 0..cb {
+                let bit = (body[(bit_pos + i) / 8] >> ((bit_pos + i) % 8)) & 1;
+                code |= (bit as u32) << i;
+            }
+            bit_pos += cb;
+            run_codes += 1;
+
+            if code == CLEAR_CODE as u32 && prev.is_some() {
+                clear_widths.push(code_bits);
+                run_lengths.push(run_codes);
+                run_codes = 0;
+                resync!();
+                next_code = FIRST_CODE as u32;
+                code_bits = 9;
+                maxcode = (1u32 << 9) - 1; // MAXCODE(INIT_BITS)-1
+                prev = None;
+                continue;
+            }
+
+            let Some(p) = prev else {
+                assert!(code < 256, "run's first code must be a literal, got {code}");
+                out.push(code as u8);
+                prev = Some(code as u16);
+                continue;
+            };
+
+            stack.clear();
+            let kwkwk = code == next_code;
+            assert!(
+                kwkwk || code < next_code,
+                "corrupt input: code {code} >= next_code {next_code}"
+            );
+            let mut c = if kwkwk { p as u32 } else { code };
+            while c > 255 {
+                stack.push(suffix[c as usize]);
+                c = u32::from(prefix[c as usize]);
+            }
+            stack.push(c as u8);
+            let first_byte = c as u8;
+            if kwkwk {
+                // KwKwK emits str(prev) + first_byte(str(prev)); the
+                // stack is in reverse order so the appended byte sits
+                // at index 0 (emitted last).
+                stack.insert(0, first_byte);
+            }
+            for &b in stack.iter().rev() {
+                out.push(b);
+            }
+
+            if next_code < maxmaxcode {
+                prefix[next_code as usize] = p;
+                suffix[next_code as usize] = first_byte;
+                next_code += 1;
+            }
+            prev = Some(code as u16);
+        }
+        (out, clear_widths, run_lengths)
+    }
 
     /// Scan a headerless block-mode codestream and count the CLEAR codes
     /// (256) it contains. The scanner mirrors the encoder's code-width
@@ -415,6 +672,10 @@ mod tests {
         let mut next_code: u32 = FIRST_CODE as u32;
         let mut code_bits: u32 = 9;
         let mut bit_pos: usize = 0;
+        // Bit position of the current block-run origin (compress42.c
+        // `boff`): group-of-8 resyncs are measured from the previous
+        // resync landing, not from the body start.
+        let mut run_start: usize = 0;
         let mut clears = 0usize;
         // The first code of the stream (and of each post-clear segment)
         // emits no new dictionary entry.
@@ -436,10 +697,11 @@ mod tests {
                 // Codes are packed in groups of 8 (cb * 8 bits); the
                 // rest of the current group is padding after a clear.
                 let group_bits = cb * 8;
-                let rem = bit_pos % group_bits;
+                let rem = (bit_pos - run_start) % group_bits;
                 if rem != 0 {
                     bit_pos += group_bits - rem;
                 }
+                run_start = bit_pos;
                 next_code = FIRST_CODE as u32;
                 code_bits = 9;
                 saw_first = false;
@@ -452,7 +714,18 @@ mod tests {
             }
             if next_code <= max_code {
                 next_code += 1;
-                if should_bump_encode_code_width(next_code, code_bits, max_bits as u32) {
+                // Decode-side boundary: the scanner walks the emitted
+                // stream, so it widens one code earlier than the
+                // encoder's insertion check (decoder semantics).
+                if should_bump_decode_code_width(next_code, code_bits, max_bits as u32) {
+                    // Resync to the next old-width group boundary
+                    // relative to the run start, then re-origin.
+                    let group_bits = code_bits as usize * 8;
+                    let rem = (bit_pos - run_start) % group_bits;
+                    if rem != 0 {
+                        bit_pos += group_bits - rem;
+                    }
+                    run_start = bit_pos;
                     code_bits += 1;
                 }
             }
@@ -573,8 +846,175 @@ mod tests {
             count_clear_codes(&compressed[3..], 16) >= 1,
             "expected at least one ratio-based CLEAR code"
         );
+        // The CLEAR lands mid-run at a widened code width, so its
+        // group-of-8 pad must be measured from the block-run origin —
+        // verify against the compress42.c `boff` reference model.
+        let (reference_decoded, clear_widths) = reference_unlzw(&compressed[3..], 16);
+        assert!(
+            clear_widths.iter().any(|&w| w > 9),
+            "expected a CLEAR at a widened code width, got {clear_widths:?}"
+        );
+        assert_eq!(reference_decoded, data);
         let decompressed = super::super::decode::decode(&compressed).unwrap();
         assert_eq!(decompressed, data);
+    }
+
+    #[test]
+    fn test_clear_pad_originates_at_block_run_start() {
+        // Fuzz-found regression: with max_bits=10 the dictionary fills
+        // (767 entries) and the dict-full CLEAR is emitted at code width
+        // 10 — after the 9→10 bump re-origined the group-of-8 lattice at
+        // body bit 2304 (288 bytes), which is not a multiple of the
+        // 10-byte group size. Padding the CLEAR group relative to the
+        // body start — the pre-fix bug — shifts the post-CLEAR codes off
+        // the lattice that gzip/ncompress resync to ("corrupt input").
+        let data = prng_bytes(4096);
+        let compressed = encode_with_options(&data, 10);
+        let (reference_decoded, clear_widths) = reference_unlzw(&compressed[3..], 10);
+        assert!(
+            clear_widths.contains(&10),
+            "expected a dict-full CLEAR at width 10, got clears at {clear_widths:?}"
+        );
+        assert_eq!(reference_decoded, data);
+        assert_eq!(super::super::decode::decode(&compressed).unwrap(), data);
+    }
+
+    #[test]
+    fn test_clear_pad_run_relative_multiple_runs() {
+        // Exhaustively re-check the resync basis across several
+        // consecutive block runs: every CLEAR pad landing must satisfy
+        // (landing - previous_landing) % old_width == 0. This is the
+        // property gzip's `resetbuf` slide relies on.
+        let data = prng_bytes(20_000);
+        let compressed = encode_with_options(&data, 12);
+        let (reference_decoded, clear_widths) = reference_unlzw(&compressed[3..], 12);
+        assert!(
+            clear_widths.len() >= 2,
+            "expected multiple dict-full CLEARs, got {clear_widths:?}"
+        );
+        assert_eq!(reference_decoded, data);
+        assert_eq!(super::super::decode::decode(&compressed).unwrap(), data);
+    }
+
+    #[test]
+    fn test_fuzz_regression_clear_pad_run_start() {
+        // Fuzz-found regression (lzw / lzw-bits9 original-decompress):
+        // the encoder padded CLEAR groups relative to the body start
+        // instead of the block-run origin (compress42.c `boff`), so a
+        // CLEAR landing after a width bump drifted off the resync
+        // lattice and gzip/ncompress rejected the stream as
+        // "corrupt input". Validate this input against the reference
+        // model at both max_bits settings the harness exercises.
+        let input = include_bytes!("../../../tests/fixtures/fuzz/lzw_clear_pad_run_start.bin");
+        for max_bits in [9u8, 16] {
+            let compressed = encode_with_options(input, max_bits);
+            let (reference_decoded, clear_widths) = reference_unlzw(&compressed[3..], max_bits);
+            assert!(
+                !clear_widths.is_empty(),
+                "expected CLEAR codes for max_bits={max_bits}"
+            );
+            assert_eq!(
+                reference_decoded,
+                &input[..],
+                "reference-model decode failed for max_bits={max_bits}"
+            );
+            // The capped model shares our decoder's phantom-bump blind
+            // spot, so also validate with the gzip-faithful model.
+            let (gzip_decoded, run_lengths) = reference_unlzw_gzip(&compressed[3..], max_bits);
+            assert_eq!(
+                gzip_decoded,
+                &input[..],
+                "phantom-bump reference decode failed for max_bits={max_bits}"
+            );
+            if max_bits == 9 {
+                assert!(
+                    run_lengths.iter().all(|&n| n <= 256),
+                    "run exceeds 256 codes at max_bits=9: {run_lengths:?}"
+                );
+            }
+            assert_eq!(
+                super::super::decode::decode(&compressed).unwrap(),
+                &input[..],
+                "decode failed for max_bits={max_bits}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_dict_full_clear_is_emit_256_max_bits_9() {
+        // Fuzz-found regression (lzw-bits9 original-decompress,
+        // run-1791251880): compress42.c's decoder widens whenever
+        // free_ent > maxcode WITHOUT an n_bits < maxbits guard (the
+        // "phantom bump"), so in a max_bits=9 stream it reads only the
+        // first 256 codes of a block run at 9 bits and switches to 10
+        // bits from code #257. The encoder used to emit the dict-full
+        // CLEAR on the miss AFTER the dictionary filled — emit #257 —
+        // which the real decoder reads at 10 bits, misaligning every
+        // subsequent code ("gzip: stdin: corrupt input"). The CLEAR
+        // must instead be emitted the moment the dictionary becomes
+        // exactly full — emit #256 — so every run stays within the
+        // decoder's pre-bump reach.
+        let data: Vec<u8> = (0..4096u32).map(|i| (i % 256) as u8).collect();
+        let compressed = encode_with_options(&data, 9);
+        let (gzip_decoded, run_lengths) = reference_unlzw_gzip(&compressed[3..], 9);
+        assert!(
+            run_lengths.len() >= 2,
+            "expected dict-full CLEAR-terminated runs, got {run_lengths:?}"
+        );
+        assert!(
+            run_lengths.iter().all(|&n| n <= 256),
+            "block run exceeds 256 codes — gzip would phantom-bump: {run_lengths:?}"
+        );
+        assert_eq!(gzip_decoded, data, "phantom-bump reference decode failed");
+        assert_eq!(super::super::decode::decode(&compressed).unwrap(), data);
+    }
+
+    #[test]
+    fn test_fuzz_regression_bits9_phantom_bump_artifacts() {
+        // The two inputs behind the run-1791251880 failure artifacts,
+        // reconstructed from fuzz/src/datagen.rs generators:
+        // `incrementing-511` and `high-entropy-257`. Both fill the
+        // max_bits=9 dictionary and previously produced streams that
+        // gzip rejected ("corrupt input") or silently misdecoded.
+        let incrementing_511: Vec<u8> = (0..511u32).map(|i| (i % 256) as u8).collect();
+        let high_entropy_257: Vec<u8> = (0..257u32).map(|i| ((i * 73 + 19) % 256) as u8).collect();
+        for data in [incrementing_511, high_entropy_257] {
+            let compressed = encode_with_options(&data, 9);
+            let (gzip_decoded, run_lengths) = reference_unlzw_gzip(&compressed[3..], 9);
+            assert!(
+                run_lengths.iter().all(|&n| n <= 256),
+                "block run exceeds 256 codes at max_bits=9: {run_lengths:?}"
+            );
+            assert_eq!(
+                gzip_decoded,
+                data,
+                "phantom-bump reference decode failed (len={})",
+                data.len()
+            );
+            assert_eq!(super::super::decode::decode(&compressed).unwrap(), data);
+        }
+    }
+
+    #[test]
+    fn test_phantom_bump_compat_all_max_bits() {
+        // The dict-full CLEAR moved one emit earlier for every
+        // max_bits, not just 9. Validate against the gzip-faithful
+        // phantom-bump model across the whole range with an input that
+        // fills the dictionary repeatedly.
+        let data = prng_bytes(20_000);
+        for max_bits in 9..=16u8 {
+            let compressed = encode_with_options(&data, max_bits);
+            let (gzip_decoded, run_lengths) = reference_unlzw_gzip(&compressed[3..], max_bits);
+            assert_eq!(
+                gzip_decoded, data,
+                "phantom-bump reference decode failed for max_bits={max_bits} (runs: {run_lengths:?})"
+            );
+            assert_eq!(
+                super::super::decode::decode(&compressed).unwrap(),
+                data,
+                "decode failed for max_bits={max_bits}"
+            );
+        }
     }
 
     #[test]
