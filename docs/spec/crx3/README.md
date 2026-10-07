@@ -17,7 +17,7 @@
 | 4 | N が過大なものを拒否 (16 MiB 上限) | crx3.proto 「reject CRX₃ files that contain an N that is too large」 | ✅ | `rejects_bad_inputs` |
 | 5 | ヘッダ末尾以降を ZIP アーカイブとして decode | 同上 | ✅ | `test_crx3_python_oracle` |
 | 6 | ヘッダ後が ZIP でない入力を拒否 | 同上 | ✅ | `test_crx3_rejects_non_zip_tail` |
-| 17 | CRX2 (version 2) の decode | Chromium `crx_file.h` / `crx_verifier.cc` | ⚠️ | 固定ヘッダ + `ProofAlgorithm::RsaPkcs1` の decode を実装 (公開鍵/署名は生値で公開、署名検証・CRX ID 抽出は対象外)。`decodes_crx2`, `rejects_truncated_crx2_header`。CRX の作成は Chromium 側ツールの領域 (intentional scope) |
+| 17 | CRX2 (version 2) の decode | Chromium `crx_file.h` / `crx_verifier.cc` | ✅ | 固定ヘッダ + `ProofAlgorithm::RsaPkcs1` の decode を実装 (公開鍵/署名は生値で公開)。`crx_id` は v2 で wire 非格納のため `SHA-256(public_key)[..16]` から導出して `Crx3Image::crx_id` で公開 (crx3.proto の導出規則と同一)。`decodes_crx2`, `rejects_truncated_crx2_header`, `crx2_crx_id_derived_from_pubkey`。署名検証は #14 で intentional scope。CRX の作成は Chromium 側ツールの領域 (intentional scope) |
 
 ## protobuf ヘッダ層 (CrxFileHeader)
 
@@ -43,7 +43,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 14 |
-| ⚠️ 部分対応  | 1 |
+| ✅ 実装+テスト済み  | 15 |
+| ⚠️ 部分対応  | 0 |
 | ❌ 未対応  | 2 (intentional scope) |
 | **合計** | **17** |

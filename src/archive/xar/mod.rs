@@ -8,7 +8,7 @@
 //! `application/x-gzip` = zlib-compressed).
 //!
 //! Decode verifies the header TOC checksum (none/SHA-1/MD5 and
-//! `cksum_alg=3` named digests "sha1"/"md5"/"sha256"/"sha512"), the
+//! `cksum_alg=3` named digests "sha1"/"md5"/"sha256"/"sha512"/"whirlpool"), the
 //! uncompressed TOC length, and each file's `extracted-checksum` when
 //! it uses a supported digest. Extended attributes (`<ea>`) are
 //! exposed as opaque name/data blobs; signatures and encoding styles

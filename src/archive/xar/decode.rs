@@ -115,6 +115,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<XarEntry>, Error> {
                 "md5" => Some("md5"),
                 "sha256" => Some("sha256"),
                 "sha512" => Some("sha512"),
+                "whirlpool" => Some("whirlpool"),
                 _ => return Err(Error::Unsupported("xar: unsupported digest algorithm")),
             }
         }
@@ -182,6 +183,7 @@ fn digest(kind: &str, data: &[u8]) -> Result<Vec<u8>, Error> {
         "md5" => crate::util::md5::md5(data).to_vec(),
         "sha256" => crate::util::sha256::sha256(data).to_vec(),
         "sha512" => crate::util::sha512::sha512(data).to_vec(),
+        "whirlpool" => crate::util::whirlpool::whirlpool(data).to_vec(),
         _ => return Err(Error::Unsupported("xar: unsupported digest")),
     })
 }
@@ -204,7 +206,7 @@ fn decode_heap_run(node: &xml::Node, heap: &[u8]) -> Result<Vec<u8>, Error> {
     {
         let expected =
             hex_bytes(cs.text.trim()).ok_or_else(|| invalid("xar: bad archived-checksum"))?;
-        if let "sha1" | "md5" | "sha256" | "sha512" = style
+        if let "sha1" | "md5" | "sha256" | "sha512" | "whirlpool" = style
             && digest(style, stored)?[..] != expected[..]
         {
             return Err(invalid("xar: archived-checksum mismatch"));
@@ -243,7 +245,7 @@ fn decode_heap_run(node: &xml::Node, heap: &[u8]) -> Result<Vec<u8>, Error> {
         let expected =
             hex_bytes(cs.text.trim()).ok_or_else(|| invalid("xar: bad extracted-checksum"))?;
         // Unknown digest styles are not verified.
-        if let "sha1" | "md5" | "sha256" | "sha512" = style
+        if let "sha1" | "md5" | "sha256" | "sha512" | "whirlpool" = style
             && digest(style, &data)?[..] != expected[..]
         {
             return Err(invalid("xar: extracted-checksum mismatch"));
@@ -321,6 +323,7 @@ mod tests {
     use crate::util::sha1::sha1;
     use crate::util::sha256::sha256;
     use crate::util::sha512::sha512;
+    use crate::util::whirlpool::whirlpool;
 
     fn hex_lower(data: &[u8]) -> String {
         use core::fmt::Write;
@@ -489,6 +492,66 @@ mod tests {
         let mut heap = sha512(&toc_comp).to_vec();
         heap.extend_from_slice(b"jello");
         let x = make_xar_cksum3("sha512", &heap, &toc);
+        assert!(matches!(decode(&x), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn test_cksum_alg3_whirlpool() {
+        // cksum_alg=3 with the digest named "whirlpool": the TOC
+        // checksum and the per-file archived/extracted checksums
+        // all verify via Whirlpool (64-byte output, like SHA-512).
+        let cksum = hex_lower(&whirlpool(b"hello"));
+        let toc = alloc::format!(
+            concat!(
+                "<?xml version='1.0'?><xar><toc>",
+                "<checksum style='whirlpool'><offset>0</offset><size>64</size></checksum>",
+                "<file id='1'><name>f.txt</name><type>file</type>",
+                "<data><offset>64</offset><size>5</size><length>5</length>",
+                "<archived-checksum style='whirlpool'>{}</archived-checksum>",
+                "<extracted-checksum style='whirlpool'>{}</extracted-checksum>",
+                "<encoding style='none'/></data></file></toc></xar>"
+            ),
+            cksum,
+            cksum,
+        );
+        let toc_comp = crate::compress::zlib::encode::encode(toc.as_bytes());
+        let mut heap = whirlpool(&toc_comp).to_vec();
+        heap.extend_from_slice(b"hello");
+        let x = make_xar_cksum3("whirlpool", &heap, &toc);
+        let entries = decode(&x).unwrap();
+        assert_eq!(entries[0].name, "f.txt");
+        assert_eq!(entries[0].data, b"hello");
+    }
+
+    #[test]
+    fn test_cksum_alg3_whirlpool_mismatch() {
+        // A corrupted whirlpool TOC checksum and a tampered file byte
+        // (caught by the whirlpool archived-checksum) are rejected.
+        let cksum = hex_lower(&whirlpool(b"hello"));
+        let toc = alloc::format!(
+            concat!(
+                "<?xml version='1.0'?><xar><toc>",
+                "<checksum style='whirlpool'><offset>0</offset><size>64</size></checksum>",
+                "<file id='1'><name>f.txt</name><type>file</type>",
+                "<data><offset>64</offset><size>5</size><length>5</length>",
+                "<archived-checksum style='whirlpool'>{}</archived-checksum>",
+                "<encoding style='none'/></data></file></toc></xar>"
+            ),
+            cksum,
+        );
+        let toc_comp = crate::compress::zlib::encode::encode(toc.as_bytes());
+
+        // Corrupt the stored TOC checksum in the heap.
+        let mut heap = whirlpool(&toc_comp).to_vec();
+        heap.extend_from_slice(b"hello");
+        heap[0] ^= 0xFF;
+        let x = make_xar_cksum3("whirlpool", &heap, &toc);
+        assert!(matches!(decode(&x), Err(Error::InvalidData(_))));
+
+        // Corrupt the stored file bytes: whirlpool mismatch.
+        let mut heap = whirlpool(&toc_comp).to_vec();
+        heap.extend_from_slice(b"jello");
+        let x = make_xar_cksum3("whirlpool", &heap, &toc);
         assert!(matches!(decode(&x), Err(Error::InvalidData(_))));
     }
 

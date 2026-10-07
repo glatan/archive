@@ -42,7 +42,7 @@
 | 21 | 書き込み時は signature を含める | §4.3.9.4 | ✅ | エンコーダーで常に signature 付き |
 | 22 | ZIP64 時は 8B sizes | §4.3.9.2 | ✅ | `test_force_zip64_roundtrip` |
 | 23 | 不正 Data Descriptor reject | §4.3.9 | ✅ | `test_bad_data_descriptor_rejected`, `test_zip_decode_detects_data_descriptor_mismatch` |
-| 24 | CD Encryption 時の DD field = binary zeros | §4.3.9.6 | ✅ | CD Encryption 対応: bit 13 マスキングで DD field をゼロ扱い。`test_cd_encryption_bit13_masking` |
+| 24 | CD Encryption 時の DD field = binary zeros | §4.3.9.6 | ✅ | bit 13 検出時に CD の CRC-32/圧縮/非圧縮サイズをゼロ (masked) として扱い Local File Header からフォールバック (`decode.rs` `cd_masked`)。`test_cd_bit13_masking_falls_back_to_local_header` |
 
 ---
 
@@ -50,7 +50,7 @@
 
 | # | 仕様要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|---------|---------|------|----------------|
-| 25 | Archive Decryption Header | §4.3.10 | ✅ | `parse_archive_decryption_header` でパース+復号。`test_parse_archive_decryption_header_aes256`, `test_cd_encryption_aes256_decode` |
+| 25 | Archive Decryption Header | §4.3.10 | ✅ | `parse_archive_decryption_header` で ADH をパース (復号自体は Central Directory Encryption として intentional scope 外、`reject_encrypted_central_directory` で reject)。`test_parse_archive_decryption_header_aes256`, `test_parse_archive_decryption_header_3des`, `test_parse_archive_decryption_header_truncated`, `test_central_directory_encryption_rejected` |
 | 26 | Archive Extra Data Record (sig `0x08064B50`) | §4.3.11 | ✅ | decode 時にシグネチャを認識してスキップ。`test_archive_extra_data_record_skipped` |
 
 ---
@@ -124,7 +124,7 @@
 | 54 | version 4.5 (45): ZIP64 | §4.4.3 | ✅ | ZIP64 時に設定 |
 | 55 | version 5.1 (51): AES encryption | §4.4.3 | ✅ | AES 使用時に version_needed=51 で write |
 | 56 | version 6.3 (63): LZMA / PPMd | §4.4.3 | ✅ | `compute_version_needed()` で LZMA/PPMd 時に version=63 設定 |
-| 57 | feature version に基づく最小バージョン強制 | §4.4.3.1 | ✅ | decode: `ZipHeader.version_needed` に公開。encode: local/central とも `compute_version_needed()` で compression method 考慮 (bzip2=46, deflate64=21, lzma/ppmd=63, aes=51, zip64=45)。`test_bzip2_version_needed_in_local_and_central` |
+| 57 | feature version に基づく最小バージョン強制 | §4.4.3.1 | ⚠️ | decode: `ZipHeader.version_needed` に公開。encode: local/central とも `compute_version_needed()` で compression method 考慮 (bzip2=46, deflate64=21, lzma/ppmd=63, aes=51, zip64=45)。記名テスト `test_bzip2_version_needed_in_local_and_central` は未整備 (実装のみ存在) |
 
 ---
 
@@ -139,7 +139,7 @@
 | 62 | Bit 5: Compressed patched data | §4.4.4 | ✅ | 未サポート機能、読み飛ばし (仕様通りの動作) |
 | 63 | Bit 6: Strong encryption | §4.4.4 | ✅ | 検出して `Unsupported` を返す。復号は intentional non-support (APPNOTE §10.1 により実装に PKWARE との別途ライセンス契約が義務付けられているため)。`test_strong_encryption_rejected_aes`, `test_strong_encryption_rejected_other_algorithms` |
 | 64 | Bit 11: Language Encoding Flag (UTF-8) | §4.4.4 | ✅ | `test_decode_cp437_name_and_comment`, `test_decode_invalid_utf8_metadata_rejected` |
-| 65 | Bit 13: Central Directory Encryption masking | §4.4.4 | ✅ | bit 13 検出時に CRC-32/圧縮サイズ/非圧縮サイズを Local File Header からフォールバック。CD 本体の暗号化 (ADH) は検出して `Unsupported` を返す |
+| 65 | Bit 13: Central Directory Encryption masking | §4.4.4 | ✅ | bit 13 検出時に CRC-32/圧縮サイズ/非圧縮サイズを Local File Header からフォールバック (`test_cd_bit13_masking_falls_back_to_local_header`)。CD 本体の暗号化 (ADH) は検出して `Unsupported` を返す |
 | 66 | Bit 6 set → version ≥ 50, bit 0 も set | §4.4.4 | ✅ | version < 50 と bit 0 未設定を reject |
 | 152 | Method 14 (LZMA): general purpose bit 1 = EOS marker 使用 | §4.4.4, §5.8.9 | ✅ | bit 1 set → `lzma_decode_with_props` (EOS marker)、unset → `lzma_decode_with_props_and_size` (サイズベース) |
 
@@ -172,6 +172,7 @@
 | 155 | ZIP64 EOCD Locator は ZIP64 EOCD record と同一 disk 上に存在すること | §4.3.15 ("MUST reside on the same disk") | ✅ | `decode_parts` の disk 番号整合検証で間接的に保証 (locator disk ≠ EOCD disk は reject) |
 | 156 | self-extracting archive (SFX): 先頭の実行可能部を読み飛ばしてアーカイブ開始位置を検出 | APPNOTE 前言 "self-extracting" / de facto | ✅ | `detect_sfx_prefix` および `detect_sfx_prefix_zip64` が EOCD 算術 (eocd_offset − cd_size − cd_offset) でプレフィックス長を推定し、CD・ローカルヘッダー・ZIP64 のオフセットを補正する (`decodes_sfx_prefixed_archive`, `sfx_prefix_via_zip64`) |
 | 126 | Record が segment 境界を跨がない | §8.5.2 | — | writer 側のレイアウト制約であり reader は各 record を連結ストリーム上でシークして読むだけのため該当なし |
+| 159 | temporary spanning marker signature `0x30304b50` (segmented LFH/CD の暫定マーカー) | §8.5.4 | ❌ | 未実装 (受理する signature は `0x08074b50` のみ)。§8.3 の split 命名規約 (filename.z01…filename.zip) は `decode_parts(&[&[u8]])` のスライス列入力モデルのため呼び出し側責務 |
 
 ---
 

@@ -37,6 +37,7 @@
 | 17 | FLAT_INLINE で startblk 全 1 = 全 inline (データブロックなし) | 実 mkfs.erofs fixture の root inode が該当 | ✅ | `test_erofs_mkfs_image_*` |
 | 18 | datalayout 4 (CHUNK_BASED): extents は `roundup(isize+xattr,8)` 後の `erofs_inode_chunk_info` + u32 blkaddr 配列または 8B chunk index、`EROFS_NULL_ADDR` chunk = hole | erofs.rst Chunk-based files、erofs_fs.h `erofs_inode_chunk_index` | ✅ | `read_chunked` (合成のみ、mkfs デフォルトでは非生成) |
 | 19 | chunk format の未知ビット / 48bit index / device_id≠0 を拒否 | erofs_fs.h `EROFS_CHUNK_FORMAT_*` | ✅ | decode 時検証 |
+| 29a | METABOX (0x100) の metabox inode decode | erofs_fs.h `EROFS_FEATURE_INCOMPAT_METABOX` | ✅ | `metabox_nid` が指す metabox inode の blob を decode し、dirent nid bit63 付き inode のメタデータと `COMPAT_SHARED_EA_IN_METABOX` の共有 xattr を metabox 空間で解決。`metabox_inode_decodes`, `metabox_shared_xattr`, `rejects_metabox_*` 等 |
 
 ## dirent 層
 
@@ -59,13 +60,13 @@
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 29 | METABOX / DEVICE_TABLE (`extra_devices != 0`) / DEDUPE イメージ | ⚠️ | METABOX (0x100) は decode 対応: `metabox_nid` が指す metabox inode の blob を decode し、dirent nid bit63 付き inode のメタデータと `COMPAT_SHARED_EA_IN_METABOX` の共有 xattr を metabox 空間で解決。`extra_devices != 0` (DEVICE_TABLE) は外部 blob 参照で単一 `&[u8]` 入力モデルと不整合のため `Error::Unsupported` (intentional scope)。DEDUPE (0x20) は受理するが DEDUPE 固有データは未解釈。`metabox_inode_decodes`, `metabox_shared_xattr`, `rejects_metabox_*` 等 |
+| 29 | DEVICE_TABLE (`extra_devices != 0`) / DEDUPE (0x20) | ❌ intentional scope | DEVICE_TABLE は外部 blob 参照で単一 `&[u8]` 入力モデルと不整合のため `Error::Unsupported`。DEDUPE は feature フラグのみで wire 上の固有構造を持たない (`erofs_fs.h` に定義なし、dedup 済み chunk index は既存 chunked decode がそのまま処理)。METABOX の対応は #29a |
 
 ## 集計
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 33 |
-| ⚠️ 部分対応  | 1 |
-| ❌ 未対応  | 0 |
-| **合計** | **34** |
+| ✅ 実装+テスト済み  | 34 |
+| ⚠️ 部分対応  | 0 |
+| ❌ 未対応  | 1 (intentional scope) |
+| **合計** | **35** |

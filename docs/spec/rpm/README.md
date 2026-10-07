@@ -38,6 +38,7 @@
 | 12 | index/データ範囲の bounds 検査 (truncated → `UnexpectedEof`) | crate エラー規約 | ✅ | `rejects_*` 系 |
 | 12a | index entry は tag 昇順ソート・重複 tag なし | format_header.html ("entries are sorted by tag number") | ✅ | decoder 側は tag の単調増加と重複の有無を検証する (`rejects_unsorted_index_entries`, `rejects_duplicate_tag`)。encode 側 (#26) は昇順で出力する |
 | 12b | データ store の整列パディングはゼロ | format_header.html | ✅ | decoder 側はデータストアの整列パディングがゼロであるかを検証する (`rejects_nonzero_store_padding`, `accepts_aligned_zero_padding`)。encode 側はゼロパディングを出力する |
+| 38a | payload/header digest 検証 (opt-in) | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ✅ | `RpmPackage::verify_digests` で Signature/Header digest タグ (SIGTAG_MD5 1004/SHA1 269/SHA256 272,273) と payload digest (5092/5097 + algo 5093。MD5/SHA1/SHA256/SHA512) を検証。`verifies_md5_sha1_digests`, `rejects_tampered_payload_digest`, `detects_tampered_header_digest` |
 
 ### payload
 
@@ -84,5 +85,5 @@
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 38 | OpenPGP 署名検証・payload/header digest 検証 | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ⚠️ | digest 検証は `RpmPackage::verify_digests` で opt-in 実装 (Signature/Header digest タグ、payload digest 5092/5097 を含む。MD5/SHA1/SHA256/SHA512)。`verifies_md5_sha1_digests`, `rejects_tampered_payload_digest`, `detects_tampered_header_digest`。OpenPGP/GPG 署名検証は暗号レイヤの責務外 (intentional)。tag 値は API 経由で参照可能。v6 必須の SHA3_256 digest (Sig tag 279) と v6 新設 payload digest tag 5121-5124 は対象外 (SHA3 実装を持たないため intentional scope) |
+| 38 | OpenPGP 署名検証・v6 SHA3 digest tag | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ❌ intentional scope | OpenPGP/GPG 署名検証は暗号レイヤの責務外。v6 必須の SHA3_256 digest (Sig tag 279) と payload digest tag 5121-5124 は SHA3 実装を持たないため対象外。digest 検証の実装済み部分は #38a |
 | 39 | RPMTAG のパッケージ管理セマンティクス (依存関係・scriptlet・ファイル属性の install 意味) | rpm tags | ❌ | パッケージマネージャ層の責務 (intentional)。生 tag は `header.get_*` で取得可能 |

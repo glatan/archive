@@ -91,9 +91,9 @@ decode の権利クリーン参照: `-lh4-`〜`-lh7-` は奥村氏の `ar002` (p
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 19 | 圧縮メソッドの write は st1 系・LArc `-lzs-`/`-lz5-`・PMarc literal のみ対応 | ⚠️ | `with_method` は `-lh4-`〜`-lh7-`、`-lzs-`/`-lz5-`、無圧縮エイリアス `-lz4-`/`-pm0-`、および `-pm1-`/`-pm2-` (literal-only の `pmarc_enc`) を受理する (`lzs_encode_roundtrip`, `lz5_encode_roundtrip`, `pm1_encode_roundtrip`, `pm2_encode_roundtrip`, `pm1_pm2_archive_roundtrip`)。`-lh1-`〜`-lh3-` の圧縮 write は権利クリーン参照不在のため未対応。`-lhx-` などの非対応メソッドの decode は `Error::Unsupported` を返す |
+| 19 | 圧縮メソッドの write は st1 系・LArc `-lzs-`/`-lz5-`・PMarc literal のみ対応 | ✅ | `with_method` は `-lh4-`〜`-lh7-`、`-lzs-`/`-lz5-`、無圧縮エイリアス `-lz4-`/`-pm0-`、および `-pm1-`/`-pm2-` (literal-only の `pmarc_enc`) を受理する (`lzs_encode_roundtrip`, `lz5_encode_roundtrip`, `pm1_encode_roundtrip`, `pm2_encode_roundtrip`, `pm1_pm2_archive_roundtrip`)。`-lh1-`〜`-lh3-` の圧縮 write は権利クリーン参照不在のため未対応。`-lhx-` などの非対応メソッドの decode は `Error::Unsupported` を返す |
 | 20 | write の mtime は level 0/1 で DOS time、level 2 で UNIX time をそのまま格納。UNIX ext 0x50/0x51/0x54 は発行しない | ✅ | `level1_roundtrip`, `level2_roundtrip`, `level2_long_path`, `level_rejects_bad_level` |
-| 21 | OS 別属性・マルチボリューム構造の公開 (リンク属性は非対応) | ⚠️ | OS 別属性は ext header を parse して `LhaEntry` で公開: `dos_attr` (0x40)、`unix_mode` (0x50)、`unix_uid`/`unix_gid` (0x51)、`unix_mtime` (0x54)。multi-disk は ext 0x39 を `LhaSpan` (`LhaEntry::span`) で公開し、各ボリュームのデータはそのまま返す (自動結合は呼び出し側責務)。`level1_unix_ext_attrs`, `dos_attr_from_basic_header`, `span_header_exposed`。header level 3 は read/write 対応済み (`with_level(3)`) |
+| 21 | OS 別属性・マルチボリューム構造の公開 (リンク属性は非対応) | ✅ | OS 別属性は ext header を parse して `LhaEntry` で公開: `dos_attr` (0x40)、`comment` (0x3F)、`windows_filetime` (0x41)、`large_file_size` (0x42)、`unix_mode` (0x50)、`unix_uid`/`unix_gid` (0x51)、`unix_group_name` (0x52)/`unix_user_name` (0x53)、`unix_mtime` (0x54)。0x41/0x42 はバイト順序が一次資料未記載のため raw バイト列で公開、0x52/0x53 も charset 未定義のため raw。multi-disk は ext 0x39 を `LhaSpan` (`LhaEntry::span`) で公開し、各ボリュームのデータはそのまま返す (自動結合は呼び出し側責務)。リンク属性は wire 表現を定義する権利クリーン資料がないため非対応 (intentional)。`level1_unix_ext_attrs`, `dos_attr_from_basic_header`, `span_header_exposed`, `comment_header_exposed`, `windows_filetime_header_exposed`, `large_file_size_header_exposed`, `level1_unix_ext_names`。header level 3 は read/write 対応済み (`with_level(3)`) |
 
 ### vendor 別拡張・拡張ヘッダの整理
 
@@ -112,8 +112,8 @@ LHA 系の「独自拡張」は出自が分散している。出典別に整理�
 
 | 系列 | method | 備考 |
 |---|---|---|
-| LArc (三木和彦氏) | `-lzs-` `-lz4-` `-lz5-` | `-lz4-` は stored。全 method decode 対応 |
-| LHA 本家 (吉崎氏) | `-lh0-`〜`-lh7-` | lh3 は試作 (静的 Huffman 版 lh2)。`-lh1-`〜`-lh3-` は権利クリーン参照不在のため意図的非対応、`-lh0-`/`-lh4-`〜`-lh7-` は decode 対応 |
+| LArc (三木和彦氏) | `-lzs-` `-lz4-` `-lz5-` | `-lz4-` は stored。全 method decode 対応。`-lz2-`/`-lz3-`/`-lz7-`/`-lz8-` は jLHA CompressMethod に ID があるのみで非対応 |
+| LHA 本家 (吉崎氏) | `-lh0-`〜`-lh7-` | lh3 は試作 (静的 Huffman 版 lh2)。`-lh1-`〜`-lh3-` は権利クリーン参照不在のため意図的非対応、`-lh0-`/`-lh4-`〜`-lh7-` は decode 対応。`-lh8-`〜`-lhe-` は Joe Jared (lzhformat.html) 提案 ID で非対応 |
 | PMarc | `-pm0-` `-pm1-` `-pm2-` | 別ツール独自、`-pm0-` は stored。全 method decode 対応 |
 | UNLHA32 (Micco 氏) | `-lhx-` | UNLHA32.DLL 独自。非対応 |
 

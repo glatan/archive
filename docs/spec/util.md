@@ -62,7 +62,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 28 | Display 実装 (全5バリアント) | crate internal API contract | ✅ | `test_display_*` (5テスト) |
+| 28 | Display 実装 (全7バリアント) | crate internal API contract | ✅ | `test_display_*` (7テスト) |
 | 29 | From\<Error\> for std::io::Error | crate internal API contract | ✅ | `test_io_error_unexpected_eof`, `test_io_error_invalid_data` |
 | 30 | std::error::Error 実装 | crate internal API contract | ✅ | `test_std_error_impl` |
 
@@ -137,9 +137,19 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
 | 55 | SHA-512 メッセージダイジェスト | FIPS 180-4 | ✅ | `util::sha512` (xar/rpm feature)。`test_sha512_empty`, `test_sha512_abc`, `test_sha512_two_block`, `test_sha512_million_a`, `test_sha512_padding_boundary` |
-| 56 | Whirlpool-512 メッセージダイジェスト | ISO/IEC 10118-3 / Whirlpool 仕様 (非特許宣言済み) | ✅ | `util::whirlpool` (pea feature)。C テーブルは S-box + 巡回行から const fn で生成。`test_whirlpool_empty`, `test_whirlpool_abc`, `test_whirlpool_incremental`, `test_whirlpool_padding_boundary` |
+| 56 | Whirlpool-512 メッセージダイジェスト | ISO/IEC 10118-3 / Whirlpool 仕様 (非特許宣言済み) | ✅ | `util::whirlpool` (pea/xar features)。C テーブルは S-box + 巡回行から const fn で生成。`test_whirlpool_empty`, `test_whirlpool_abc`, `test_whirlpool_incremental`, `test_whirlpool_padding_boundary` |
 | 57 | PBKDF2 (SHA-1 / Whirlpool) | RFC 2898 + PEA KDF ワイヤ仕様 | ✅ | `util::pbkdf2` (pea feature)。`test_pbkdf2_sha1_rfc6070`, `test_pbkdf2_whirlpool`, `test_pbkdf2_sha1_xkey_layout`, `test_hmac_sha1_rfc2202`, `test_hmac_long_key` |
 | 58 | AES-EAX 認証付き暗号 (OMAC1 + CTR) | EAX (Bellare-Rogaway-Wagner) + SP 800-38A/38B | ✅ | `util::eax` (pea feature)。`test_eax_paper_vectors`, `test_eax_gladman_vectors`, `test_eax_rejects_bad_tag` |
+
+### その他ユーティリティ
+
+| # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
+|---|------|----------|-----------|----------------|
+| 59 | CRC-16/ARC (poly 0x8005 reflected) | CRC-16/ARC 規約 | ✅ | `util::crc16` (lha/arc features)。`check_value` |
+| 60 | CRC-16/CCITT + AUG バリアント | CRC-16/CCITT 規約 | ✅ | `util::crc16ccitt` (macbinary/binhex features)。`check_value`, `augmented` |
+| 61 | 出力サイズ上限チェック (decompression bomb 防御) | crate internal | ✅ | `util::bounded::check_output_limit` (feature 非依存)。`within_limit`, `at_exact_limit`, `exceeds_limit`, `no_limit`, `zero_limit`, `zero_additional_at_limit`, `saturating_overflow` |
+| 62 | Base64 codec (RFC 4648) | RFC 4648 | ✅ | `util::base64` (uuencode feature、POSIX uuencode Base64 アルゴリズム用)。`test_rfc4648_vectors`, `test_roundtrip_binary`, `test_rejects_*` 系 |
+| 63 | Subbotin carry-less range coder (LZMA 系エントロピー符号の共有部品) | LZMA spec / de facto | ✅ | `util::range_coder` (lzip/lrzip/xz/sevenz features)。`test_range_coder_roundtrip_*`, `test_encoder_normalizes_after_bit_operations`, `test_decoder_*` |
 
 ---
 
@@ -147,5 +157,5 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 58 |
-| **合計** | **58** |
+| ✅ 実装+テスト済み | 63 |
+| **合計** | **63** |

@@ -30,6 +30,8 @@
 | 12 | PCOMPRESS1-3: `[u32 compsize][zlib ブロック]` の繰り返し (ブロック出力 = min(残り, 1 MiB))、末尾 u32 = 最終ブロック非圧縮サイズ; compsize == 出力サイズで raw ブロック | `compress_file` / unpea 読み取り部、`zcompres.compress2` (zlib 形式) | ✅ | `decodes_compressed_archive` + Python oracle |
 | 13 | オブジェクト完全性タグ: ヘッダ+非圧縮データへのハッシュを照合 | `update_obj_control_algo`/`check_obj` | ✅ | `rejects_tampered_tag` |
 | 19 | マルチボリューム分割結合 | pea_help.pdf / pea.pas ボリュームタグ | ✅ | `decode_parts(&[&[u8]])` / `decode_parts_with_password_bytes` が `.pea` ボリューム断片列を結合 (各ボリュームタグの検証・除去 → payload 連結 → 通常 decode)。`decodes_multi_volume`, `rejects_bad_volume_tag`, `rejects_empty_volume_list`。分割出力側の生成は対象外 |
+| 18a | 認証付き暗号ストリーム decode — AES 系 (コード 48: AES-128 CTR+HMAC-SHA1-128 / 49: AES-128 EAX / 65: AES-256 EAX) | pea_help.pdf crypto コード表 | ✅ | 16B crypto subheader (salt + password verifier) を読み、`decode_with_password*` API で PBKDF2-SHA1 (48/49) / PBKDF2-Whirlpool (65) による鍵導出 → verifier 照合 → 復号 → ストリーム認証タグ照合。`decodes_aes_hmac_stream`, `decodes_aes_eax_stream`, `decodes_aes256_eax_stream`, `rejects_wrong_password`, `rejects_bad_auth_tag`, `rejects_unsupported_encrypted_stream` |
+| 20a | 単一ストリームの PEA write (stored / PCOMPRESS2 deflate + 完全性タグ出力) | pea.pas 書き込み部 | ✅ | `PeaEncoder` で stored / PCOMPRESS2 deflate、CRC32/ADLER32/CRC64/MD5/SHA1/SHA256 タグの出力に対応。`pea_encode_roundtrip`, `pea_encode_compressed_roundtrip`, `pea_encode_control_algo_selection`, `test_pea_encode_python_oracle`, `test_pea_archive_encoder_trait`。fuzz harness `pea`/`pea-store`/`pea-sha256` で roundtrip + corrupt 対象 |
 
 ## 完全性検証
 
@@ -44,15 +46,15 @@
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 18 | 認証付き暗号ストリーム decode (コード 48-51, 65-76) | ⚠️ | AES 系のみ実装: 48 (AES-128 CTR + HMAC-SHA1-128)、49 (AES-128 EAX)、65 (AES-256 EAX)。16B crypto subheader (salt + password verifier) を読み、`decode_with_password*` API で PBKDF2-SHA1 (48/49) / PBKDF2-Whirlpool (65) による鍵導出 → verifier 照合 → 復号 → ストリーム認証タグ照合を行う。`decodes_aes_hmac_stream`, `decodes_aes_eax_stream`, `decodes_aes256_eax_stream`, `rejects_wrong_password`, `rejects_bad_auth_tag`, `rejects_unsupported_encrypted_stream`。Twofish/Serpent EAX (50, 51, 66, 67)、AES/Twofish/Serpent トリプルカスケード (68-76)、scrypt/ハイブリッド KDF 系は intentional scope (コード参照: manifest `no_url_available` `pea-crypto-specs`) |
-| 20 | EOS 後のマルチストリーム生成・暗号ストリーム出力 | ⚠️ | 単一ストリームの PEA 書き込みは `PeaEncoder` で実装済み (stored / PCOMPRESS2 deflate、CRC32/ADLER32/CRC64/MD5/SHA1/SHA256 タグの出力に対応)。`pea_encode_roundtrip`, `pea_encode_compressed_roundtrip`, `pea_encode_control_algo_selection`, `test_pea_encode_python_oracle`, `test_pea_archive_encoder_trait`。EOS 後のストリーム追加および暗号化ストリーム出力は intentional scope 外とする。fuzz harness `pea`/`pea-store`/`pea-sha256` で roundtrip + corrupt 対象 |
+| 18 | 認証付き暗号ストリーム decode — 非 AES 系 | ❌ intentional scope | Twofish/Serpent EAX (50, 51, 66, 67)、AES/Twofish/Serpent トリプルカスケード (68-76)、scrypt/ハイブリッド KDF 系。新規 cipher primitive と参照資料が必要 (manifest `no_url_available` `pea-crypto-specs`)。AES 系の対応は #18a |
+| 20 | EOS 後のマルチストリーム生成・暗号ストリーム出力 | ❌ intentional scope | 単一ストリーム write は #20a で対応済み。EOS 後のストリーム追加および暗号化ストリーム出力は scope 外 |
 | 21 | 属性・タイムスタンプのファイルシステム適用 | ❌ intentional scope | SETATTR/RESETATTR は OS 依存。raw 値として公開 |
 
 ## 集計
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 18 |
-| ⚠️ 部分対応  | 2 |
-| ❌ 未対応  | 1 (intentional scope) |
-| **合計** | **21** |
+| ✅ 実装+テスト済み  | 20 |
+| ⚠️ 部分対応  | 0 |
+| ❌ 未対応  | 3 (intentional scope) |
+| **合計** | **23** |

@@ -48,14 +48,14 @@
 |---|------|------|------|
 | 20 | Range Lock sector (offset 0x7FFFFFFF) / トランザクション signature | ❌ intentional scope | 並行アクセス制御はコンテナ展開に不要。signature は読み飛ばし |
 | 22 | 大文字 mapping / red-black 挿入順序 | ⚠️ 列挙は DFS で網羅、名前順序保証なし | 検索用ソート規則は write 時にのみ意味を持つ (`CfbEncoder` は sibling を大文字 mapping 後の比較規則でソートして balanced tree を構築) |
-| 24 | red-black color ビット (byte 67) の検証・sibling/child ID の NOSTREAM 規約・同一 storage 内の名前重複なし要件 | ⚠️ opt-in | `decode_strict` で color バイト、NOSTREAM 規約、および同一 storage 内の重複名を検証する (`rejects_invalid_color_byte`, `rejects_stream_with_child`, `rejects_duplicate_sibling_names`)。既定の `decode` は後方互換性のため寛容な処理 (lenient) を維持する |
+| 24 | red-black color ビット (byte 67) の検証・sibling/child ID の NOSTREAM 規約・同一 storage 内の名前重複なし要件 | ✅ opt-in | `decode_strict` で color バイト、NOSTREAM 規約、および同一 storage 内の重複名を検証する (`rejects_invalid_color_byte`, `rejects_stream_with_child`, `rejects_duplicate_sibling_names`)。既定の `decode` が寛容な処理 (lenient) を維持するのは後方互換のための設計判断 |
 | 23 | version 3 で上位 32bit が非ゼロな stream size の寛容読み | ❌ intentional scope | spec は「parser は上位を無視すべき」と推奨。本実装は規格上限超過を厳格拒否 |
 
 ## 集計
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 20 |
-| ⚠️ 部分対応  | 2 |
+| ✅ 実装+テスト済み  | 21 |
+| ⚠️ 部分対応  | 1 |
 | ❌ 未対応  | 2 (intentional scope) |
 | **合計** | **24** |

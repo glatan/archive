@@ -123,25 +123,25 @@
 | [cpio](cpio/README.md) | POSIX `odc` / SVR4 `newc`/`newcrc`/`bin` | 42 | 1 | 0 | 43 |
 | [ar](ar/README.md) | IEEE Std 1003.1 Issue 7 (Issue 8 は記述削除) / GNU ar / BSD ar | 27 | 0 | 0 | 27 |
 | [deb](deb/README.md) | deb(5) (dpkg) | 26 | 0 | 2 | 28 |
-| [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 35 | 1 | 1 | 37 |
+| [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 36 | 0 | 2 | 38 |
 | [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 46 | 0 | 1 | 47 |
-| [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 27 | 1 | 0 | 28 |
-| [mscfb](mscfb/README.md) | [MS-CFB] Compound File Binary File Format v20210625 | 20 | 2 | 2 | 24 |
+| [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 28 | 0 | 1 | 29 |
+| [mscfb](mscfb/README.md) | [MS-CFB] Compound File Binary File Format v20210625 | 21 | 1 | 2 | 24 |
 | [cramfs](cramfs/README.md) | Linux kernel cramfs.rst + fs/cramfs/README + cramfs_fs.h | 21 | 0 | 3 | 24 |
 | [romfs](romfs/README.md) | Linux kernel romfs.rst | 22 | 0 | 1 | 23 |
-| [erofs](erofs/README.md) | Linux kernel erofs.rst + erofs-utils `include/erofs_fs.h` (MIT) | 33 | 1 | 0 | 34 |
-| [iso9660](iso9660/README.md) | ECMA-119 + SUSP 1.10 + RRIP 1.12 + Joliet + El Torito 1.0 / zisofs | 42 | 1 | 1 | 44 |
-| [crx3](crx3/README.md) | Chromium components/crx_file/crx3.proto | 14 | 1 | 2 | 17 |
-| [pea](pea/README.md) | PEA file format spec (pea_help.pdf) + PeaZip pea.pas/pea_utils.pas | 18 | 2 | 1 | 21 |
+| [erofs](erofs/README.md) | Linux kernel erofs.rst + erofs-utils `include/erofs_fs.h` (MIT) | 34 | 0 | 1 | 35 |
+| [iso9660](iso9660/README.md) | ECMA-119 + SUSP 1.10 + RRIP 1.12 + Joliet + El Torito 1.0 / zisofs | 43 | 0 | 2 | 45 |
+| [crx3](crx3/README.md) | Chromium components/crx_file/crx3.proto | 15 | 0 | 2 | 17 |
+| [pea](pea/README.md) | PEA file format spec (pea_help.pdf) + PeaZip pea.pas/pea_utils.pas | 20 | 0 | 3 | 23 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 27 | 1 | 1 | 29 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
 | [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 30 | 0 | 1 | 31 |
-| [lha](lha/README.md) | lha header documentation + jLHA Notes + lzhformat.html + 奥村氏 ar002/lzss.c (PD) + lhasa (ISC) | 22 | 2 | 0 | 24 |
-| [arj](arj/README.md) | ARJ technical note (ARJ 2.x) + UNARJ/newtua_dos 参照実装 | 22 | 2 | 1 | 25 |
+| [lha](lha/README.md) | lha header documentation + jLHA Notes + lzhformat.html + 奥村氏 ar002/lzss.c (PD) + lhasa (ISC) | 24 | 0 | 0 | 24 |
+| [arj](arj/README.md) | ARJ technical note (ARJ 2.x) + UNARJ/newtua_dos 参照実装 | 24 | 0 | 3 | 27 |
 | [arc](arc/README.md) | SEA ARC file format description + hyc/arc `Arcinfo` | 24 | 0 | 1 | 30 |
 | [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 38 | 0 | 0 | 38 |
-| [xar](xar/README.md) | xarformat (mackyle/xar wiki) | 33 | 1 | 3 | 37 |
-| [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 152 | 0 | 5 | 158 |
+| [xar](xar/README.md) | xarformat (mackyle/xar wiki) | 34 | 0 | 3 | 37 |
+| [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 150 | 2 | 6 | 159 |
 | [7z](sevenz/README.md) | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) | 121 | 0 | 0 | 121 |
 
 ### エンコードフォーマット
@@ -158,16 +158,16 @@
 
 | コンポーネント | ファイル | ✅ | ⚠️ | ❌ | 合計 |
 |---|---|---|---|---|---|
-| CRC-32 / CRC-64 / XXH32 / XXH64 / Adler-32 / SHA-1 / SHA-256 / MD5 / AES / DES / RC2 / RC4 / BitReader / Error | [util.md](util.md) | 58 | 0 | 0 | 58 |
+| CRC-32 / CRC-64 / XXH32 / XXH64 / Adler-32 / SHA-1 / SHA-256 / MD5 / AES / DES / RC2 / RC4 / BitReader / Error | [util.md](util.md) | 63 | 0 | 0 | 63 |
 
 ### 全体集計
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 2305 |
-| ⚠️ 部分実装 | 16 |
-| ❌ 未実装 | 44 |
+| ✅ 実装+テスト済み | 2321 |
+| ⚠️ 部分実装 | 5 |
+| ❌ 未実装 | 53 |
 | — 該当なし | 6 |
-| **合計** | **2371** |
+| **合計** | **2385** |
 
-**全体カバー率**: 2305 / 2371 = **97.2%** (❌ 行 (intentional exclusion・要修正候補を含む) および該当なし除外後: 2305 / 2321 = **99.3%**)
+**全体カバー率**: 2321 / 2385 = **97.3%** (❌ 行 (intentional exclusion・要修正候補を含む) および該当なし除外後: 2321 / 2326 = **99.8%**)
