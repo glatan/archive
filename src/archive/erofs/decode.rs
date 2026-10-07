@@ -937,9 +937,14 @@ pub fn decode(input: &[u8]) -> Result<ErofsImage, Error> {
     if feature_compat & COMPAT_SB_CHKSUM != 0 {
         // CRC32C over `blksz - 1024` bytes starting at the superblock
         // offset, checksum field zeroed, seeded ~0 with no final
-        // complement (`erofs_crc32c(~0, sb, len)`).
+        // complement (`erofs_crc32c(~0, sb, len)`). The image must be
+        // at least `blksz` bytes: the length check above only covers
+        // the superblock itself.
         let csum_len = blksz - SUPER_OFF;
-        let mut region = input[SUPER_OFF..SUPER_OFF + csum_len].to_vec();
+        let mut region = input
+            .get(SUPER_OFF..SUPER_OFF + csum_len)
+            .ok_or(Error::UnexpectedEof)?
+            .to_vec();
         region[4..8].fill(0);
         let stored = u32le(sb, 4);
         let actual = crc32c(&region) ^ 0xFFFF_FFFF;
@@ -2778,5 +2783,21 @@ mod tests {
         }]);
         let img = b.build(root);
         assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    /// COMPAT_SB_CHKSUM reads `blksz - 1024` bytes from SUPER_OFF; an
+    /// image shorter than one block must be rejected with
+    /// `UnexpectedEof`, not sliced out of range (fuzz run-1791310069
+    /// panic on a 1152-byte image with blkszbits=12).
+    #[test]
+    fn rejects_short_image_with_sb_checksum() {
+        // Superblock fits in the image but the checksummed region
+        // (SUPER_OFF..blksz) does not.
+        let mut img = vec![0u8; SUPER_OFF + SUPER_SIZE];
+        let sb = &mut img[SUPER_OFF..SUPER_OFF + SUPER_SIZE];
+        sb[0..4].copy_from_slice(&le32(MAGIC));
+        sb[8..12].copy_from_slice(&le32(COMPAT_SB_CHKSUM));
+        sb[12] = 12; // blkszbits -> 4 KiB blocks
+        assert!(matches!(decode(&img), Err(Error::UnexpectedEof)));
     }
 }

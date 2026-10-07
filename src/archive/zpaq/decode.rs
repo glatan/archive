@@ -69,7 +69,25 @@ pub struct ZpaqJournalVersion {
 /// ```
 pub fn decode(input: &[u8]) -> Result<Vec<ZpaqEntry>, Error> {
     let mut entries = Vec::new();
-    for_each_segment(input, |segment| {
+    for_each_segment(input, 0, |segment| {
+        entries.push(ZpaqEntry {
+            filename: segment.filename.clone(),
+            comment: segment.comment.clone(),
+            data: segment.data.clone(),
+        });
+        Ok(())
+    })?;
+    Ok(entries)
+}
+
+/// Decode with a maximum total payload size limit across all entries.
+///
+/// Returns [`Error::OutputLimitExceeded`] if the combined decompressed
+/// output would exceed `max_output` bytes. A `max_output` of 0 means
+/// unlimited.
+pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<ZpaqEntry>, Error> {
+    let mut entries = Vec::new();
+    for_each_segment(input, max_output, |segment| {
         entries.push(ZpaqEntry {
             filename: segment.filename.clone(),
             comment: segment.comment.clone(),
@@ -82,15 +100,27 @@ pub fn decode(input: &[u8]) -> Result<Vec<ZpaqEntry>, Error> {
 
 /// Run `f` over every segment of every block in `input`, in stream
 /// order. Predictor/arithmetic state is shared across the segments of
-/// each block exactly like upstream `Decompresser`.
+/// each block exactly like upstream `Decompresser`. `max_output` bounds
+/// the combined payload bytes emitted across all blocks (0 = unlimited).
 fn for_each_segment(
     input: &[u8],
+    max_output: usize,
     mut f: impl FnMut(&DecodedSegment) -> Result<(), Error>,
 ) -> Result<(), Error> {
     let mut start = 0;
+    let mut emitted_total = 0usize;
+    // Bound total ZPAQL work across every block of this decode.
+    let budget = crate::compress::zpaq::zpaql::new_shared_budget();
     while let Some(header) = parse_block_header_at(input, start)? {
-        let mut block = BlockDecoder::new(input, &header, usize::MAX)?;
+        let remaining = if max_output == 0 {
+            usize::MAX
+        } else {
+            max_output.saturating_sub(emitted_total)
+        };
+        let mut block = BlockDecoder::new(input, &header, remaining)?;
+        block.set_cycle_budget(budget.clone());
         while let Some(segment) = block.next_segment()? {
+            emitted_total = emitted_total.saturating_add(segment.data.len());
             f(&segment)?;
         }
         start = block.end_pos();
@@ -119,7 +149,7 @@ pub fn decode_journal_versions(input: &[u8]) -> Result<Vec<ZpaqJournalVersion>, 
     let mut versions = Vec::new();
 
     let mut saw_segment = false;
-    let result = for_each_segment(input, |segment| {
+    let result = for_each_segment(input, 0, |segment| {
         saw_segment = true;
         match parse_journal_segment(segment)? {
             JournalSegment::Ordinary(entry) => {
@@ -262,6 +292,21 @@ mod tests {
         assert_eq!(entries[1].filename_utf8(), Some("b.txt"));
         assert_eq!(entries[1].comment_utf8(), Some("note"));
         assert_eq!(entries[1].data, b"bbb");
+    }
+
+    #[test]
+    fn test_decode_bounded_limits_total_output() {
+        let mut enc = ZpaqEncoder::new(2);
+        enc.add_file("a.txt", b"aaa");
+        enc.add_file("b.txt", b"bbb");
+        let archive = enc.finish().unwrap();
+        let entries = decode_bounded(&archive, 6).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(matches!(
+            decode_bounded(&archive, 5),
+            Err(Error::OutputLimitExceeded { .. })
+        ));
+        assert_eq!(decode_bounded(&archive, 0).unwrap().len(), 2);
     }
 
     #[test]

@@ -167,7 +167,21 @@ fn encode_frame(
             let is_last = pos + chunk_size >= input.len();
             let chunk = &input[pos..pos + chunk_size];
 
-            encode_best_block(chunk, is_last, output, dict_content);
+            // The match searcher's virtual buffer must mirror the decoder's
+            // `[dict | output]` history window. Only the first block can
+            // reference the dictionary: at pos > 0 an offset into the dict
+            // prefix would resolve against the frame output the decoder has
+            // already produced, silently copying the wrong bytes. Later
+            // blocks therefore search the real frame history (the last
+            // WINDOW_SIZE input bytes), which is also all the decoder's
+            // window can reach — the dictionary tail is never within
+            // WINDOW_SIZE once pos >= MAX_BLOCK_SIZE > WINDOW_SIZE.
+            let history: &[u8] = if pos == 0 {
+                dict_content
+            } else {
+                &input[pos.saturating_sub(WINDOW_SIZE)..pos]
+            };
+            encode_best_block(chunk, is_last, output, history);
             pos += chunk_size;
         }
     }
@@ -181,7 +195,11 @@ fn encode_frame(
 }
 
 /// Encode a single block using the best strategy.
-fn encode_best_block(chunk: &[u8], is_last: bool, output: &mut Vec<u8>, dict_content: &[u8]) {
+///
+/// `history` is the decoder-visible history prefix for this block: the
+/// dictionary content for the first block, or the preceding frame bytes
+/// (at most the last `WINDOW_SIZE`) for later blocks.
+fn encode_best_block(chunk: &[u8], is_last: bool, output: &mut Vec<u8>, history: &[u8]) {
     // RLE: all same byte
     if chunk.len() > 1 && chunk.iter().all(|&b| b == chunk[0]) {
         write_block_header(output, is_last, 0b01, chunk.len() as u32);
@@ -190,7 +208,7 @@ fn encode_best_block(chunk: &[u8], is_last: bool, output: &mut Vec<u8>, dict_con
     }
 
     if chunk.len() >= MIN_COMPRESS_SIZE {
-        let compressed = build_compressed_block(chunk, dict_content);
+        let compressed = build_compressed_block(chunk, history);
         if compressed.len() < chunk.len() {
             write_block_header(output, is_last, 0b10, compressed.len() as u32);
             output.extend_from_slice(&compressed);
@@ -215,8 +233,8 @@ struct EncSequence {
 }
 
 /// Build a compressed block's content bytes.
-fn build_compressed_block(input: &[u8], dict_content: &[u8]) -> Vec<u8> {
-    let (literals, sequences) = lz77_compress_with_dict(input, dict_content);
+fn build_compressed_block(input: &[u8], history: &[u8]) -> Vec<u8> {
+    let (literals, sequences) = lz77_compress_with_dict(input, history);
 
     if sequences.is_empty() {
         // No matches found — emit literals-only compressed block
@@ -1218,47 +1236,52 @@ impl MsbBitWriter {
 // ============================================================
 
 /// Run LZ77 on input, returning (literals, sequences).
-fn lz77_compress_with_dict(input: &[u8], dict_content: &[u8]) -> (Vec<u8>, Vec<EncSequence>) {
+///
+/// `history` is the decoder-visible byte prefix the block may match
+/// against (dictionary content for the first block of a dict frame,
+/// otherwise the preceding frame bytes within the window).
+fn lz77_compress_with_dict(input: &[u8], history: &[u8]) -> (Vec<u8>, Vec<EncSequence>) {
     let mut literals = Vec::new();
     let mut sequences = Vec::new();
     let mut pos = 0;
     let mut literal_start = 0;
 
-    // Build a virtual buffer: [dict_content | input]
+    // Build a virtual buffer: [history | input]
     // All positions in hash chains are in this virtual space.
-    let dict_len = dict_content.len();
-    let virt_len = dict_len + input.len();
+    let history_len = history.len();
+    let virt_len = history_len + input.len();
 
     let mut head = vec![0u32; HASH_SIZE];
     let mut prev = vec![0u32; WINDOW_SIZE];
 
     // Helper to read a byte from virtual buffer
     let virt_byte = |vpos: usize| -> u8 {
-        if vpos < dict_len {
-            dict_content[vpos]
+        if vpos < history_len {
+            history[vpos]
         } else {
-            input[vpos - dict_len]
+            input[vpos - history_len]
         }
     };
 
-    // Pre-populate hash chains with dictionary content
-    let dict_start = dict_len.saturating_sub(WINDOW_SIZE);
-    for dp in dict_start..dict_len {
-        if dp + 3 <= virt_len {
-            let h = hash3_virt(virt_byte(dp), virt_byte(dp + 1), virt_byte(dp + 2));
-            prev[dp % WINDOW_SIZE] = head[h] as u32;
-            head[h] = dp as u32;
+    // Pre-populate hash chains with the history tail reachable through
+    // the window.
+    let history_start = history_len.saturating_sub(WINDOW_SIZE);
+    for hp in history_start..history_len {
+        if hp + 3 <= virt_len {
+            let h = hash3_virt(virt_byte(hp), virt_byte(hp + 1), virt_byte(hp + 2));
+            prev[hp % WINDOW_SIZE] = head[h] as u32;
+            head[h] = hp as u32;
         }
     }
 
-    // Now compress input, using virtual positions (input pos = dict_len + pos)
+    // Now compress input, using virtual positions (input pos = history_len + pos)
     while pos < input.len() {
         if pos + MIN_MATCH_LEN > input.len() {
             pos += 1;
             continue;
         }
 
-        let vpos = dict_len + pos;
+        let vpos = history_len + pos;
         let hash = hash3(&input[pos..pos + 3]);
         let mut best_len = MIN_MATCH_LEN - 1;
         let mut best_dist = 0usize;
@@ -1311,7 +1334,7 @@ fn lz77_compress_with_dict(input: &[u8], dict_content: &[u8]) -> (Vec<u8>, Vec<E
             for i in 1..best_len {
                 let p = pos + i;
                 if p + 3 <= input.len() {
-                    let vp = dict_len + p;
+                    let vp = history_len + p;
                     let h = hash3(&input[p..p + 3]);
                     prev[vp % WINDOW_SIZE] = head[h] as u32;
                     head[h] = vp as u32;
@@ -2036,6 +2059,42 @@ mod tests {
             let dict_id_flag = descriptor & 0x03;
             assert_eq!(dict_id_flag, 3, "should use 4-byte dict ID");
         }
+    }
+
+    #[test]
+    fn test_encode_with_dict_multiblock_roundtrip() {
+        // Regression for a fuzz-found corruption: blocks after the first
+        // must not emit match offsets into the dictionary prefix. The
+        // decoder resolves offsets against `[dict | frame output]`, so a
+        // dict-referencing offset from block 2+ lands on already-produced
+        // output bytes instead of the dict — silent corruption caught only
+        // by the content checksum. Span > MAX_BLOCK_SIZE and place a marker
+        // that exists only in the dictionary tail at the start of block 2.
+        let marker = b"UNIQUE-DICT-TAIL-MARKER-0xDEADBEEF!";
+        let mut dict_content = Vec::new();
+        while dict_content.len() < 4096 {
+            dict_content.extend_from_slice(b"dictionary body without the marker. ");
+        }
+        dict_content.truncate(4096);
+        dict_content.extend_from_slice(marker);
+        let dict = decode::ZstdDict::from_content(0x1234_5678, &dict_content).unwrap();
+
+        let filler = b"compressible frame filler text, absent from the dict. ";
+        let mut input = Vec::with_capacity(3 * MAX_BLOCK_SIZE);
+        while input.len() < MAX_BLOCK_SIZE {
+            input.extend_from_slice(filler);
+        }
+        input.truncate(MAX_BLOCK_SIZE);
+        // Block 2 starts with the dict-tail marker: the buggy encoder
+        // matched it against the dictionary and emitted a wrong offset.
+        input.extend_from_slice(marker);
+        while input.len() < 2 * MAX_BLOCK_SIZE + 500 {
+            input.extend_from_slice(filler);
+        }
+
+        let encoded = encode_with_dict(&input, &dict);
+        let decoded = decode::decode_with_dict(&encoded, &dict).unwrap();
+        assert_eq!(decoded, input);
     }
 
     #[test]

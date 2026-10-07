@@ -427,22 +427,26 @@ fn parse(input: &[u8]) -> Result<File<'_>, Error> {
         if obj_type > 5 || obj_type == 3 || obj_type == 4 {
             return Err(Error::InvalidData("mscfb"));
         }
-        let name_len = u16le(e, 64) as usize;
-        if obj_type != 0 {
+        // [MS-CFB] 2.6.3: for unallocated entries the name fields are
+        // undefined, so the name is only decoded for allocated objects.
+        let name = if obj_type != 0 {
+            let name_len = u16le(e, 64) as usize;
             if !(2..=64).contains(&name_len) || !name_len.is_multiple_of(2) {
                 return Err(Error::InvalidData("mscfb"));
             }
             if e[name_len - 2] != 0 || e[name_len - 1] != 0 {
                 return Err(Error::InvalidData("mscfb"));
             }
-        }
-        let units: Vec<u16> = (0..name_len / 2).map(|i| u16le(e, 2 * i)).collect();
-        let units = if units.last() == Some(&0) {
-            &units[..units.len() - 1]
+            let units: Vec<u16> = (0..name_len / 2).map(|i| u16le(e, 2 * i)).collect();
+            let units = if units.last() == Some(&0) {
+                &units[..units.len() - 1]
+            } else {
+                &units[..]
+            };
+            String::from_utf16(units).map_err(|_| Error::InvalidData("mscfb"))?
         } else {
-            &units[..]
+            String::new()
         };
-        let name = String::from_utf16(units).map_err(|_| Error::InvalidData("mscfb"))?;
         file.entries.push(DirEntry {
             name,
             obj_type,

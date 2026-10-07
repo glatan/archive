@@ -74,6 +74,14 @@ pub(crate) fn decode(
     while out.len() < expected {
         if remaining == 0 {
             remaining = usize::try_from(r.get(16)).unwrap_or(0);
+            if r.overran() {
+                return Err(Error::InvalidData("lzh: truncated block count"));
+            }
+            // A block with a zero command count is meaningless in the
+            // format; accepting it would underflow `remaining` below.
+            if remaining == 0 {
+                return Err(Error::InvalidData("lzh: zero block count"));
+            }
             let t_tab = huf::read_pt_len(&mut r, MAX_TEMP_CODES, TEMP_CODE_BITS, TEMP_SPECIAL)?;
             c_tab = huf::read_c_len(&mut r, &t_tab, NUM_CODES, CODE_BITS)?;
             p_tab = huf::read_pt_len(&mut r, max_off, offset_bits, usize::MAX)?;
@@ -113,4 +121,19 @@ pub(crate) fn decode(
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression (fuzz run-1791310276): a block whose 16-bit command
+    /// count is zero must be rejected instead of underflowing
+    /// `remaining` (which panicked in debug builds and silently
+    /// returned padded garbage in release).
+    #[test]
+    fn test_st1_zero_block_count_rejected() {
+        let err = decode(14, 4, &[0u8; 8], 1).unwrap_err();
+        assert!(matches!(err, Error::InvalidData(_)));
+    }
 }

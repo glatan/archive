@@ -1,8 +1,9 @@
 //! Algorithm registry — maps algorithm names to encode/decode functions.
 //!
 //! Each [`Algorithm`] variant corresponds to a compression format or archive
-//! format supported by the `archive` crate. The [`encode_with`] and
-//! [`decode_with`] functions dispatch to the appropriate library calls.
+//! format supported by the `archive` crate. The [`encode_with`],
+//! [`decode_with`], and [`decode_bounded_with`] functions dispatch to the
+//! appropriate library calls.
 //!
 //! Archive formats (tar, cpio) are wrapped so they present the same
 //! `&[u8] → Vec<u8>` interface as compression: a single file named
@@ -1291,6 +1292,58 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
                 .next()
                 .map_or(Vec::new(), |e| e.data))
         }
+    }
+}
+
+/// Bounded variant of [`decode_with`] for the corrupt-pattern probe.
+///
+/// Codecs whose stream carries no output length expose a `decode_bounded`
+/// API; routing the probe through it caps a mutated stream's output at the
+/// harness limit ([`Error::OutputLimitExceeded`] on excess) instead of
+/// materializing it and tripping the resource oracle afterwards. Formats
+/// without a bounded decode fall back to [`decode_with`].
+pub fn decode_bounded_with(
+    algo: Algorithm,
+    data: &[u8],
+    max_output: usize,
+) -> Result<Vec<u8>, Error> {
+    match algo {
+        Algorithm::Xpress => xca::lz77::decode_bounded(data, max_output),
+        Algorithm::XpressHuff => xca::huffman::decode_bounded(data, max_output),
+        Algorithm::Lznt1 => xca::lznt1::decode_bounded(data, max_output),
+        Algorithm::Lzf => lzf::decode_bounded(data, max_output),
+        Algorithm::Fastlz => fastlz::decode_bounded(data, max_output),
+        Algorithm::Zx0 => zx0::decode_bounded(data, max_output),
+        Algorithm::Zx1 => zx1::decode_bounded(data, max_output),
+        Algorithm::Zx2 => zx2::decode_bounded(data, max_output),
+        Algorithm::Zx5 => zx5::decode_bounded(data, max_output),
+        Algorithm::Vcdiff => vcdiff::decode_bounded(&[], data, max_output),
+        Algorithm::VcdiffSrc => vcdiff::decode_bounded(delta_source(), data, max_output),
+        Algorithm::Mppc => mppc::decode_bounded(data, max_output),
+        Algorithm::MppcRdp4 | Algorithm::MppcRdp5 => {
+            let (&flags, body) = data
+                .split_first()
+                .ok_or(Error::InvalidData("mppc rdp: missing flags byte"))?;
+            mppc::decode_rdp_bounded(flags, body, max_output)
+        }
+        Algorithm::Lzs => lzs::decode_bounded(data, max_output),
+        Algorithm::Lzsa | Algorithm::Lzsa2 => lzsa::decode_bounded(data, max_output),
+        Algorithm::Lzrw1 => lzrw1::decode_bounded(data, max_output),
+        Algorithm::Lzrw1a => lzrw1a::decode_bounded(data, max_output),
+        Algorithm::Lzrw2 => lzrw2::decode_bounded(data, max_output),
+        Algorithm::Lzrw3 => lzrw3::decode_bounded(data, max_output),
+        Algorithm::Lzrw3a => lzrw3a::decode_bounded(data, max_output),
+        // A corrupt zpaq stream can emit unbounded output from finite
+        // input (the arithmetic decoder need not consume input to produce
+        // bits), so probes must go through the bounded codec entry point.
+        Algorithm::Zpaq | Algorithm::ZpaqLevel2 | Algorithm::ZpaqLevel3 => {
+            zpaq::decode::decode_bounded(data, max_output)
+        }
+        Algorithm::ZpaqArchive => {
+            let entries = zpaq_archive::decode::decode_bounded(data, max_output)?;
+            Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
+        }
+        _ => decode_with(algo, data),
     }
 }
 

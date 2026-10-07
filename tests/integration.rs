@@ -255,6 +255,9 @@ mod deflate_tests;
 #[cfg(feature = "erofs")]
 #[path = "integration/erofs.rs"]
 mod erofs_tests;
+// Generated module names come from fuzz failure signatures and are not
+// required to be snake case.
+#[allow(non_snake_case)]
 #[path = "integration/generated/mod.rs"]
 mod generated_tests;
 #[path = "integration/gzip.rs"]

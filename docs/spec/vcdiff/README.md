@@ -45,7 +45,7 @@
 | 16 | near モード (2..s_near+1): `near[m-2] + varint`。s_near=4 | RFC 3284 §5.3 | ✅ | `vcdiff_xdelta3_near_same_caches` (統合) |
 | 17 | same モード (s_near+2..s_near+s_same+1): `same[(m-(s_near+2))*256 + b]`、b は 1 バイト。s_same=3 | RFC 3284 §5.3 | ✅ | `vcdiff_xdelta3_near_same_caches` (統合) |
 | 18 | キャッシュ更新: COPY 処理ごとに near[next_slot]=addr・next_slot 巡回、same[addr % (s_same*256)]=addr。ウィンドウ先頭で全スロット 0 初期化 | RFC 3284 §5.1/5.2 | ✅ | `vcdiff_xdelta3_near_same_caches` (統合) |
-| 19 | ウィンドウ生成量が target length を超過/不足したら拒否 | RFC 3284 §6 | ✅ | `rejects_target_length_mismatch`、`vcdiff_rejects_malformed` (統合) |
+| 19 | ウィンドウ生成量が target length を超過/不足したら拒否 (ADD/RUN/COPY 各命令の実行前に残量を検査して早期拒否) | RFC 3284 §6 | ✅ | `rejects_target_length_mismatch`、`vcdiff_rejects_oversized_copy_size`、`vcdiff_rejects_oversized_run_size`、`vcdiff_rejects_malformed` (統合) |
 | 20 | COPY アドレスが既生成範囲 (source ++ 生成済み target) を超える場合は拒否。加えて RFC §3 の表明に従い、S/T 境界を跨ぐ複写区間も拒否 | RFC 3284 §3 + crate contract | ✅ | `rejects_copy_out_of_range`、`rejects_copy_spanning_source_boundary` |
 | 21 | 複数ウィンドウ連接のサポート | RFC 3284 §4 | ✅ | `multi_window` (単体。fixture は全件単一ウィンドウ) |
 

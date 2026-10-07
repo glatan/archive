@@ -146,6 +146,9 @@ struct PostProcessor {
     z: Zpaql,
     /// Postprocessed output pending collection.
     out: Vec<u8>,
+    /// Shared decode budget applied to the PCOMP VM when the PROG
+    /// program is loaded.
+    cycle_budget: Option<super::zpaql::CycleBudget>,
 }
 
 impl PostProcessor {
@@ -158,7 +161,15 @@ impl PostProcessor {
             pm: 0,
             z: Zpaql::new(),
             out: Vec::new(),
+            cycle_budget: None,
         }
+    }
+
+    /// Attach a shared decode budget; applied to the PCOMP VM as soon
+    /// as a PROG program loads it.
+    fn set_cycle_budget(&mut self, budget: super::zpaql::CycleBudget) {
+        self.z.set_cycle_budget(budget.clone());
+        self.cycle_budget = Some(budget);
     }
 
     /// Upstream `PostProcessor::init(ph, pm)` — called once per block.
@@ -218,6 +229,9 @@ impl PostProcessor {
                 self.prog.push(c as u8);
                 if self.prog.len() == self.psize {
                     self.z = Zpaql::set_pcomp_header(self.ph, self.pm, &self.prog)?;
+                    if let Some(budget) = &self.cycle_budget {
+                        self.z.set_cycle_budget(budget.clone());
+                    }
                     self.z.initp()?;
                     self.state = 5;
                 }
@@ -293,6 +307,14 @@ impl<'a> BlockDecoder<'a> {
     /// block decoder returned `None`.
     pub(crate) fn end_pos(&self) -> usize {
         self.last_pos
+    }
+
+    /// Share `budget` with this block's HCOMP and (when a PROG segment
+    /// loads one) PCOMP VMs, so total ZPAQL work is bounded across the
+    /// whole decode rather than per `run` call.
+    pub(crate) fn set_cycle_budget(&mut self, budget: super::zpaql::CycleBudget) {
+        self.pred.set_cycle_budget(budget.clone());
+        self.pp.set_cycle_budget(budget);
     }
 
     /// Upstream `Decoder::decompress`: next postprocessed-input byte,
@@ -478,6 +500,10 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
     let mut output = Vec::new();
     let mut start = 0;
+    // One budget for the whole decode: per-byte `run` calls would
+    // otherwise multiply the per-run cap by the stream length, letting
+    // a hostile program stall the decoder far past any single-run bound.
+    let budget = super::zpaql::new_shared_budget();
     while let Some(header) = parse_block_header_at(input, start)? {
         let remaining = if max_output == 0 {
             usize::MAX
@@ -485,6 +511,7 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
             max_output.saturating_sub(output.len())
         };
         let mut block = BlockDecoder::new(input, &header, remaining)?;
+        block.set_cycle_budget(budget.clone());
         while let Some(segment) = block.next_segment()? {
             output.extend_from_slice(&segment.data);
         }
@@ -756,6 +783,22 @@ mod tests {
         assert!(CustomModel::new(2, 0, 0, vec![1, 42], vec![56]).is_err());
         // truncated component record (CM needs 3 bytes total).
         assert!(CustomModel::new(2, 0, 0, vec![1, 2, 8], vec![56]).is_err());
+    }
+
+    /// Regression (fuzz run-1791310069 panic): a ZPAQL header
+    /// declaring more components than the hash array holds
+    /// (`n > 2^hh`, here `n=2` with `hh=0`) must be rejected instead of
+    /// indexing `h[n-1]` out of bounds when the predictor copies
+    /// per-component contexts.
+    #[test]
+    fn decode_rejects_component_count_over_hash_size() {
+        let bad: &[u8] = &[
+            0x6b, 0x53, 0x74, 0xa0, 0x31, 0x83, 0xd3, 0x8c, 0xb2, 0x28, 0xb0, 0xd3, 0x7a, 0x50,
+            0x51, 0x01, 0x01, 0x1a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x03, 0x00, 0x08, 0x00,
+            0x00, 0x00, 0x60, 0x04, 0x1c, 0x3b, 0x0a, 0x3b, 0x70, 0x19, 0x0a, 0x3b, 0x0a, 0x3b,
+            0x70, 0x38, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xfd,
+        ];
+        assert!(matches!(decode(bad), Err(Error::InvalidData(_))));
     }
 
     #[test]

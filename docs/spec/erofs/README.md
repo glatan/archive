@@ -14,7 +14,7 @@
 | 1 | magic `0xE0F5E1E2` at `EROFS_SUPER_OFFSET` (1024) | erofs_fs.h `EROFS_SUPER_OFFSET`、erofs-utils `include/erofs_fs.h` `EROFS_SUPER_MAGIC_V1` | ✅ | `rejects_bad_magic` |
 | 2 | `blkszbits` は 9..=16、`blksz = 1 << blkszbits` | erofs_fs.h `blkszbits`、erofs-utils の検証 | ✅ | decode 時検証 |
 | 3 | `sb_extslots`: superblock size = 128 + slots*16 | erofs_fs.h `EROFS_SB_EXTSLOT_SIZE` | ✅ | decode 時検証 |
-| 4 | `EROFS_FEATURE_COMPAT_SB_CHKSUM`: `blksz - 1024` バイトの CRC32C (checksum フィールド zero、seed ~0、final complement なし) | erofs-utils `erofs_superblock_csum_verify` | ✅ | `test_erofs_rejects_bad_superblock_checksum`、実 mkfs fixture (compat `sb_csum` 付き) で検証 |
+| 4 | `EROFS_FEATURE_COMPAT_SB_CHKSUM`: `blksz - 1024` バイトの CRC32C (checksum フィールド zero、seed ~0、final complement なし) | erofs-utils `erofs_superblock_csum_verify` | ✅ | `test_erofs_rejects_bad_superblock_checksum`、`rejects_short_image_with_sb_checksum` (checksum 領域の EOF 境界)、実 mkfs fixture (compat `sb_csum` 付き) で検証 |
 | 5 | `feature_incompat`: 受理側は LZ4_0PADDING(0x01)/COMPR_CFGS(0x02)/COMPR_HEAD2(0x08)/ZTAILPACKING(0x10)/FRAGMENTS・DEDUPE(0x20)/XATTR_PREFIXES(0x40)/48BIT(0x80)/METABOX(0x100)。拒否は `extra_devices≠0` のみ | erofs_fs.h `EROFS_FEATURE_INCOMPAT_*` | ✅ | decode 時検証 (extra_devices → `Error::Unsupported`) |
 | 6 | `INCOMPAT_48BIT` 時は `rootnid_8b`(offset 112) / `blocks = blocks_lo | blocks_hi<<32` | erofs_fs.h rb union / `rootnid_8b` | ✅ | decode 時分岐 (48bit image は合成されないため小規模イメージでは 16bit 経路) |
 | 7 | `meta_blkaddr`、`xattr_blkaddr`、`volume_name`、`epoch`、`fixed_nsec` の解釈 | erofs_fs.h `erofs_super_block` | ✅ | 全テスト |

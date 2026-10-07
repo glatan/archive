@@ -395,32 +395,42 @@ fn parse_pax_time(value: &str) -> Option<(i64, u32)> {
 /// the length field itself, the space, key, `=`, value, and the trailing newline.
 fn parse_pax_attributes(data: &[u8]) -> Vec<(String, String)> {
     let mut attrs = Vec::new();
-    let text = String::from_utf8_lossy(data);
-    let mut remaining = text.as_ref();
+    // Work on raw bytes: the record length counts bytes, and slicing a
+    // lossy-decoded `&str` at an arbitrary byte offset can panic on a
+    // char boundary.
+    let mut remaining = data;
 
     while !remaining.is_empty() {
         // Find the space that separates the length from the key=value
-        let space_pos = match remaining.find(' ') {
+        let space_pos = match remaining.iter().position(|&b| b == b' ') {
             Some(p) => p,
             None => break,
         };
-        let len_str = &remaining[..space_pos];
-        let total_len: usize = match len_str.parse() {
-            Ok(n) => n,
-            Err(_) => break,
+        let total_len: usize = match core::str::from_utf8(&remaining[..space_pos])
+            .ok()
+            .and_then(|len_str| len_str.parse().ok())
+        {
+            Some(n) => n,
+            None => break,
         };
-        if total_len == 0 || total_len > remaining.len() {
+        // The record must cover at least the length field, the space,
+        // and one payload byte; a smaller `total_len` would make the
+        // slice below run backwards.
+        if total_len <= space_pos + 1 || total_len > remaining.len() {
             break;
         }
 
         // The record is total_len bytes (including the length prefix and trailing newline)
         let record = &remaining[space_pos + 1..total_len];
         // Strip trailing newline
-        let record = record.trim_end_matches('\n');
+        let mut record = record;
+        while record.last() == Some(&b'\n') {
+            record = &record[..record.len() - 1];
+        }
 
-        if let Some(eq_pos) = record.find('=') {
-            let key = &record[..eq_pos];
-            let value = &record[eq_pos + 1..];
+        if let Some(eq_pos) = record.iter().position(|&b| b == b'=') {
+            let key = String::from_utf8_lossy(&record[..eq_pos]);
+            let value = String::from_utf8_lossy(&record[eq_pos + 1..]);
             attrs.push((key.to_string(), value.to_string()));
         }
 
@@ -472,6 +482,20 @@ pub fn decode_reader<R: std::io::Read>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression (fuzz run-1791310276): a pax record whose declared
+    /// length doesn't extend past the space separator ("1 x") must not
+    /// panic on the reversed slice.
+    #[test]
+    fn test_parse_pax_attributes_short_length() {
+        assert!(parse_pax_attributes(b"1 x").is_empty());
+        assert_eq!(
+            parse_pax_attributes(b"7 a=b\n1 x")
+                .first()
+                .map(|p| p.0.as_str()),
+            Some("a")
+        );
+    }
 
     /// Verifies that `round_up_to_block` maps 0→0, non-zero sizes to the
     /// next 512-byte boundary.
