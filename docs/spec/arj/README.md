@@ -43,6 +43,7 @@
 | 11 | entry data CRC-32 を検証、不一致は reject | ARJ tech note | ✅ | decode 内検証 |
 | 12 | bounds 検査 (truncated signature/header/data、st1 block count=0 → エラー) | crate エラー規約 | ✅ | `test_arj_rejects_truncated`, `test_st1_zero_block_count_rejected` (共有 `compress::lzh::st1`), `test_fuzz_regression_arj_1_corrupt` |
 | 13 | filename は UTF-8 必須 | crate エラー規約 | ✅ | `read_cstr` |
+| 19a | method 8/9 (ARJ32 no-data pseudo-method) decode と file_type 5 chapter label の受理 | ARJ32 系 de facto | ✅ | `test_arj_method8_9_no_data`, `test_arj_chapter_label` |
 
 ### encode
 
@@ -50,6 +51,7 @@
 |---|------|----------|-----------|----------------|
 | 14 | `ArjEncoder`: main header (host_os=unix) を先頭に出力し、file header + data、dir は file_type 3。`with_method` で method 0-4 を選択 (1-3 は st1 共有エンコーダ、4 は `method4::encode`、圧縮不利時は method 0 fallback)、`finish_parts` で multi-volume 分割 | ARJ tech note | ✅ | `roundtrip`, `dir_entry`, `st1_methods_roundtrip`, `test_arj_method4_encode_roundtrip`, `test_arj_finish_parts_roundtrip` |
 | 15 | 終端 `0x60 0xEA` + `u16` 0 を付与、各 header に ext size 0 を付与 | ARJ tech note | ✅ | 往復テスト |
+| 20a | 暗号化 (garbled) の write | ARJ tech note | ✅ | `ArjEncoder::with_password` で対応 (`ungarble` は対称変換のため encode/decode で共用)。`garbled_roundtrip`, `garbled_write_requires_password_decode`, `test_arj_garbled_write_roundtrip` |
 
 ### システム相互運用
 
@@ -69,8 +71,8 @@
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 19 | method 5+ / security envelope / chapter 機能は非対応 | ⚠️ | method 8/9 (ARJ32 no-data pseudo-method) は decode 対応、file_type 5 の chapter label はメタデータとして受理 (`test_arj_method8_9_no_data`, `test_arj_chapter_label`)。method 5-7 は歴史的に未定義のまま `Error::Unsupported`。security envelope は公開アルゴリズム記述がなく `Error::Unsupported` (intentional)。decode 参照実装は manifest `no_url_available` (`newtua-dos` が安全側、`unarj-source` は制限付き freeware のため参照のみ)。oracle は `unar`/`7z` (Debian `arj` は non-free) |
-| 20 | 暗号化 (garbled) の write / パスワードなし decode | ⚠️ | garbled の write は `ArjEncoder::with_password` で対応する (`ungarble` は対称変換であるため encode と decode で共用)。パスワードなしの復号は暗号化の性質上不可能なため intentional scope 外とする。`garbled_roundtrip`, `garbled_write_requires_password_decode`, `test_arj_garbled_write_roundtrip` |
+| 19 | method 5-7 / security envelope は非対応 | ❌ intentional scope | method 5-7 は歴史的に未定義のまま `Error::Unsupported`。security envelope は公開アルゴリズム記述がなく `Error::Unsupported`。method 8/9 と chapter label の対応は #19a。decode 参照実装は manifest `no_url_available` (`newtua-dos` が安全側、`unarj-source` は制限付き freeware のため参照のみ)。oracle は `unar`/`7z` (Debian `arj` は non-free) |
+| 20 | パスワードなし garbled decode | ❌ intentional scope | 暗号化の性質上不可能。garbled write の対応は #20a |
 | 22 | method 5+ の write は非対応 | ❌ | `with_method` は 0-4 のみ受理 (method 5+ は `InvalidData`)。method 8/9 は no-data pseudo-method のため write の対象外。圧縮不利時は method 0 fallback |
 
 ### 実装メモ

@@ -252,6 +252,11 @@ pub struct ElTorito {
 pub struct VolumeMeta {
     /// System identifier (§8.4.5; a-characters).
     pub system_id: String,
+    /// Volume set size (ECMA-119 §8.4.10; BP 121-124, both-endian u16).
+    pub volume_set_size: u16,
+    /// Volume sequence number within the set (§8.4.11; BP 125-128,
+    /// both-endian u16).
+    pub volume_seq_number: u16,
     /// Volume set identifier (§8.4.19; d-characters).
     pub volume_set_id: String,
     /// Publisher identifier (§8.4.20; a-characters).
@@ -904,6 +909,11 @@ fn parse_vd(sec: &[u8], joliet: bool) -> Result<VolDesc, Error> {
     if sec[0] != expected || &sec[1..6] != VD_ID || sec[6] != 1 {
         return Err(Error::InvalidData("iso9660 bad volume descriptor"));
     }
+    // File Structure Version must be 1 (ECMA-119 §8.4.30, BP 882;
+    // the byte at BP 881 is the effective-date tz field, not this).
+    if sec[881] != 1 {
+        return Err(Error::InvalidData("iso9660 bad file structure version"));
+    }
     // Character fields are a/d-characters in the PVD and UCS-2BE
     // in a Joliet SVD (per the Joliet spec the SVD carries every
     // character field in the declared supplementary encoding).
@@ -916,6 +926,14 @@ fn parse_vd(sec: &[u8], joliet: bool) -> Result<VolDesc, Error> {
     };
     let volume_id = dec_field(&sec[40..72]);
     let volume_blocks = both32(sec, 80)?;
+    // Volume set size / sequence number (ECMA-119 §8.4.10-8.4.11;
+    // BP 121-128, both-endian u16). The descriptor must declare a
+    // non-empty set and sit within it.
+    let volume_set_size = both16(sec, 120)?;
+    let volume_seq_number = both16(sec, 124)?;
+    if volume_set_size == 0 || volume_seq_number == 0 || volume_seq_number > volume_set_size {
+        return Err(Error::InvalidData("iso9660 bad volume set sequence"));
+    }
     let lbs = both16(sec, 128)? as usize;
     if !lbs.is_power_of_two() || !(512..=32 * 1024).contains(&lbs) {
         return Err(Error::InvalidData("iso9660 bad logical block size"));
@@ -929,9 +947,12 @@ fn parse_vd(sec: &[u8], joliet: bool) -> Result<VolDesc, Error> {
     if r[0] != 34 {
         return Err(Error::InvalidData("iso9660 bad root record"));
     }
-    // Descriptor metadata (ECMA-119 §8.4.5, §8.4.19-8.4.29).
+    // Descriptor metadata (ECMA-119 §8.4.5, §8.4.10-8.4.11,
+    // §8.4.19-8.4.29).
     let meta = VolumeMeta {
         system_id: dec_field(&sec[8..40]),
+        volume_set_size,
+        volume_seq_number,
         volume_set_id: dec_field(&sec[190..318]),
         publisher_id: dec_field(&sec[318..446]),
         data_preparer_id: dec_field(&sec[446..574]),
@@ -1862,6 +1883,12 @@ mod tests {
             }
             self.data[s + 80..s + 84].copy_from_slice(&p.to_le_bytes());
             self.data[s + 84..s + 88].copy_from_slice(&p.to_be_bytes());
+            // Volume set of 1, first volume (ECMA-119
+            // §8.4.10-8.4.11, both-endian u16).
+            self.data[s + 120..s + 122].copy_from_slice(&1u16.to_le_bytes());
+            self.data[s + 122..s + 124].copy_from_slice(&1u16.to_be_bytes());
+            self.data[s + 124..s + 126].copy_from_slice(&1u16.to_le_bytes());
+            self.data[s + 126..s + 128].copy_from_slice(&1u16.to_be_bytes());
             self.data[s + 128..s + 130].copy_from_slice(&2048u16.to_le_bytes());
             self.data[s + 130..s + 132].copy_from_slice(&2048u16.to_be_bytes());
             if let Some((pt_extent, pt_size)) = pt {
@@ -1872,6 +1899,8 @@ mod tests {
             }
             let rec = Self::dirent(root_extent, root_size, 2, &[0], &[]);
             self.data[s + 156..s + 156 + 34].copy_from_slice(&rec[..34]);
+            // File Structure Version = 1 (ECMA-119 §8.4.30, BP 882).
+            self.data[s + 881] = 1;
         }
 
         /// Write a boot record volume descriptor (El Torito 1.0 §2.2)
@@ -2885,6 +2914,50 @@ mod tests {
         assert_eq!(m.expiration_time, None);
         assert_eq!(m.effective_time, None);
         assert!(out.joliet_meta.is_none());
+    }
+
+    /// Volume set size / sequence number (ECMA-119 §8.4.10-8.4.11,
+    /// BP 121-128, both-endian u16) decode into `VolumeMeta`.
+    #[test]
+    fn pvd_volume_set_fields() {
+        let mut img = plain_iso();
+        let s = 16 * SECTOR;
+        // Declare a 2-volume set; this descriptor is volume 1.
+        img[s + 120..s + 122].copy_from_slice(&2u16.to_le_bytes());
+        img[s + 122..s + 124].copy_from_slice(&2u16.to_be_bytes());
+        let out = decode(&img).unwrap();
+        assert_eq!(out.meta.volume_set_size, 2);
+        assert_eq!(out.meta.volume_seq_number, 1);
+    }
+
+    /// File Structure Version (ECMA-119 §8.4.30, BP 882) must be 1.
+    #[test]
+    fn rejects_bad_file_structure_version() {
+        let mut img = plain_iso();
+        img[16 * SECTOR + 881] = 2;
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    /// The volume sequence number must be within 1..=set size and
+    /// the set size must be nonzero (ECMA-119 §8.4.10-8.4.11).
+    #[test]
+    fn rejects_bad_volume_seq() {
+        // Sequence number beyond the declared set size (2 > 1).
+        let mut img = plain_iso();
+        let s = 16 * SECTOR;
+        img[s + 124..s + 126].copy_from_slice(&2u16.to_le_bytes());
+        img[s + 126..s + 128].copy_from_slice(&2u16.to_be_bytes());
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+        // Sequence number 0.
+        let mut img = plain_iso();
+        let s = 16 * SECTOR;
+        img[s + 124..s + 128].copy_from_slice(&[0; 4]);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+        // Set size 0.
+        let mut img = plain_iso();
+        let s = 16 * SECTOR;
+        img[s + 120..s + 124].copy_from_slice(&[0; 4]);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
     }
 
     /// Volume datetimes (ECMA-119 §8.4.26-8.4.29): 17-byte

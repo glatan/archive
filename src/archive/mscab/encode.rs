@@ -5,8 +5,10 @@
 //! MSZIP cabinets emit `CK`-prefixed raw-DEFLATE blocks with the
 //! 32 KiB history window carried across `CFDATA` boundaries
 //! (MS-CAB §3.1 `tcompTYPE_MSZIP`). [`MscabEncoder::reserve`] emits
-//! `FLAG_RESERVE_PRESENT` zero-filled reserved areas; cabinet sets
-//! and per-file date/attribute metadata are not emitted.
+//! `FLAG_RESERVE_PRESENT` zero-filled reserved areas;
+//! [`MscabEncoder::add_file_with_meta`] emits per-file CFFILE
+//! date/time/attribs metadata (defaulting to zero via
+//! [`MscabEncoder::add_file`]); cabinet sets are not emitted.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -24,6 +26,17 @@ const CFDATA_MAX: usize = 32 * 1024;
 /// MSZIP sliding-window depth carried across CFDATA blocks (§3.1).
 const MSZIP_WINDOW: usize = 32 * 1024;
 
+/// Per-file metadata emitted into the CFFILE record (MS-CAB §2.3).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MscabFileMeta {
+    /// MS-DOS format date (CFFILE `date` field).
+    pub date: u16,
+    /// MS-DOS format time (CFFILE `time` field).
+    pub time: u16,
+    /// File attributes (CFFILE `attribs` field).
+    pub attribs: u16,
+}
+
 /// Folder compression applied to every file in the cabinet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MscabCompression {
@@ -32,6 +45,13 @@ pub enum MscabCompression {
     /// MSZIP (`tcompTYPE_MSZIP`): raw DEFLATE per CFDATA block with
     /// the "CK" signature and a carried 32 KiB dictionary.
     Mszip,
+}
+
+/// Queued file: name, contents, and CFFILE metadata.
+struct FileRec {
+    name: String,
+    data: Vec<u8>,
+    meta: MscabFileMeta,
 }
 
 /// Encoder for single-file MS-CAB archives.
@@ -43,9 +63,9 @@ pub struct MscabEncoder {
     /// (cbCFHeader, cbCFFolder, cbCFData) reserved-area sizes emitted
     /// when `FLAG_RESERVE_PRESENT` is set; areas are zero-filled.
     reserve: Option<(u16, u8, u8)>,
-    /// (name, data) pairs in queue order; `uoffFileStart` is the
-    /// concatenated folder offset, computed at finish time.
-    files: Vec<(String, Vec<u8>)>,
+    /// Files in queue order; `uoffFileStart` is the concatenated
+    /// folder offset, computed at finish time.
+    files: Vec<FileRec>,
 }
 
 impl MscabEncoder {
@@ -78,8 +98,18 @@ impl MscabEncoder {
 
     /// Queue one file. Names are emitted as ASCIIZ; they must be
     /// non-empty and contain no NUL bytes (enforced at finish).
+    /// CFFILE date/time/attribs are emitted as zero.
     pub fn add_file(&mut self, name: &str, data: &[u8]) {
-        self.files.push((String::from(name), data.to_vec()));
+        self.add_file_with_meta(name, data, MscabFileMeta::default());
+    }
+
+    /// Queue a file with explicit CFFILE date/time/attribs metadata.
+    pub fn add_file_with_meta(&mut self, name: &str, data: &[u8], meta: MscabFileMeta) {
+        self.files.push(FileRec {
+            name: String::from(name),
+            data: data.to_vec(),
+            meta,
+        });
     }
 
     /// Serialize the cabinet. Returns [`Error::InvalidData`] if a
@@ -96,12 +126,12 @@ impl MscabEncoder {
         // Concatenated folder stream + per-file offsets.
         let mut stream = Vec::new();
         let mut uoffs = Vec::with_capacity(self.files.len());
-        for (name, data) in &self.files {
-            if name.is_empty() || name.as_bytes().contains(&0) {
+        for file in &self.files {
+            if file.name.is_empty() || file.name.as_bytes().contains(&0) {
                 return Err(Error::InvalidData("mscab: invalid file name"));
             }
             uoffs.push(stream.len() as u32);
-            stream.extend_from_slice(data);
+            stream.extend_from_slice(&file.data);
         }
 
         // Split into CFDATA blocks, compressing each with the
@@ -144,14 +174,14 @@ impl MscabEncoder {
             36
         };
         let mut files_buf = Vec::new();
-        for ((name, data), uoff) in self.files.iter().zip(uoffs.iter()) {
-            files_buf.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        for (file, uoff) in self.files.iter().zip(uoffs.iter()) {
+            files_buf.extend_from_slice(&(file.data.len() as u32).to_le_bytes());
             files_buf.extend_from_slice(&uoff.to_le_bytes());
             files_buf.extend_from_slice(&0u16.to_le_bytes()); // iFolder
-            files_buf.extend_from_slice(&0u16.to_le_bytes()); // date
-            files_buf.extend_from_slice(&0u16.to_le_bytes()); // time
-            files_buf.extend_from_slice(&0u16.to_le_bytes()); // attribs
-            files_buf.extend_from_slice(name.as_bytes());
+            files_buf.extend_from_slice(&file.meta.date.to_le_bytes());
+            files_buf.extend_from_slice(&file.meta.time.to_le_bytes());
+            files_buf.extend_from_slice(&file.meta.attribs.to_le_bytes());
+            files_buf.extend_from_slice(file.name.as_bytes());
             files_buf.push(0);
         }
         let data_off = folders_off + 8 + cb_cffolder as usize + files_buf.len();
@@ -343,6 +373,31 @@ mod tests {
         let mut enc = MscabEncoder::new().reserve(60_001, 0, 0);
         enc.add_file("a", b"x");
         assert!(enc.finish().is_err());
+    }
+
+    #[test]
+    fn encoder_emits_date_time_attribs() {
+        let mut enc = MscabEncoder::new();
+        enc.add_file_with_meta(
+            "meta.bin",
+            b"payload",
+            MscabFileMeta {
+                date: 0x5021,
+                time: 0x7C00,
+                attribs: 0x20,
+            },
+        );
+        enc.add_file("plain.bin", b"no meta");
+        let entries = decode(&enc.finish().unwrap()).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name(), "meta.bin");
+        assert_eq!(entries[0].date, 0x5021);
+        assert_eq!(entries[0].time, 0x7C00);
+        assert_eq!(entries[0].attribs, 0x20);
+        // add_file keeps emitting zeroed metadata.
+        assert_eq!(entries[1].date, 0);
+        assert_eq!(entries[1].time, 0);
+        assert_eq!(entries[1].attribs, 0);
     }
 
     #[test]

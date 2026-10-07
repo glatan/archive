@@ -1646,6 +1646,24 @@ mod tests {
         assert_eq!(entries[0].data, b"descriptor");
     }
 
+    #[test]
+    fn test_cd_bit13_masking_falls_back_to_local_header() {
+        // Bit 13 (0x2000): the CD carries masked (zeroed) CRC-32 and sizes;
+        // the real values are taken from the Local File Header.
+        let data = b"masked central directory fields";
+        let mut archive = build_test_zip("masked.txt", data, 0, false, false, false);
+        archive[6] = 0x00;
+        archive[7] = 0x20;
+        let cd_sig = CENTRAL_DIRECTORY_HEADER_SIGNATURE.to_le_bytes();
+        let cd_off = archive.windows(4).position(|w| w == cd_sig).unwrap();
+        archive[cd_off + 8] = 0x00;
+        archive[cd_off + 9] = 0x20;
+        archive[cd_off + 16..cd_off + 28].fill(0);
+        let entries = decode(&archive).unwrap();
+        assert_eq!(entries[0].name, "masked.txt");
+        assert_eq!(entries[0].data, data);
+    }
+
     #[cfg(feature = "cmpsc")]
     #[test]
     fn test_decode_cmpsc_method16_roundtrip() {

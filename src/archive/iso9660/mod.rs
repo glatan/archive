@@ -24,10 +24,12 @@
 //! initial/section entries are parsed, and the referenced boot
 //! image is extracted into `ElToritoEntry::image` (`IsoImage::el_torito`).
 //! Descriptor metadata — system/volume-set/publisher/preparer/
-//! application and copyright/abstract/bibliographic identifiers
-//! plus the four 17-byte volume timestamps (ECMA-119 §8.4.5,
-//! §8.4.19-8.4.29) — is exposed via `IsoImage::meta` (primary) and
-//! `IsoImage::joliet_meta` (supplementary).
+//! application and copyright/abstract/bibliographic identifiers,
+//! volume set size / sequence number (§8.4.10-8.4.11), and the four
+//! 17-byte volume timestamps (ECMA-119 §8.4.5, §8.4.19-8.4.29) — is
+//! exposed via `IsoImage::meta` (primary) and `IsoImage::joliet_meta`
+//! (supplementary). The descriptor's File Structure Version (§8.4.30)
+//! and `seq ∈ 1..=size` consistency are validated on decode.
 //! Extended attribute records (ECMA-119 §9.5) are parsed into
 //! `IsoEntry::xa` and act as a fallback for owner/group/mode/
 //! mtime when Rock Ridge fields are absent. The remaining SUSP

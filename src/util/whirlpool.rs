@@ -1,4 +1,5 @@
-//! Whirlpool-2003 hash (ISO/IEC 10118-3) for PEA EAX256 key derivation.
+//! Whirlpool-2003 hash (ISO/IEC 10118-3) for PEA EAX256 key derivation
+//! and XAR "whirlpool" digests.
 //!
 //! Table-driven implementation: the C tables gather each byte
 //! position's S-box contribution through the circulant diffusion row

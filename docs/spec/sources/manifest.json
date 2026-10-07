@@ -1596,7 +1596,7 @@
    "format": "crx3",
    "title": "Chromium components/crx_file headers (CRX2 fixed layout)",
    "version": "chromium main",
-   "note": "CRX2 固定ヘッダ layout・64KiB ヘッダ上限・RSA PKCS#1 受理の書面参照 (crx_file.h / crx_verifier.cc)。コード取り込みなし",
+   "note": "CRX2 固定ヘッダ layout・64KiB ヘッダ上限・RSA PKCS#1 受理・crx_id 導出規則 (`GetCrxIdFromPublicKey`) の書面参照 (crx_file.h / crx_verifier.cc)。コード取り込みなし",
    "reference_url": [
     "https://github.com/chromium/chromium/blob/main/components/crx_file/crx_file.h",
     "https://github.com/chromium/chromium/blob/main/components/crx_file/crx_verifier.cc"

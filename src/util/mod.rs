@@ -87,8 +87,8 @@ pub(crate) mod sha512;
 #[cfg(any(feature = "sevenz", feature = "zip", feature = "pea"))]
 pub(crate) mod aes256;
 
-/// Whirlpool hash for PEA AES-256 EAX key derivation.
-#[cfg(feature = "pea")]
+/// Whirlpool hash for PEA AES-256 EAX key derivation and XAR digests.
+#[cfg(any(feature = "pea", feature = "xar"))]
 pub(crate) mod whirlpool;
 
 /// PBKDF2 (RFC 2898) key derivation for PEA encrypted streams.

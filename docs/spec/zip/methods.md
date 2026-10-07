@@ -17,7 +17,7 @@
 | 77 | Method 95: XZ | §4.4.5 | ✅ | decode + encode: `ZipCompression::Xz` (`xz` feature) |
 | 78 | Method 98: PPMd version I Rev 1 | §4.4.5, §5.10 | ✅ | decode + encode: `ZipCompression::Ppmd` |
 | 79 | Method 99: AE-x encryption marker | §4.4.5, Appendix E | ✅ | AES encryption で使用 |
-| 80 | 未知メソッド reject | §4.4.5 | ✅ | `Unsupported("zip: compression method")` |
+| 80 | 未知メソッド reject | §4.4.5 | ✅ | `Unsupported("zip: compression method")`。APPNOTE 登録だが非対応の method ID: 18 (IBM TERSE new)、19 (IBM LZ77 z Architecture)、94 (MP3) — 他の未実装 ID と同様に汎用 reject 経路 |
 
 ---
 

@@ -31,7 +31,7 @@
 | 13 | cksum_alg と `<checksum style>` の一致を検証 | 同上 (style 名と digest 名の一致要件) | ✅ | `decode_real` 経由 (style 照合実装) |
 | 14 | `<file>` 要素は再帰的にネスト可能。directory の `<file>` 子要素は `親名/名前` のパスを構成 | §TOC example (nested `<file>`) | ✅ | `decode_real` (sub/nested.txt) |
 | 15 | `<file>` の `<name>` `<type>` は必須 | 同上 | ✅ | `decode_real`; 欠落時 InvalidData |
-| 36 | cksum_alg=3 の "sha1"/"md5" 以外の digest 名 | OpenSSL digest 名 | ⚠️ | `"sha256"`/`"sha512"` を `digest()` および archived/extracted-checksum のガードで検証 (`util::sha512` 新規実装)。`test_cksum_alg3_sha256`, `test_cksum_alg3_sha256_mismatch`, `test_cksum_alg3_sha512`, `test_cksum_alg3_sha512_mismatch`。他の OpenSSL ダイジェスト名は引き続き `Error::Unsupported` (`test_cksum_alg3_unknown_digest_rejected`) |
+| 36 | cksum_alg=3 の "sha1"/"md5" 以外の digest 名 | OpenSSL digest 名 | ✅ | `src/util` 実装済みの OpenSSL 互換 digest 名を受理: `"sha256"`/`"sha512"`/`"whirlpool"` を `digest()` および archived/extracted-checksum のガードで検証 (`util::sha512`, `util::whirlpool`)。受理集合 = {sha1, md5, sha256, sha512, whirlpool}。それ以外の digest 名は `Error::Unsupported` (intentional boundary)。`test_cksum_alg3_sha256`, `test_cksum_alg3_sha256_mismatch`, `test_cksum_alg3_sha512`, `test_cksum_alg3_sha512_mismatch`, `test_cksum_alg3_whirlpool`, `test_cksum_alg3_whirlpool_mismatch`, `test_cksum_alg3_unknown_digest_rejected` |
 
 ## Heap / ファイルデータ
 

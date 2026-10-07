@@ -88,6 +88,21 @@ pub struct LhaEntry {
     pub unix_gid: Option<u16>,
     /// UNIX `time_t` from extended header `0x54`.
     pub unix_mtime: Option<u32>,
+    /// Archive comment from extended header `0x3F`; raw payload
+    /// (encoding/layout is application-defined).
+    pub comment: Option<Vec<u8>>,
+    /// Windows FILETIME record from extended header `0x41`; raw
+    /// payload (encoding/layout is application-defined).
+    pub windows_filetime: Option<Vec<u8>>,
+    /// Large-file size record from extended header `0x42`; raw
+    /// payload (encoding/layout is application-defined).
+    pub large_file_size: Option<Vec<u8>>,
+    /// UNIX group name from extended header `0x52`; raw payload
+    /// (encoding/layout is application-defined).
+    pub unix_group_name: Option<Vec<u8>>,
+    /// UNIX user name from extended header `0x53`; raw payload
+    /// (encoding/layout is application-defined).
+    pub unix_user_name: Option<Vec<u8>>,
     /// Multi-disk segment descriptor from extended header `0x39`.
     pub span: Option<LhaSpan>,
     /// Entry payload (empty for directories and unsupported methods).
@@ -121,6 +136,11 @@ struct ExtHeaders {
     unix_uid: Option<u16>,
     unix_gid: Option<u16>,
     unix_mtime: Option<u32>,
+    comment: Option<Vec<u8>>,
+    windows_filetime: Option<Vec<u8>>,
+    large_file_size: Option<Vec<u8>>,
+    unix_group_name: Option<Vec<u8>>,
+    unix_user_name: Option<Vec<u8>>,
     span: Option<LhaSpan>,
 }
 
@@ -169,7 +189,15 @@ fn walk_ext_headers_sized(
                     size_of_run: u32le(&payload[5..]),
                 });
             }
+            // Comment: no length or charset constraint is defined,
+            // so the raw payload is exposed.
+            0x3F => ext.comment = Some(payload.to_vec()),
             0x40 if !payload.is_empty() => ext.dos_attr = Some(payload[0]),
+            // Windows FILETIMEs and the >4 GiB size record: the
+            // primary references do not pin down the byte order, so
+            // the raw payload is passed through for the caller.
+            0x41 => ext.windows_filetime = Some(payload.to_vec()),
+            0x42 => ext.large_file_size = Some(payload.to_vec()),
             0x50 if payload.len() >= 2 => ext.unix_mode = Some(u16le(payload)),
             // `header.doc.md` stores gid first, then uid (lzhformat
             // documents the opposite order).
@@ -177,6 +205,10 @@ fn walk_ext_headers_sized(
                 ext.unix_gid = Some(u16le(payload));
                 ext.unix_uid = Some(u16le(&payload[2..]));
             }
+            // Group/user names have no defined charset (Shift_JIS
+            // variants circulate); expose the raw bytes.
+            0x52 => ext.unix_group_name = Some(payload.to_vec()),
+            0x53 => ext.unix_user_name = Some(payload.to_vec()),
             0x54 if payload.len() >= 4 => ext.unix_mtime = Some(u32le(payload)),
             _ => {}
         }
@@ -381,6 +413,11 @@ fn decode_level01(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Resu
         unix_uid: ext.unix_uid,
         unix_gid: ext.unix_gid,
         unix_mtime: ext.unix_mtime,
+        comment: ext.comment,
+        windows_filetime: ext.windows_filetime,
+        large_file_size: ext.large_file_size,
+        unix_group_name: ext.unix_group_name,
+        unix_user_name: ext.unix_user_name,
         span: ext.span,
         data,
     });
@@ -448,6 +485,11 @@ fn decode_level2(
         unix_uid: ext.unix_uid,
         unix_gid: ext.unix_gid,
         unix_mtime: ext.unix_mtime,
+        comment: ext.comment,
+        windows_filetime: ext.windows_filetime,
+        large_file_size: ext.large_file_size,
+        unix_group_name: ext.unix_group_name,
+        unix_user_name: ext.unix_user_name,
         span: ext.span,
         data,
     });
@@ -523,6 +565,11 @@ fn decode_level3(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Resul
         unix_uid: ext.unix_uid,
         unix_gid: ext.unix_gid,
         unix_mtime: ext.unix_mtime,
+        comment: ext.comment,
+        windows_filetime: ext.windows_filetime,
+        large_file_size: ext.large_file_size,
+        unix_group_name: ext.unix_group_name,
+        unix_user_name: ext.unix_user_name,
         span: ext.span,
         data,
     });
@@ -1069,5 +1116,88 @@ mod tests {
             })
         );
         assert_eq!(e[0].data, b"abc");
+    }
+
+    /// Hand-built level-1 archive: a `-lh0-` member `name`/`data`
+    /// plus arbitrary extended blocks given as `(type, payload)`
+    /// pairs. The basic `hsize` ends at the first extended block's
+    /// `u16` size field, like the reference encoder.
+    fn level1_with_ext(name: &[u8], data: &[u8], blocks: &[(u8, &[u8])]) -> Vec<u8> {
+        let mut exts = Vec::new();
+        for &(ty, payload) in blocks {
+            let size = (3 + payload.len()) as u16;
+            exts.extend_from_slice(&size.to_le_bytes());
+            exts.push(ty);
+            exts.extend_from_slice(payload);
+        }
+        let hsize = 25 + name.len();
+        let skip = (data.len() + exts.len()) as u32;
+        let mut a = Vec::new();
+        a.push(hsize as u8);
+        a.push(0); // checksum placeholder
+        a.extend_from_slice(b"-lh0-");
+        a.extend_from_slice(&skip.to_le_bytes());
+        a.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        a.extend_from_slice(&0u32.to_le_bytes()); // mtime
+        a.push(0x20); // MS-DOS attribute
+        a.push(1); // level 1
+        a.push(name.len() as u8);
+        a.extend_from_slice(name);
+        a.extend_from_slice(&crate::util::crc16::crc16(data).to_le_bytes());
+        a.push(b'U'); // OS id
+        a.extend_from_slice(&exts);
+        a.extend_from_slice(&0u16.to_le_bytes()); // ext terminator
+        a[1] = a[2..2 + hsize].iter().fold(0u8, |x, &b| x.wrapping_add(b));
+        a.extend_from_slice(data);
+        a.push(0); // archive terminator
+        a
+    }
+
+    #[test]
+    fn comment_header_exposed() {
+        // Extended header `0x3F` carries an archive comment; it is
+        // exposed as raw bytes (no charset/length is defined).
+        let payload = b"packed by hand";
+        let a = level1_with_ext(b"f.txt", b"abc", &[(0x3F, payload)]);
+        let e = decode(&a).unwrap();
+        assert_eq!(e[0].comment.as_deref(), Some(&payload[..]));
+        assert_eq!(e[0].data, b"abc");
+        assert_eq!(e[0].windows_filetime, None);
+        assert_eq!(e[0].large_file_size, None);
+    }
+
+    #[test]
+    fn windows_filetime_header_exposed() {
+        // `0x41` carries Windows FILETIME records (UNLHA32 writes
+        // create/access/write as three u64s); the primary docs do
+        // not pin the byte order, so raw bytes are exposed.
+        let payload = [0xabu8; 24];
+        let a = level1_with_ext(b"f.txt", b"abc", &[(0x41, &payload)]);
+        let e = decode(&a).unwrap();
+        assert_eq!(e[0].windows_filetime.as_deref(), Some(&payload[..]));
+        assert_eq!(e[0].comment, None);
+    }
+
+    #[test]
+    fn large_file_size_header_exposed() {
+        // `0x42` carries the >4 GiB size record; raw bytes for the
+        // same reason as `0x41`.
+        let payload = [0x42u8; 16];
+        let a = level1_with_ext(b"f.txt", b"abc", &[(0x42, &payload)]);
+        let e = decode(&a).unwrap();
+        assert_eq!(e[0].large_file_size.as_deref(), Some(&payload[..]));
+    }
+
+    #[test]
+    fn level1_unix_ext_names() {
+        // `0x52`/`0x53` carry group/user names in an undefined
+        // charset (Shift_JIS variants circulate); non-UTF-8 bytes
+        // must pass through untouched.
+        let group = b"wheel";
+        let user = [0x83, 0x86, b'u', b'z']; // non-UTF-8 name bytes
+        let a = level1_with_ext(b"f.txt", b"abc", &[(0x52, &group[..]), (0x53, &user[..])]);
+        let e = decode(&a).unwrap();
+        assert_eq!(e[0].unix_group_name.as_deref(), Some(&group[..]));
+        assert_eq!(e[0].unix_user_name.as_deref(), Some(&user[..]));
     }
 }

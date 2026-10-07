@@ -91,7 +91,10 @@ pub struct Crx3Image {
     /// Container version from the wire header (2 or 3).
     pub version: u32,
     /// 16-byte extension id from `SignedData.crx_id`, if present.
-    /// Always `None` for version 2 files, which carry no `SignedData`.
+    /// Version 2 files carry no `SignedData` on the wire, so the id is
+    /// derived as `SHA-256(public_key)[..16]` — the same derivation
+    /// Chromium's `crx_verifier.cc` `GetCrxIdFromPublicKey` uses for
+    /// both versions.
     pub crx_id: Option<[u8; 16]>,
     /// Signing proofs carried by the header (unverified).
     pub proofs: Vec<Crx3Proof>,
@@ -112,7 +115,9 @@ impl Crx3Image {
     /// matches, and `None` when the check cannot be performed —
     /// the header carries no `crx_id` or no RSA public key. The
     /// archive is decoded either way; this only reports the consistency
-    /// result to the caller.
+    /// result to the caller. For CRX2 the `crx_id` is derived from the
+    /// public key itself (see `Crx3Image::crx_id`), so this always
+    /// returns `None`: v2 proofs are `RsaPkcs1`, not `Sha256WithRsa`.
     pub fn verify_crx_id(&self) -> Option<bool> {
         let crx_id = self.crx_id?;
         let mut saw_rsa_key = false;
@@ -254,10 +259,22 @@ fn decode_crx2(input: &[u8]) -> Result<Crx3Image, Error> {
     if public_key.is_empty() && signature.is_empty() {
         return Err(Error::InvalidData("crx2 empty proof"));
     }
+    // CRX2 carries no SignedData on the wire; per crx3.proto the
+    // crx_id is the first 128 bits of SHA-256(public_key), the same
+    // derivation Chromium uses for both versions
+    // (crx_verifier.cc GetCrxIdFromPublicKey).
+    let crx_id = if public_key.is_empty() {
+        None
+    } else {
+        let digest = crate::util::sha256::sha256(public_key);
+        let mut id = [0u8; 16];
+        id.copy_from_slice(&digest[..16]);
+        Some(id)
+    };
     let archive = input.get(sig_end..).ok_or(Error::UnexpectedEof)?;
     Ok(Crx3Image {
         version: VERSION_CRX2,
-        crx_id: None,
+        crx_id,
         proofs: alloc::vec![Crx3Proof {
             algorithm: ProofAlgorithm::RsaPkcs1,
             public_key: public_key.to_vec(),
@@ -387,7 +404,10 @@ mod tests {
     fn decodes_crx2() {
         let img = decode(&build_crx2(b"RSAPUB2", b"RSASIG2", &zip_bytes())).unwrap();
         assert_eq!(img.version, 2);
-        assert_eq!(img.crx_id, None);
+        let digest = crate::util::sha256::sha256(b"RSAPUB2");
+        let mut id = [0u8; 16];
+        id.copy_from_slice(&digest[..16]);
+        assert_eq!(img.crx_id, Some(id));
         assert_eq!(img.verified_contents, None);
         assert_eq!(img.proofs.len(), 1);
         assert_eq!(img.proofs[0].algorithm, ProofAlgorithm::RsaPkcs1);
@@ -397,6 +417,20 @@ mod tests {
         assert_eq!(img.entries[0].name, "manifest.json");
         assert_eq!(img.entries[0].data, b"{}");
         assert_eq!(img.entries[1].data, b"console.log(1)");
+    }
+
+    #[test]
+    fn crx2_crx_id_derived_from_pubkey() {
+        // CRX2 carries no SignedData; crx_id is derived as
+        // SHA-256(public_key)[..16] like Chromium's
+        // GetCrxIdFromPublicKey.
+        let pubkey = b"fake-der-spki-v2";
+        let digest = crate::util::sha256::sha256(pubkey);
+        let mut id = [0u8; 16];
+        id.copy_from_slice(&digest[..16]);
+        let img = decode(&build_crx2(pubkey, b"RSASIG", &zip_bytes())).unwrap();
+        assert_eq!(img.version, 2);
+        assert_eq!(img.crx_id, Some(id));
     }
 
     #[test]
