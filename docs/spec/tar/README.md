@@ -54,7 +54,7 @@
 | 30 | エンコーダー: 100文字超リンク名の自動 GnuLongLink 生成 | GNU tar extensions | ✅ | `test_roundtrip_long_link_name`, `test_roundtrip_long_name_and_link` |
 | 31 | 切り詰めアーカイブエラー (ヘッダーのみ) | POSIX.1-2001 ustar / GNU / PAX | ✅ | `test_truncated_archive_header_only` |
 | 32 | 100バイト丁度のファイル名 | POSIX.1-2001 ustar / GNU / PAX | ✅ | `test_exact_100_byte_filename` |
-| 33 | PAX 不正属性の安全なスキップ | POSIX.1-2001 pax extended header | ✅ | `test_pax_malformed_graceful`, `test_parse_pax_attributes_invalid_length_safely_skipped`, `test_parse_pax_attributes_empty_value` |
+| 33 | PAX 不正属性の安全なスキップ | POSIX.1-2001 pax extended header | ✅ | `test_pax_malformed_graceful`, `test_parse_pax_attributes_invalid_length_safely_skipped`, `test_parse_pax_attributes_empty_value`, `test_parse_pax_attributes_short_length`, `test_fuzz_regression_tar_gnu_corrupt`, `test_fuzz_regression_tar_ustar_corrupt`, `test_fuzz_regression_tar_pax_corrupt` |
 
 | 34 | devmajor/devminor フィールド (bytes 329-344) | POSIX.1-2001 ustar header fields | ✅ | `test_devmajor_devminor_roundtrip` |
 | 35 | UStar フィクスチャデコード (`tar --format=ustar` 生成) | POSIX.1-2001 ustar header | ✅ | `test_tar_decode_ustar_fixture` (統合テスト) |

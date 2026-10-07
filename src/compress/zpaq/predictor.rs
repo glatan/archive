@@ -155,6 +155,11 @@ impl Predictor {
         self.z.component_count() != 0
     }
 
+    /// Attach a shared decode budget to the HCOMP VM.
+    pub(crate) fn set_cycle_budget(&mut self, budget: super::zpaql::CycleBudget) {
+        self.z.set_cycle_budget(budget);
+    }
+
     fn init(&mut self) -> Result<(), Error> {
         self.z.inith()?;
         self.c8 = 1;

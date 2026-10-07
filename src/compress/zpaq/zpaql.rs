@@ -21,9 +21,14 @@
 //!
 //! Divergences from upstream behavior, all of which only affect
 //! malformed inputs: a per-run instruction budget is enforced (upstream
-//! would loop forever), and register indices are bounds-checked.
+//! would loop forever), decode-time VMs may additionally share a
+//! cumulative [`CycleBudget`] so a program that saturates the per-run
+//! cap on every input byte cannot hang the decoder, and register
+//! indices are bounds-checked.
 
+use alloc::rc::Rc;
 use alloc::vec::Vec;
+use core::cell::Cell;
 
 use crate::error::Error;
 
@@ -33,6 +38,36 @@ use crate::error::Error;
 /// PCOMP EOS flush) needed ~16.78M ops, so 256M leaves 15x headroom
 /// while still bounding hostile programs.
 const MAX_CYCLES: u32 = 1 << 28;
+
+/// Instructions credited to a shared [`CycleBudget`] per `run` call.
+///
+/// `run` is invoked once per byte boundary (HCOMP) and once per
+/// postprocessed byte plus EOS (PCOMP), so the credit bounds the
+/// sustained cost of a hostile program to ~`RUN_CREDIT` ops per
+/// processed byte on top of the initial `MAX_CYCLES` burst balance.
+/// Legitimate built-in HCOMP/PCOMP programs use well under 1K ops per
+/// byte; 8192 keeps wide headroom while a credit far smaller would risk
+/// rejecting heavy-but-valid custom postprocessors.
+const RUN_CREDIT: u64 = 1 << 13;
+
+/// Shared instruction budget across all ZPAQL VMs of one decode
+/// operation (`Rc<Cell<ops_remaining>>`).
+///
+/// Upstream bounds nothing at all; `MAX_CYCLES` alone caps each `run`
+/// call but not the total over the per-byte calls of a whole stream.
+/// Decoders hand one `CycleBudget` to every VM in the stream (HCOMP and
+/// PCOMP, across all blocks) so cumulative work stays proportional to
+/// the bytes actually processed: each `run` credits `RUN_CREDIT`
+/// (balance capped at `MAX_CYCLES`) and each instruction debits one.
+/// Exhaustion fails the decode with [`Error::InvalidData`].
+pub(crate) type CycleBudget = Rc<Cell<u64>>;
+
+/// A fresh shared budget seeded with one full `MAX_CYCLES` burst, so a
+/// single legitimately heavy early `run` (the documented PCOMP EOS
+/// flush) keeps its per-run headroom.
+pub(crate) fn new_shared_budget() -> CycleBudget {
+    Rc::new(Cell::new(u64::from(MAX_CYCLES)))
+}
 
 /// In-memory gap between the COMP section and the program region.
 const HEADER_GAP: usize = 128;
@@ -69,6 +104,10 @@ pub(crate) struct Zpaql {
     r: [u32; 256],
     /// Bytes emitted by `OUT` instructions (PCOMP output).
     out: Vec<u8>,
+    /// Optional budget shared with the other VMs of the same decode
+    /// operation. `None` (encoder and standalone use) keeps only the
+    /// per-run `MAX_CYCLES` cap.
+    cycle_budget: Option<CycleBudget>,
 }
 
 impl Zpaql {
@@ -90,6 +129,7 @@ impl Zpaql {
             h: Vec::new(),
             r: [0; 256],
             out: Vec::new(),
+            cycle_budget: None,
         }
     }
 
@@ -297,7 +337,18 @@ impl Zpaql {
 
     /// Initialize VM state for HCOMP (`hh`, `hm` fields).
     pub(crate) fn inith(&mut self) -> Result<(), Error> {
-        self.init(self.header[2] as usize, self.header[3] as usize)
+        self.init(self.header[2] as usize, self.header[3] as usize)?;
+        // The predictor maps component `i` to hash entry `h[i]` for
+        // `i in 0..n`, so a header declaring more components than the
+        // `2^hh`-entry hash array holds is malformed. VM `h` accesses
+        // during `run` are masked, but the predictor's per-component
+        // `hash_at(i)` copy is not.
+        if self.component_count() > self.h.len() {
+            return Err(Error::InvalidData(
+                "zpaq: more components than hash entries",
+            ));
+        }
+        Ok(())
     }
 
     /// Initialize VM state for PCOMP (`ph`, `pm` fields).
@@ -332,17 +383,37 @@ impl Zpaql {
         Ok(())
     }
 
+    /// Attach a shared decode budget to this VM. See [`CycleBudget`].
+    pub(crate) fn set_cycle_budget(&mut self, budget: CycleBudget) {
+        self.cycle_budget = Some(budget);
+    }
+
     /// Run the program at `hbegin` with `input` in register `a` until
     /// HALT. `input` wraps to `u32` (PCOMP receives `0xFFFF_FFFF` at
     /// end of segment).
     pub(crate) fn run(&mut self, input: u32) -> Result<(), Error> {
         self.pc = self.hbegin;
         self.a = input;
+        if let Some(budget) = &self.cycle_budget {
+            // Credit this run; the balance never exceeds the documented
+            // per-run limit, so a burst cannot stockpile past it.
+            let bal = budget.get().saturating_add(RUN_CREDIT);
+            budget.set(bal.min(u64::from(MAX_CYCLES)));
+        }
         let mut cycles = MAX_CYCLES;
         loop {
             cycles -= 1;
             if cycles == 0 {
                 return Err(Error::InvalidData("zpaq: zpaql execution limit exceeded"));
+            }
+            if let Some(budget) = &self.cycle_budget {
+                let bal = budget.get();
+                if bal == 0 {
+                    return Err(Error::InvalidData(
+                        "zpaq: zpaql cumulative execution limit exceeded",
+                    ));
+                }
+                budget.set(bal - 1);
             }
             if !self.execute()? {
                 return Ok(());
@@ -584,5 +655,49 @@ impl Zpaql {
 impl Default for Zpaql {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// set_header preamble fields (hh hm ph pm n) with 0 components.
+    const EMPTY_COMP: [u8; 5] = [0, 0, 0, 0, 0];
+
+    fn vm_with_program(program: &[u8]) -> Zpaql {
+        let mut z = Zpaql::set_header(&EMPTY_COMP, program).unwrap();
+        z.inith().unwrap();
+        z
+    }
+
+    #[test]
+    fn shared_cycle_budget_limits_total_across_runs_and_vms() {
+        // JMP -1 loops on itself forever; without a shared budget each
+        // run call would burn the full per-run MAX_CYCLES before erroring.
+        let program = [63u8, 254];
+        // Seed empty: each run call only gets its RUN_CREDIT on top.
+        let budget: CycleBudget = Rc::new(Cell::new(0));
+        let mut z1 = vm_with_program(&program);
+        z1.set_cycle_budget(budget.clone());
+        let mut z2 = vm_with_program(&program);
+        z2.set_cycle_budget(budget.clone());
+        assert!(z1.run(0).is_err());
+        assert!(z2.run(0).is_err());
+        // The two VMs drew from the same balance: 2 * RUN_CREDIT total.
+        assert_eq!(budget.get(), 0);
+    }
+
+    #[test]
+    fn shared_cycle_budget_allows_terminating_programs() {
+        let program = [56u8]; // HALT
+        let budget = new_shared_budget();
+        let mut z = vm_with_program(&program);
+        z.set_cycle_budget(budget.clone());
+        z.run(0).unwrap();
+        z.run(1).unwrap();
+        // The balance caps at MAX_CYCLES, so a trivial program that
+        // sits at the cap only ever debits its own ops.
+        assert_eq!(budget.get(), u64::from(MAX_CYCLES) - 1);
     }
 }

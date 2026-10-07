@@ -17,6 +17,11 @@ fn read32le(data: &[u8]) -> u32 {
 }
 
 #[inline]
+fn read32be(data: &[u8]) -> u32 {
+    u32::from_be_bytes([data[0], data[1], data[2], data[3]])
+}
+
+#[inline]
 fn write32le(data: &mut [u8], value: u32) {
     data[..4].copy_from_slice(&value.to_le_bytes());
 }
@@ -28,7 +33,7 @@ fn write32be(data: &mut [u8], value: u32) {
 
 #[inline]
 const fn not_auipc_pair(auipc: u32, inst2: u32) -> bool {
-    ((((auipc) << 8) ^ (inst2.wrapping_sub(3))) & 0xF8003) != 3
+    ((((auipc) << 8) ^ (inst2.wrapping_sub(3))) & 0xF8003) != 0
 }
 
 #[inline]
@@ -801,7 +806,7 @@ impl RiscVFilter {
                     }
 
                     let addr =
-                        read32le(&buffer[i + 4..]).wrapping_sub(now_pos.wrapping_add(i as u32));
+                        read32be(&buffer[i + 4..]).wrapping_sub(now_pos.wrapping_add(i as u32));
                     inst2 = (inst >> 12) | (addr << 20);
                     new_inst = 0x17 | (inst2_rs1 << 7) | (addr.wrapping_add(0x800) & 0xFFFF_F000);
                 }
@@ -1017,6 +1022,39 @@ mod tests {
         let input = [0xEF, 0x00, 0x00, 0x00, 0x13, 0x00, 0x00, 0x00];
         let encoded = riscv_encode(&input, 0x1000);
         assert_eq!(riscv_decode(&encoded, 0x1000), input);
+    }
+
+    #[test]
+    fn test_riscv_auipc_non_pair_roundtrip() {
+        // Regression (fuzz run-1791310276): `not_auipc_pair` must treat
+        // any non-zero masked result as "not a pair". Here the mask
+        // yields 3, which the buggy `!= 3` check misread as a real pair
+        // and the encoder rewrote the bytes into an undecodable form.
+        let input = [0x17, 0x15, 0x4C, 0xA3, 0x5A, 0x69, 0xD5, 0xD8];
+        let encoded = riscv_encode(&input, 0);
+        assert_eq!(riscv_decode(&encoded, 0), input);
+    }
+
+    #[test]
+    fn test_riscv_special_auipc_roundtrip() {
+        // Same regression on the decode side: this input already looks
+        // like the encoded rd=x2 special form, so the decoder converts
+        // it and the encoder must restore it exactly.
+        let input = [0x17, 0x71, 0xC6, 0x31, 0x62, 0x9B, 0x2D, 0x4E];
+        let encoded = riscv_encode(&input, 0);
+        assert_eq!(riscv_decode(&encoded, 0), input);
+    }
+
+    #[test]
+    fn test_riscv_special_auipc_reads_be_absolute_address() {
+        // Regression (fuzz run-1791310276): the encoded special format
+        // stores the absolute address big endian (encoder `write32be`),
+        // so the decoder must use `read32be`. Expected output matches
+        // liblzma `lzma_bcj_riscv_decode` at start_offset 0x7884.
+        let encoded = [0x17, 0x31, 0xD9, 0x70, 0x83, 0xD1, 0x7C, 0xE6];
+        let decoded = [0x17, 0x07, 0xD1, 0x83, 0x93, 0x0D, 0x27, 0x46];
+        assert_eq!(riscv_decode(&encoded, 0x7884), decoded);
+        assert_eq!(riscv_encode(&decoded, 0x7884), encoded);
     }
 
     #[test]

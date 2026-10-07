@@ -416,9 +416,11 @@ fn encode_journal_operations(
 /// Decode every block of `input` and return the offset just past the
 /// last block terminator.  Fails when trailing bytes remain.
 fn find_archive_end(input: &[u8], header: &ParsedBlockHeader) -> Result<usize, Error> {
-    let mut end = decode_one_block(input, header)?;
+    // Bound total ZPAQL work across every block of the import scan.
+    let budget = crate::compress::zpaq::zpaql::new_shared_budget();
+    let mut end = decode_one_block(input, header, &budget)?;
     while let Some(next) = parse_block_header_at(input, end)? {
-        end = decode_one_block(input, &next)?;
+        end = decode_one_block(input, &next, &budget)?;
     }
     if end != input.len() {
         return Err(Error::InvalidData("zpaq: trailing bytes after archive end"));
@@ -427,8 +429,13 @@ fn find_archive_end(input: &[u8], header: &ParsedBlockHeader) -> Result<usize, E
 }
 
 /// Run one block to its `255` terminator; returns the offset just past it.
-fn decode_one_block(input: &[u8], header: &ParsedBlockHeader) -> Result<usize, Error> {
+fn decode_one_block(
+    input: &[u8],
+    header: &ParsedBlockHeader,
+    budget: &crate::compress::zpaq::zpaql::CycleBudget,
+) -> Result<usize, Error> {
     let mut dec = BlockDecoder::new(input, header, usize::MAX)?;
+    dec.set_cycle_budget(budget.clone());
     while dec.next_segment()?.is_some() {}
     Ok(dec.end_pos())
 }

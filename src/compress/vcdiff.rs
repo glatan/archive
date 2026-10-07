@@ -196,6 +196,9 @@ struct WindowDecode<'a> {
     ipos: usize,
     apos: usize,
     cache: Cache,
+    /// Declared target length of this window; no instruction may push
+    /// `out` past it.
+    target_len: usize,
 }
 
 impl<'a> WindowDecode<'a> {
@@ -208,6 +211,14 @@ impl<'a> WindowDecode<'a> {
         } else {
             size_code as usize
         };
+        // The window's target length is exact, so an instruction that
+        // would grow the output past it is malformed. Reject before
+        // writing anything: a huge coded size must not reach the
+        // RUN resize or the COPY self-copy loop, which would otherwise
+        // allocate/copy gigabytes even when `max_output` is usize::MAX.
+        if size > self.target_len.saturating_sub(self.out.len()) {
+            return Err(Error::InvalidData("vcdiff: instruction exceeds target"));
+        }
         match inst_type {
             I_ADD => {
                 let end = self
@@ -257,7 +268,9 @@ impl<'a> WindowDecode<'a> {
                 // RFC 3284 section 3: the copied substring must be entirely
                 // contained in either the source segment or the target
                 // window; reject copies spanning the boundary.
-                if a < self.source.len() && a + size > self.source.len() {
+                // (`size > len - a` instead of `a + size > len` so a huge
+                // coded size cannot wrap the sum.)
+                if a < self.source.len() && size > self.source.len() - a {
                     return Err(Error::InvalidData("vcdiff: COPY spans boundary"));
                 }
                 for i in 0..size {
@@ -328,6 +341,7 @@ fn decode_window(
         ipos: 0,
         apos: 0,
         cache: Cache::new(),
+        target_len,
     };
 
     while w.ipos < inst.len() {
@@ -1100,5 +1114,52 @@ mod tests {
         let d = encode_with_windows(b"", b"ab", 1);
         assert_eq!(decode(&d).unwrap(), b"ab");
         assert_eq!(window_indicators(&d).len(), 2);
+    }
+
+    #[test]
+    fn vcdiff_rejects_oversized_copy_size() {
+        // Regression (fuzz run-1791310069 hang): a COPY whose coded
+        // size is ~5.9 GiB must be rejected against the window's
+        // declared target length before the self-copy loop runs, not
+        // after gigabytes of output accumulate.
+        let enc: &[u8] = &[
+            2, // target_len
+            0, // delta indicator
+            1, 7, 1,    // data / inst / addr lengths
+            b'x', // data
+            2,    // ADD size 1 -> out = "x"
+            19,   // COPY mode 0, size coded separately
+            0xFF, 0xFF, 0xFF, 0xFF, 0x15, // size varint: 0x15FF_FFFFF
+            0,    // addr 0 -> target[0] (self-copy)
+        ];
+        let mut d = stream(&[]);
+        d.push(0); // Win_Indicator: no source
+        write_varint(&mut d, enc.len());
+        d.extend_from_slice(enc);
+        assert!(matches!(decode(&d), Err(Error::InvalidData(_))));
+        // decode_with_source shares the same window decoder.
+        assert!(matches!(
+            decode_with_source(b"src", &d),
+            Err(Error::InvalidData(_))
+        ));
+    }
+
+    #[test]
+    fn vcdiff_rejects_oversized_run_size() {
+        // Same oversized-size rejection for RUN, before `out` is
+        // resized by the coded count.
+        let enc: &[u8] = &[
+            1, // target_len
+            0, // delta indicator
+            1, 6, 0,    // data / inst / addr lengths
+            b'x', // data (RUN byte)
+            0,    // RUN, size coded separately
+            0xFF, 0xFF, 0xFF, 0xFF, 0x15, // size varint: 0x15FF_FFFFF
+        ];
+        let mut d = stream(&[]);
+        d.push(0); // Win_Indicator: no source
+        write_varint(&mut d, enc.len());
+        d.extend_from_slice(enc);
+        assert!(matches!(decode(&d), Err(Error::InvalidData(_))));
     }
 }

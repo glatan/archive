@@ -26,7 +26,7 @@
 | 8 | ディレクトリ = FAT チェーン上の 128B エントリ配列 | §2.6 | ✅ | 全テスト |
 | 9 | entry #0 は Root Storage Object (type 0x05) 必須 | §2.6.2 | ✅ | decode 時 assert |
 | 10 | Object Type ∈ {0,1,2,5} 検証 (3/4 は不正) | §2.6.1 | ✅ | decode 時 assert |
-| 11 | Name は UTF-16LE、長 ≤64B、偶数、終端 NUL 必須、サロゲート不正は拒否 | §2.6.1 | ✅ | `rejects_unterminated_name` |
+| 11 | Name は UTF-16LE、長 ≤64B、偶数、終端 NUL 必須、サロゲート不正は拒否。未割当エントリ (Object Type 0x00) の name フィールドは未定義のため検証・デコード対象外 | §2.6.1 / §2.6.3 | ✅ | `rejects_unterminated_name`, `test_fuzz_regression_mscfb_v4_corrupt` |
 | 12 | 列挙: root.child から red-black 木を left/node/right DFS。storage は path 成分、stream のみ entry 出力 (`Storage/Sub/Name`) | §2.6.4 | ✅ | `storage_children_get_path_prefix`、`sibling_chain_enumerates_all` |
 | 13 | stream ID 循環・範囲外を拒否 | §2.6.1 | ✅ | `visited` セット + depth 制限 |
 | 14 | v3 の stream size ≤ 0x80000000 (上位 32bit が非ゼロの旧実装ファイルはサイズ解釈を 32bit に限定せず規格値として扱い超過なら拒否) | §2.6.1 | ✅ | decode 時 assert |

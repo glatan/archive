@@ -175,7 +175,7 @@
 | 111 | Dictionary デコード (辞書コンテンツを履歴プレフィックスとして使用) | RFC 8878 §5 | ✅ | `test_execute_sequences_with_dict_content`, `test_execute_sequences_with_dict_overlap` |
 | 112 | Dictionary ID 不一致/未提供エラー | RFC 8878 §5 | ✅ | `test_decode_dict_required_but_missing`, `test_decode_dict_id_mismatch` |
 | 113 | Dictionary 付きデコードのシステム zstd 互換性 | RFC 8878 §5 | ✅ | `test_zstd_decode_with_dict_system` (統合テスト) |
-| 114 | public encoder の dictionary ID 付きエンコード | RFC 8878 §3.1.1 / §3.1.1.2-§3.1.1.5 / §4.1 / §4.2 / §5 | ✅ | `test_encode_with_dict_roundtrip` |
+| 114 | public encoder の dictionary ID 付きエンコード (dict 履歴は先頭ブロックのみ使用、2 ブロック目以降は直前 `WINDOW_SIZE` バイトの実 frame 履歴を使用) | RFC 8878 §3.1.1 / §3.1.1.2-§3.1.1.5 / §4.1 / §4.2 / §5 | ✅ | `test_encode_with_dict_roundtrip`, `test_encode_with_dict_multiblock_roundtrip`, `test_fuzz_regression_zstd_dict_self` |
 | 115 | dictionary ID 付き public encoder 出力のシステム zstd 互換性 | RFC 8878 §3.1.1 / §3.1.1.2-§3.1.1.5 / §4.1 / §4.2 / §5 | ✅ | `test_zstd_encode_with_dict_system_compat` (統合テスト) |
 | 116 | Compressed_Literals_Header size_format=0/1/2/3 の境界値 | RFC 8878 §3.1.1 / §3.1.1.2-§3.1.1.5 / §4.1 / §4.2 / §5 | ✅ | `test_compressed_literals_header_size_formats_roundtrip` |
 

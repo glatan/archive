@@ -428,6 +428,37 @@ fn test_xz_encode_riscv_filter_chain_system_decode() {
 }
 
 #[test]
+fn test_xz_decode_system_encoded_riscv_auipc_pair() {
+    // AUIPC+inst2 pair; start offset makes the pair take the special
+    // rd=x2 conversion path (regression coverage for run-1791310276).
+    let input = [0x17, 0x07, 0xD1, 0x83, 0x93, 0x0D, 0x27, 0x46];
+    let Some(encoded) = xz_system_compress("--filters=riscv:start=30852 --lzma2:dict=4KiB", &input)
+    else {
+        return;
+    };
+    let decoded = xz::decode::decode(&encoded).unwrap();
+    assert_eq!(decoded, input);
+}
+
+#[test]
+fn test_xz_encode_riscv_filter_chain_system_decode_fuzz_regression() {
+    use archive::compress::xz::filters::Filter;
+
+    // Fuzz run-1791310276 input: exercises the RISC-V AUIPC
+    // special-format path where the encoder produced output that
+    // upstream xz could not reverse.
+    let input = include_bytes!(
+        "../fixtures/fuzz/generated/xz-riscv_self_xz-riscv-self-checksum-m_74e82f14.bin"
+    );
+    let encoded =
+        xz::encode::encode_with_filters(input, &[Filter::RiscV { start_offset: 0 }]).unwrap();
+    assert_eq!(xz::decode::decode(&encoded).unwrap(), input);
+    if let Some(decoded) = xz_system_decode(&encoded) {
+        assert_eq!(decoded, input);
+    }
+}
+
+#[test]
 fn test_xz_encode_arm_filter_chain_system_decode() {
     use archive::compress::xz::filters::Filter;
 

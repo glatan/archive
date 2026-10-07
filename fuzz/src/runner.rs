@@ -710,6 +710,15 @@ const fn min_encoded_floor(algo: Algorithm) -> usize {
         // archive holding two tar members; both exceed 4KiB of structural
         // overhead on tiny inputs.
         Algorithm::Cmpsc | Algorithm::Deb => 8192,
+        // ISO9660 needs ~21 sectors of mandatory structure even for an
+        // empty image (16-sector system area, volume descriptor set and
+        // terminator, plus both path tables): ~43008 bytes minimum.
+        Algorithm::Iso9660 | Algorithm::IsoRr => 45056,
+        // MSCFB v4 uses 4096-byte sectors and emits at least five of them
+        // (header, FAT, directory, MiniFAT, mini stream) once a stream is
+        // stored: 20480 bytes observed for a single-byte input. Six sectors
+        // leaves headroom for metadata growth.
+        Algorithm::MscfbV4 => 24576,
         _ => 4096,
     }
 }
@@ -1104,13 +1113,21 @@ fn decode_outcome(algo: Algorithm, candidate: &[u8]) -> Result<DecodeOutcome, St
 }
 
 /// Probe a mutated encoded stream: the decoder must return (`Ok` or `Err`)
-/// without panicking and must not decode beyond `decoded_limit`.
+/// without panicking and must not decode beyond `decoded_limit`. Codecs
+/// whose stream does not carry an output length are probed through their
+/// bounded decode API so oversized output is capped at the limit rather
+/// than materialized.
 fn corrupt_probe(algo: Algorithm, candidate: &[u8], decoded_limit: usize) -> Result<(), String> {
-    match decode_outcome(algo, candidate)? {
-        DecodeOutcome::Decoded(size) if size > decoded_limit => Err(format!(
-            "resource oracle: corrupt decode produced {size} bytes > {decoded_limit}"
+    watchdog::note_data(candidate);
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        algorithms::decode_bounded_with(algo, candidate, decoded_limit)
+    })) {
+        Ok(Ok(decoded)) if decoded.len() > decoded_limit => Err(format!(
+            "resource oracle: corrupt decode produced {} bytes > {decoded_limit}",
+            decoded.len()
         )),
-        _ => Ok(()),
+        Ok(_) => Ok(()),
+        Err(panic_info) => Err(format!("PANIC: {}", panic_message(&panic_info))),
     }
 }
 
@@ -1385,9 +1402,13 @@ fn replay_hang_artifact(path: &Path, load_err: String) -> Result<(), String> {
         data.len()
     );
     if pattern == TestPattern::Corrupt {
-        // The recorded bytes are the decoder input itself.
+        // The recorded bytes are the decoder input itself. Replay through
+        // the same bounded probe the corrupt case used — a plain
+        // decode_outcome would skip the output cap and could re-hang on
+        // streams that emit unbounded output from finite input.
         let _inflight = watchdog::enter(algo, pattern, meta.iteration, &data);
-        return match decode_outcome(algo, &data) {
+        let limit = corrupt_decoded_limit(data.len());
+        return match corrupt_probe(algo, &data, limit) {
             Ok(_) => {
                 eprintln!("[replay] success: hang no longer reproduces");
                 Ok(())

@@ -183,11 +183,14 @@ fn decode_state(input: &[u8]) -> Result<JidacState, Error> {
     let mut committed_len = input.len();
 
     let mut start = 0;
+    // Bound total ZPAQL work across every block of this decode.
+    let budget = crate::compress::zpaq::zpaql::new_shared_budget();
     while !incomplete {
         let Some(header) = parse_block_header_at(input, start)? else {
             break;
         };
         let mut block = BlockDecoder::new(input, &header, usize::MAX)?;
+        block.set_cycle_budget(budget.clone());
         while let Some(segment) = block.next_segment()? {
             let Some(usize_field) = parse_comment(&segment.comment) else {
                 if saw_jidac {
