@@ -49,7 +49,7 @@
 | 20 | Range Lock sector (offset 0x7FFFFFFF) / トランザクション signature | ❌ intentional scope | 並行アクセス制御はコンテナ展開に不要。signature は読み飛ばし |
 | 22 | 大文字 mapping / red-black 挿入順序 | ✅ | `decode::get_stream(input, path)` が各 storage の sibling red-black 木を §2.6.4 ソート規則 (大文字化 UTF-16 code unit、長さ→code unit 順、`mod.rs` の `sort_key`/`key_cmp` で encode と共通化) で二分下降して lookup。`decode::decode_sorted` は §2.6.4 規則の順序列挙 (非整列木でも順序保証)。`get_stream_resolves_sibling_tree`, `get_stream_misses_unknown_and_non_stream_paths`, `decode_sorted_orders_by_264_sort_rule`, `decode_sorted_fixes_unsorted_tree` |
 | 24 | red-black color ビット (byte 67) の検証・sibling/child ID の NOSTREAM 規約・同一 storage 内の名前重複なし要件 | ✅ opt-in | `decode_strict` で color バイト、NOSTREAM 規約、および同一 storage 内の重複名を検証する (`rejects_invalid_color_byte`, `rejects_stream_with_child`, `rejects_duplicate_sibling_names`)。既定の `decode` が寛容な処理 (lenient) を維持するのは後方互換のための設計判断 |
-| 23 | version 3 で上位 32bit が非ゼロな stream size の寛容読み | ❌ intentional scope | spec は「parser は上位を無視すべき」と推奨。本実装は規格上限超過を厳格拒否 |
+| 23 | version 3 で上位 32bit が非ゼロな stream size の寛容読み | ❌ intentional scope | [MS-CFB] §2.6.1 は「parser は上位 32bit を無視すべき」と推奨。本実装は上位 32bit が非ゼロ (解釈サイズ > `u32::MAX`) の場合のみ `stream_data` で `InvalidData` を返し、上位が 0 で 2-4 GiB の場合は受理する |
 
 ## 集計
 

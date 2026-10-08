@@ -26,7 +26,12 @@
 //! view applies all `i` blocks in order; deletion entries remove the
 //! filename.
 //!
-//! Read support is [`decode_jidac`]. [`encode_jidac`] writes a fresh
+//! Read support is [`decode_jidac`], which resolves fragment
+//! references into file contents, and [`decode_jidac_index`], a
+//! metadata-only view that never requires `d` block contents and
+//! therefore also decodes spec §8 index archives (journaling archives
+//! with no `d` blocks, e.g. produced by upstream `zpaq x -index`).
+//! [`encode_jidac`] writes a fresh
 //! single-transaction archive; [`JidacAppender`] appends new
 //! transactions to an existing archive with upstream content-defined
 //! fragmenting and SHA-1 fragment deduplication, and [`JidacAppender::delete`]
@@ -75,6 +80,67 @@ pub struct JidacJournal {
     pub files: Vec<JidacFile>,
 }
 
+/// One fragment's metadata as recorded by an `h` block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct JidacFragment {
+    /// SHA-1 of the uncompressed fragment contents.
+    pub sha1: [u8; 20],
+    /// Uncompressed fragment size in bytes.
+    pub size: u32,
+}
+
+/// One file's metadata recovered from `i` blocks. Fragment
+/// references are left as ids; contents are not decoded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JidacIndexFile {
+    /// Raw filename bytes.
+    pub filename: Vec<u8>,
+    /// `yyyymmddhhmmss` timestamp, or 0 if the index recorded none.
+    pub date: i64,
+    /// Packed attributes (`attr << 8 | 'u'` unix / `'w'` windows), or 0.
+    pub attr: u64,
+    /// Referenced fragment ids, in order (unresolved).
+    pub fragments: Vec<u32>,
+    /// Total uncompressed size: the sum of the `size` fields of all
+    /// referenced fragments. `None` when at least one referenced id
+    /// has no `h`-block record in this stream — possible for an
+    /// index that does not describe every fragment it references.
+    pub size: Option<u64>,
+}
+
+/// One committed transaction's metadata view: the file table visible
+/// after its `i` blocks were applied.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JidacIndexVersion {
+    /// `yyyymmddhhmmss` transaction date from the `c` block filename.
+    pub date: i64,
+    /// Files visible at the end of this transaction.
+    pub files: Vec<JidacIndexFile>,
+}
+
+/// A decoded metadata-only JIDAC view (spec §8 index).
+///
+/// Returned by [`decode_jidac_index`]: file metadata and the fragment
+/// table without any fragment contents, so `d`-block-less index
+/// archives decode the same way as full journaling archives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JidacIndex {
+    /// Fragment metadata table built from `h` blocks: fragment id →
+    /// SHA-1 + uncompressed size. Upstream reserves fragment id 0, so
+    /// real ids start at 1; ids never described by an `h` block are
+    /// absent.
+    pub fragments: BTreeMap<u32, JidacFragment>,
+    /// Committed transactions in stream order.
+    pub versions: Vec<JidacIndexVersion>,
+    /// Files visible after all committed transactions.
+    pub files: Vec<JidacIndexFile>,
+    /// Byte offset where committed data ends: the start of a trailing
+    /// incomplete transaction, or `input.len()` when the stream ends
+    /// cleanly. Same semantics as [`JidacAppender::committed_len`].
+    pub committed_len: usize,
+}
+
+#[derive(Clone)]
 struct FileRecord {
     date: i64,
     attr: u64,
@@ -164,20 +230,35 @@ fn snapshot(
     Ok(files)
 }
 
+/// Per-transaction file-table snapshot taken after the last `i`
+/// block of the transaction.
+struct VersionSnap {
+    date: i64,
+    files: BTreeMap<Vec<u8>, FileRecord>,
+}
+
 struct JidacState {
+    /// Decoded fragment contents (full decode only; empty in
+    /// metadata-only mode).
     frags: Vec<Vec<u8>>,
+    /// Fragment metadata collected from `h` blocks.
+    ht: BTreeMap<u32, JidacFragment>,
     dt: BTreeMap<Vec<u8>, FileRecord>,
-    versions: Vec<JidacVersion>,
+    versions: Vec<VersionSnap>,
     /// Byte offset where committed data ends: the start of a trailing
     /// incomplete transaction, or `input.len()` when the stream ends
     /// cleanly.
     committed_len: usize,
 }
 
-fn decode_state(input: &[u8]) -> Result<JidacState, Error> {
+/// Walk the JIDAC block sequence. With `metadata_only`, `d` block
+/// payloads are not stored and `h` records are not verified against
+/// fragment data, so spec §8 index archives (no `d` blocks) decode.
+fn decode_state(input: &[u8], metadata_only: bool) -> Result<JidacState, Error> {
     let mut frags: Vec<Vec<u8>> = Vec::new();
+    let mut ht: BTreeMap<u32, JidacFragment> = BTreeMap::new();
     let mut dt: BTreeMap<Vec<u8>, FileRecord> = BTreeMap::new();
-    let mut versions: Vec<JidacVersion> = Vec::new();
+    let mut versions: Vec<VersionSnap> = Vec::new();
     let mut saw_jidac = false;
     let mut incomplete = false;
     let mut committed_len = input.len();
@@ -202,6 +283,13 @@ fn decode_state(input: &[u8]) -> Result<JidacState, Error> {
             };
             saw_jidac = true;
             let (fdate, ftype, num) = parse_filename(&segment.filename)?;
+            // Spec §8: num range is 0000000001..4294967295. Upstream
+            // enforces num >= 1 on h blocks ("bad h fragment"); a
+            // num=0 d block would shift fragment ids and silently
+            // return wrong data, so reject it for all block types.
+            if num == 0 {
+                return Err(Error::InvalidData("zpaq jidac: bad fragment"));
+            }
             let payload = &segment.data;
             match ftype {
                 b'c' => {
@@ -214,10 +302,14 @@ fn decode_state(input: &[u8]) -> Result<JidacState, Error> {
                         committed_len = start;
                         break;
                     }
-                    versions.push(JidacVersion {
+                    versions.push(VersionSnap {
                         date: fdate,
-                        files: Vec::new(),
+                        files: BTreeMap::new(),
                     });
+                }
+                b'd' if metadata_only => {
+                    // Metadata-only decode keeps no fragment contents;
+                    // the fragment table is rebuilt from `h` blocks.
                 }
                 b'd' => {
                     // payload = fragdata + usize[4]*n + 0[4] + n[4]
@@ -264,22 +356,38 @@ fn decode_state(input: &[u8]) -> Result<JidacState, Error> {
                         return Err(Error::InvalidData("zpaq jidac: bad h block size"));
                     }
                     let n = (payload.len() - 4) / 24;
-                    // Verify recorded sizes against stored fragments.
+                    // Record sha1/usize into the fragment table; in
+                    // full mode also verify sizes against stored data.
                     let mut s = 4usize;
                     for i in 0..n {
-                        let id = num as usize + i;
-                        let recorded = btoi(&payload[s + 20..s + 24])? as usize;
-                        match frags.get(id) {
-                            Some(frag) if frag.len() == recorded => {}
-                            Some(_) => {
-                                return Err(Error::InvalidData(
-                                    "zpaq jidac: fragment size mismatch",
-                                ));
-                            }
-                            None => {
-                                return Err(Error::InvalidData(
-                                    "zpaq jidac: fragment table without data",
-                                ));
+                        let id64 = u64::from(num) + i as u64;
+                        if id64 > u64::from(u32::MAX) {
+                            return Err(Error::InvalidData("zpaq jidac: bad fragment"));
+                        }
+                        let id = id64 as u32;
+                        let mut sum = [0u8; 20];
+                        sum.copy_from_slice(&payload[s..s + 20]);
+                        let recorded = btoi(&payload[s + 20..s + 24])?;
+                        ht.insert(
+                            id,
+                            JidacFragment {
+                                sha1: sum,
+                                size: recorded,
+                            },
+                        );
+                        if !metadata_only {
+                            match frags.get(id as usize) {
+                                Some(frag) if frag.len() == recorded as usize => {}
+                                Some(_) => {
+                                    return Err(Error::InvalidData(
+                                        "zpaq jidac: fragment size mismatch",
+                                    ));
+                                }
+                                None => {
+                                    return Err(Error::InvalidData(
+                                        "zpaq jidac: fragment table without data",
+                                    ));
+                                }
                             }
                         }
                         s += 24;
@@ -338,7 +446,7 @@ fn decode_state(input: &[u8]) -> Result<JidacState, Error> {
                         return Err(Error::InvalidData("zpaq jidac: bad i block size"));
                     }
                     if let Some(v) = versions.last_mut() {
-                        v.files = snapshot(&dt, &frags)?;
+                        v.files = dt.clone();
                     }
                 }
                 _ => {
@@ -356,10 +464,38 @@ fn decode_state(input: &[u8]) -> Result<JidacState, Error> {
     }
     Ok(JidacState {
         frags,
+        ht,
         dt,
         versions,
         committed_len,
     })
+}
+
+/// Build the metadata-only view of one file table snapshot.
+fn snapshot_index(
+    dt: &BTreeMap<Vec<u8>, FileRecord>,
+    ht: &BTreeMap<u32, JidacFragment>,
+) -> Vec<JidacIndexFile> {
+    let mut files = Vec::with_capacity(dt.len());
+    for (filename, rec) in dt {
+        let mut size = Some(0u64);
+        for &p in &rec.ptrs {
+            match ht.get(&p) {
+                Some(f) => {
+                    size = size.and_then(|acc| acc.checked_add(u64::from(f.size)));
+                }
+                None => size = None,
+            }
+        }
+        files.push(JidacIndexFile {
+            filename: filename.clone(),
+            date: rec.date,
+            attr: rec.attr,
+            fragments: rec.ptrs.clone(),
+            size,
+        });
+    }
+    files
 }
 
 /// Decode an upstream JIDAC journaling archive.
@@ -369,11 +505,44 @@ fn decode_state(input: &[u8]) -> Result<JidacState, Error> {
 /// metadata, or reference missing fragments are rejected. A trailing
 /// incomplete transaction (`jmp < 0`) is ignored like upstream does.
 pub fn decode_jidac(input: &[u8]) -> Result<JidacJournal, Error> {
-    let state = decode_state(input)?;
+    let state = decode_state(input, false)?;
+    let mut versions = Vec::with_capacity(state.versions.len());
+    for v in &state.versions {
+        versions.push(JidacVersion {
+            date: v.date,
+            files: snapshot(&v.files, &state.frags)?,
+        });
+    }
     let files = snapshot(&state.dt, &state.frags)?;
-    Ok(JidacJournal {
-        versions: state.versions,
+    Ok(JidacJournal { versions, files })
+}
+
+/// Decode only the metadata of a JIDAC journaling stream.
+///
+/// Unlike [`decode_jidac`], fragment contents are never required or
+/// decoded: `i`-block fragment references are returned as id lists
+/// and the fragment table is built from `h` blocks alone. This also
+/// decodes spec §8 index archives — journaling archives with no `d`
+/// blocks, as produced by upstream `zpaq x -index` — for which
+/// [`decode_jidac`] fails on the unresolvable fragment references.
+/// Applied to a regular journaling archive it returns the same file
+/// table and version history, plus [`JidacFragment`] metadata for
+/// every `h`-block record.
+pub fn decode_jidac_index(input: &[u8]) -> Result<JidacIndex, Error> {
+    let state = decode_state(input, true)?;
+    let mut versions = Vec::with_capacity(state.versions.len());
+    for v in &state.versions {
+        versions.push(JidacIndexVersion {
+            date: v.date,
+            files: snapshot_index(&v.files, &state.ht),
+        });
+    }
+    let files = snapshot_index(&state.dt, &state.ht);
+    Ok(JidacIndex {
+        fragments: state.ht,
+        versions,
         files,
+        committed_len: state.committed_len,
     })
 }
 
@@ -443,6 +612,9 @@ pub fn encode_jidac(entries: &[JidacInput], date: i64, level: u8) -> Result<Vec<
     for e in entries {
         if e.filename.contains(&0) {
             return Err(Error::InvalidData("zpaq jidac: NUL in filename"));
+        }
+        if e.filename.len() > 65535 {
+            return Err(Error::InvalidData("zpaq jidac: filename too long"));
         }
         if e.data.len() > 0x7FFF_FFFF {
             return Err(Error::InvalidData("zpaq jidac: fragment too big"));
@@ -619,7 +791,7 @@ impl JidacAppender {
     /// Open an existing JIDAC archive for appending. The archive must
     /// decode as a valid JIDAC stream (`decode_jidac` rules).
     pub fn open(existing: &[u8]) -> Result<Self, Error> {
-        let state = decode_state(existing)?;
+        let state = decode_state(existing, false)?;
         let mut frag_ids = BTreeMap::new();
         for (i, frag) in state.frags.iter().enumerate().skip(1) {
             frag_ids.insert(sha1(frag), i as u32);
@@ -660,6 +832,9 @@ impl JidacAppender {
     pub fn add(&mut self, input: &JidacInput) -> Result<(), Error> {
         if input.filename.contains(&0) {
             return Err(Error::InvalidData("zpaq jidac: NUL in filename"));
+        }
+        if input.filename.len() > 65535 {
+            return Err(Error::InvalidData("zpaq jidac: filename too long"));
         }
         let mut ptrs = Vec::new();
         for frag in split_fragments(input.data, self.frag_bits) {
@@ -770,6 +945,9 @@ impl JidacAppender {
         // i block: delete records first (upstream order), then adds.
         let mut ipayload = Vec::new();
         for name in &self.deletes {
+            if name.len() > 65535 {
+                return Err(Error::InvalidData("zpaq jidac: filename too long"));
+            }
             ipayload.extend_from_slice(&0i64.to_le_bytes());
             ipayload.extend_from_slice(name);
             ipayload.push(0);
@@ -1079,5 +1257,298 @@ mod tests {
         assert!(parse_filename(b"short").is_err());
         assert!(parse_filename(b"jDC18990101120000i0000000001").is_err());
         assert!(parse_filename(b"jDC20250101120000i0000000001").is_ok());
+    }
+
+    #[test]
+    fn jidac_rejects_oversized_filename() {
+        let long_name = alloc::vec![b'a'; 65536];
+        let input = JidacInput {
+            filename: &long_name,
+            date: 20_250_101_120_000,
+            attr: 0,
+            data: b"x",
+        };
+        assert!(matches!(
+            encode_jidac(core::slice::from_ref(&input), 20_250_101_120_000, 1),
+            Err(Error::InvalidData("zpaq jidac: filename too long"))
+        ));
+
+        let base = encode_jidac(&[entry("a.txt", b"alpha")], 20_250_101_120_000, 1).unwrap();
+        let mut ap = JidacAppender::open(&base).unwrap();
+        assert!(matches!(
+            ap.add(&input),
+            Err(Error::InvalidData("zpaq jidac: filename too long"))
+        ));
+    }
+
+    /// Build a spec §8 index archive by hand: `c` (jmp = 0), `h`, and
+    /// `i` blocks describing one file backed by fragment 1, with no
+    /// `d` block — the fragment data lives in the archive this index
+    /// describes.
+    fn index_archive() -> Vec<u8> {
+        let date = 20_250_101_120_000i64;
+        let data = b"index payload data";
+        let attr: u64 = (0o100644u64 << 8) | u64::from(b'u');
+        let mut arc = Vec::new();
+        // c block: upstream writes jmp = 0 for an index transaction.
+        emit_block(
+            &mut arc,
+            1,
+            &jidac_name(date, b'c', 2).unwrap(),
+            &jidac_comment(8),
+            &0i64.to_le_bytes(),
+        )
+        .unwrap();
+        // h block: bsize (compressed d-block size in the described
+        // archive) + sha1[20] usize[4] for fragment 1.
+        let mut h = Vec::new();
+        h.extend_from_slice(&120u32.to_le_bytes());
+        h.extend_from_slice(&sha1(data));
+        h.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        emit_block(
+            &mut arc,
+            1,
+            &jidac_name(date, b'h', 1).unwrap(),
+            &jidac_comment(h.len()),
+            &h,
+        )
+        .unwrap();
+        // i block: one add entry pointing at fragment 1.
+        let mut i = Vec::new();
+        i.extend_from_slice(&date.to_le_bytes());
+        i.extend_from_slice(b"meta.txt");
+        i.push(0);
+        i.extend_from_slice(&3u32.to_le_bytes());
+        i.extend_from_slice(&(attr as u32).to_le_bytes()[..3]);
+        i.extend_from_slice(&1u32.to_le_bytes());
+        i.extend_from_slice(&1u32.to_le_bytes());
+        emit_block(
+            &mut arc,
+            1,
+            &jidac_name(date, b'i', 1).unwrap(),
+            &jidac_comment(i.len()),
+            &i,
+        )
+        .unwrap();
+        arc
+    }
+
+    #[test]
+    fn jidac_index_decodes_index_archive() {
+        let arc = index_archive();
+        let idx = decode_jidac_index(&arc).unwrap();
+        assert_eq!(idx.versions.len(), 1);
+        assert_eq!(idx.versions[0].date, 20_250_101_120_000);
+        assert_eq!(idx.files.len(), 1);
+        let f = &idx.files[0];
+        assert_eq!(f.filename, b"meta.txt");
+        assert_eq!(f.date, 20_250_101_120_000);
+        assert_eq!(f.attr, (0o100644u64 << 8) | u64::from(b'u'));
+        assert_eq!(f.fragments, [1]);
+        assert_eq!(f.size, Some(18));
+        let frag = idx.fragments.get(&1).unwrap();
+        assert_eq!(frag.sha1, sha1(b"index payload data"));
+        assert_eq!(frag.size, 18);
+        assert_eq!(idx.fragments.len(), 1);
+        assert_eq!(idx.versions[0].files, idx.files);
+        assert_eq!(idx.committed_len, arc.len());
+        // The same stream is rejected by the full decoder because
+        // fragment data is absent.
+        assert!(matches!(
+            decode_jidac(&arc),
+            Err(Error::InvalidData(
+                "zpaq jidac: fragment table without data"
+            ))
+        ));
+    }
+
+    #[test]
+    fn jidac_index_unknown_fragment_size() {
+        // An index may reference fragments it does not describe:
+        // ptr 7 has no h record, so size is unknown.
+        let date = 20_250_101_120_000i64;
+        let mut arc = Vec::new();
+        emit_block(
+            &mut arc,
+            1,
+            &jidac_name(date, b'c', 1).unwrap(),
+            &jidac_comment(8),
+            &0i64.to_le_bytes(),
+        )
+        .unwrap();
+        let mut i = Vec::new();
+        i.extend_from_slice(&date.to_le_bytes());
+        i.extend_from_slice(b"ext.bin");
+        i.push(0);
+        i.extend_from_slice(&0u32.to_le_bytes());
+        i.extend_from_slice(&2u32.to_le_bytes());
+        i.extend_from_slice(&7u32.to_le_bytes());
+        i.extend_from_slice(&3u32.to_le_bytes());
+        emit_block(
+            &mut arc,
+            1,
+            &jidac_name(date, b'i', 1).unwrap(),
+            &jidac_comment(i.len()),
+            &i,
+        )
+        .unwrap();
+        let idx = decode_jidac_index(&arc).unwrap();
+        assert_eq!(idx.files.len(), 1);
+        assert_eq!(idx.files[0].fragments, [7, 3]);
+        assert_eq!(idx.files[0].size, None);
+        assert!(idx.fragments.is_empty());
+    }
+
+    #[test]
+    fn jidac_index_full_archive_metadata() {
+        // A regular journaling archive decodes metadata-only too:
+        // the fragment table comes from the h block, file ptrs stay
+        // unresolved.
+        let data = b"journal payload";
+        let enc = encode_jidac(
+            &[
+                entry("a.txt", data),
+                JidacInput {
+                    filename: b"dir/b.bin",
+                    date: 20_250_101_130_000,
+                    attr: (0o100600u64 << 8) | u64::from(b'u'),
+                    data: b"second",
+                },
+            ],
+            20_250_101_120_000,
+            1,
+        )
+        .unwrap();
+        let idx = decode_jidac_index(&enc).unwrap();
+        assert_eq!(idx.versions.len(), 1);
+        assert_eq!(idx.files.len(), 2);
+        assert_eq!(idx.files[0].filename, b"a.txt");
+        assert_eq!(idx.files[0].fragments, [1]);
+        assert_eq!(idx.files[0].size, Some(15));
+        assert_eq!(idx.files[1].filename, b"dir/b.bin");
+        assert_eq!(idx.files[1].fragments, [2]);
+        assert_eq!(idx.files[1].size, Some(6));
+        assert_eq!(idx.files[1].attr, (0o100600u64 << 8) | u64::from(b'u'));
+        assert_eq!(idx.fragments.len(), 2);
+        assert_eq!(idx.fragments[&1].sha1, sha1(data));
+        assert_eq!(idx.fragments[&1].size, 15);
+        assert_eq!(idx.fragments[&2].size, 6);
+        // Consistent with the full decode of the same stream.
+        let j = decode_jidac(&enc).unwrap();
+        assert_eq!(idx.files.len(), j.files.len());
+        for (m, f) in idx.files.iter().zip(&j.files) {
+            assert_eq!(m.filename, f.filename);
+            assert_eq!(m.date, f.date);
+            assert_eq!(m.attr, f.attr);
+            assert_eq!(m.size, Some(f.data.len() as u64));
+        }
+    }
+
+    #[test]
+    fn jidac_index_multi_version_history() {
+        // Second transaction reuses fragment 1 by dedup: it emits only
+        // c + i blocks. The index view keeps per-version snapshots.
+        let data = b"shared";
+        let base = encode_jidac(&[entry("a.txt", data)], 20_250_101_120_000, 1).unwrap();
+        let mut ap = JidacAppender::open(&base).unwrap();
+        ap.add(&entry("b.txt", data)).unwrap();
+        ap.delete(b"a.txt");
+        let suffix = ap.commit(20_250_102_120_000, 1).unwrap();
+        let mut arc = base;
+        arc.extend_from_slice(&suffix);
+        let idx = decode_jidac_index(&arc).unwrap();
+        assert_eq!(idx.versions.len(), 2);
+        assert_eq!(idx.versions[0].files.len(), 1);
+        assert_eq!(idx.versions[0].files[0].filename, b"a.txt");
+        assert_eq!(idx.versions[1].files.len(), 1);
+        assert_eq!(idx.versions[1].files[0].filename, b"b.txt");
+        assert_eq!(idx.versions[1].files[0].fragments, [1]);
+        assert_eq!(idx.files, idx.versions[1].files);
+        assert_eq!(idx.fragments.len(), 1);
+        assert_eq!(idx.fragments[&1].sha1, sha1(data));
+    }
+
+    #[test]
+    fn jidac_index_rejects_malformed() {
+        // Non-journal input is still rejected.
+        let plain = crate::compress::zpaq::encode::encode(b"x", 1);
+        assert!(decode_jidac_index(&plain).is_err());
+        assert!(decode_jidac_index(b"garbage").is_err());
+
+        // Truncated i entry: nonzero date, filename, no attr field.
+        let date = 20_250_101_120_000i64;
+        let mut arc = Vec::new();
+        emit_block(
+            &mut arc,
+            1,
+            &jidac_name(date, b'c', 1).unwrap(),
+            &jidac_comment(8),
+            &0i64.to_le_bytes(),
+        )
+        .unwrap();
+        let mut i = Vec::new();
+        i.extend_from_slice(&date.to_le_bytes());
+        i.extend_from_slice(b"x");
+        i.push(0);
+        emit_block(
+            &mut arc,
+            1,
+            &jidac_name(date, b'i', 1).unwrap(),
+            &jidac_comment(i.len()),
+            &i,
+        )
+        .unwrap();
+        assert!(matches!(
+            decode_jidac_index(&arc),
+            Err(Error::InvalidData("zpaq jidac: missing attr"))
+        ));
+
+        // Corrupt h block payload (not 4 mod 24).
+        let mut arc2 = Vec::new();
+        emit_block(
+            &mut arc2,
+            1,
+            &jidac_name(date, b'c', 1).unwrap(),
+            &jidac_comment(8),
+            &0i64.to_le_bytes(),
+        )
+        .unwrap();
+        emit_block(
+            &mut arc2,
+            1,
+            &jidac_name(date, b'h', 1).unwrap(),
+            &jidac_comment(9),
+            &[0u8; 9],
+        )
+        .unwrap();
+        assert!(matches!(
+            decode_jidac_index(&arc2),
+            Err(Error::InvalidData("zpaq jidac: bad h block size"))
+        ));
+    }
+
+    #[test]
+    fn jidac_rejects_zero_num() {
+        // Spec §8: num range is 0000000001..4294967295. A num=0 block
+        // is rejected for every block type (upstream checks it on h).
+        for ftype in *b"cdhi" {
+            let mut arc = Vec::new();
+            emit_block(
+                &mut arc,
+                1,
+                &jidac_name(20_250_101_120_000, ftype, 0).unwrap(),
+                &jidac_comment(8),
+                &0i64.to_le_bytes(),
+            )
+            .unwrap();
+            assert!(
+                matches!(
+                    decode_jidac(&arc),
+                    Err(Error::InvalidData("zpaq jidac: bad fragment"))
+                ),
+                "ftype {}",
+                ftype
+            );
+        }
     }
 }

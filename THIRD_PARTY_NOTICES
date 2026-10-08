@@ -915,15 +915,16 @@ against de facto reference behavior:
 - ZPAQ (`src/compress/zpaq/**`, `src/archive/zpaq/**`)
   - Reference and port source: Matt Mahoney's ZPAQ format, context-mixing
     model, and ZPAQL VM (`zpaq`/`libzpaq` v7.15, released to the public
-    domain; the bundled upstream `libdivsufsort-lite` component is MIT and
-    is not used by this port). The written specification "ZPAQ Level 1
+    domain; the bundled upstream `libdivsufsort-lite` (MIT), libtomcrypt
+    AES, and Salsa20/8 (both public domain) components are not used by
+    this port). The written specification "ZPAQ Level 1
     and Level 2" (zpaq206.pdf, https://mattmahoney.net/dc/zpaq206.pdf) is
-    partially non-extractable (embedded-font PDF), so the spec's own
-    reference implementation was used as the authoritative source for the
-    predictor state table, squash/stretch tables, built-in level 1-3
-    model blobs, and arithmetic coder semantics (the
-    IMPLEMENTATION_POLICY exception for a materially incomplete written
-    specification with a clean rights chain).
+    text-extractable, but tables and superscripts degrade under
+    extraction, so the spec's own reference implementation was used as
+    the authoritative source for the predictor state table,
+    squash/stretch tables, built-in level 1-3 model blobs, and arithmetic
+    coder semantics (the IMPLEMENTATION_POLICY exception for written-spec
+    portions lacking usable precision, with a clean rights chain).
   - libzpaq was also compiled locally (interpreter path, -DNOJIT) as a
     development oracle: bidirectional encode/decode compatibility was
     verified for modeled levels 1-3, unmodeled (n=0) stored streams,

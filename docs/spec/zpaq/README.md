@@ -1,39 +1,44 @@
-# ZPAQ
+# ZPAQ (zpaq206.pdf Level 1/2 v2.06)
 
 | 項目 | 内容 |
 |------|------|
-| 基準仕様 | [ZPAQ Level 1 and Level 2 specification (zpaq206.pdf, 2016-03-22)](https://mattmahoney.net/dc/zpaq206.pdf)。低レイヤ codec (ZPAQL VM・predictor component・block/model 構造) はこの仕様が根拠。**監査メモ: zpaq206.pdf は埋め込みフォントの関係でテキスト抽出が不完全 (断片のみ)。state table・coder 定数・block framing の byte レイアウトなど抽出不能な部分は、仕様自身の参照実装である libzpaq (public domain) を一次参照として補完した (IMPLEMENTATION_POLICY の例外条件: 書面仕様が実質不在 + 権利 clean)。実装は upstream との wire 互換を fixture + oracle で検証済み** |
-| 参照実装 | zpaq/libzpaq v7.15 (Matt Mahoney、public domain)。predictor state table (sns)・squash/stretch テーブル・built-in level 1-3 model blob・arithmetic coder 意味論を移植し、さらに oracle としてコンパイル (-DNOJIT) して双方向 interop を検証した。upstream 生成 fixture は `tests/fixtures/zpaq/` に収録。JIDAC journaling format は upstream `zpaq.cpp` (v7.15) の journaling コードを一次参照にした。`.cfg` config 言語は `libzpaq.cpp` の `Compiler` を移植し (mid.cfg/max.cfg を built-in blob に byte-exact で確認)、upstream `zpaq` CLI (v7.15、`pkg/zpaq` でコンテナに導入) を fuzz の file-based oracle (`ArchiveSpec::Zpaq`) および JIDAC 双方向 interop に使用。詳細: THIRD_PARTY_NOTICES ZPAQ 項 |
-| wire 互換性 | low-level codec は upstream と双方向互換: upstream libzpaq が生成した stream (modeled level 1-3・unmodeled `n=0` stored・PROG/PCOMP segment) を byte-exact に decode し、こちらが生成した stream は upstream が decode する |
-| 仕様対象外の層 | crate-local の multi-entry archive 層・journaling transaction・archive editor は upstream 仕様 (v6.x journaling format) ではなく crate 独自のため bounded contract で管理。upstream の ZPAQL JIT 実行経路は scope 外 (config 言語コンパイルは `compress::zpaq::config` で対象) |
-| current scope | upstream wire 互換な low-level codec、multi-entry sequential-segment archive、crate-local journaling transaction helper、materialized archive editor、upstream JIDAC journaling stream の decode / emit (`archive::zpaq::jidac`: single-transaction `encode_jidac` と incremental append の `JidacAppender`) を対象にする |
-| public encoder / archive writer | low-level encoder は built-in level `1..=3` (upstream の min/mid/max model) と validated custom model、archive writer は basic writer / append-as-new-block / journaling / materialized archive editor を持つ。emit する segment の postprocessor は既定で PASS で、`CustomModel::with_pcomp` により PROG (PCOMP program 付き) も emit できる。`compress::zpaq::config` は upstream `.cfg` 言語 (comp/hcomp/pcomp section、ZPAQL mnemonic、if/do 構造化 pseudo-op、$N+M 引数) を CompiledModel へコンパイルし `to_custom_model` で橋渡しする |
-| decoder acceptance | upstream と同じく level byte は 1 (modeled) / 2 (unmodeled) のみ受理し、それ以外は reject する。stored (n=0) / modeled / PASS / PROG segment を処理する |
+| 基準仕様 | [ZPAQ Level 1 and Level 2 specification (zpaq206.pdf, 2016-03-22)](https://mattmahoney.net/dc/zpaq206.pdf) (ローカルスナップショット: `docs/spec/sources/zpaq206.pdf`)。低レイヤ codec (§2-§7)、archive format (§8)、encrypted format (§9) はこの仕様が根拠 |
+| 監査メモ | zpaq206.pdf は本文テキストは抽出可能だが、表組みと上付き文字が抽出時に劣化する (`2^15` → `215` 等)。state table・coder 定数・opcode 表など表・数式の精度が求められる部分は、仕様自身の参照実装である libzpaq (public domain) を一次参照として補完した (IMPLEMENTATION_POLICY 例外条件: 書面仕様の該当箇所が実用精度を欠く + 権利 clean)。実装は upstream との wire 互換を fixture + oracle で検証済み |
+| 参照実装 | zpaq/libzpaq v7.15 (Matt Mahoney、public domain)。predictor state table (sns)・squash/stretch テーブル・built-in level 1-3 model blob・arithmetic coder 意味論を移植し、-DNOJIT でコンパイルして双方向 interop oracle として検証。upstream 生成 fixture は `tests/fixtures/zpaq/` に収録。JIDAC journaling は仕様書 §8 が書面定義であり、upstream `zpaq.cpp` (v7.15) は fragment 境界判定・emit 順序などの動作参照。`.cfg` config 言語は `libzpaq.cpp` の `Compiler` を移植し、upstream mid.cfg/max.cfg の functional text が built-in level 2/3 blob に byte-exact で一致することを回帰化。upstream `zpaq` CLI (v7.15、`pkg/zpaq` でコンテナ導入) は fuzz oracle (`ArchiveSpec::Zpaq`) と JIDAC 双方向 interop に使用。詳細: THIRD_PARTY_NOTICES ZPAQ 項 |
+| current scope | upstream wire 互換な low-level codec (level 1/2、stored/modeled、PASS/PROG postprocessor)、§8 streaming archive (named segment・continuation 対応)、§8 journaling (JIDAC decode・single-transaction emit・incremental append・index metadata decode)、crate-local journaling transaction helper、`ZpaqArchiveEditor`、`decode_bounded` 出力上限、upstream `.cfg` config 言語コンパイラ |
+| intentional exclusion | §9 encrypted format (AES-256 CTR + Scrypt wrapper)、multi-part archive の分割 emit (§10)、ZPAQL JIT 実行経路 (upstream `libzpaq.cpp` の x86-64 codegen、意味論は interpreter と等価)、upstream compact method string (`-m x6ci1` 系) パース |
+| 検証方針 | low-level codec は upstream 生成 stream の byte-exact decode (committed fixture) と crate 出力を upstream が decode する逆方向 oracle で検証。decoder は upstream parity で lax 受理、encoder は strict (§7: compressor は適合データを出力する責任がある) |
 
-### 現在の bounded contract と網羅状況
+## 対応レイヤ・仕様版
 
-| 軸 | 現在の bounded contract | 代表テスト/備考 |
-|----|-------------------------|----------------|
-| predictor component types | upstream component numbering の `CONST` / `CM` / `ICM` / `MATCH` / `AVG` / `MIX2` / `MIX` / `ISSE` / `SSE` 全種を実装。built-in level 1-3 model はそのうち `CONST` / `ICM` / `ISSE` / `MATCH` / `MIX` / `MIX2` / `SSE` を使い (upstream 生成 stream の byte-exact decode で回帰化)、built-in が使わない `CM` と `AVG` は `CustomModel` roundtrip で検証 | `decode_upstream_fixtures`, `custom_model_cm_avg_roundtrip` |
-| predictor / coder semantics | upstream libzpaq の `sns` state table・`squash`/`stretch` テーブル・`dt`/`dt2k`・coder 初期値 (`low=1`, split point, normalization) を移植し、upstream 生成 stream との byte-exact decode で検証 | `tables.rs`, `decode_upstream_fixtures` |
-| ZPAQL VM | upstream opcode 意味論 (register/jump/arithmetic/logical/memory/hash、`OUT`/`HASH`/`HASHD`/`HALT`) を実装し、HCOMP (context 計算) と PCOMP (postprocessing、`ph`/`pm` は block header 由来) の両経路で動作。cycle limit 超過は reject。上限は upstream `-m3` archive の PCOMP EOS (`run(-1)`) が 1<<24 を僅かに超える実測に合わせて 1<<28 に設定 (fuzz 検出の regression fixture で固定)。加えて decode 呼び出し全体で共有する累積 cycle budget があり、`run()` ごとに 8192 cycle が credit され残高は 1<<28 で cap、枯渇時は reject (corrupt 入力に対する bounded-but-slow 長時間 decode の防御、fuzz hang artifact で固定) | `zpaql.rs`, PCOMP fixture tests, `decode_upstream_jidac_heavy_pcomp`, `shared_cycle_budget_*` |
-| malformed input handling | locator 非存在 (empty output)、header 途中 truncation、不正 level/type byte、不完全 COMP record、unknown component type、checksum 破損を reject/処理する | `decode_rejects_malformed_streams`, `custom_model_rejects_invalid_headers` |
-| upstream wire interop | upstream libzpaq 生成 stream の decode (level 1-3・empty/binary payload・stored `n=0`・identity PCOMP・非 identity PCOMP (a++ out halt)・EOS `run(-1)` の trailing byte・SHA-1 segment checksum) を committed fixture で回帰化。逆方向 (crate 出力を upstream が decode) は開発時に oracle で検証済み。JIDAC については upstream `zpaq` CLI 生成 archive の decode と crate 生成 archive の `zpaq l`/`x`/追加 append の受理を確認。再現手順は `tests/fixtures/README.md` | `decode_upstream_fixtures`, `tests/fixtures/zpaq/` |
-| block/model/archive surface | level byte 検証 (1/2 のみ受理)、multiple named segments、empty payload entries、metadata/truncation/corruption、multi-segment archive boundary、append-as-new-block workflow (upstream journaling と同様に既存 model を再利用した新 block を追加)、crate-local journaling transaction (committed latest view / version history / uncommitted tail ignore) を回帰化 | `decode.rs`, `archive::zpaq`, integration tests |
-| public writer の出力同一性 | public writer が生成する built-in level `1..=3` surface については low-level/archive-level roundtrip、level clamp regression、upstream oracle による decode 検証 (modeled 全 level + stored + multi-segment)、parsed existing header を再利用する append writer regression、`ZpaqJournalEncoder` の commit/update/delete regression を回帰化。fuzz harness `zpaq-archive` で multi-entry archive roundtrip + corrupt 対象 | `compress::zpaq::encode`, `archive::zpaq::encode`, integration tests |
-| config 言語コンパイラ | `compress::zpaq::config` が upstream `.cfg` 文法 (comp/hcomp/pcomp、全 ZPAQL mnemonic、if/ifnot/else/endif・ifl/ifnotl/elsel・do/while/until/forever pseudo-op、() nested comment、$N+M 引数) をコンパイルし、upstream mid.cfg/max.cfg の functional text (GPL license notice 除去済み) と再構成した min.cfg が built-in level 1-3 blob に byte-exact で一致することを回帰化 | `compiles_builtin_models_byte_exact`, `compiled_model_encodes_identically_to_builtin`, `structured_control_flow`, `do_while_lowers_to_backward_jt`, `pcomp_section_compiles`, `errors_on_malformed_input`, `mid_cfg_args_shift_table_sizes`, `case_insensitive_and_nested_comments` |
-| custom authoring API | low-level `compress::zpaq::encode::CustomModel` は arbitrary validated predictor config / HCOMP / `hh` / `hm` / level byte を受け取り、`encode_with_model()` でエンコード出力が可能。predictor component config と level/memory 範囲の妥当性を encode 前に検証する | `custom_model_rejects_invalid_headers`, `stored_mode_roundtrip` |
-| decoder validation policy | parsed model/header を先に検証し、known component type の不完全 config、unknown component type、component count が hash array (`2^hh`) を超える header を payload decode 前に reject する。VM cycle limit exhaustion は実行時に reject する | `custom_model_rejects_invalid_headers`, `decode_rejects_component_count_over_hash_size`, header parse tests |
-| metadata 制約 | archive writer は filename/comment を NUL-terminated string として格納するため、metadata 内の NUL byte は reject する | archive writer contract |
-| upstream JIDAC journaling | `archive::zpaq::jidac` は upstream v6.x journaling stream (`jDC` named segments、`c`/`d`/`h`/`i` block 種別、global fragment table、date=0 deletion marker) を decode し、per-version view と latest view を返す。emit は `encode_jidac` の single-transaction archive (fragment は id 1 から採番) と `JidacAppender` による incremental append (upstream の content-defined chunking、SHA-1 による fragment dedup/reuse、deletion record、`committed_len` による incomplete tail 切り詰め) を持つ。upstream `zpaq a` 生成 archive (multi-transaction・deletion・dedup reuse) の decode、crate 生成・追記 archive の `zpaq l`/`x`/append 受理を CLI で双方向確認 (`jidac-appended-mixed.zpaq` fixture は crate base + crate append + upstream append の 3-version chain) | `jidac_single_file_roundtrip`, `jidac_multi_file_roundtrip`, `jidac_rejects_non_journal_stream`, `jidac_rejects_bad_name_and_date`, `decode_upstream_jidac_heavy_pcomp`, `jidac_append_*`, `decode_jidac_appended_mixed` |
-| journaling semantics | crate-local journaling helper は reserved metadata prefix 付き segment + commit marker を 1 transaction として扱い、`decode_journal_latest()` は committed transaction のみを適用して filename 単位で latest-visible policy を返す。`decode_journal_versions()` は commit ごとの snapshot history を返し、不完全 tail は ignore する | `test_decode_journal_latest_applies_put_update_and_delete`, `test_decode_journal_versions_ignores_uncommitted_tail`, `test_zpaq_journal_latest_view_roundtrip`, `test_zpaq_journal_delete_visibility` |
-| archive workflow expansion | `ZpaqArchiveEditor` は plain archive / latest journal view を import し、`push`/`put`/`delete` を staged に適用して 1 つの sequential-segment archive に materialize できる。import 時は parsed existing header/model を再利用する | `test_archive_editor_from_archive_put_and_delete`, `test_archive_editor_from_journal_latest_materializes_plain_archive`, `test_zpaq_archive_editor_rewrites_imported_archive`, `test_zpaq_archive_editor_materializes_journal_latest_view` |
-| 未実装事項 | ZPAQL JIT 実行経路 (upstream `libzpaq.cpp` の x86-64 codegen; 意味論は interpreter と等価)。upstream `-m x6ci1` 系の compact method string パースは scope 外 (config 言語コンパイルは対象)。追加 scope を広げる場合は bounded contract を先に更新する | current contract status |
+| レイヤ | 仕様根拠 | decode | encode | 備考 |
+|---|---|---|---|---|
+| zpaq stream level 1 (modeled のみ) | zpaq206 §2/§7 | ✅ | ✅ | level 1 は n>0 必須 |
+| zpaq stream level 2 (modeled / stored) | zpaq206 §2/§4 | ✅ | ✅ | built-in level 2/3 + custom model、stored は n=0 |
+| streaming archive (named segment・continuation) | zpaq206 §8 | ✅ | ✅ | 空 filename = 前ファイル continuation |
+| journaling archive (JIDAC: jDC/c/d/h/i) | zpaq206 §8 | ✅ | ✅ | `decode_jidac` / `encode_jidac` / `JidacAppender` |
+| index archive (d block なし) | zpaq206 §8 | ✅ | ❌ | `decode_jidac_index` で metadata decode。emit は対象外 |
+| encrypted archive (AES-256 CTR + Scrypt) | zpaq206 §9 | ❌ | ❌ | intentional exclusion |
+| multi-part archive (part00 index + partNN) | zpaq206 §10 | ⚠️ | ❌ | part 連結は caller が concat すれば decode 可、part00 index は `decode_jidac_index` で読み取り可。分割 emit は対象外 |
 
+状態マーカー: ✅ 実装+テスト済み / ⚠️ 部分実装 / ❌ 未実装
 
 ---
 
+## 子ファイル
+
+| ファイル | 内容 |
+|---|---|
+| [codec.md](codec.md) | §2-§7: block/segment syntax、predictor component、arithmetic decoder、postprocessor、ZPAQL VM、compliance |
+| [archive.md](archive.md) | §8 archive format (streaming/journaling/index)、crate-local 契約、§9 encryption・§10 implementation notes、未実装事項 |
+
 ## 集計
 
-低レイヤ codec は upstream ZPAQ/libzpaq と wire 互換であり、upstream 生成 fixture の byte-exact decode と oracle による逆方向検証で確認済み。archive/journal/editor 層は crate 独自 scope として bounded contract で管理し、upstream JIDAC journaling stream は `archive::zpaq::jidac` で decode・single-transaction emit・incremental append をカバーする。upstream config 言語は `compress::zpaq::config` でコンパイル可能 (upstream `Compiler` の移植; mid.cfg/max.cfg を built-in blob に byte-exact で再現)。JIT 実行経路と compact method string パースが対象外。
-上記の各軸が current contract を構成し、すべてテスト回帰化済み。
+| 状態 | 件数 |
+|------|------|
+| ✅ 実装+テスト済み | 55 |
+| ⚠️ 部分実装 | 0 |
+| ❌ 未実装 | 4 |
+| **合計** | **59** |
+
+**カバー率**: 55 / 59 = **93.2%** (❌ はすべて intentional exclusion)
