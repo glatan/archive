@@ -1595,11 +1595,12 @@
    "format": "zpaq",
    "title": "zpaq / libzpaq reference implementation (Matt Mahoney)",
    "version": "zpaq v7.15",
-   "note": "public domain (同梱 libdivsufsort-lite は MIT、port 対象外)。predictor state table (sns)・squash/stretch テーブル・built-in level 1-3 model blob・arithmetic coder 意味論を移植 (zpaq206.pdf の該当箇所が抽出不能のため、IMPLEMENTATION_POLICY 例外として参照実装を一次参照に使用)。さらに oracle としてコンパイル (-DNOJIT) し双方向 interop を検証。config 言語コンパイラ (compress/zpaq/config.rs) は libzpaq.cpp の Compiler を移植 (テスト定数の upstream mid.cfg/max.cfg functional text は zpaq 1.07+ 配布由来で GPL license notice は除去済み; built-in blob に byte-exact — 詳細は TPN ZPAQ 項)。JIDAC journaling format は upstream zpaq.cpp v7.15 を一次参照にし、upstream zpaq CLI (v7.15、pkg/zpaq でコンテナ導入) で双方向および fuzz oracle (ArchiveSpec::Zpaq) として検証。upstream 生成 fixture は tests/fixtures/zpaq/ に収録、harness は .local/refs/libzpaq/ (gitignored)。upstream は 'not encumbered by any patents' と明言 (THIRD_PARTY_NOTICES §3 ZPAQ 項)",
+   "note": "public domain (同梱 libdivsufsort-lite は MIT、port 対象外)。predictor state table (sns)・squash/stretch テーブル・built-in level 1-3 model blob・arithmetic coder 意味論を移植 (zpaq206.pdf は本文テキストは抽出可能だが上付き文字・表が抽出時に劣化するため、これら該当箇所は IMPLEMENTATION_POLICY 例外として参照実装を一次参照に使用)。さらに oracle としてコンパイル (-DNOJIT) し双方向 interop を検証。config 言語コンパイラ (compress/zpaq/config.rs) は libzpaq.cpp の Compiler を移植 (テスト定数の upstream mid.cfg/max.cfg functional text は zpaq 1.07+ 配布由来で GPL license notice は除去済み; built-in blob に byte-exact — 詳細は TPN ZPAQ 項)。JIDAC journaling format は upstream zpaq.cpp v7.15 を一次参照にし、upstream zpaq CLI (v7.15、pkg/zpaq でコンテナ導入) で双方向および fuzz oracle (ArchiveSpec::Zpaq) として検証。upstream 生成 fixture は tests/fixtures/zpaq/ に収録、harness は .local/refs/libzpaq/ (gitignored)。upstream は 'not encumbered by any patents' と明言 (THIRD_PARTY_NOTICES §3 ZPAQ 項)",
    "reference_url": [
-    "https://mattmahoney.net/dc/zpaq.html"
+    "https://mattmahoney.net/dc/zpaq.html",
+    "https://mattmahoney.net/dc/zpaq715.zip"
    ],
-   "license": "public domain (bundled libdivsufsort-lite: MIT)"
+   "license": "public domain (bundled libdivsufsort-lite: MIT; bundled libtomcrypt AES / Salsa20: public domain, unused)"
   },
   {
    "id": "libmspack-lzx",

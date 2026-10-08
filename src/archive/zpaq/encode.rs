@@ -344,6 +344,9 @@ impl Default for ZpaqArchiveEditor {
     }
 }
 
+/// Spec §2: filename and comment are each 0..65535 bytes.
+const MAX_METADATA_LEN: usize = 65535;
+
 fn validate_metadata(value: &[u8], field: &'static str) -> Result<(), Error> {
     if value.contains(&0) {
         return Err(match field {
@@ -351,6 +354,26 @@ fn validate_metadata(value: &[u8], field: &'static str) -> Result<(), Error> {
             "comment" => Error::InvalidData("zpaq: comment contains NUL"),
             _ => Error::InvalidData("zpaq: metadata contains NUL"),
         });
+    }
+    if value.len() > MAX_METADATA_LEN {
+        return Err(match field {
+            "filename" => Error::InvalidData("zpaq: filename too long"),
+            "comment" => Error::InvalidData("zpaq: comment too long"),
+            _ => Error::InvalidData("zpaq: metadata too long"),
+        });
+    }
+    Ok(())
+}
+
+/// Spec §8 streaming: a segment comment must not end with the
+/// journaling marker `jDC\x01`.  Upstream readers use that suffix to
+/// detect journaling blocks, so emitting it on a streaming segment
+/// would make the block be misinterpreted as JIDAC.
+fn reject_jidac_marker(comment: &[u8]) -> Result<(), Error> {
+    if comment.ends_with(b"jDC\x01") {
+        return Err(Error::InvalidData(
+            "zpaq: comment ends with reserved jDC marker",
+        ));
     }
     Ok(())
 }
@@ -369,6 +392,7 @@ fn encode_entries(
     for entry in entries {
         validate_metadata(&entry.filename, "filename")?;
         validate_metadata(&entry.comment, "comment")?;
+        reject_jidac_marker(&entry.comment)?;
         enc.encode_segment(output, &entry.filename, &entry.comment, &entry.data)?;
     }
     Ok(())
@@ -390,6 +414,13 @@ fn encode_journal_operations(
                 filename.extend_from_slice(&entry.filename);
                 let mut comment = journal_comment(b'P');
                 comment.extend_from_slice(&entry.comment);
+                // Re-validate the assembled wire fields: the journal
+                // prefixes add bytes that can push an otherwise legal
+                // name/comment over the 65535-byte §2 limit, and the
+                // §8 jDC marker check must see the final comment bytes.
+                validate_metadata(&filename, "filename")?;
+                validate_metadata(&comment, "comment")?;
+                reject_jidac_marker(&comment)?;
                 enc.encode_segment(output, &filename, &comment, &entry.data)?;
             }
             JournalOperation::Delete(filename) => {
@@ -398,6 +429,7 @@ fn encode_journal_operations(
 
                 let mut encoded_filename = ZPAQ_JOURNAL_ENTRY_PREFIX.to_vec();
                 encoded_filename.extend_from_slice(filename);
+                validate_metadata(&encoded_filename, "filename")?;
                 let comment = journal_comment(b'D');
                 enc.encode_segment(output, &encoded_filename, &comment, &[])?;
             }
@@ -457,6 +489,8 @@ fn journal_comment(op: u8) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use super::*;
     use crate::archive::zpaq::decode::decode;
 
@@ -496,6 +530,69 @@ mod tests {
         assert!(matches!(
             enc.finish(),
             Err(Error::InvalidData("zpaq: comment contains NUL"))
+        ));
+    }
+
+    #[test]
+    fn test_rejects_oversized_filename() {
+        let mut enc = ZpaqEncoder::new(1);
+        enc.add_entry(&vec![b'a'; 65536], b"", b"payload");
+        assert!(matches!(
+            enc.finish(),
+            Err(Error::InvalidData("zpaq: filename too long"))
+        ));
+
+        // The 65535-byte boundary is still accepted.
+        let mut enc = ZpaqEncoder::new(1);
+        enc.add_entry(&vec![b'a'; 65535], b"", b"payload");
+        let archive = enc.finish().unwrap();
+        assert_eq!(decode(&archive).unwrap()[0].filename.len(), 65535);
+    }
+
+    #[test]
+    fn test_rejects_oversized_comment() {
+        let mut enc = ZpaqEncoder::new(1);
+        enc.add_entry(b"ok", &vec![b'c'; 65536], b"payload");
+        assert!(matches!(
+            enc.finish(),
+            Err(Error::InvalidData("zpaq: comment too long"))
+        ));
+    }
+
+    #[test]
+    fn test_journal_rejects_oversized_encoded_filename() {
+        // The "@zpaqj1:" prefix pushes a near-limit filename over
+        // 65535 bytes on the wire.
+        let mut journal = ZpaqJournalEncoder::new(1);
+        journal.put_entry(&vec![b'a'; 65535], b"", b"payload");
+        assert!(matches!(
+            journal.finish(),
+            Err(Error::InvalidData("zpaq: filename too long"))
+        ));
+    }
+
+    #[test]
+    fn test_rejects_comment_ending_jdc_marker() {
+        // Spec §8: a streaming segment comment must not end with
+        // "jDC\x01" (the JIDAC journaling marker).
+        let mut enc = ZpaqEncoder::new(1);
+        enc.add_entry(b"ok", b"note jDC\x01", b"payload");
+        assert!(matches!(
+            enc.finish(),
+            Err(Error::InvalidData(
+                "zpaq: comment ends with reserved jDC marker"
+            ))
+        ));
+
+        // The same applies to journal put operations, where the
+        // emitted comment is prefix + op + user comment.
+        let mut journal = ZpaqJournalEncoder::new(1);
+        journal.put_entry(b"ok", b"note jDC\x01", b"payload");
+        assert!(matches!(
+            journal.finish(),
+            Err(Error::InvalidData(
+                "zpaq: comment ends with reserved jDC marker"
+            ))
         ));
     }
 

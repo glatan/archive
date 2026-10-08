@@ -113,7 +113,7 @@
 | [lrzip](lrzip/README.md) | magic.header.txt + upstream de facto facts (crate-local subset) | 41 | 0 | 1 | 42 |
 | [packbits](packbits/README.md) | Apple TN1023 + TIFF 6.0 §9 | 12 | 0 | 3 | 15 |
 | [xz](xz/README.md) | xz-file-format.txt 1.2.1 | 59 | 0 | 0 | 59 |
-| [ZPAQ](zpaq/README.md) | ZPAQ Level 1/2 specification (zpaq206.pdf) + crate bounded contract (archive 層) | — | — | — | bounded contract |
+| [ZPAQ](zpaq/README.md) | ZPAQ Level 1/2 specification (zpaq206.pdf) | 55 | 0 | 4 | 59 |
 
 ### アーカイブフォーマット
 
@@ -164,10 +164,10 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 2330 |
+| ✅ 実装+テスト済み | 2385 |
 | ⚠️ 部分実装 | 1 |
-| ❌ 未実装 | 51 |
+| ❌ 未実装 | 55 |
 | — 該当なし | 6 |
-| **合計** | **2388** |
+| **合計** | **2447** |
 
-**全体カバー率**: 2330 / 2388 = **97.6%** (❌ 行 (intentional exclusion・要修正候補を含む) および該当なし除外後: 2330 / 2331 = **99.96%**)
+**全体カバー率**: 2385 / 2447 = **97.5%** (❌ 行 (intentional exclusion・要修正候補を含む) および該当なし除外後: 2385 / 2386 = **99.96%**)

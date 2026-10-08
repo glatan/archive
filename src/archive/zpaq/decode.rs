@@ -70,11 +70,7 @@ pub struct ZpaqJournalVersion {
 pub fn decode(input: &[u8]) -> Result<Vec<ZpaqEntry>, Error> {
     let mut entries = Vec::new();
     for_each_segment(input, 0, |segment| {
-        entries.push(ZpaqEntry {
-            filename: segment.filename.clone(),
-            comment: segment.comment.clone(),
-            data: segment.data.clone(),
-        });
+        push_segment_entry(&mut entries, segment);
         Ok(())
     })?;
     Ok(entries)
@@ -88,14 +84,30 @@ pub fn decode(input: &[u8]) -> Result<Vec<ZpaqEntry>, Error> {
 pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<ZpaqEntry>, Error> {
     let mut entries = Vec::new();
     for_each_segment(input, max_output, |segment| {
-        entries.push(ZpaqEntry {
-            filename: segment.filename.clone(),
-            comment: segment.comment.clone(),
-            data: segment.data.clone(),
-        });
+        push_segment_entry(&mut entries, segment);
         Ok(())
     })?;
     Ok(entries)
+}
+
+/// Append a decoded segment to `entries` following the streaming-format
+/// continuation rule: a segment with an empty filename continues the
+/// previous file, so its payload is appended to the last entry and its
+/// own comment is dropped. An empty filename with no preceding entry
+/// (the first segment of the archive) stays a standalone anonymous
+/// entry, matching the spec's "no file name is specified" case.
+fn push_segment_entry(entries: &mut Vec<ZpaqEntry>, segment: &DecodedSegment) {
+    if segment.filename.is_empty()
+        && let Some(last) = entries.last_mut()
+    {
+        last.data.extend_from_slice(&segment.data);
+        return;
+    }
+    entries.push(ZpaqEntry {
+        filename: segment.filename.clone(),
+        comment: segment.comment.clone(),
+        data: segment.data.clone(),
+    });
 }
 
 /// Run `f` over every segment of every block in `input`, in stream
@@ -144,7 +156,7 @@ pub fn decode_journal_latest(input: &[u8]) -> Result<Vec<ZpaqEntry>, Error> {
 
 /// Decode all committed journaling snapshots in commit order.
 pub fn decode_journal_versions(input: &[u8]) -> Result<Vec<ZpaqJournalVersion>, Error> {
-    let mut visible = Vec::new();
+    let mut visible: Vec<ZpaqEntry> = Vec::new();
     let mut pending = Vec::new();
     let mut versions = Vec::new();
 
@@ -158,7 +170,15 @@ pub fn decode_journal_versions(input: &[u8]) -> Result<Vec<ZpaqJournalVersion>, 
                         "zpaq: mixed journal and non-journal segments in pending transaction",
                     ));
                 }
-                apply_put(&mut visible, entry);
+                // Empty filename segments continue the previous file,
+                // matching the streaming-format rule in `decode`.
+                if entry.filename.is_empty()
+                    && let Some(last) = visible.last_mut()
+                {
+                    last.data.extend_from_slice(&entry.data);
+                } else {
+                    apply_put(&mut visible, entry);
+                }
                 versions.push(ZpaqJournalVersion {
                     version: versions.len() + 1,
                     entries: visible.clone(),
@@ -390,6 +410,80 @@ mod tests {
         assert_eq!(latest.len(), 2);
         assert_eq!(latest[0].filename_utf8(), Some("a.txt"));
         assert_eq!(latest[1].filename_utf8(), Some("b.txt"));
+    }
+
+    #[test]
+    fn test_decode_merges_continuation_segment() {
+        // Segments with an empty filename continue the previous file
+        // (spec section 8); their payload is appended and their own
+        // comment is discarded.
+        let mut enc = ZpaqEncoder::new(2);
+        enc.add_file("a.txt", b"aaa");
+        enc.add_entry(b"", b"ignored", b"bbb");
+        enc.add_file("c.txt", b"ccc");
+        enc.add_entry(b"", b"", b"ddd");
+        let archive = enc.finish().unwrap();
+
+        let entries = decode(&archive).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].filename_utf8(), Some("a.txt"));
+        assert_eq!(entries[0].comment, b"");
+        assert_eq!(entries[0].data, b"aaabbb");
+        assert_eq!(entries[1].filename_utf8(), Some("c.txt"));
+        assert_eq!(entries[1].data, b"cccddd");
+    }
+
+    #[test]
+    fn test_decode_leading_empty_filename_is_standalone() {
+        // An empty filename on the first segment means "no file name is
+        // specified", not a continuation, so it stays its own entry.
+        let mut enc = ZpaqEncoder::new(2);
+        enc.add_entry(b"", b"", b"anon");
+        enc.add_file("b.txt", b"bbb");
+        let archive = enc.finish().unwrap();
+
+        let entries = decode(&archive).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].filename, b"");
+        assert_eq!(entries[0].data, b"anon");
+        assert_eq!(entries[1].filename_utf8(), Some("b.txt"));
+        assert_eq!(entries[1].data, b"bbb");
+    }
+
+    #[test]
+    fn test_decode_bounded_merges_continuation_segment() {
+        let mut enc = ZpaqEncoder::new(2);
+        enc.add_file("a.txt", b"aaa");
+        enc.add_entry(b"", b"", b"bbb");
+        let archive = enc.finish().unwrap();
+
+        let entries = decode_bounded(&archive, 0).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].filename_utf8(), Some("a.txt"));
+        assert_eq!(entries[0].data, b"aaabbb");
+    }
+
+    #[test]
+    fn test_decode_journal_versions_merges_continuation_segment() {
+        // Non-journal archives decoded through the journal path apply
+        // the same continuation rule as `decode`.
+        let mut enc = ZpaqEncoder::new(2);
+        enc.add_file("a.txt", b"aaa");
+        enc.add_entry(b"", b"", b"bbb");
+        let archive = enc.finish().unwrap();
+
+        let versions = decode_journal_versions(&archive).unwrap();
+        assert_eq!(versions.len(), 2);
+        assert_eq!(versions[0].entries.len(), 1);
+        assert_eq!(versions[0].entries[0].data, b"aaa");
+        assert_eq!(versions[1].entries.len(), 1);
+        assert_eq!(versions[1].entries[0].filename_utf8(), Some("a.txt"));
+        assert_eq!(versions[1].entries[0].data, b"aaabbb");
+
+        let latest = decode_journal_latest(&archive).unwrap();
+        assert_eq!(latest.len(), 1);
+        assert_eq!(latest[0].filename_utf8(), Some("a.txt"));
+        assert_eq!(latest[0].data, b"aaabbb");
     }
 
     #[test]
