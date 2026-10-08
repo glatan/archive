@@ -570,9 +570,19 @@ specifications or standards documents:
 - iso9660: ECMA-119 4th edition (= ISO 9660; Ecma International),
   Linux kernel isofs documentation and on-disk header
   (Documentation/filesystems/isofs.rst, include/uapi/linux/iso_fs.h;
-  GPL-2.0 with Linux-syscall-note), System Use Sharing Protocol 1.10,
-  Rock Ridge Interchange Protocol 1.12 (IEEE P1282), and the Microsoft
-  Joliet specification. Spec-informed implementation; no code was
+  GPL-2.0 with Linux-syscall-note), System Use Sharing Protocol 1.10
+  and the SUSP 1.12 draft (IEEE P1281; the `ES` entry), Rock Ridge
+  Interchange Protocol 1.12 (IEEE P1282), the Microsoft
+  Joliet specification, the "El Torito" Bootable CD-ROM Format
+  Specification 1.0 (Phoenix Technologies / IBM, 1995), the zisofs
+  format description (RRIP 'ZF' entry, libburnia project), and Apple
+  Technical Note FL36 (Apple Extensions to ISO 9660, February 1994).
+  The Linux kernel isofs decoder sources (fs/isofs/rock.c GPL-2.0
+  and fs/isofs/compress.c GPL-2.0-or-later, both with
+  Linux-syscall-note) and the zisofs-tools `mkzftree` writer
+  (GPL-2.0) were consulted as behavioral references for the
+  SUSP/RRIP/zisofs implementation.
+  Spec-informed implementation; no code was
   copied. `bsdtar`/`libarchive` (BSD-2-Clause) was used only as a
   local test-time oracle to produce and cross-validate the checked-in
   fixtures `tests/fixtures/iso9660/bsdtar-*.iso`, and to validate

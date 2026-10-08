@@ -75,7 +75,7 @@
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
 | 25 | multi-cabinet set (.set / disk spanning) read | MS-CAB §2.1, §2.3 | ✅ | `decode_parts` が iCabinet 順の member 列を受理 (index/setID 不一致は reject)。iFolder 0xFFFD/0xFFFE/0xFFFF と cbUncomp==0 CFDATA 分割を解決 (continued entry の dedup は name+cbFile 一致で判定、CFHEADER の PREV/NEXT flag 自体は内容を解決に使わないため未検証)。`decode_parts_split_file`, `decode_parts_cfdata_block_split`, `decode_parts_set_id_mismatch`, `decode_parts_index_mismatch`, `decode_parts_missing_earlier_member`, `decode_parts_rejects_empty` |
-| 27 | §1.3 フォーマット上限群 (file ≤0x7FFF8000、folder data ≤0x7FFF8000、count ≤0xFFFF、cab ≤0x7FFFFFFF) の検証 + CFFILE szName ≤256B+NUL の encoder 検証 + CFFILE 順序規則 (iFolder→uoffFolderStart、continued-from-prev 先頭) | MS-CAB §1.3, §2.3 | ❌ | encoder は cFolders/cFiles の u16 上限のみ検証。バイト上限・szName 256B 上限・明示的な CFFILE 順序検証は未実装 (decoder は範囲検査で充足、`decode_parts` は順序前提で動作)。flags 上位 reserved bit の "MUST be ignored" は decoder 無視で充足 |
+| 27 | §1.3 フォーマット上限群 (file ≤0x7FFF8000、folder data ≤0x7FFF8000、count ≤0xFFFF、cab ≤0x7FFFFFFF) の検証 + CFFILE szName ≤256B+NUL の encoder 検証 + CFFILE 順序規則 (iFolder→uoffFolderStart、continued-from-prev 先頭) | MS-CAB §1.3, §2.3 | ✅ | encoder `finish` で cbFile/folder data ≤0x7FFF8000・cbCabinet ≤0x7FFFFFFF・szName ≤256B を `check_limit` で検証し、count ≤0xFFFF も reject。CFFILE 順序規則 (iFolder→uoffFolderStart、continued-from-prev 先頭・continued-to-next 最後) は単一 folder writer で iFolder=0・uoffFolderStart 単調非減少が構造的に成立 (debug_assert で明示)。`rejects_name_over_256_bytes`, `enforces_section_1_3_size_limits`, `cffile_offsets_are_ordered`。flags 上位 reserved bit の "MUST be ignored" は decoder 無視で充足 |
 
 ### Intentional scope (実装対象外)
 

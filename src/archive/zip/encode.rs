@@ -1809,6 +1809,44 @@ mod tests {
         assert_eq!(entries[1].header.compression_method, 0);
     }
 
+    #[cfg(feature = "std")]
+    #[test]
+    fn test_streamed_central_version_made_by() {
+        use std::io::Cursor;
+
+        let mut writer = ZipStreamWriter::new(Vec::new());
+        writer
+            .write_file_from_reader(
+                "streamed.txt",
+                Cursor::new(b"streamed payload".as_slice()),
+                &ZipEntryOptions {
+                    compression: ZipCompression::Store,
+                    ..ZipEntryOptions::default()
+                },
+            )
+            .unwrap();
+        let archive = writer.finish().unwrap();
+
+        // Streamed central directory record (APPNOTE 4.3.12):
+        // version_made_by packs the host OS byte (upper half) with
+        // the spec version (lower half); version_needed is the
+        // minimum extract version (Store needs only the 2.0 default).
+        let cd = archive
+            .windows(4)
+            .position(|w| w == CENTRAL_DIRECTORY_HEADER_SIGNATURE.to_le_bytes())
+            .unwrap();
+        let made_by = u16::from_le_bytes(archive[cd + 4..cd + 6].try_into().unwrap());
+        let needed = u16::from_le_bytes(archive[cd + 6..cd + 8].try_into().unwrap());
+        let host: u16 = if cfg!(unix) { 3 } else { 0 };
+        assert_eq!(made_by >> 8, host);
+        assert_eq!(made_by & 0x00FF, ZIP_VERSION_DEFAULT);
+        assert_eq!(needed, ZIP_VERSION_DEFAULT);
+
+        let entries = decode::decode(&archive).unwrap();
+        assert_eq!(entries[0].header.host_system, host as u8);
+        assert_eq!(entries[0].header.version_needed, ZIP_VERSION_DEFAULT);
+    }
+
     #[cfg(feature = "bzip2")]
     #[test]
     fn test_roundtrip_bzip2_single_file() {
@@ -1827,6 +1865,40 @@ mod tests {
         assert_eq!(entries[0].name, "bzip2.txt");
         assert_eq!(entries[0].header.compression_method, 12);
         assert_eq!(entries[0].data, b"Hello bzip2 in ZIP Hello bzip2 in ZIP");
+    }
+
+    #[cfg(feature = "bzip2")]
+    #[test]
+    fn test_bzip2_version_needed_in_local_and_central() {
+        let mut encoder = ZipEncoder::new();
+        encoder.add_file_with_options(
+            "bzip2.txt",
+            b"bzip2 version needed payload",
+            &ZipEntryOptions {
+                compression: ZipCompression::Bzip2,
+                ..ZipEntryOptions::default()
+            },
+        );
+        let archive = encoder.finish().unwrap();
+
+        // Local file header: version_needed follows the signature
+        // (APPNOTE 4.3.7). Bzip2 requires at least version 4.6 (46).
+        assert_eq!(archive[0..4], LOCAL_FILE_HEADER_SIGNATURE.to_le_bytes());
+        let lfh_version = u16::from_le_bytes(archive[4..6].try_into().unwrap());
+        assert_eq!(lfh_version, ZIP_VERSION_BZIP2);
+
+        // Central directory record: version_needed sits at offset +6,
+        // after the signature and version_made_by (APPNOTE 4.3.12).
+        let cd = archive
+            .windows(4)
+            .position(|w| w == CENTRAL_DIRECTORY_HEADER_SIGNATURE.to_le_bytes())
+            .unwrap();
+        let cd_version = u16::from_le_bytes(archive[cd + 6..cd + 8].try_into().unwrap());
+        assert_eq!(cd_version, ZIP_VERSION_BZIP2);
+
+        let entries = decode::decode(&archive).unwrap();
+        assert_eq!(entries[0].header.version_needed, ZIP_VERSION_BZIP2);
+        assert_eq!(entries[0].header.compression_method, 12);
     }
 
     #[cfg(feature = "zstd")]

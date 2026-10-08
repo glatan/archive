@@ -62,7 +62,6 @@
 | 21b | title pointer list 順の entry 列 API | Title Pointer List | ✅ | `decode_title_order` が titlePtrPos の u32 index 列でソート (欠落/不正なら path 順)。`title_order_uses_title_pointer_list`, `title_order_falls_back_on_invalid_list` |
 | 21c | MIME type メタデータと title の公開 | MIME Type List, Directory Entries | ✅ | `ZimEntry::mime_type` (MIME list 参照、redirect は空) / `ZimEntry::title` (空 title は bare path にフォールバック、未終端の切り詰め title は空として扱う許容動作)。`exposes_mime_type_and_title`, `resolves_redirect` |
 | 21d | cluster compression id 0 (素データの別表現として一部の writer が使用) は受理せず `Unsupported` | Clusters | ✅ | `rejects_unknown_cluster_compression` (id 0 は `CLUSTER_NONE`(1) のみ受理経路外 → `_` arm で reject) |
-| 21e | dirent path の `.` / `..` セグメント・絶対パス禁止 | Directory Entries | ⚠️ | decoder は path を `N/path` としてそのまま公開し、dot セグメント検証を行わない。抽出側でのサニタイズを想定 (crate ポリシー) |
 | 25 | v6 write / extended cluster の出力、redirect・deprecated entry の出力 | Directory Entries, Clusters | ✅ | `ZimVersion::{V5,V6}` + `with_extended_cluster` + `add_redirect` + `add_deprecated`。`v6_extended_cluster_roundtrip`, `v6_plain_cluster_roundtrip`, `extended_cluster_requires_v6`, `redirect_roundtrip`, `redirect_missing_target_rejected`, `redirect_to_non_content_rejected`, `deprecated_entries_skipped_on_decode`, `v6_extended_with_redirect_and_deprecated`, `test_zim_encoder_v6_extended_with_redirect` |
 | 26 | `X/listing/titleordered/v0` title index | Title Pointer List (titlePtrPos は obsolete 注記あり) | ✅ | `decode_title_order` は `titlePtrPos` より `v0` リスティングを優先して参照し、形式不正時は `titlePtrPos` にフォールバックする (`title_order_uses_x_listing_v0`, `title_order_prefers_listing_over_titleptrpos`, `title_order_falls_back_when_listing_malformed`) |
 
@@ -71,3 +70,4 @@
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
 | 22 | fulltext index 検索 API | openzim wiki (format doc 外) | ❌ | title pointer list 順の列挙は `decode_title_order` で提供 (21b)。fulltext index そのものの検索は対象外 |
+| 21e | dirent path の `.` / `..` セグメント・絶対パス禁止 | Directory Entries | ❌ intentional scope | decoder は path を `N/path` としてそのまま公開し、dot セグメント検証を行わない。zip/tar 等と同じく decoder は生名を公開し抽出側でサニタイズする crate ポリシー (`archive-cli` の `sanitize_relative_path` が `..` を reject) |

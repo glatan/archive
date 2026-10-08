@@ -25,6 +25,22 @@ const FLAG_RESERVE_PRESENT: u16 = 0x0004;
 const CFDATA_MAX: usize = 32 * 1024;
 /// MSZIP sliding-window depth carried across CFDATA blocks (§3.1).
 const MSZIP_WINDOW: usize = 32 * 1024;
+/// MS-CAB §1.3 format limit shared by a CFFILE's `cbFile` and a
+/// folder's total uncompressed data.
+const DATA_MAX: usize = 0x7FFF_8000;
+/// MS-CAB §1.3 limit on `cbCabinet` (the whole serialized cabinet).
+const CB_CABINET_MAX: usize = 0x7FFF_FFFF;
+/// MS-CAB §1.3 limit on the CFFILE `szName`: at most 256 bytes of
+/// file name plus the NUL terminator emitted on the wire.
+const SZ_NAME_MAX: usize = 256;
+
+/// Reject `len` when it exceeds the MS-CAB §1.3 limit `max`.
+fn check_limit(len: usize, max: usize, msg: &'static str) -> Result<(), Error> {
+    if len > max {
+        return Err(Error::InvalidData(msg));
+    }
+    Ok(())
+}
 
 /// Per-file metadata emitted into the CFFILE record (MS-CAB §2.3).
 #[derive(Debug, Clone, Copy, Default)]
@@ -97,8 +113,9 @@ impl MscabEncoder {
     }
 
     /// Queue one file. Names are emitted as ASCIIZ; they must be
-    /// non-empty and contain no NUL bytes (enforced at finish).
-    /// CFFILE date/time/attribs are emitted as zero.
+    /// non-empty, contain no NUL bytes, and be at most 256 UTF-8
+    /// bytes (enforced at finish). CFFILE date/time/attribs are
+    /// emitted as zero.
     pub fn add_file(&mut self, name: &str, data: &[u8]) {
         self.add_file_with_meta(name, data, MscabFileMeta::default());
     }
@@ -113,8 +130,10 @@ impl MscabEncoder {
     }
 
     /// Serialize the cabinet. Returns [`Error::InvalidData`] if a
-    /// queued name is empty, contains a NUL byte, or the cabinet
-    /// would exceed u32/u16 field limits.
+    /// queued name is empty, contains a NUL byte, or exceeds 256
+    /// UTF-8 bytes, or the MS-CAB §1.3 size limits would be
+    /// exceeded (`cbFile`/folder data > 0x7FFF8000, `cbCabinet`
+    /// > 0x7FFFFFFF, or entry counts > 0xFFFF).
     pub fn finish(self) -> Result<Vec<u8>, Error> {
         if self.reserve.is_some_and(|(h, _, _)| h > 60_000) {
             return Err(Error::InvalidData("mscab: cbCFHeader exceeds 60,000"));
@@ -127,11 +146,34 @@ impl MscabEncoder {
         let mut stream = Vec::new();
         let mut uoffs = Vec::with_capacity(self.files.len());
         for file in &self.files {
-            if file.name.is_empty() || file.name.as_bytes().contains(&0) {
+            let name = file.name.as_bytes();
+            if name.is_empty() || name.contains(&0) {
                 return Err(Error::InvalidData("mscab: invalid file name"));
             }
+            check_limit(
+                name.len(),
+                SZ_NAME_MAX,
+                "mscab: file name exceeds 256 bytes",
+            )?;
+            check_limit(
+                file.data.len(),
+                DATA_MAX,
+                "mscab: cbFile exceeds 0x7FFF8000",
+            )?;
+            // CFFILE ordering (MS-CAB §2.3): records are sorted by
+            // (iFolder, uoffFolderStart) and a file continued from a
+            // previous folder comes first. This writer emits a single
+            // folder, so iFolder is always 0 and uoffFolderStart is
+            // monotonically non-decreasing by construction; the rule
+            // holds trivially and is asserted here for clarity.
+            debug_assert!(uoffs.last().is_none_or(|&p| p as usize <= stream.len()));
             uoffs.push(stream.len() as u32);
             stream.extend_from_slice(&file.data);
+            check_limit(
+                stream.len(),
+                DATA_MAX,
+                "mscab: folder data exceeds 0x7FFF8000",
+            )?;
         }
 
         // Split into CFDATA blocks, compressing each with the
@@ -242,9 +284,11 @@ impl MscabEncoder {
         }
 
         let cb_cabinet = out.len();
-        if cb_cabinet > u32::MAX as usize {
-            return Err(Error::InvalidData("mscab: cabinet too large"));
-        }
+        check_limit(
+            cb_cabinet,
+            CB_CABINET_MAX,
+            "mscab: cabinet exceeds 0x7FFFFFFF",
+        )?;
         out[8..12].copy_from_slice(&(cb_cabinet as u32).to_le_bytes());
         Ok(out)
     }
@@ -408,5 +452,73 @@ mod tests {
         let mut enc = MscabEncoder::new();
         enc.add_file("a\0b", b"x");
         assert!(enc.finish().is_err());
+    }
+
+    #[test]
+    fn rejects_name_over_256_bytes() {
+        // MS-CAB §1.3: CFFILE szName holds at most 256 bytes plus
+        // the terminating NUL. The limit counts UTF-8 bytes.
+        let mut enc = MscabEncoder::new();
+        enc.add_file(&"x".repeat(257), b"data");
+        assert!(enc.finish().is_err());
+        let mut enc = MscabEncoder::new();
+        enc.add_file(&"é".repeat(129), b"d"); // 258 UTF-8 bytes
+        assert!(enc.finish().is_err());
+        // Exactly 256 bytes is accepted and round-trips.
+        let name = "x".repeat(256);
+        let mut enc = MscabEncoder::new();
+        enc.add_file(&name, b"data");
+        let entries = decode(&enc.finish().unwrap()).unwrap();
+        assert_eq!(entries[0].name(), name);
+        let mut enc = MscabEncoder::new();
+        enc.add_file(&"é".repeat(128), b"d"); // 256 UTF-8 bytes
+        assert!(enc.finish().is_ok());
+    }
+
+    #[test]
+    fn enforces_section_1_3_size_limits() {
+        // MS-CAB §1.3: cbFile and uncompressed folder data are each
+        // capped at 0x7FFF8000, cbCabinet at 0x7FFFFFFF. Allocating
+        // multi-gibibyte inputs to exercise finish() end to end is
+        // impractical, so the shared bound helper is driven at the
+        // exact boundary values; the name limit above and the
+        // existing u16 count checks cover finish()'s wiring.
+        assert!(check_limit(0x7FFF_8000, DATA_MAX, "x").is_ok());
+        assert!(check_limit(0x7FFF_8001, DATA_MAX, "x").is_err());
+        assert!(check_limit(0x7FFF_FFFF, CB_CABINET_MAX, "x").is_ok());
+        assert!(check_limit(0x8000_0000, CB_CABINET_MAX, "x").is_err());
+    }
+
+    #[test]
+    fn cffile_offsets_are_ordered() {
+        // MS-CAB §2.3 ordering: with one folder, uoffFolderStart
+        // must be non-decreasing (zero-length files may share an
+        // offset) and every iFolder is 0. Verify via the wire: each
+        // CFFILE record is 16 bytes + ASCIIZ name; uoff sits at
+        // offset 4 of each record.
+        let mut enc = MscabEncoder::new();
+        enc.add_file("a", b"first");
+        enc.add_file("bb", b""); // zero-length: same uoff as next
+        enc.add_file("ccc", b"second");
+        let cab = enc.finish().unwrap();
+        let coff = u32::from_le_bytes([cab[16], cab[17], cab[18], cab[19]]) as usize;
+        let mut uoffs = Vec::new();
+        let mut p = coff;
+        for _ in 0..3 {
+            uoffs.push(u32::from_le_bytes([
+                cab[p + 4],
+                cab[p + 5],
+                cab[p + 6],
+                cab[p + 7],
+            ]));
+            assert_eq!(u16::from_le_bytes([cab[p + 8], cab[p + 9]]), 0); // iFolder
+            p += 16;
+            while cab[p] != 0 {
+                p += 1;
+            }
+            p += 1; // skip NUL
+        }
+        assert_eq!(uoffs, [0, 5, 5]);
+        assert!(uoffs.windows(2).all(|w| w[0] <= w[1]));
     }
 }

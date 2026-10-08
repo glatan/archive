@@ -178,6 +178,20 @@ pub struct IsoEntry {
     /// Apple `AA`/`BA` extension records found on the record
     /// (TN FL36).
     pub apple: Vec<AppleExt>,
+    /// Raw File Flags byte of the directory record (ECMA-119
+    /// §9.1.6): bit0 = Existence (record not reported to the
+    /// user), bit1 = Directory, bit2 = Associated File, bit3 =
+    /// record format in the extended attribute record, bit4 =
+    /// Protection (XAR owner/group/permissions present), bits 5-6
+    /// reserved, bit7 = another section of a multi-extent file
+    /// follows. For a multi-extent file this is the flag byte of
+    /// the first section's record.
+    pub file_flags: u8,
+    /// Volume Sequence Number of the directory record
+    /// (ECMA-119 §9.1.9, both-endian u16): the volume of the set
+    /// carrying this record. For a multi-extent file this is the
+    /// value of the first section's record.
+    pub volume_seq_number: u16,
     /// File contents or symlink target; empty for directories.
     pub data: Vec<u8>,
 }
@@ -225,6 +239,25 @@ pub struct ElToritoEntry {
     pub load_lba: u32,
     /// Boot image contents (sector_count*512 bytes at load_lba).
     pub image: Vec<u8>,
+    /// Section Entry Extension records (indicator 0x44, El
+    /// Torito 1.0 §2.5) that immediately follow this entry in
+    /// the catalog, in catalog order. Empty when the entry has
+    /// no extensions.
+    pub extensions: Vec<ElToritoExtension>,
+}
+
+/// A Section Entry Extension record (El Torito 1.0 §2.5,
+/// Figure 6): indicator 0x44, placed immediately after a
+/// section entry to carry additional selection criteria.
+/// Several extensions may be chained via the continuation bit.
+#[derive(Debug, Clone)]
+pub struct ElToritoExtension {
+    /// Continuation flag (byte 1 bit 5): another extension
+    /// record follows this one.
+    pub continues: bool,
+    /// Vendor-unique selection criteria (bytes 2-31 of the
+    /// record).
+    pub criteria: Vec<u8>,
 }
 
 /// El Torito 1.0 boot catalog decoded from a boot record volume
@@ -282,6 +315,16 @@ pub struct VolumeMeta {
     pub expiration_time: Option<i64>,
     /// Volume effective time (§8.4.29) as Unix seconds.
     pub effective_time: Option<i64>,
+    /// Volume flags byte of a supplementary volume descriptor
+    /// (ECMA-119 §8.5.3, BP 8): bit0 clear means the escape
+    /// sequences field holds only escape sequences registered
+    /// under ISO/IEC 2375. `0` for a primary descriptor, where
+    /// BP 8 is unused.
+    pub volume_flags: u8,
+    /// Application Use area (ECMA-119 §8.4.32 / §8.5.20;
+    /// BP 884-1395, 512 bytes). The contents are
+    /// application-defined and returned unmodified.
+    pub application_use: Vec<u8>,
 }
 
 /// Decoded ISO 9660 image.
@@ -496,6 +539,8 @@ struct DirRec<'a> {
     unit_size: u8,
     /// Interleave Gap Size in logical blocks (BP28).
     gap_size: u8,
+    /// Volume Sequence Number (BP29-32, both-endian).
+    vol_seq: u16,
     mtime: i64,
     /// Raw file identifier bytes (`\x00` = ".", `\x01` = "..").
     name: &'a [u8],
@@ -542,6 +587,7 @@ fn parse_dirents<'a>(
             flags: r[25],
             unit_size: r[26],
             gap_size: r[27],
+            vol_seq: both16(r, 28)?,
             mtime: dec_datetime(r, 18),
             name,
             susp,
@@ -897,6 +943,8 @@ struct DirRecOwned {
     /// File Unit Size / Interleave Gap Size (BP27/BP28).
     unit_size: u8,
     gap_size: u8,
+    /// Volume Sequence Number (BP29-32, both-endian).
+    vol_seq: u16,
     mtime: i64,
 }
 
@@ -964,6 +1012,10 @@ fn parse_vd(sec: &[u8], joliet: bool) -> Result<VolDesc, Error> {
         modification_time: dec_vd_datetime(sec, 830),
         expiration_time: dec_vd_datetime(sec, 847),
         effective_time: dec_vd_datetime(sec, 864),
+        // SVD volume flags (§8.5.3, BP 8); unused (=0) on a PVD.
+        volume_flags: sec[7],
+        // Application Use area (§8.4.32 / §8.5.20, BP 884-1395).
+        application_use: sec[883..1395].to_vec(),
     };
     Ok(VolDesc {
         volume_id,
@@ -978,6 +1030,7 @@ fn parse_vd(sec: &[u8], joliet: bool) -> Result<VolDesc, Error> {
             flags: r[25],
             unit_size: r[26],
             gap_size: r[27],
+            vol_seq: both16(r, 28)?,
             mtime: dec_datetime(r, 18),
         },
         meta,
@@ -1216,6 +1269,7 @@ impl<'a> Tree<'a> {
             flags: r[25],
             unit_size: r[26],
             gap_size: r[27],
+            vol_seq: both16(r, 28)?,
             mtime: dec_datetime(r, 18),
         })
     }
@@ -1369,6 +1423,7 @@ impl Walker<'_, '_> {
                     flags: r.flags,
                     unit_size: r.unit_size,
                     gap_size: r.gap_size,
+                    vol_seq: r.vol_seq,
                     mtime: r.mtime,
                 },
                 r.name.to_vec(),
@@ -1522,6 +1577,8 @@ impl Walker<'_, '_> {
                 dev_t: rr.dev_t,
                 ino: rr.ino.unwrap_or(0),
                 mtime,
+                file_flags: rec.flags,
+                volume_seq_number: rec.vol_seq,
                 xa,
                 sparse: rr.sparse,
                 susp_ext: rr.susp_ext.clone(),
@@ -1602,11 +1659,31 @@ fn parse_el_torito(input: &[u8], sec: &[u8]) -> Result<Option<ElTorito>, Error> 
                     sector_count,
                     load_lba,
                     image,
+                    extensions: Vec::new(),
                 });
             }
             // Section headers (0x90 = more sections, 0x91 = last)
             // only mark boundaries between entry groups; skip them.
             0x90 | 0x91 => {}
+            // Section Entry Extension (§2.5, Figure 6):
+            // indicator 0x44 immediately follows the section
+            // entry it extends; byte 1 bit 5 chains another
+            // extension. It carries vendor-unique selection
+            // criteria and is not a boot image itself.
+            0x44 => {
+                let ext = ElToritoExtension {
+                    continues: e[1] & 0x20 != 0,
+                    criteria: e[2..].to_vec(),
+                };
+                match entries.last_mut() {
+                    Some(entry) => entry.extensions.push(ext),
+                    None => {
+                        return Err(Error::InvalidData(
+                            "iso9660 el torito extension without section entry",
+                        ));
+                    }
+                }
+            }
             _ => break,
         }
     }
@@ -3386,5 +3463,171 @@ mod tests {
                 },
             ]
         );
+    }
+    /// Directory record File Flags and record-side Volume
+    /// Sequence Number (ECMA-119 §9.1.6/§9.1.9, BP 26 and
+    /// BP 29-32) are exposed verbatim on IsoEntry.
+    #[test]
+    fn dirent_file_flags_and_volume_seq() {
+        let mut b = IsoBuilder::new();
+        let f = b.alloc(b"data");
+        // bit0 = Existence + bit2 = Associated File, volume seq 2.
+        let mut rec = IsoBuilder::dirent(f, 4, 0x05, b"FILE.TXT;1", &[]);
+        rec[28..30].copy_from_slice(&2u16.to_le_bytes());
+        rec[30..32].copy_from_slice(&2u16.to_be_bytes());
+        // A multi-extent first section keeps bit7 in file_flags.
+        let e1 = b.alloc(b"part-1");
+        let e2 = b.alloc(b"part-2");
+        let subd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(f, 4, 0, b"INNER.TXT;1", &[]),
+        ]);
+        let sub = b.alloc(&subd);
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            rec,
+            IsoBuilder::dirent(sub, SECTOR as u32, 2, b"SUB", &[]),
+            IsoBuilder::dirent(e1, 6, FLAG_MULTI_EXTENT, b"BIG.BIN;1", &[]),
+            IsoBuilder::dirent(e2, 6, 0, b"BIG.BIN;1", &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        let out = decode(&img).unwrap();
+        let names: Vec<&str> = out.entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["FILE.TXT", "SUB", "SUB/INNER.TXT", "BIG.BIN"]);
+        assert_eq!(out.entries[0].file_flags, 0x05);
+        assert_eq!(out.entries[0].volume_seq_number, 2);
+        // directory record: bit1 set in the raw flags
+        assert_eq!(out.entries[1].file_flags, 0x02);
+        assert_eq!(out.entries[1].volume_seq_number, 1);
+        // multi-extent file reports the first section's flags
+        assert_eq!(out.entries[3].file_flags, 0x80);
+        assert_eq!(out.entries[3].data, b"part-1part-2");
+    }
+
+    /// A directory record whose both-endian Volume Sequence
+    /// Number halves disagree is rejected (ECMA-119 §7.3.3
+    /// via §9.1.9).
+    #[test]
+    fn rejects_bad_dirent_vol_seq() {
+        let mut b = IsoBuilder::new();
+        let f = b.alloc(b"data");
+        let mut rec = IsoBuilder::dirent(f, 4, 0, b"FILE.TXT;1", &[]);
+        // Big-endian half disagrees with the little-endian half.
+        rec[30..32].copy_from_slice(&7u16.to_be_bytes());
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            rec,
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    /// The PVD Application Use field (ECMA-119 §8.4.32,
+    /// BP 884-1395) is exposed verbatim via VolumeMeta.
+    #[test]
+    fn pvd_application_use_field() {
+        let mut img = plain_iso();
+        let s = 16 * SECTOR;
+        let marker = b"APP-USE DATA BLOCK";
+        img[s + 883..s + 883 + marker.len()].copy_from_slice(marker);
+        img[s + 1394] = 0x5A;
+        let out = decode(&img).unwrap();
+        let au = &out.meta.application_use;
+        assert_eq!(au.len(), 512);
+        assert_eq!(&au[..marker.len()], marker);
+        assert_eq!(au[511], 0x5A);
+        assert!(au[marker.len()..511].iter().all(|&b| b == 0));
+    }
+
+    /// The SVD Volume Flags byte (ECMA-119 §8.5.3, BP 8) is
+    /// exposed on the supplementary descriptor's VolumeMeta;
+    /// the PVD's unused BP 8 reads as 0.
+    #[test]
+    fn svd_volume_flags() {
+        let mut b = IsoBuilder::new();
+        b.next_sector = 19; // VD region: 16 PVD, 17 SVD, 18 term
+        let jd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+        ]);
+        let jroot = b.alloc(&jd);
+        let pd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+        ]);
+        let proot = b.alloc(&pd);
+        let mut img = b.finish_ext(proot, SECTOR as u32, Some((jroot, SECTOR as u32)), None);
+        img[17 * SECTOR + 7] = 1; // escapes not ISO/IEC 2375-registered
+        let out = decode(&img).unwrap();
+        assert_eq!(out.meta.volume_flags, 0);
+        assert_eq!(out.joliet_meta.unwrap().volume_flags, 1);
+    }
+
+    /// El Torito Section Entry Extension records (indicator
+    /// 0x44, §2.5 Figure 6) attach to the preceding section
+    /// entry — chained via byte 1 bit 5 — and do not stop the
+    /// catalog scan.
+    #[test]
+    fn el_torito_section_entry_extension() {
+        let mut b = IsoBuilder::new();
+        b.next_sector = 19;
+        let img_lba = b.alloc_span(&vec![0x55u8; 512]);
+        let img2_lba = b.alloc_span(&vec![0x77u8; 512]);
+        let mut cat = vec![0u8; SECTOR];
+        cat[..32].copy_from_slice(&IsoBuilder::validation_entry(0, b"ID"));
+        cat[32..64].copy_from_slice(&IsoBuilder::boot_entry(0x88, 0, 0, 1, img_lba));
+        // Two chained extensions: bit5 set on the first only.
+        cat[64] = 0x44;
+        cat[65] = 0x20;
+        cat[66..70].copy_from_slice(b"EXT1");
+        cat[96] = 0x44;
+        cat[98..102].copy_from_slice(b"EXT2");
+        // A second bootable section entry follows the extensions.
+        cat[128..160].copy_from_slice(&IsoBuilder::boot_entry(0x88, 0, 0, 1, img2_lba));
+        let cat_lba = b.alloc(&cat);
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = decode(&b.finish_boot(root, SECTOR as u32, cat_lba)).unwrap();
+        let et = &img.el_torito[0];
+        assert_eq!(et.entries.len(), 2);
+        let exts = &et.entries[0].extensions;
+        assert_eq!(exts.len(), 2);
+        assert!(exts[0].continues);
+        assert!(!exts[1].continues);
+        assert_eq!(exts[0].criteria.len(), 30);
+        assert_eq!(&exts[0].criteria[..4], b"EXT1");
+        assert_eq!(&exts[1].criteria[..4], b"EXT2");
+        // The entry after the extension records is still parsed.
+        assert!(et.entries[1].bootable);
+        assert_eq!(et.entries[1].load_lba, img2_lba);
+        assert!(et.entries[1].image.iter().all(|&b| b == 0x77));
+        assert!(et.entries[1].extensions.is_empty());
+    }
+
+    /// A Section Entry Extension record with no preceding
+    /// section entry is malformed (El Torito 1.0 §2.5).
+    #[test]
+    fn rejects_orphan_el_torito_extension() {
+        let mut b = IsoBuilder::new();
+        b.next_sector = 19;
+        let mut cat = vec![0u8; SECTOR];
+        cat[..32].copy_from_slice(&IsoBuilder::validation_entry(0, b"ID"));
+        cat[32] = 0x44; // extension where the default entry belongs
+        let cat_lba = b.alloc(&cat);
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], &[]),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish_boot(root, SECTOR as u32, cat_lba);
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
     }
 }

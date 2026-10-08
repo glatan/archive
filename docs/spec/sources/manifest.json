@@ -858,6 +858,22 @@
    "filename": "iso_fs.h"
   },
   {
+   "id": "linux-isofs-rock-c",
+   "format": "iso9660",
+   "title": "Linux kernel fs/isofs/rock.c (SUSP/RRIP/zisofs decoder source)",
+   "version": "linux master (fetched 2026-10)",
+   "url": "https://raw.githubusercontent.com/torvalds/linux/master/fs/isofs/rock.c",
+   "filename": "isofs_rock.c"
+  },
+  {
+   "id": "linux-isofs-compress-c",
+   "format": "iso9660",
+   "title": "Linux kernel fs/isofs/compress.c (zisofs transparent decompression)",
+   "version": "linux master (fetched 2026-10)",
+   "url": "https://raw.githubusercontent.com/torvalds/linux/master/fs/isofs/compress.c",
+   "filename": "isofs_compress.c"
+  },
+  {
    "id": "rrip-112",
    "format": "iso9660",
    "title": "Rock Ridge Interchange Protocol (IEEE P1282)",
@@ -1233,6 +1249,24 @@
     "https://ecma-international.org/wp-content/uploads/ECMA_TR-112-2_1st_edition_december_2023.pdf"
    ],
    "license": "specification document (ECMA TR/112-2 permits copying)"
+  },
+  {
+   "id": "susp-112-draft",
+   "format": "iso9660",
+   "title": "System Use Sharing Protocol (IEEE P1281) draft standard",
+   "version": "draft standard version 1.12",
+   "note": "SUSP ES extension selector は 1.10 にはなく 1.12 draft で追加されたエントリ。原本は ftp.ymi.com の susp112.ps のみで流通 (リンク切れ)。ミラーが見つからないため no_url_available",
+   "reference_url": "ftp://ftp.ymi.com/pub/rockridge/susp112.ps",
+   "license": "IEEE P1281 draft standard document"
+  },
+  {
+   "id": "zisofs-tools",
+   "format": "iso9660",
+   "title": "zisofs-tools mkzftree (zisofs reference writer)",
+   "version": "1.0.x",
+   "note": "zisofs ZF 実装の behavioral reference としてソースを参照 (コード取り込みなし)。単一ファイルではなくツール全体のため no_url_available",
+   "reference_url": "https://www.kernel.org/pub/linux/utils/fs/zisofs/",
+   "license": "GPL-2.0"
   },
   {
    "id": "mscfb-write-refs",

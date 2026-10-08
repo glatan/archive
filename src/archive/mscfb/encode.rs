@@ -14,8 +14,8 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::cmp::Ordering;
 
+use super::{key_cmp, sort_key};
 use crate::error::Error;
 
 const SIGNATURE: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
@@ -45,16 +45,6 @@ fn put16(b: &mut [u8], o: usize, v: u16) {
 
 fn put32(b: &mut [u8], o: usize, v: u32) {
     b[o..o + 4].copy_from_slice(&v.to_le_bytes());
-}
-
-/// [MS-CFB] 2.6.4 sort key: the name uppercased as UTF-16 code units.
-/// Ordering is by unit count first, then by unit values.
-fn sort_key(name: &str) -> Vec<u16> {
-    name.to_uppercase().encode_utf16().collect()
-}
-
-fn key_cmp(a: &[u16], b: &[u16]) -> Ordering {
-    a.len().cmp(&b.len()).then_with(|| a.cmp(b))
 }
 
 /// Input tree node: a storage (`data: None`) or stream (`data: Some`).

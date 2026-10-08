@@ -4,7 +4,7 @@
 |------|------|
 | 形式概要 | ISO 9660 (= ECMA-119) CD-ROM ファイルシステムイメージ。System Area + Volume Descriptor 列 + Path Table + ディレクトリレコード木。Rock Ridge (IEEE P1282) と Joliet 補足ボリュームを decode |
 | 基準仕様 | ECMA-119 4th ed. (`sources/ecma119.pdf`)、Linux kernel `Documentation/filesystems/isofs.rst` + `include/uapi/linux/iso_fs.h`、SUSP 1.10 (`sources/susp.shar`)、RRIP 1.12 (`sources/rrip112.pdf`)、Joliet spec (`sources/jolspec.html`)、El Torito 1.0 (`sources/eltorito_spec_1.0.pdf`)、zisofs format (`sources/zisofs_format.txt`)、Apple TN FL36 (`sources/apple_iso9660_fl36.html`) — いずれも `docs/spec/sources/` にスナップショット |
-| 参照実装 | bsdtar / libarchive (BSD-2-Clause、oracle + fixture 生成: `tests/fixtures/iso9660/bsdtar-*.iso`)。詳細: THIRD_PARTY_NOTICES iso9660 項 |
+| 参照実装 | bsdtar / libarchive (BSD-2-Clause、oracle + fixture 生成: `tests/fixtures/iso9660/bsdtar-*.iso`)。behavioral reference: Linux kernel `fs/isofs/rock.c` + `compress.c` (GPL、SUSP/RRIP/zisofs)、zisofs-tools `mkzftree` (GPL-2.0)。詳細: THIRD_PARTY_NOTICES iso9660 項 |
 | 実装 | `archive::archive::iso9660::{decode, encode::{IsoEncoder, encode}}` (read/write)。`iso9660` feature 配下 |
 
 ## Volume Descriptor 層
@@ -80,7 +80,7 @@
 |---|------|------|------|
 | 38 | multi-session / UDF bridge / HFS ハイブリッドの別ツリー | ❌ intentional scope | primary + Joliet SVD のみ。UDF 実装時の一次仕様は OSTA UDF 2.60 / ECMA TR/112-2 (manifest `no_url_available` `osta-udf-260`) — ISO 9660 拡張ではなく別 FS 扱い |
 | 39c | PVD/SVD のメタデータフィールド群 (system_id, volume_set_id, publisher, preparer, application, copyright/abstract/bibliographic ID, 4 個のボリューム日付) | ✅ | 各メタデータフィールドは `VolumeMeta` 構造体として `IsoImage::meta` (PVD) および `joliet_meta` (SVD) で公開する (ECMA-119 §8.4.19-8.4.29、Joliet 側は UCS-2BE をデコード)。`volume_set_size` (§8.4.10) / `volume_seq_number` (§8.4.11) を both-endian u16 で公開し、`seq ∈ 1..=size` の整合性と File Structure Version == 1 (§8.4.30) を検証する。`pvd_metadata_fields`, `joliet_metadata_fields`, `test_iso9660_pvd_metadata`, `pvd_volume_set_fields`, `rejects_bad_volume_seq`, `rejects_bad_file_structure_version` 等。Enhanced VD (version=2) の解釈および High Sierra ("CDROM" magic) は引き続き intentional scope 外とする |
-| 43 | dir record の残フィールド (File Flags bit0 Existence/bit2 Associated File・レコード側 Volume Sequence Number §9.1.9) / PVD Application Use field (§8.4.32) / SVD Volume Flags (§8.5.3) / El Torito Section Entry Extension (indicator 0x44、§2.5) / Joliet CD-XA (`CD-XA001`) | ❌ intentional scope | File Flags は列挙・読み出しに使用するが raw flags は非公開。Application Use field は未公開。SVD Volume Flags は未検証。El Torito の extension entry (0x44) は catalog 走査を打ち切る (後続 section entry は読まない)。CD-XA ラベルは #38 の XA/multi-session intentional scope に含まれる |
+| 43 | dir record の残フィールド (File Flags bit0 Existence/bit2 Associated File・レコード側 Volume Sequence Number §9.1.9) / PVD Application Use field (§8.4.32) / SVD Volume Flags (§8.5.3) / El Torito Section Entry Extension (indicator 0x44、§2.5) / Joliet CD-XA (`CD-XA001`) | ✅ (CD-XA のみ #38 の intentional scope) | `IsoEntry::file_flags` (raw §9.1.6 byte、multi-extent は先頭 section) / `IsoEntry::volume_seq_number` (§9.1.9 both-endian 検証) / `VolumeMeta::application_use` (§8.4.32/§8.5.20 の 512B verbatim) / `VolumeMeta::volume_flags` (§8.5.3、`joliet_meta` 経由) / `ElToritoEntry::extensions` (`ElToritoExtension { continues, criteria }`、indicator 0x44 を直前 entry に付与して catalog 走査継続、孤立 0x44 は `InvalidData`)。`dirent_file_flags_and_volume_seq`, `rejects_bad_dirent_vol_seq`, `pvd_application_use_field`, `svd_volume_flags`, `el_torito_section_entry_extension`, `rejects_orphan_el_torito_extension` |
 
 ## Fixture / interop
 

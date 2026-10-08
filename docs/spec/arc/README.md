@@ -22,7 +22,7 @@
 | method 9 (squashed = dynamic LZW、RLE なし) | de facto (newtua_dos、`compress::lzw`/compress42.c、nomarch oracle 検証) | ✅ | ✅ | compress 式 9→13bit 可変幅 LZW + block mode、RLE90 段なし。compcol の「固定 13bit」記述は誤り (newtua_dos 側が nomarch と一致)。Debian `arc` 生成 fixture で decode 確認済み |
 | method 0x0a (crushed = adaptive LZW + RLE90) | de facto (XADMaster port / unar 一致) | ✅ | ✅ | LSB-first、literal-bit モード切替 + usage ベース置換の adaptive LZW、RLE90 段あり。decode/encode ともに unar・newtua (XADMaster port、リポジトリ外の相互検証) で展開確認済み (arc/nomarch は非対応) |
 | method 0x0b (distilled = LZSS + header Huffman) | de facto (XADMaster port) | ✅ | ✅ | 8KiB LZSS + ヘッダ内シリアライズ Huffman + 固定 offset prefix 表。現行 oracle (arc/nomarch/unar) は 0x0b を decode しないため、decode は XADMaster port 一致ベクタ、encode は自 decoder roundtrip + newtua decoder 相互検証 (リポジトリ外) のみ |
-| method 20-29 (informational items)・30-39 (control items) | ARC spec (SEA technical memo、ARC 6.0) | ⚠️ | ❌ | 通常 member と同一ヘッダで parse 後 payload を `length` バイト skip。file ではないため entry として surface しない (sub-type payload は解釈しない) |
+| method 20-29 (informational items)・30-39 (control items) | ARC spec (SEA technical memo、ARC 6.0) | ✅ | ❌ | 通常 member と同一ヘッダで parse 後 payload を `length` バイト skip (`skips_info_control_items`)。file ではないため entry として surface しない設計 (sub-type payload は解釈しない)。encode の info/control item emit は対象外 |
 
 ### ヘッダ構造
 
