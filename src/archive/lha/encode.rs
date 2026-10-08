@@ -207,8 +207,16 @@ impl LhaEncoder {
         hdr.push(hsize as u8);
         hdr.push(0); // checksum placeholder
         hdr.extend_from_slice(m.method);
-        hdr.extend_from_slice(&(m.packed.len() as u32).to_le_bytes());
-        hdr.extend_from_slice(&(m.orig as u32).to_le_bytes());
+        hdr.extend_from_slice(
+            &u32::try_from(m.packed.len())
+                .map_err(|_| Error::InvalidData("lha: payload too large"))?
+                .to_le_bytes(),
+        );
+        hdr.extend_from_slice(
+            &u32::try_from(m.orig)
+                .map_err(|_| Error::InvalidData("lha: payload too large"))?
+                .to_le_bytes(),
+        );
         hdr.extend_from_slice(&m.mtime.to_le_bytes());
         // 0x10 = MS-DOS directory attribute, 0x20 = archive
         hdr.push(if is_dir { 0x10 } else { 0x20 });
@@ -243,8 +251,16 @@ impl LhaEncoder {
         hdr.push(hsize as u8);
         hdr.push(0); // checksum placeholder
         hdr.extend_from_slice(m.method);
-        hdr.extend_from_slice(&(skip as u32).to_le_bytes());
-        hdr.extend_from_slice(&(m.orig as u32).to_le_bytes());
+        hdr.extend_from_slice(
+            &u32::try_from(skip)
+                .map_err(|_| Error::InvalidData("lha: payload too large"))?
+                .to_le_bytes(),
+        );
+        hdr.extend_from_slice(
+            &u32::try_from(m.orig)
+                .map_err(|_| Error::InvalidData("lha: payload too large"))?
+                .to_le_bytes(),
+        );
         hdr.extend_from_slice(&m.mtime.to_le_bytes());
         hdr.push(0x20); // attribute
         hdr.push(1); // level 1
@@ -289,8 +305,16 @@ impl LhaEncoder {
         let mut hdr = Vec::with_capacity(hsize);
         hdr.extend_from_slice(&(hsize as u16).to_le_bytes());
         hdr.extend_from_slice(m.method);
-        hdr.extend_from_slice(&(m.packed.len() as u32).to_le_bytes());
-        hdr.extend_from_slice(&(m.orig as u32).to_le_bytes());
+        hdr.extend_from_slice(
+            &u32::try_from(m.packed.len())
+                .map_err(|_| Error::InvalidData("lha: payload too large"))?
+                .to_le_bytes(),
+        );
+        hdr.extend_from_slice(
+            &u32::try_from(m.orig)
+                .map_err(|_| Error::InvalidData("lha: payload too large"))?
+                .to_le_bytes(),
+        );
         hdr.extend_from_slice(&m.mtime.to_le_bytes());
         hdr.push(0x20); // reserved
         hdr.push(2); // level 2

@@ -334,7 +334,9 @@ pub struct IsoImage {
     pub volume_id: String,
     /// Total volume size in logical blocks.
     pub volume_blocks: u32,
-    /// Whether the primary tree carries SUSP/Rock Ridge entries.
+    /// Whether any Rock Ridge  name was used while decoding
+    /// the primary tree. An image with SUSP entries but no
+    /// (PX-only) reports  and may fall back to Joliet.
     pub has_rock_ridge: bool,
     /// Whether a Joliet supplementary volume descriptor is present.
     pub has_joliet: bool,
@@ -662,12 +664,11 @@ fn parse_susp(img: &[u8], blksz: usize, mut area: &[u8], depth: usize) -> Result
                 if len < 7 || e[4] != 0xBE || e[5] != 0xEF {
                     return Err(Error::InvalidData("iso9660 bad SP entry"));
                 }
-                // SP payload byte 6 is the number of bytes skipped at
-                // the start of subsequent system-use fields.
-                let skip = e[6] as usize;
-                if area.len() > len && skip > area.len() - len {
-                    return Err(Error::InvalidData("iso9660 bad SP skip"));
-                }
+                // SP payload byte 6 (LEN_SKP) is the number of
+                // bytes skipped at the start of every other
+                // record's system-use area; applied by the
+                // directory scan.
+                let _ = e[6];
             }
             b"CE" => {
                 if len < 28 {
@@ -721,7 +722,11 @@ fn parse_susp(img: &[u8], blksz: usize, mut area: &[u8], depth: usize) -> Result
                         // volroot/host: record as-is
                         sl.extend_from_slice(&e[p..p + clen]);
                     } else {
-                        if !sl.is_empty() && !sl.ends_with(b"/") {
+                        // Component Flags bit0 (CONTINUE, RRIP
+                        // 4.1.3.1): the component continues in the
+                        // next Component Record — join without a
+                        // separator.
+                        if !rr.sl_continue && !sl.is_empty() && !sl.ends_with(b"/") {
                             sl.push(b'/');
                         }
                         sl.extend_from_slice(&e[p..p + clen]);
@@ -891,9 +896,14 @@ fn parse_susp(img: &[u8], blksz: usize, mut area: &[u8], depth: usize) -> Result
             rr.gid = cont_rr.gid;
         }
         if let Some(csl) = cont_rr.symlink {
-            rr.symlink
-                .get_or_insert_with(Vec::new)
-                .extend_from_slice(&csl);
+            let sl = rr.symlink.get_or_insert_with(Vec::new);
+            // A continuation SL starting a new component (previous
+            // component was not marked CONTINUE) needs the
+            // separator it would have had in one SL entry.
+            if !rr.sl_continue && !sl.is_empty() && !sl.ends_with(b"/") && !csl.starts_with(b"/") {
+                sl.push(b'/');
+            }
+            sl.extend_from_slice(&csl);
             rr.sl_continue = cont_rr.sl_continue;
         }
         if rr.tf_modify.is_none() {
@@ -1126,6 +1136,8 @@ fn joliet_name(raw: &[u8]) -> String {
 struct Tree<'a> {
     input: &'a [u8],
     blksz: usize,
+    /// This volume's sequence number within the set (PVD).
+    vol_seq: u16,
 }
 
 impl<'a> Tree<'a> {
@@ -1357,8 +1369,9 @@ fn zisofs_inflate(data: &[u8], zf: ZfParams) -> Result<Vec<u8>, Error> {
             // Equal pointers: the block is all zeroes.
             out.resize(out.len() + want, 0);
         } else {
-            // Sanity bound on the stored stream (mkzftree uses
-            // 2 * block_size).
+            // Defensive sanity bound on the stored stream:
+            // a compressed block may slightly exceed the raw
+            // block, but never twice it.
             if csize > 2 * block_size {
                 return Err(Error::InvalidData("iso9660 zisofs block too large"));
             }
@@ -1382,6 +1395,9 @@ struct Walker<'a, 'b> {
     joliet: bool,
     /// System Use fields carry SUSP/Rock Ridge entries.
     susp_active: bool,
+    /// SUSP SP BP7: bytes skipped at the start of each record's
+    /// System Use Area (except the root directory's "." record).
+    len_skp: usize,
     /// (extent, size) of visited directories, for cycle detection.
     visited: BTreeSet<(u32, u32)>,
     entries: Vec<IsoEntry>,
@@ -1394,7 +1410,13 @@ impl Walker<'_, '_> {
     /// records and emits its entries. `dir` is the record
     /// holding the directory's extent (or the `.` record a
     /// Rock Ridge `CL` link resolves to).
-    fn walk(&mut self, dir: &DirRecOwned, path: &str, depth: usize) -> Result<(), Error> {
+    fn walk(
+        &mut self,
+        dir: &DirRecOwned,
+        path: &str,
+        depth: usize,
+        is_root: bool,
+    ) -> Result<(), Error> {
         if depth > 64 {
             return Err(Error::InvalidData("iso9660 directory nesting too deep"));
         }
@@ -1402,16 +1424,30 @@ impl Walker<'_, '_> {
             return Err(Error::InvalidData("iso9660 directory cycle"));
         }
         let data = self.tree.read_file(dir)?;
-        self.scan(&data, path, depth)
+        self.scan(&data, path, depth, is_root)
     }
 
     /// Emit the entries of one directory's record data, recursing
     /// into child directories.
-    fn scan(&mut self, data: &[u8], path: &str, depth: usize) -> Result<(), Error> {
+    fn scan(&mut self, data: &[u8], path: &str, depth: usize, is_root: bool) -> Result<(), Error> {
         let mut recs: Vec<(DirRecOwned, Vec<u8>, RrInfo)> = Vec::new();
         parse_dirents(data, self.tree.blksz, |r| {
-            let rr = if self.susp_active && !r.susp.is_empty() {
-                parse_susp(self.tree.input, self.tree.blksz, r.susp, 0)?
+            // SUSP 1.10 5.3 (SP BP7 LEN_SKP): the first LEN_SKP
+            // bytes of each record's System Use Area precede the
+            // System Use fields — except in the root directory's
+            // "." record, whose SP entry sits at offset 0.
+            let skip = if is_root && r.name == [0] {
+                0
+            } else {
+                self.len_skp
+            };
+            let susp = if skip == 0 {
+                r.susp
+            } else {
+                r.susp.get(skip..).unwrap_or(&[])
+            };
+            let rr = if self.susp_active && !susp.is_empty() {
+                parse_susp(self.tree.input, self.tree.blksz, susp, 0)?
             } else {
                 RrInfo::default()
             };
@@ -1544,9 +1580,15 @@ impl Walker<'_, '_> {
             } else {
                 IsoKind::Other(sfmt)
             };
+            // ECMA-119 9.1.9: a record whose Volume Sequence
+            // Number differs from this volume's has its extent on
+            // another volume of the set — keep the metadata but
+            // do not read file data or descend.
+            let foreign_volume = rec.vol_seq != self.tree.vol_seq;
             let entry_data = match kind {
                 IsoKind::Directory => Vec::new(),
                 IsoKind::Symlink => rr.symlink.clone().unwrap_or_default(),
+                _ if foreign_volume => Vec::new(),
                 _ => {
                     let parts: Vec<DirRecOwned> = recs[i..i + n_ext].iter().map(|t| t.0).collect();
                     let raw = self.tree.read_parts(&parts)?;
@@ -1585,7 +1627,7 @@ impl Walker<'_, '_> {
                 apple: rr.apple.clone(),
                 data: entry_data,
             });
-            if kind == IsoKind::Directory {
+            if kind == IsoKind::Directory && !foreign_volume {
                 let target = match rr.cl {
                     // `CL` child link (RRIP §4.1.5): the
                     // directory's real records live at the linked
@@ -1594,7 +1636,7 @@ impl Walker<'_, '_> {
                     Some(lbn) => self.tree.dir_dot(lbn)?,
                     None => *rec,
                 };
-                self.walk(&target, &cpath, depth + 1)?;
+                self.walk(&target, &cpath, depth + 1, false)?;
             }
             i += n_ext;
         }
@@ -1752,11 +1794,13 @@ pub fn decode(input: &[u8]) -> Result<IsoImage, Error> {
     let tree = Tree {
         input,
         blksz: pvd.logical_block_size,
+        vol_seq: pvd.meta.volume_seq_number,
     };
 
     // SUSP detection: "SP" marker in the "." record of the PVD root
     // directory (SUSP 5.3).
     let mut susp_active = false;
+    let mut len_skp = 0usize;
     {
         let root_data = tree.read_file(&pvd.root)?;
         if root_data.len() >= 41 && root_data[0] >= 34 {
@@ -1771,6 +1815,7 @@ pub fn decode(input: &[u8]) -> Result<IsoImage, Error> {
                 && r[susp_off + 5] == 0xEF
             {
                 susp_active = true;
+                len_skp = usize::from(r[susp_off + 6]);
             }
         }
     }
@@ -1779,11 +1824,12 @@ pub fn decode(input: &[u8]) -> Result<IsoImage, Error> {
         tree: &tree,
         joliet: false,
         susp_active,
+        len_skp,
         visited: BTreeSet::new(),
         entries: Vec::new(),
         use_rr: false,
     };
-    walker.walk(&pvd.root, "", 0)?;
+    walker.walk(&pvd.root, "", 0, true)?;
     let use_rr = walker.use_rr;
     let mut entries = walker.entries;
 
@@ -1793,16 +1839,18 @@ pub fn decode(input: &[u8]) -> Result<IsoImage, Error> {
         let stree = Tree {
             input,
             blksz: svd.logical_block_size,
+            vol_seq: svd.meta.volume_seq_number,
         };
         let mut jw = Walker {
             tree: &stree,
             joliet: true,
             susp_active,
+            len_skp,
             visited: BTreeSet::new(),
             entries: Vec::new(),
             use_rr: false,
         };
-        jw.walk(&svd.root, "", 0)?;
+        jw.walk(&svd.root, "", 0, true)?;
         entries = jw.entries;
     }
 
@@ -2228,6 +2276,70 @@ mod tests {
         let out = decode(&img).unwrap();
         assert_eq!(out.entries[0].kind, IsoKind::Symlink);
         assert_eq!(out.entries[0].data, b"hello.txt");
+    }
+
+    #[test]
+    fn rr_symlink_component_continue() {
+        // RRIP 1.12 4.1.3.1: a Component Record with CONTINUE=1
+        // continues the same path component in the next record —
+        // no '/' separator is inserted between the pieces.
+        let mut b = IsoBuilder::new();
+        let sp = &[b'S', b'P', 7, 1, 0xBE, 0xEF, 0];
+        // components: "hello" CONTINUE -> ".txt", then "next"
+        let mut susp = vec![b'S', b'L', 24, 1, 0];
+        susp.extend_from_slice(&[1, 5]);
+        susp.extend_from_slice(b"hello");
+        susp.extend_from_slice(&[0, 4]);
+        susp.extend_from_slice(b".txt");
+        susp.extend_from_slice(&[0, 4]);
+        susp.extend_from_slice(b"next");
+        susp.extend_from_slice(&[b'P', b'X', 44, 1]);
+        susp.extend_from_slice(&0o120777u32.to_le_bytes());
+        susp.extend_from_slice(&0o120777u32.to_be_bytes());
+        susp.extend_from_slice(&1u32.to_le_bytes());
+        susp.extend_from_slice(&1u32.to_be_bytes());
+        susp.extend_from_slice(&0u32.to_le_bytes());
+        susp.extend_from_slice(&0u32.to_be_bytes());
+        susp.extend_from_slice(&0u32.to_le_bytes());
+        susp.extend_from_slice(&0u32.to_be_bytes());
+        susp.extend_from_slice(&1u32.to_le_bytes());
+        susp.extend_from_slice(&1u32.to_be_bytes());
+        let ext = b.alloc(&[]);
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], sp),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(ext, 0, 0, b"LINK.TXT;1", &susp),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        let out = decode(&img).unwrap();
+        assert_eq!(out.entries[0].kind, IsoKind::Symlink);
+        assert_eq!(out.entries[0].data, b"hello.txt/next");
+    }
+
+    #[test]
+    fn susp_len_skp_shifts_system_use_area() {
+        // SUSP 1.10 5.3: SP BP7 (LEN_SKP) bytes at the start of
+        // every record's System Use Area precede the SUSP fields,
+        // except in the root directory's "." record.
+        let mut b = IsoBuilder::new();
+        let f = b.alloc(b"data");
+        let sp = &[b'S', b'P', 7, 1, 0xBE, 0xEF, 6];
+        // file record: 6-byte pad, then NM "padded-name"
+        let mut susp = vec![0u8; 6];
+        let mut nm = vec![b'N', b'M', (5 + 11) as u8, 1, 0];
+        nm.extend_from_slice(b"padded-name");
+        susp.extend_from_slice(&nm);
+        let rootd = IsoBuilder::dir_block(&[
+            IsoBuilder::dirent(0, 0, 2, &[0], sp),
+            IsoBuilder::dirent(0, 0, 2, &[1], &[]),
+            IsoBuilder::dirent(f, 4, 0, b"FILE.TXT;1", &susp),
+        ]);
+        let root = b.alloc(&rootd);
+        let img = b.finish(root, SECTOR as u32);
+        let out = decode(&img).unwrap();
+        assert!(out.has_rock_ridge);
+        assert_eq!(out.entries[0].name, "padded-name");
     }
 
     #[test]
@@ -3499,6 +3611,10 @@ mod tests {
         assert_eq!(names, ["FILE.TXT", "SUB", "SUB/INNER.TXT", "BIG.BIN"]);
         assert_eq!(out.entries[0].file_flags, 0x05);
         assert_eq!(out.entries[0].volume_seq_number, 2);
+        // ECMA-119 9.1.9: vol_seq 2 means the extent lives on
+        // another volume of the set — the record is listed but
+        // its data is not read from this image.
+        assert!(out.entries[0].data.is_empty());
         // directory record: bit1 set in the raw flags
         assert_eq!(out.entries[1].file_flags, 0x02);
         assert_eq!(out.entries[1].volume_seq_number, 1);

@@ -49,7 +49,8 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 ///
 /// Runs of three or more identical bytes are emitted as repeat packets;
 /// shorter runs and non-repeating data are emitted as literal packets of at
-/// most 128 bytes. This matches the reference `PackBits` encoder behavior.
+/// most 128 bytes. This matches the behavior documented for the Apple
+/// Toolbox `PackBits` call in TN1023.
 pub fn encode(data: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(data.len() + data.len() / 127 + 1);
     let mut literal_start = 0usize;
@@ -130,6 +131,31 @@ mod tests {
         // 129-byte run: one 128-run packet + trailing literal byte.
         let enc129 = encode(&[0x55; 129]);
         assert_eq!(&enc129[..], b"\x81\x55\x00\x55");
+    }
+
+    #[test]
+    fn literal_packet_splits_at_128() {
+        // 129 non-repeating bytes -> 128-byte literal packet + 1-byte packet.
+        let data: Vec<u8> = (0..129u16).map(|i| (i % 251) as u8).collect();
+        // ensure no 3-byte run exists in the data (all literals)
+        let enc = encode(&data);
+        let mut flags = Vec::new();
+        let mut i = 0;
+        while i < enc.len() {
+            flags.push(enc[i]);
+            let n = enc[i] as i8;
+            i += 1 + if n >= 0 {
+                n as usize + 1
+            } else if n == -128 {
+                0
+            } else {
+                1
+            };
+        }
+        assert_eq!(flags, [127, 0]);
+        // -128 (0x80) is never emitted as a flag (TN1023).
+        assert!(!flags.contains(&0x80));
+        assert_eq!(decode(&enc).unwrap(), data);
     }
 
     #[test]

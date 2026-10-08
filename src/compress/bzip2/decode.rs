@@ -47,6 +47,9 @@ const RUNB: u16 = 1;
 /// Maximum number of selectors (reference bzip2 limit: 2 + 900000/50).
 const MAX_SELECTORS: usize = 18002;
 
+// Constant data carried over verbatim from the reference implementation's
+// `randtable.c` (BSD-style bzip2 license); see THIRD_PARTY_NOTICES. Part of
+// the de facto format definition (randomized-RLE substitution table).
 const BZ2_RNUMS: [i32; 512] = [
     619, 720, 127, 481, 931, 816, 813, 233, 566, 247, 985, 724, 205, 454, 863, 491, 741, 242, 949,
     214, 733, 859, 335, 708, 621, 574, 73, 654, 730, 472, 419, 436, 278, 496, 867, 210, 399, 680,
@@ -388,8 +391,10 @@ fn undo_mtf_rle2(
             let mut run_len = 0u64;
             let mut power = 1u64;
             while i < symbols.len() && (symbols[i] == RUNA || symbols[i] == RUNB) {
-                run_len += (symbols[i] as u64 + 1) * power;
-                power *= 2;
+                // Saturating: a wrapped u64 would let run_len slip under
+                // the max_output check below (and panic in debug builds).
+                run_len = run_len.saturating_add((symbols[i] as u64 + 1).saturating_mul(power));
+                power = power.saturating_mul(2);
                 i += 1;
             }
             // Validate run length before allocating
@@ -572,6 +577,16 @@ mod tests {
         let seq_to_unseq = *b"A";
         // 30 RUNB symbols → run_len ≈ 2^31, far exceeds max_output of 100
         let symbols = vec![RUNB; 30];
+        let result = undo_mtf_rle2(&symbols, &seq_to_unseq, 1, 100);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_undo_mtf_rle2_run_saturates_instead_of_overflowing() {
+        let seq_to_unseq = *b"A";
+        // 64+ consecutive RUNB symbols would wrap the u64 accumulator;
+        // the run length must saturate and be rejected, not panic.
+        let symbols = vec![RUNB; 128];
         let result = undo_mtf_rle2(&symbols, &seq_to_unseq, 1, 100);
         assert!(result.is_err());
     }

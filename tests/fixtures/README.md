@@ -27,7 +27,7 @@
 - `hello.txt`
   - 元データは ASCII 文字列 `Hello, World!`
 - `hello.gz`
-  - `hello.txt` を gzip で圧縮したもの
+  - `hello.txt` を system `gzip` (GNU gzip) で圧縮したもの
   - integration test では gzip デコードと、ヘッダーを剥がした raw DEFLATE デコードの両方に使う
 - `repeated.txt`
   - 元データは `"The quick brown fox jumps over the lazy dog. "` を 10 回連結した 450 バイトのテキスト
@@ -287,6 +287,10 @@
 - `xz_original_decompress_1.bin`
   - ファズテストで検出・保存された ASCII 寄りの入力
   - crate 側で xz encode した結果を system `xz -dc` で展開できるかの回帰に使う
+  - ツール不在時は self-roundtrip のみ検証する
+- `lzma_original_decompress_1.bin`
+  - ファズテストで検出・保存されたバイナリ入力
+  - crate 側で lzma-alone encode した結果を system `xz --format=lzma -dc` で展開できるかの回帰用
   - ツール不在時は self-roundtrip のみ検証する
 - `lzw_clear_pad_run_start.bin`
   - ファズテストで検出・保存されたバイナリ入力 (90,029 バイト)

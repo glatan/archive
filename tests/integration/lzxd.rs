@@ -7,7 +7,7 @@ use super::*;
 // The *_LZD byte arrays below are verbatim/aligned/uncompressed-block
 // LZXD streams produced by the test-side encoder in this file. Every
 // stream was additionally decoded with libmspack's reference LZXD
-// decoder (LGPL 2.1, `lzxd_decompress` with is_delta=1) during vector
+// decoder (LGPL 2.1, `lzxd_init` with is_delta=1) during vector
 // creation and produced identical output.
 
 const W17: usize = 1 << 17;

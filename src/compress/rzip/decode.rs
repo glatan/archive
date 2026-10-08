@@ -79,8 +79,13 @@ fn decode_chunk_container(chunk: &[u8], dst: &mut Vec<u8>) -> Result<usize, Erro
 
 fn read_stream_chain(chunk: &[u8], mut head: u32, consumed: &mut usize) -> Result<Vec<u8>, Error> {
     let mut stream = Vec::new();
+    let mut block_count = 0u32;
 
     while head != 0 {
+        block_count += 1;
+        if block_count > 10000 {
+            return Err(Error::InvalidData("rzip: stream chain cycle detected"));
+        }
         let pos = head as usize;
         if pos + 13 > chunk.len() {
             return Err(Error::UnexpectedEof);
@@ -302,6 +307,58 @@ mod tests {
         let mut compressed = encode::encode(b"ctype");
         compressed[24 + 26] = 9;
         assert!(matches!(decode(&compressed), Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn test_stream_chain_multi_block() {
+        // A stream built from a multi-block  chain (as upstream
+        // produces for large inputs) must decode all blocks in order.
+        let mut chunk = Vec::new();
+        chunk.extend_from_slice(&[0u8; 9]);
+        chunk.extend_from_slice(&26u32.to_le_bytes()); // stream0 head
+        chunk.extend_from_slice(&[0u8; 9]);
+        chunk.extend_from_slice(&0u32.to_le_bytes()); // stream1 head
+        // block 1 at 26: ctype=raw, len 2, next=41
+        chunk.extend_from_slice(&[CTYPE_NONE]);
+        chunk.extend_from_slice(&2u32.to_le_bytes());
+        chunk.extend_from_slice(&2u32.to_le_bytes());
+        chunk.extend_from_slice(&41u32.to_le_bytes());
+        chunk.extend_from_slice(b"ab");
+        // block 2 at 41: ctype=raw, len 2, next=0
+        chunk.extend_from_slice(&[CTYPE_NONE]);
+        chunk.extend_from_slice(&2u32.to_le_bytes());
+        chunk.extend_from_slice(&2u32.to_le_bytes());
+        chunk.extend_from_slice(&0u32.to_le_bytes());
+        chunk.extend_from_slice(b"cd");
+        let mut consumed = 0usize;
+        let stream = read_stream_chain(&chunk, 26, &mut consumed).unwrap();
+        assert_eq!(stream, b"abcd");
+        assert_eq!(consumed, 30);
+    }
+
+    #[test]
+    fn test_stream_chain_cycle_rejected() {
+        // A block whose  points at itself must not loop forever
+        // (DoS via unbounded stream Vec growth).
+        let mut input = Vec::new();
+        input.extend_from_slice(b"RZIP");
+        input.push(2);
+        input.push(1);
+        input.extend_from_slice(&4u32.to_be_bytes()); // expected_size low
+        input.extend_from_slice(&0u32.to_be_bytes()); // expected_size high
+        input.extend_from_slice(&[0u8; 10]); // reserved
+        // chunk: two 13-byte stream headers; stream0 head -> block at 26.
+        input.extend_from_slice(&[0u8; 9]);
+        input.extend_from_slice(&26u32.to_le_bytes());
+        input.extend_from_slice(&[0u8; 9]);
+        input.extend_from_slice(&0u32.to_le_bytes()); // stream1 head = none
+        // block at offset 26: raw ctype, 1 byte, next = itself.
+        input.push(CTYPE_NONE);
+        input.extend_from_slice(&1u32.to_le_bytes());
+        input.extend_from_slice(&1u32.to_le_bytes());
+        input.extend_from_slice(&26u32.to_le_bytes());
+        input.push(b'x');
+        assert!(matches!(decode(&input), Err(Error::InvalidData(_))));
     }
 
     #[test]

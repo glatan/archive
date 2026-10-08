@@ -16,7 +16,7 @@ const E: usize = 8;
 fn alphabet_edict(entries: usize) -> Vec<u8> {
     let mut d = vec![0u8; entries * E];
     for i in 0..256usize {
-        d[i * E] = 1 << 2; // PSL=0, CSL=1
+        d[i * E] = 1; // PSL=0, CSL=1 (bits 5-7)
         d[i * E + 1] = i as u8;
     }
     d

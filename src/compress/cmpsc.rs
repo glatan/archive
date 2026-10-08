@@ -8,6 +8,10 @@
 //! expansion dictionary; compression walks a compression dictionary
 //! (character entries + format-0 sibling descriptors).
 //!
+//! (SDL-Hercules-390/hyperion, QPL, was once consulted to confirm
+//! interpretation of the public specification only; no code was copied.
+//! See THIRD_PARTY_NOTICES.)
+//!
 //! Scope (basic method only):
 //! - format-0 sibling descriptors; format-1 sibling descriptors,
 //!   symbol translation, order preservation, and entropy encoding
@@ -44,26 +48,48 @@ fn check_sym_size(sym_size: u8) -> Result<usize, Error> {
 struct ExpEntry {
     /// Partial-symbol length; 0 marks an unpreceded (complete) entry.
     psl: u8,
+    /// Complete-symbol length (unpreceded entries only, 1-7).
+    csl: u8,
     /// Predecessor index (preceded entries only).
     pptr: u16,
     /// Extension characters stored in this entry.
     ecs: [u8; 7],
 }
 
-fn exp_entry(dict: &[u8], index: usize) -> ExpEntry {
+fn exp_entry(dict: &[u8], index: usize) -> Result<ExpEntry, Error> {
     let e = &dict[index * ENTRY..index * ENTRY + ENTRY];
     let psl = e[0] >> 5;
     let mut ecs = [0u8; 7];
     if psl == 0 {
-        // Unpreceded: CSL in bits 3-5, ECs in bytes 1-7.
-        let csl = ((e[0] >> 2) & 7) as usize;
-        ecs[..csl.min(7)].copy_from_slice(&e[1..1 + csl.min(7)]);
-        ExpEntry { psl, pptr: 0, ecs }
+        // Unpreceded: bits 3-4 reserved (must be zero), CSL in bits 5-7,
+        // ECs in bytes 1-7. Both violations may cause a data exception
+        // per the architecture, so we reject them.
+        if e[0] & 0x18 != 0 {
+            return Err(Error::InvalidData("cmpsc: unpreceded entry reserved bits"));
+        }
+        let csl = (e[0] & 7) as usize;
+        if csl == 0 {
+            return Err(Error::InvalidData("cmpsc: unpreceded entry with CSL 0"));
+        }
+        ecs[..csl].copy_from_slice(&e[1..1 + csl]);
+        Ok(ExpEntry {
+            psl,
+            csl: csl as u8,
+            pptr: 0,
+            ecs,
+        })
     } else {
         // Preceded: PPTR in bits 3-15, up to 5 ECs in bytes 2-6.
+        // PSL 6/7 are model-dependent; we treat them as 5 (an
+        // architecturally permitted behavior).
         let pptr = (((e[0] & 0x1f) as u16) << 8) | e[1] as u16;
         ecs[..5].copy_from_slice(&e[2..7]);
-        ExpEntry { psl, pptr, ecs }
+        Ok(ExpEntry {
+            psl,
+            csl: 0,
+            pptr,
+            ecs,
+        })
     }
 }
 
@@ -75,6 +101,15 @@ fn expand_index(
     out: &mut Vec<u8>,
     max_output: usize,
 ) -> Result<(), Error> {
+    // Index symbols 0-255 store the byte value directly; no
+    // expansion-dictionary reference is made (POP App.D).
+    if index < ALPHABET {
+        if out.len() >= max_output {
+            return Err(Error::InvalidData("cmpsc: output limit exceeded"));
+        }
+        out.push(index as u8);
+        return Ok(());
+    }
     // Collect the predecessor chain: index -> pptr -> ... -> unpreceded.
     let mut chain = Vec::with_capacity(16);
     let mut cur = index;
@@ -82,7 +117,7 @@ fn expand_index(
         if cur >= entries {
             return Err(Error::InvalidData("cmpsc: index out of range"));
         }
-        let e = exp_entry(dict, cur);
+        let e = exp_entry(dict, cur)?;
         if e.psl == 0 {
             chain.push((cur, 0usize));
             break;
@@ -94,12 +129,8 @@ fn expand_index(
         }
     }
     for &(ci, n) in chain.iter().rev() {
-        let e = exp_entry(dict, ci);
-        let take = if e.psl == 0 {
-            ((dict[ci * ENTRY] >> 2) & 7) as usize
-        } else {
-            n.min(5)
-        };
+        let e = exp_entry(dict, ci)?;
+        let take = if e.psl == 0 { e.csl as usize } else { n.min(5) };
         if out.len() + take > max_output {
             return Err(Error::InvalidData("cmpsc: output limit exceeded"));
         }
@@ -406,7 +437,7 @@ fn try_descend(
 fn alphabet_expansion_dictionary(entries: usize) -> Vec<u8> {
     let mut d = vec![0u8; entries * ENTRY];
     for i in 0..ALPHABET {
-        d[i * ENTRY] = 1 << 2; // PSL=0, CSL=1
+        d[i * ENTRY] = 1; // PSL=0, CSL=1 (bits 5-7)
         d[i * ENTRY + 1] = i as u8;
     }
     d
@@ -547,6 +578,31 @@ mod tests {
         let (_, ed) = test_dictionaries();
         let data = pack9(&[65, 66, 67]);
         assert_eq!(expand(&ed, 9, &data, 1 << 20).unwrap(), b"ABC");
+    }
+
+    #[test]
+    fn expand_alphabet_bypasses_dictionary() {
+        // Index symbols 0-255 store the byte value without consulting the
+        // expansion dictionary (POP App.D); a dict with malformed alphabet
+        // entries still decodes them.
+        let ed = vec![0u8; 512 * ENTRY];
+        let data = pack9(&[65, 66, 67]);
+        assert_eq!(expand(&ed, 9, &data, 1 << 20).unwrap(), b"ABC");
+    }
+
+    #[test]
+    fn expand_rejects_bad_unpreceded_entry() {
+        // Preceded entry 256 chains to alphabet entry 65, which is
+        // malformed: reserved bits 3-4 set, then CSL=0.
+        let mut ed = alphabet_expansion_dictionary(512);
+        ed[256 * ENTRY] = 1 << 5;
+        ed[256 * ENTRY + 1] = 65;
+        ed[256 * ENTRY + 2] = b'B';
+        ed[65 * ENTRY] = 0x08 | 1; // bits 3-4 nonzero + CSL=1
+        let data = pack9(&[256]);
+        assert!(expand(&ed, 9, &data, 1 << 20).is_err());
+        ed[65 * ENTRY] = 0; // CSL=0
+        assert!(expand(&ed, 9, &data, 1 << 20).is_err());
     }
 
     #[test]

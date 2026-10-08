@@ -2,7 +2,7 @@
 //!
 //! Supports portable ASCII `odc` (070707), `newc` (070701), `newcrc` (070702), and binary `bin`.
 //! The encoder can produce archives with regular files, symlinks, directories,
-//! device files, and hardlinks.
+//! device files, sockets, and hardlinks.
 
 use alloc::vec::Vec;
 

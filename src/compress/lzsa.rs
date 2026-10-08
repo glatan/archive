@@ -1179,6 +1179,25 @@ mod tests {
     }
 
     #[test]
+    fn verbatim_frame_for_incompressible() {
+        // Incompressible input must fall back to a verbatim frame
+        // (StreamFormat: DSZ byte2 bit7). xorshift32 fills the buffer.
+        let mut noise = vec![0u8; 70000];
+        let mut x = 0x9e3779b9u32;
+        for b in noise.iter_mut() {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            *b = x as u8;
+        }
+        for enc in [encode(&noise), encode_lzsa2(&noise)] {
+            assert_eq!(&enc[..2], &[0x7b, 0x9e]);
+            assert_eq!(enc[5] & 0x80, 0x80, "verbatim flag not set");
+            assert_eq!(decode(&enc).unwrap(), noise);
+        }
+    }
+
+    #[test]
     fn rejects_reserved_dsz_bits() {
         // StreamFormat: DSZ byte2 bits1-6 are reserved; nonzero is rejected.
         for enc in [encode(b"hello"), encode_lzsa2(b"hello")] {

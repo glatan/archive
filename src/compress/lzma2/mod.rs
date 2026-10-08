@@ -1,5 +1,9 @@
 //! LZMA2 codec (chunk-based LZMA compression).
 //!
+//! The chunk format follows liblzma coder semantics (public domain);
+//! xz-file-format.txt covers only the filter properties byte (§5.3.1)
+//! and leaves the chunk layout out of scope (§3.2).
+//!
 //! LZMA2 splits data into independently decompressible chunks,
 //! each preceded by a control byte that indicates the reset level
 //! and whether the chunk is LZMA-compressed or stored raw.

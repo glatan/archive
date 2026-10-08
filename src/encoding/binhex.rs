@@ -134,7 +134,18 @@ fn sixbit_decode(chars: &[u8]) -> Result<Vec<u8>, Error> {
 
 fn sixbit_encode(data: &[u8], out: &mut Vec<u8>) {
     // First output line holds ':' + 63 characters; later lines 64.
+    // Wrap lazily (before the next character, not after filling a line)
+    // so the terminating ':' always shares its line with the last data
+    // character — Lewis: the final line is 2-65 characters.
     let mut col = 1usize;
+    let mut put = |out: &mut Vec<u8>, c: u8| {
+        if col == 64 {
+            out.push(b'\n');
+            col = 0;
+        }
+        out.push(c);
+        col += 1;
+    };
     let mut acc: u32 = 0;
     let mut nbits = 0u32;
     for &b in data {
@@ -142,16 +153,11 @@ fn sixbit_encode(data: &[u8], out: &mut Vec<u8>) {
         nbits += 8;
         while nbits >= 6 {
             nbits -= 6;
-            out.push(ALPHABET[((acc >> nbits) & 0x3F) as usize]);
-            col += 1;
-            if col == 64 {
-                out.push(b'\n');
-                col = 0;
-            }
+            put(out, ALPHABET[((acc >> nbits) & 0x3F) as usize]);
         }
     }
     if nbits > 0 {
-        out.push(ALPHABET[((acc << (6 - nbits)) & 0x3F) as usize]);
+        put(out, ALPHABET[((acc << (6 - nbits)) & 0x3F) as usize]);
     }
     out.extend_from_slice(b":\n");
 }
@@ -259,6 +265,7 @@ pub fn decode(input: &[u8]) -> Result<BinHexEntry, Error> {
 
     // Collect 6-bit characters until the terminating ':'.
     let mut chars: Vec<u8> = Vec::new();
+    let mut trailing_bang = false;
     loop {
         if i >= input.len() {
             return Err(Error::UnexpectedEof);
@@ -270,12 +277,14 @@ pub fn decode(input: &[u8]) -> Result<BinHexEntry, Error> {
             b'\r' | b'\n' | b'\t' | b' ' => {}
             b'!' => {
                 // '!' is alphabet[0], but one legacy '!' may sit just
-                // before the final ':' — drop it in that case only.
+                // before the final ':'. Treat it as the quirk first; if
+                // the fork layer then fails, retry with '!' as data.
                 let mut j = i;
                 while j < input.len() && matches!(input[j], b'\r' | b'\n' | b'\t' | b' ') {
                     j += 1;
                 }
                 if j < input.len() && input[j] == b':' {
+                    trailing_bang = true;
                     break;
                 }
                 chars.push(c);
@@ -284,7 +293,17 @@ pub fn decode(input: &[u8]) -> Result<BinHexEntry, Error> {
         }
     }
 
-    let raw8 = sixbit_decode(&chars)?;
+    match decode_body(&chars) {
+        Err(err) if trailing_bang => {
+            chars.push(b'!');
+            decode_body(&chars).map_err(|_| err)
+        }
+        res => res,
+    }
+}
+
+fn decode_body(chars: &[u8]) -> Result<BinHexEntry, Error> {
+    let raw8 = sixbit_decode(chars)?;
     let raw = rle_decode(&raw8)?;
 
     // Fork layer.
@@ -466,6 +485,14 @@ mod tests {
             let data = vec![0x90u8; n];
             let mut rle = Vec::new();
             rle_encode(&data, &mut rle);
+            assert_eq!(rle_decode(&rle).unwrap(), data, "n={n}");
+        }
+        // Normal-byte runs: n <= 3 stays literal, n >= 4 packetizes.
+        for n in [1usize, 2, 3, 4] {
+            let data = vec![0xBBu8; n];
+            let mut rle = Vec::new();
+            rle_encode(&data, &mut rle);
+            assert_eq!(rle.contains(&RLE_MARKER), n >= 4, "n={n}");
             assert_eq!(rle_decode(&rle).unwrap(), data, "n={n}");
         }
     }
@@ -696,5 +723,52 @@ mod tests {
         assert!(lines.iter().all(|l| l.len() <= 64));
         assert!(lines.iter().any(|l| l.len() == 64));
         assert_eq!(lines[0][0], b':');
+    }
+
+    #[test]
+    fn encode_final_colon_on_last_line() {
+        // 47 bytes encode to exactly 63 6-bit chars, filling the first
+        // line (':' + 63). Lewis requires the final ':' on the same line
+        // as the last data character (final line is 2-65 chars), so it
+        // must not wrap onto a line of length 1.
+        let mut out = Vec::new();
+        sixbit_encode(&[0xAA; 47], &mut out);
+        assert!(out.ends_with(b":\n"));
+        assert!(!out.ends_with(b"\n:\n"));
+        // Same invariant through the public encoder for arbitrary sizes.
+        for n in [0usize, 1, 47, 48, 95, 96] {
+            let mut e = entry();
+            e.data = vec![0xAB; n];
+            e.resource = Vec::new();
+            let doc = encode(&e);
+            assert!(
+                !doc.windows(3).any(|w| w == b"\n:\n" || w == b"\r:\n"),
+                "n={n}"
+            );
+            assert_eq!(decode(&doc).unwrap(), e, "n={n}");
+        }
+    }
+
+    #[test]
+    fn rejects_bad_name() {
+        // Craft documents with a malformed name field (valid CRCs so the
+        // name checks themselves are exercised).
+        let mk = |name_len: u8, name: &[u8], term: u8| -> Vec<u8> {
+            let mut raw = vec![name_len];
+            raw.extend_from_slice(name);
+            raw.push(term);
+            raw.extend_from_slice(&[0; 4 + 4 + 2 + 4 + 4]); // TYPE AUTH FLAG DLEN RLEN
+            raw.extend_from_slice(&crc16_ccitt_aug(&raw).to_be_bytes());
+            raw.extend_from_slice(&crc16_ccitt_aug(&[]).to_be_bytes()); // data CRC
+            raw.extend_from_slice(&crc16_ccitt_aug(&[]).to_be_bytes()); // rsrc CRC
+            let mut rle = Vec::new();
+            rle_encode(&raw, &mut rle);
+            let mut out = vec![b':'];
+            sixbit_encode(&rle, &mut out);
+            out
+        };
+        assert!(decode(&mk(0, b"", 0)).is_err()); // empty name
+        assert!(decode(&mk(64, &[b'a'; 64], 0)).is_err()); // over 63
+        assert!(decode(&mk(4, b"name", b'X')).is_err()); // missing NUL
     }
 }

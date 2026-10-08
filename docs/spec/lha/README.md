@@ -67,7 +67,7 @@ decode の権利クリーン参照: `-lh4-`〜`-lh7-` は奥村氏の `ar002` (p
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 13 | `LhaEncoder::add_file` / `add_dir` / `encode`: level-0 `-lh0-`/`-lhd-` ヘッダを生成、name 1-255B・NUL/`\` なし。パス区切りは raw `0xff` に変換、dir エントリは末尾 `0xff` + attr `0x10` | lha note level-0 + header.c 実測 | ✅ | `level0_roundtrip` |
+| 13 | `LhaEncoder::add_file` / `add_dir` / `encode`: level-0 `-lh0-`/`-lhd-` ヘッダを生成、name 1-233B (実効上限 — `hsize = 22 + name <= u8::MAX`; wire name フィールド自体の上限は 255B)・NUL/`\` なし。パス区切りは raw `0xff` に変換、dir エントリは末尾 `0xff` + attr `0x10` | lha note level-0 + header.c 実測 | ✅ | `level0_roundtrip` |
 | 13a | `LhaEncoder::with_level(1|2)` / `encode_level`: level-1 は基本 name field に basename (230B 超は ext `0x01`)、packed フィールドは skip size、dir は ext `0x02` (raw `0xff` 区切り・末尾付き)。level-2 は u16 総サイズ (自身込み) + ext `0x00` header-CRC + filename ext 必須 + 下位 8bit 0 時 1B pad | lha note level-1/level-2 + header.c write_header_level1/write_header_level2 | ✅ | `level1_roundtrip`, `level2_roundtrip`, `level2_long_path`, `level1_long_basename_uses_ext`, `level2_zero_low_byte_padding` |
 | 13b | `LhaEncoder::with_level(3)`: `[u16 word_size=4][method][u32 packed][u32 orig][u32 unix time][0x20][level=3][u16 crc16][u8 osid][u32 hsize][u32 ext chain][u32 0]` (ext 順序: 0x00 header-CRC → 0x01 filename → 0x02 dir)。`with_method`: `-lh4-`〜`-lh7-` を st1 共有エンコーダ (`compress::lzh::st1_enc`) で圧縮、stored alias `-lz4-`/`-pm0-`、圧縮不利時は `-lh0-` fallback | jLHA Notes Level3Header + lhasa 実測 | ✅ | `level3_roundtrip`, `level3_wire_layout`, `level3_long_name`, `lh5_encode_roundtrip`, `lh4_lh6_lh7_encode_roundtrip`, `lh5_falls_back_to_stored`, `stored_alias_methods_roundtrip` |
 | 14 | 終端 `0x00` を付与 | lha note | ✅ | 往復テスト |
@@ -84,7 +84,7 @@ decode の権利クリーン参照: `-lh4-`〜`-lh7-` は奥村氏の `ar002` (p
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 17 | offset 2 の `-l?-` または `-pm?-` マーカー + offset 20 の level byte (0-3) で自動検出、`list`/`extract`/`test`/`inspect`/`pack` に対応 | CLI 規約 | ✅ | `detect_lha` |
+| 17 | offset 2 の `-l??-`/`-p??-` マーカー (input[3] が `l` または `p`) + offset 20 の level byte (0-3) で自動検出、`list`/`extract`/`test`/`inspect`/`pack` に対応 | CLI 規約 | ✅ | `detect_lha` |
 | 18 | fuzz harness `lha` で encode→decode 往復。`lha-lh4`/`lha-lh5`/`lha-lh6`/`lha-lh7`/`lha-lzs`/`lha-lz5`/`lha-pm1`/`lha-pm2` バリアントが各 compression method をカバー | fuzz 規約 | ✅ | `Algorithm::Lha` 他 |
 
 ### 既知制約 (intentional scope)
@@ -140,4 +140,7 @@ LHA 系の「独自拡張」は出自が分散している。出典別に整理�
 - dir エントリ (`-lhd-`) は filename 部を空にし、フルパスを ext `0x02` (level-0 は name field) に末尾区切り付きで書く。level-1/2 では OS id `U` を発行するが UNIX ext (0x50/0x51/0x54) は発行しない。
 - level 0/1 の mtime フィールドは DOS time、level 2/3 は UNIX time をそのまま格納する。
 - level-3 エンコーダは先頭 `u16 word_size=4` (固定) + u32 packed/orig + u32 ext チェーン (0x00 header-CRC → 0x01 filename → 0x02 dir の順、各エントリの u32 size は size フィールド自身 + type + payload を含む) を出力し、packed フィールドには実バイト数 (skip size ではない) を書く。
+- level 0-2 エンコーダの packed/orig (level-1 は skip サイズ) は u32 フィールドのため、4 GiB 超のペイロードは `u32::try_from` で `InvalidData` reject (level-3 と同じ方針)。
+- `-lhd-` dir エントリで packed > 0 の非準拠入力も packed フィールド分だけストリームを進める (進めないと次ヘッダを誤認してデシンクする)。dir のデータ本体は読み出さない (`lhd_nonzero_packed_stays_in_sync`).
+- decode の `-` マーカーは offset 2/6 の両方を要求するガードあり。level-2/3 では filename ext `0x01` 必須 (`0x02` のみの `-lhd-` は reject)。level-3 header 総サイズは 1 MiB で上限打ち切り (防御的上限)。ext `0x00` header CRC-16 は parse のみで検証しない (file CRC-16 は検証)。末尾の中途半端な trailing bytes (21B 未満の残余) は `InvalidData`。
 - 圧縮メソッドエンコーダ (`with_method` の `-lh4-`〜`-lh7-`) は `compress::lzh::st1_enc` 共有実装 (greedy hash-chain + 頻度ベース Huffman、ARJ method 1-3 と共用)。stored alias `-lz4-`/`-pm0-` は wire 上 `-lh0-` と同型のためタグのみ付け替えて受理する。encoder の window は de facto (lhasa) 値で動作し、オリジナル版の LHa decoder の de jure window を超える distance を emit し得る点は上記「encoder window の既知制約」を参照。

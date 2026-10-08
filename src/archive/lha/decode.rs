@@ -17,7 +17,7 @@
 //!   `-lzs-`/`-lz5-` LZSS file entries via
 //!   `LhaEncoder::with_method` (stored fallback when
 //!   compression does not win). Level 0 requires the whole filename to
-//!   fit in one byte (at most 255 bytes); levels 1/2/3 carry the name
+//!   fit in one byte (at most 233 bytes — the u8 header-size field bounds 22 + name); levels 1/2/3 carry the name
 //!   through extended headers.
 //!
 //! Layout (level 0):
@@ -199,8 +199,8 @@ fn walk_ext_headers_sized(
             0x41 => ext.windows_filetime = Some(payload.to_vec()),
             0x42 => ext.large_file_size = Some(payload.to_vec()),
             0x50 if payload.len() >= 2 => ext.unix_mode = Some(u16le(payload)),
-            // `header.doc.md` stores gid first, then uid (lzhformat
-            // documents the opposite order).
+            // `header.doc.md` stores gid first, then uid;
+            // lzhformat lists the fields in the same order.
             0x51 if payload.len() >= 4 => {
                 ext.unix_gid = Some(u16le(payload));
                 ext.unix_uid = Some(u16le(&payload[2..]));
@@ -389,7 +389,11 @@ fn decode_level01(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Resu
     if is_dir && !name.ends_with('/') {
         name.push('/');
     }
-    let take = if is_dir { 0 } else { packed };
+    // The packed-size field always advances the stream, even for
+    // `-lhd-` directory entries (which should carry packed=0);
+    // otherwise a non-conformant packed>0 dir entry would desync
+    // the following header scan.
+    let take = packed;
     if data_start + take > input.len() {
         return Err(Error::InvalidData("lha: truncated entry data"));
     }
@@ -466,7 +470,11 @@ fn decode_level2(
         name.push('/');
     }
     let data_start = pos + size16;
-    let take = if is_dir { 0 } else { packed };
+    // The packed-size field always advances the stream, even for
+    // `-lhd-` directory entries (which should carry packed=0);
+    // otherwise a non-conformant packed>0 dir entry would desync
+    // the following header scan.
+    let take = packed;
     if data_start + take > input.len() {
         return Err(Error::InvalidData("lha: truncated entry data"));
     }
@@ -546,7 +554,11 @@ fn decode_level3(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Resul
         name.push('/');
     }
     let data_start = pos + hsize;
-    let take = if is_dir { 0 } else { packed };
+    // The packed-size field always advances the stream, even for
+    // `-lhd-` directory entries (which should carry packed=0);
+    // otherwise a non-conformant packed>0 dir entry would desync
+    // the following header scan.
+    let take = packed;
     if data_start + take > input.len() {
         return Err(Error::InvalidData("lha: truncated entry data"));
     }
@@ -594,6 +606,31 @@ mod tests {
         assert_eq!(e[1].name, "a/b.bin");
         assert_eq!(e[1].data, &[0, 1, 2, 255]);
         assert_eq!(e[0].level, 0);
+    }
+
+    #[test]
+    fn lhd_nonzero_packed_stays_in_sync() {
+        // A non-conformant -lhd- entry carrying packed > 0 must
+        // still advance the stream by that many bytes; otherwise
+        // the next member header is misread.
+        let mut enc = crate::archive::lha::encode::LhaEncoder::new();
+        enc.add_dir("docs", 0).unwrap();
+        enc.add_file("f.txt", b"x", 0).unwrap();
+        let mut a = enc.finish();
+        // level-0 header: packed is u32le at bytes 7..11; the
+        // whole header spans a[0] + 2 bytes.
+        let hlen = a[0] as usize + 2;
+        a[7..11].copy_from_slice(&4u32.to_le_bytes());
+        // recompute the header checksum (sum of bytes 2..hlen mod 256)
+        let sum: u8 = a[2..hlen].iter().fold(0u8, |s, &b| s.wrapping_add(b));
+        a[1] = sum;
+        // splice 4 junk bytes between the dir header and the file member
+        a.splice(hlen..hlen, [0xAA; 4]);
+        let e = decode(&a).unwrap();
+        assert_eq!(e.len(), 2);
+        assert!(e[0].is_dir);
+        assert_eq!(e[1].name, "f.txt");
+        assert_eq!(e[1].data, b"x");
     }
 
     #[test]

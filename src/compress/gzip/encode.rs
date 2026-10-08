@@ -129,7 +129,8 @@ pub fn encode_with_options(
     // FEXTRA: 2-byte LE length + data
     if let Some(extra) = options.extra {
         validate_extra_field(extra)?;
-        let xlen = extra.len() as u16;
+        let xlen = u16::try_from(extra.len())
+            .map_err(|_| Error::InvalidData("gzip: extra field exceeds 65535 bytes"))?;
         output.extend_from_slice(&xlen.to_le_bytes());
         output.extend_from_slice(extra);
     }
@@ -767,5 +768,20 @@ mod tests {
             encode_with_options(b"data", deflate::encode::Level::Fast, &options),
             Err(Error::InvalidData("gzip: malformed FEXTRA subfield data"))
         );
+    }
+
+    #[test]
+    fn rejects_oversized_extra_field() {
+        // XLEN is u16; >65535 bytes of FEXTRA must be rejected, not
+        // silently truncated to a non-conformant header.
+        let extra = vec![0u8; 65540];
+        let opts = GzipEncodeOptions {
+            extra: Some(&extra),
+            ..Default::default()
+        };
+        assert!(matches!(
+            encode_with_options(b"x", deflate::encode::Level::Default, &opts),
+            Err(Error::InvalidData(_))
+        ));
     }
 }

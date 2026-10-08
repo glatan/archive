@@ -25,6 +25,9 @@ pub struct CpioEncoder {
     format: CpioFormat,
     /// When set, the next entry will use this inode number instead of auto-increment.
     custom_ino: Option<u32>,
+    /// Byte ranges of written regular-file data keyed by inode. Used by
+    /// `add_hardlink` for odc/bin, where every copy carries the file data.
+    file_data_ranges: Vec<(u32, usize, usize)>,
 }
 
 /// Metadata for a cpio entry.
@@ -90,6 +93,7 @@ impl CpioEncoder {
             ino_counter: 1,
             format: CpioFormat::Newc,
             custom_ino: None,
+            file_data_ranges: Vec::new(),
         }
     }
 
@@ -112,6 +116,7 @@ impl CpioEncoder {
             ino_counter: 1,
             format: CpioFormat::Newcrc,
             custom_ino: None,
+            file_data_ranges: Vec::new(),
         }
     }
 
@@ -122,6 +127,7 @@ impl CpioEncoder {
             ino_counter: 1,
             format: CpioFormat::Odc,
             custom_ino: None,
+            file_data_ranges: Vec::new(),
         }
     }
 
@@ -137,6 +143,7 @@ impl CpioEncoder {
             ino_counter: 1,
             format: CpioFormat::Bin,
             custom_ino: None,
+            file_data_ranges: Vec::new(),
         }
     }
 
@@ -196,12 +203,14 @@ impl CpioEncoder {
 
     /// Add a hardlink entry.
     ///
-    /// In SVR4 newc format, hardlinks are entries that share the same inode number.
-    /// The first entry with data carries the file content; subsequent entries with
-    /// the same inode have filesize=0. The `target_ino` must match the inode of a
-    /// previously added file (use [`CpioEncoder::set_next_ino`] to control inode assignment).
-    ///
-    /// This writes a zero-length regular file entry with the given inode and nlink=2.
+    /// In SVR4 newc/newcrc format, hardlinks are entries that share the same
+    /// inode number: the first entry with data carries the file content and
+    /// subsequent entries with the same inode have filesize=0. In odc/bin
+    /// format every copy carries the file data (FreeBSD cpio(5), `h_nlink`),
+    /// so the content of the referenced entry is duplicated. The
+    /// `target_ino` must match the inode of a previously added file (use
+    /// [`CpioEncoder::set_next_ino`] to control inode assignment); for
+    /// odc/bin an unknown inode produces an empty entry.
     ///
     /// This method does not panic.
     ///
@@ -219,9 +228,18 @@ impl CpioEncoder {
     pub fn add_hardlink(&mut self, name: &str, target_ino: u32) {
         // Override the next ino to use the target's inode
         self.custom_ino = Some(target_ino);
+        let data = match self.format {
+            CpioFormat::Odc | CpioFormat::Bin => self
+                .file_data_ranges
+                .iter()
+                .find(|(ino, ..)| *ino == target_ino)
+                .map(|&(_, off, len)| self.data[off..off + len].to_vec())
+                .unwrap_or_default(),
+            CpioFormat::Newc | CpioFormat::Newcrc => Vec::new(),
+        };
         self.add_file_with_options(
             name,
-            &[],
+            &data,
             &CpioEntryOptions {
                 mode: 0o100644,
                 nlink: 2,
@@ -404,7 +422,9 @@ impl CpioEncoder {
 
         pad_name_if_needed(&mut self.data, self.format);
 
+        let data_off = self.data.len();
         self.data.extend_from_slice(file_data);
+        self.file_data_ranges.push((ino, data_off, file_data.len()));
 
         pad_data_if_needed(&mut self.data, self.format);
     }
@@ -805,6 +825,24 @@ mod tests {
         let archive = encoder.finish();
         let entries = decode::decode(&archive).unwrap();
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_bin_odc_hardlink_carries_data() {
+        // cpio(5) h_nlink: in the binary/portable-ascii formats every copy
+        // includes the file data; only newc/newcrc use filesize=0.
+        for make in [
+            CpioEncoder::new_odc as fn() -> CpioEncoder,
+            CpioEncoder::new_bin,
+        ] {
+            let mut encoder = make();
+            encoder.set_next_ino(7);
+            encoder.add_file("orig.txt", b"payload");
+            encoder.add_hardlink("link.txt", 7);
+            let entries = decode::decode(&encoder.finish()).unwrap();
+            assert_eq!(entries[1].header.ino, 7);
+            assert_eq!(entries[1].data, b"payload");
+        }
     }
 
     #[test]

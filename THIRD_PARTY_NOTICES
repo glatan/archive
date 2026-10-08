@@ -17,19 +17,23 @@ The following implementations are intended to follow published format
 specifications or standards documents:
 
 - DEFLATE: RFC 1951. The encoder's bit-length repair
-  (`src/compress/deflate/encode.rs`) consults the behavior of zlib's
-  `gen_bitlen`/`inflate_table` (zlib license) as a reference oracle;
-  no code was copied. The decoder's over-subscribed Huffman-tree
-  rejection (`HuffmanTable::from_lengths`) uses a Kraft-sum
-  left-tracking counter arithmetically equivalent to zlib
+  (`src/compress/deflate/encode.rs`) follows the bit-length-count
+  scheme of zlib's `gen_bitlen` (zlib license), reimplemented in
+  Rust with no code copied. The decoder's over-subscribed
+  Huffman-tree rejection (`HuffmanTable::from_lengths`) uses a
+  Kraft-sum left-tracking counter arithmetically equivalent to zlib
   `inflate_table`'s `left` accounting; the check is the standard
   Kraft-inequality validation per RFC 1951 §3.2.2. HDIST values of
   31/32 are accepted when the reserved distance-code lengths are
   zero, per the RFC 1951 §3.2.7 strict reading rather than zlib's
-  `hdist > 30` rejection
+  `hdist > 30` rejection. The Python `zlib` module (CPython, PSF
+  License) is also invoked as a local test-time interoperability
+  oracle for raw deflate streams (`tests/integration/deflate.rs`,
+  wbits=-15); it is not linked or distributed
 - gzip: RFC 1952. The system `gzip` binary (GNU gzip,
   GPL-3.0-or-later) is invoked only as a local test-time
-  interoperability oracle and fixture generator
+  interoperability oracle (integration tests and the
+  archive-fuzz pipe oracle) and fixture generator
   (`tests/fixtures/gzip/`); it is not linked or distributed
 - zlib: RFC 1950. The Python `zlib` module (CPython, PSF License)
   is invoked only as a local test-time interoperability oracle;
@@ -43,6 +47,9 @@ specifications or standards documents:
     implementation. Encoder features include LZ77 command generation,
     literal context modeling, multi-block-type metablocks, simple and
     complex prefix codes, and static dictionary references
+  - The system `brotli` binary (google/brotli, MIT) is run locally as a
+    test-time interoperability oracle and fixture generator
+    (`tests/fixtures/brotli/`); it is not linked or distributed
   - Patent/IPR note: Google has disclosed an IPR declaration for
     RFC 7932 (https://datatracker.ietf.org/ipr/2396/); this
     implementation follows the RFC directly and introduces no new
@@ -52,10 +59,13 @@ specifications or standards documents:
   et al. (zlib license; src/matchfinder.c is CC0). Where the written
   specification is ambiguous (extended-length marker values, the LZSA2
   offset model), behavior was confirmed against the reference sources
-  (`expand_block_v*.c`, `shrink_block_v2.c`); the implementation is
-  spec-informed, with no code copied. Known-answer decode vectors in
+  (`expand_block_v*.c`, `shrink_block_v2.c`, `lzsa.c`,
+  `shrink_context.c` for the -b/-D modes); the implementation is
+  spec-informed. Known-answer decode vectors in
   tests/integration/lzsa.rs were produced by running the reference lzsa
-  tool v1.4.1 locally; no code was copied.
+  tool v1.4.1 locally; no code was copied. No known patent claims;
+  LZSA is an LZ77-family technique whose related historical patents
+  have all expired.
 - ZX0: format and implementation by Einar Saukas (BSD 3-Clause).
   Known-answer decode vectors in tests/integration/zx0.rs were
   produced by running the reference compressor (ZX0 v2.2)
@@ -190,8 +200,10 @@ specifications or standards documents:
   specification only). The Rust implementation in src/archive/git_pack/
   is spec-informed, with no code copied. Test-time provenance: fixtures
   tests/fixtures/git-pack/real.{pack,idx} and ref.pack were produced by
-  git 2.55 `git repack` (GPL-2.0, used as an interoperability oracle);
-  encode-direction interop was verified by `git index-pack` accepting
+  git 2.55 `git repack` (GPL-2.0, used as an interoperability oracle;
+  ref.pack was generated with repack.usedeltabaseoffset=false to force
+  REF_DELTA entries); encode-direction interop was verified by
+  `git index-pack` and `git verify-pack` accepting
   this crate's output and producing a byte-identical .idx.
   The writer also emits pack v2/v3 (SHA-1/SHA-256 object names),
   idx v1/v2, and OFS_DELTA/REF_DELTA delta object encodings from
@@ -211,7 +223,9 @@ specifications or standards documents:
   LZXD streams embedded in tests/integration/lzxd.rs were produced by a
   test-side encoder and validated against libmspack's LZXD decoder
   (LGPL 2.1); libmspack is used only as a local test-time reference,
-  not linked or distributed. No code was copied.
+  not linked or distributed. No code was copied. The shared
+  compress::lzx core also uses libmspack lzx.c as an errata source;
+  see the mscab entry.
   Patent note: [MS-PATCH] is published under the general Microsoft Open
   Specifications IPR notice. It is NOT listed on the Open Specification
   Promise (OSP) covered-specification list ([MS-DEVCENTLP], revised
@@ -229,16 +243,20 @@ specifications or standards documents:
   specification; it is not an implementation basis and no code was
   copied.
   Patent note: the CMPSC facility and its base dictionary scheme date
-  to 1990s ESA/390-era IBM technology. No specific patent covering
-  CMPSC has been identified in this audit, and no formal patent search
-  was performed.
+  to 1990s ESA/390-era IBM technology. The directly relevant IBM
+  patents — US 5,442,350 (CMPSC dictionary scheme, filed 1992),
+  US 5,323,155, US 5,424,732, and US 5,610,603 (order preservation) —
+  have all expired (2012-2015). No formal patent search was performed.
   The PKWARE APPNOTE method-16 "IBM z/OS CMPSC Entropy Encoding"
-  variant is excluded from scope (patent status unverified).
-- LZF: format description in the `lzfP.h` header comments
-  (Marc Alexander Lehmann, BSD-2-Clause OR GPL-2.0-or-later) and the
-  LZFFormat description
+  variant (CMPSC-enhancement facility, z14+) is excluded from scope
+  (patent status unverified).
+- LZF: format description in the `lzf_c.c` header comments
+  (Marc Alexander Lehmann, BSD-2-Clause OR GPL-2.0-or-later; the
+  diagram lives in `lzf_c.c`, `lzfP.h` carries only the
+  constants) and the LZFFormat description
   (ning/compress wiki). `lzf_c.c` was consulted for behavior
-  confirmation only; no code was copied.
+  confirmation only; no code was copied. No known patent claims
+  (plain LZ77 variant); no formal patent search was performed.
 - Snappy: Google snappy `format_description.txt` (raw block format) and
   `framing_format.txt` (framed stream format)
 - xz: `xz-file-format.txt` from Tukaani. The system `xz` binary is
@@ -248,10 +266,12 @@ specifications or standards documents:
 - lzip container: GNU lzip manual. The system `lzip` binary
   (GPL-2.0-or-later) is invoked only as a local test-time
   interoperability oracle; it is not linked or distributed
-- LZMA-Alone `.lzma` container: `lzma-file-format.txt` (2022-07-13)
-  from the XZ documentation (public domain). The system `xz` binary is
-  invoked only as a test-time interoperability oracle; it is not
-  linked or distributed.
+- LZMA-Alone `.lzma` container: `lzma-file-format.txt` (final content
+  change 2022-07-13; pinned snapshot is the 2024-04-08 editorial
+  revision) from the XZ documentation (public domain). The system
+  `xz` binary is invoked only as a local test-time interoperability
+  oracle (integration tests and the archive-fuzz pipe oracle); it is
+  not linked or distributed.
 - LZ4: LZ4 frame format specification
   (https://github.com/lz4/lz4/blob/dev/doc/lz4_Frame_format.md) and
   LZ4 block format specification
@@ -259,8 +279,12 @@ specifications or standards documents:
   The system `lz4` binary (liblz4 BSD-2-Clause / CLI GPL-2.0) is
   invoked only as a local test-time interoperability oracle and
   fixture generator (`tests/fixtures/lz4/hello.lz4`); it is not
-  linked or distributed
-- tar: POSIX.1-2001 UStar / GNU tar extensions / POSIX PAX extensions
+  linked or distributed. The upstream reference implementation
+  (liblz4, BSD-2-Clause) was consulted as a behavioral reference
+  for legacy-frame details (LEGACY_BLOCK_SIZE = 8 MiB, the
+  stored-block fallback) — no code was copied. Patent note:
+  LZ77-family algorithm with no known patent assertions
+- tar: POSIX.1-2017 UStar / GNU tar extensions / POSIX PAX extensions
   (PAX extended-header semantics incl. empty-value attribute deletion
   follow IEEE Std 1003.1-2017, pinned as docs/spec/sources/posix-pax).
   GNU sparse handling (the old-style 'S' header + sparse map and the
@@ -272,17 +296,26 @@ specifications or standards documents:
   not linked or distributed
 - cpio: POSIX `odc` / SVR4 `newc` / `newcrc` / `bin` (FreeBSD
   `cpio(5)` "PWB format" / "New Binary Format" descriptions).
-  `bin` test fixtures are produced by GNU cpio (GPL-3.0-or-later),
-  invoked only as a local test-time fixture generator; it is not
-  linked or distributed
-- ar: IEEE Std 1003.1 (POSIX) ar format / GNU ar extensions / BSD ar
-  extensions. The checked-in fixture `tests/fixtures/ar/thin_gnu.a` was
-  produced by GNU binutils `ar rcT` (GPL-3.0-or-later), invoked only as
-  a local fixture generator; it is not linked or distributed
+  `bin` test fixtures are produced by GNU cpio (GPL-3.0-or-later);
+  system `cpio` is also invoked as a local test-time
+  interoperability oracle for `newc`/`newcrc`/`bin` encode/decode
+  compat (e.g. `test_cpio_encode_newc_system_extract_compat`,
+  `test_cpio_bin_extract_with_system`); it is not linked or
+  distributed
+- ar (spec-informed): IEEE Std 1003.1 (POSIX) ar format / GNU ar
+  extensions / BSD ar extensions. The checked-in fixture
+  `tests/fixtures/ar/thin_gnu.a` was produced by GNU binutils `ar rcT`
+  (GPL-3.0-or-later), invoked only as a local fixture generator; it is
+  not linked or distributed. Integration tests also invoke system `ar`
+  (GNU binutils, GPL-3.0-or-later) and `bsdtar` (libarchive,
+  BSD-2-Clause) as local interop oracles at test time only
 - deb: `deb(5)` Debian binary package format (dpkg manual page,
-  https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html)
-  Integration tests invoke `tar`/`ar`/`bsdtar` only as local
-  test-time tools; they are not linked or distributed.
+  https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html;
+  GPL-2.0-or-later — consulted as format documentation only; no code
+  was copied; pinned snapshot `docs/spec/sources/deb_5_unstable.html`)
+  Integration tests invoke `tar`/`ar`/`bsdtar` (and `gzip` via
+  `tar -z`) only as local test-time tools; they are not linked or
+  distributed.
 - rpm: rpm.org Package Format documentation (format_v6 / format_header /
   format_lead, https://rpm-software-management.github.io/rpm/manual/)
   and rpm `lib/cpio.c` stripped payload behavior notes;
@@ -431,7 +464,10 @@ specifications or standards documents:
   UNIX `dhuf.c`/`shuf.c` (non-OSI terms prohibiting binary-only
   redistribution and primary commercial use), so no rights-clean
   format reference exists; decoding these methods returns
-  `Error::Unsupported`. jLHA Notes (Michel Ishizuka) is used as the
+  `Error::Unsupported`. Secondary implementations (e.g. compcol's
+  LHA reader under MIT, libarchive's lh1-3 decoder under
+  BSD-2-Clause) may themselves derive from lzhuf.c/dhuf.c and are
+  not adopted as references either. jLHA Notes (Michel Ishizuka) is used as the
   level-3 header wire layout source and the extended-header
   identifier list (comment/DOS/UNIX-name identifiers).
   Test fixtures in `tests/fixtures/lha/`: most are the lhasa test
@@ -439,7 +475,8 @@ specifications or standards documents:
   1.13, LArc 3.33, PMarc, lhmelt, lha_amiga distributed under ISC with
   lhasa) vendored unmodified as known-answer decode inputs; the
   `-lh1-`/`-lh2-`/`-lh3-` archives are retained as rejection-input
-  fixtures, and the level-* fixtures are locally synthesized.
+  fixtures, and the level-* fixtures were generated locally by
+  LHa for UNIX 1.14i (`lha a -o1`/`-o2`).
   Joe Jared's lzhformat.html (level 0-2 layouts, multi-disk/spanning
   extended header 0x39) is additionally catalogued in
   `docs/spec/sources/` as a reference document.
@@ -453,7 +490,7 @@ specifications or standards documents:
   were not consulted or copied. ARJ32 method 8/9 (no-data
   pseudo-method) and file_type 5 (chapter label) acceptance follow
   `unar`/7-Zip `NArj` decoder behavior, used as oracles only —
-  TECHNOTE.ARJ (ARJ 2.x) covers methods 0-4 only.
+  TECHNOTE.DOC (ARJ 2.x) covers methods 0-4 only.
 - arc: SEA ARC file format description
   (wotsit.org "arc" format entry); member structure facts from the
   document. Compression methods 5-7/0xa/0xb
@@ -462,8 +499,12 @@ specifications or standards documents:
   (LGPL-3.0-or-later -> incorporated under GPL-3.0 via GPLv3
   section 7 removal of the LGPL additional permissions, combined under
   AGPL-3.0 section 13). `squeeze.rs` is
-  adapted from compcol's `arc_squeeze` documentation/strings (MIT);
-  `rle90.rs` is spec-informed. ARC 5.21 for Unix (hyc/arc,
+  adapted from compcol's `arc_squeeze` documentation/strings (MIT —
+  compcol's license text is reproduced in section 4a);
+  `rle90.rs` is spec-informed. ARC methods 8/9 (squashed/crushed)
+  reuse the shared `compress::lzw` core documented in the LZW entry
+  below (ncompress `compress42.c`, public domain). ARC 5.21 for Unix
+  (hyc/arc,
   GPL version unstated — Debian records GPL-2.0) and nomarch
   (GPL-2.0-or-later) are used only as test-time oracles and
   fixture generators — they are not implementation references.
@@ -495,8 +536,9 @@ specifications or standards documents:
   document nor the method may be patented, protected, or
   restricted in any way; recorded here for completeness.
 - cramfs: Linux kernel cramfs documentation and uapi headers
-  (cramfs.rst, fs/cramfs/README, include/uapi/linux/cramfs_fs.h;
-  GPL-2.0 with Linux-syscall-note). Spec-informed implementation;
+  (Documentation/filesystems/cramfs.rst and fs/cramfs/README under
+  GPL-2.0; include/uapi/linux/cramfs_fs.h under GPL-2.0 with
+  Linux-syscall-note). Spec-informed implementation;
   no code was copied. `mkfs.cramfs`/`fsck.cramfs` (util-linux,
   GPL-2.0+) are used as test-time interoperability oracles inside
   the test container — `fsck.cramfs` also validates
@@ -569,19 +611,21 @@ specifications or standards documents:
   not linked or distributed.
 - iso9660: ECMA-119 4th edition (= ISO 9660; Ecma International),
   Linux kernel isofs documentation and on-disk header
-  (Documentation/filesystems/isofs.rst, include/uapi/linux/iso_fs.h;
-  GPL-2.0 with Linux-syscall-note), System Use Sharing Protocol 1.10
+  (Documentation/filesystems/isofs.rst GPL-2.0,
+  include/uapi/linux/iso_fs.h GPL-2.0 WITH Linux-syscall-note), System Use Sharing Protocol 1.10
   and the SUSP 1.12 draft (IEEE P1281; the `ES` entry), Rock Ridge
   Interchange Protocol 1.12 (IEEE P1282), the Microsoft
   Joliet specification, the "El Torito" Bootable CD-ROM Format
   Specification 1.0 (Phoenix Technologies / IBM, 1995), the zisofs
   format description (RRIP 'ZF' entry, libburnia project), and Apple
   Technical Note FL36 (Apple Extensions to ISO 9660, February 1994).
-  The Linux kernel isofs decoder sources (fs/isofs/rock.c GPL-2.0
-  and fs/isofs/compress.c GPL-2.0-or-later, both with
-  Linux-syscall-note) and the zisofs-tools `mkzftree` writer
-  (GPL-2.0) were consulted as behavioral references for the
-  SUSP/RRIP/zisofs implementation.
+  The Linux kernel isofs decoder sources (fs/isofs/rock.c
+  GPL-2.0-only and fs/isofs/compress.c GPL-2.0-or-later,
+  neither carrying the Linux-syscall-note) and the zisofs-tools
+  `mkzftree` writer (GPL-2.0) were consulted only to
+  confirm interpretations of the written SUSP/RRIP/zisofs
+  specifications; every adopted behavior traces to
+  susp.shar / rrip112.pdf / zisofs_format.txt.
   Spec-informed implementation; no code was
   copied. `bsdtar`/`libarchive` (BSD-2-Clause) was used only as a
   local test-time oracle to produce and cross-validate the checked-in
@@ -601,10 +645,12 @@ specifications or standards documents:
   test-time oracle; it is not linked or distributed.
 - binhex: "BinHex 4.0 Definition" (Peter N Lewis, Aug 1991) and
   RFC 1741 Appendix A. Spec-informed implementation; no code was
-  copied. CPython `binascii.crc_hqx` (PSF License) and an
-  independently written Python reference encoder are used only as
-  local test-time interoperability oracles; they are not linked or
-  distributed.
+  copied. The Lewis document carries no explicit license text; it is
+  a long-circulated informational document referenced from the
+  pinned snapshot in `docs/spec/sources/`. CPython `binascii.crc_hqx`
+  (PSF License) and an independently written Python reference
+  encoder are used only as local test-time interoperability
+  oracles; they are not linked or distributed.
 - macbinary: MacBinary II Standard Proposal (24-Jul-1987, MacBinary II
   Conference). Spec-informed implementation; no code was copied.
   A Python reference implementation written independently from the
@@ -612,7 +658,10 @@ specifications or standards documents:
   oracle; it is not linked or distributed.
 - packbits: Apple Technical Note TN1023 "Understanding PackBits" and
   TIFF Revision 6.0 Section 9 "PackBits Compression". Spec-informed
-  implementation; no code was copied.
+  implementation; no code was copied. The TN1023 worked example is
+  embedded as a known-answer decode vector in the unit tests.
+  Patent note: no known patent claims; PackBits is a 1980s
+  byte-oriented RLE scheme.
 - zip: PKWARE APPNOTE.TXT 6.3.10. The container layer, encryption,
   and methods 0/8/10/12/14/93/95/98 are spec-informed; methods 1-6
   are ported from the public-domain hwzip reference (see section 2).
@@ -649,9 +698,11 @@ specifications or standards documents:
   `04 F7 11 02` = Brotli
 - LZMA codec: LZMA algorithm specification (`lzma-specification.txt`)
   from the LZMA SDK documentation
-- LZMA2 (`src/compress/lzma2/`): LZMA2 chunk format as documented in
-  `xz-file-format.txt` (Tukaani, public domain); shared core used by
-  both the xz container and the 7z LZMA2 method
+- LZMA2 (`src/compress/lzma2/`): LZMA2 chunk format per liblzma
+  coder semantics (public domain); `xz-file-format.txt` §5.3.1 covers
+  only the filter properties byte, the chunk format itself is out of
+  scope of the written spec (§3.2). Shared core used by both the xz
+  container and the 7z LZMA2 method
 - The system `7z` binary is invoked only as a local test-time
   interoperability oracle (method round-trip vectors); it is not
   linked or distributed.
@@ -732,8 +783,9 @@ against de facto reference behavior:
   - Reference: Ross Williams' public-domain `lzrw1-a.c`; the format is
     defined by that file's format description
   - Repository scope: Rust reimplementation of the documented format;
-    the encoder's hash function (multiplier and shift structure)
-    follows the reference encoder's heuristic
+    the encoder's hash shares the reference's 3-byte
+    mixing expression and 40543 multiplier, differing only in the
+    extraction shift position
   - Known-answer decode vectors in tests/integration/lzrw1a.rs were
     produced by running the reference encoder locally after a
     small 64-bit portability patch; the patched source is not
@@ -744,13 +796,18 @@ against de facto reference behavior:
     `lzrw3.c`, `lzrw3-a.c` (and the `lzrw2.txt`, `lzrw3.txt`,
     `lzrw3-a.txt` notes); the formats are defined by those files'
     "DEFINITION OF COMPRESSED FILE FORMAT" sections and decoder
-    behavior
+    behavior (`lzrw1.c` has no such section — its format is defined
+    purely by decoder behavior)
   - Repository scope: Rust reimplementation of the documented formats;
     the shared framing lives in `compress::lzrw` (crate-private) and
     no code was copied. For LZRW2/3/3-A the shared 3-byte hash helper
     adopts the reference implementations' hash arithmetic verbatim
-    (40543 multiplier, >>4 shift, mask); for LZRW1/LZRW1-A the encoders
-    reuse only the 40543 multiplier with a different shift position
+    (40543 multiplier, >>4 shift, mask) and the 18-byte
+    START_STRING_18 table-initialization constant; for LZRW1/LZRW1-A
+    the encoders
+    share the reference's 3-byte mixing expression ((b0<<8)^(b1<<4)^b2,
+    algebraically identical to the reference's left-shift-by-4 chain)
+    and the 40543 multiplier, differing only in the extraction shift
   - Known-answer decode vectors in tests/integration/{lzrw1,lzrw2,
     lzrw3,lzrw3a}.rs were produced by running the reference encoders
     locally after small portability patches (K&R prototypes, missing
@@ -782,7 +839,23 @@ against de facto reference behavior:
     repository. The `BZ2_RNUMS` randomized-RLE table in the codec
     carries the reference implementation's constant data (the
     BSD-licensed `randtable.c` values), which are part of the de facto
-    format definition
+    format definition. The system `bzip2` binary is also used as a
+    test-time interop oracle and fixture decompressor (not linked or
+    distributed)
+  - Upstream license text (bzip2 and libbzip2, BSD-style, verbatim
+    summary): "Redistribution and use in source and binary forms, with
+    or without modification, are permitted provided that the following
+    conditions are met: 1. Redistributions of source code must retain
+    the above copyright notice, this list of conditions and the
+    following disclaimer. 2. The origin of this software must not be
+    misrepresented; you must not claim that you wrote the original
+    software. If you use this software in a product, an acknowledgment
+    in the product documentation would be appreciated but is not
+    required. 3. Altered source versions must be plainly marked as
+    such, and must not be misrepresented as being the original
+    software. 4. The name of the author may not be used to endorse or
+    promote products derived from this software without specific prior
+    written permission." Copyright (C) 1996-2019 Julian Seward.
 
 - LZW / Unix compress `.Z`
   - Reference: `ncompress` / `compress42.c`
@@ -815,10 +888,14 @@ against de facto reference behavior:
 - rzip
   - Reference: upstream `rzip.samba.org` `.rz` container and chunk semantics
     (Andrew Tridgell, GPL-2.0-or-later); the upstream source was read only
-    to confirm format facts — no GPL-licensed source is bundled or copied.
-    rzip is GPL-2.0-or-later, so a conversion path (GPL-2.0-or-later ->
+    to confirm format facts — no code was copied into the crate. Reference
+    copies of rzip.c / stream.c / rzip.h / crc32.c (rzip 2.1, Debian pool
+    orig tarball) are pinned under docs/spec/sources/. rzip is
+    GPL-2.0-or-later, so a conversion path (GPL-2.0-or-later ->
     GPL-3.0 -> AGPL-3.0 section 13) exists were any incorporation ever
-    needed
+    needed. Patent note: no specific patent covering rzip's
+    long-range LZ77 matching has been identified; the technique dates to
+    1998 and related historical patents have expired
   - Repository scope: Rust implementation of the upstream container shape and
     token/chunk behavior
   - Provenance note: the long-range matching and chunk logic are implemented in
@@ -830,12 +907,20 @@ against de facto reference behavior:
 - lrzip
   - Reference: lrzip framing (Con Kolivas et al., GPL-2.0-or-later) plus
     the crate's upstream-faithful shared rzip token/chunk layer;
-    upstream source was read only to confirm format facts — no
-    GPL-licensed source is bundled or copied. lrzip is
+    upstream source was read only to confirm format facts — no code was
+    copied into the crate. lrzip is
     GPL-2.0-or-later, so a conversion path (GPL-2.0-or-later ->
     GPL-3.0 -> AGPL-3.0 section 13) exists were any incorporation
     ever needed. The container framing is additionally covered by the
     written `doc/magic.header.txt` format document
+  - The system `lrzip` binary (GPL-2.0-or-later, distro package) is
+    invoked only as a local test-time interoperability oracle
+    (integration tests and the archive-fuzz pipe oracle,
+    encode and decode directions); it is not linked or distributed.
+    Patent note: the bundled backends are covered by their own
+    entries (LZO / ZPAQ / LZMA are patent-free or public-domain
+    algorithm specifications); the rzip rolling-hash layer is a
+    1998 design with no known patent claims.
   - Repository scope: Rust implementation of the crate's supported `.lrz`
     subset and backend wiring
 
@@ -862,7 +947,7 @@ against de facto reference behavior:
 
 - Delta filter
   - Reference: xz / 7-Zip style byte-wise delta (distance 1..=256);
-    liblzma is public domain
+    liblzma is public domain (AGPL-3.0 compatible)
   - Provenance: ported — algorithmic transliteration of liblzma's
     public-domain `delta_encode`/`delta_decode` logic
   - Repository scope: Rust implementation validated against known vectors
@@ -984,7 +1069,38 @@ against de facto reference behavior:
     dictionary structure; table values are specification material, not
     copied source code. `dictionary.bin` is byte-identical to the RFC
     7932 Appendix A DICT array (122,784 bytes; CRC-32 0x5136cb04,
-    verified 2026-10 against the pinned rfc7932.txt)
+    verified 2026-10 against the pinned rfc7932.txt). The AFFIXES index
+    ordering and internal transform-type numbering follow upstream's
+    `transform.c`/`kPrefixSuffix` conventions (not the RFC's
+    check-value numbering); the dead `Shift` arm mirrors upstream's
+    unreachable 21/22 enum values
+  - Upstream Brotli MIT license text, reproduced defensively since the
+    index conventions above derive from upstream source:
+
+      MIT License
+
+      Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors.
+
+      Permission is hereby granted, free of charge, to any person
+      obtaining a copy of this software and associated documentation
+      files (the "Software"), to deal in the Software without
+      restriction, including without limitation the rights to use,
+      copy, modify, merge, publish, distribute, sublicense, and/or
+      sell copies of the Software, and to permit persons to whom the
+      Software is furnished to do so, subject to the following
+      conditions:
+
+      The above copyright notice and this permission notice shall be
+      included in all copies or substantial portions of the Software.
+
+      THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+      EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+      OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+      NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+      HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+      WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+      FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+      OTHER DEALINGS IN THE SOFTWARE.
   - Maintenance note: if these tables are ever regenerated or replaced, keep
     their provenance documented alongside the source update
 
@@ -1059,6 +1175,35 @@ incorporation:
   adaptation source for `arc/squeeze.rs`, and as an intermediate
   reference for `mscab/quantum.rs` — MIT-licensed material is
   compatible with this work; attribution recorded here.
+
+  compcol's MIT license text, reproduced verbatim to satisfy its
+  notice requirement for the adapted `arc/squeeze.rs` material:
+
+      MIT License
+
+      Copyright (c) 2026 Karpeles Lab Inc.
+
+      Permission is hereby granted, free of charge, to any person
+      obtaining a copy of this software and associated documentation
+      files (the "Software"), to deal in the Software without
+      restriction, including without limitation the rights to use,
+      copy, modify, merge, publish, distribute, sublicense, and/or
+      sell copies of the Software, and to permit persons to whom the
+      Software is furnished to do so, subject to the following
+      conditions:
+
+      The above copyright notice and this permission notice shall be
+      included in all copies or substantial portions of the Software.
+
+      THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+      EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+      OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+      NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+      HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+      WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+      FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+      OTHER DEALINGS IN THE SOFTWARE.
+
 - newtua_dos (new-the-unarchiver, LGPL-3.0-or-later): port source —
   `src/archive/arc/{crunch,crush,distill}.rs` (ARC methods 5-7/0xa/0xb)
   and `src/archive/arj/method4.rs` are transliterations of its faithful
@@ -1228,8 +1373,8 @@ Test-fixture provenance:
   a fixture derives from a third-party test corpus. Tools used
   only to produce fixtures — e.g. GNU binutils `ar`, GNU cpio, GNU
   tar, Unix `compress`, `lzop`, `lrzip`, `genromfs`, `mkfs.erofs`,
-  `mksquashfs`, and `git` — are invoked locally and are never linked
-  or distributed. `setfattr` (attr package) is likewise invoked as a
+  `mksquashfs`, `mkfs.cramfs`/`fsck.cramfs`, and `git` — are
+  invoked locally and are never linked or distributed. `setfattr` (attr package) is likewise invoked as a
   best-effort local test helper for squashfs xattr coverage.
 
 

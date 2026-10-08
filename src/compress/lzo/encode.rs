@@ -118,7 +118,7 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
 /// Compress a single block using standard LZO1X-1 bytecode.
 ///
 /// The output follows the standard LZO1X stream format as documented
-/// in the Linux kernel (Documentation/lzo.txt). All matches use S=0
+/// in the Linux kernel (Documentation/staging/lzo.rst). All matches use S=0
 /// (no embedded trailing literals).
 pub(crate) fn compress_lzo1x(input: &[u8]) -> Vec<u8> {
     let mut output = Vec::new();
@@ -204,7 +204,7 @@ pub(crate) fn compress_lzo1x(input: &[u8]) -> Vec<u8> {
 /// Standard LZO1X: byte 1-15 → count = byte + 3 (4-18 literals).
 /// byte 0 → extended: count = 18 + (255*zeros + nonzero_byte).
 fn emit_literal_run(output: &mut Vec<u8>, count: usize) {
-    debug_assert!(count >= 3, "literal run count must be >= 3");
+    debug_assert!(count >= 4, "literal run count must be >= 4");
     if count <= 18 {
         output.push((count - 3) as u8);
     } else {

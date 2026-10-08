@@ -502,9 +502,13 @@ mod tests {
         let mut f = build(&[], &z);
         f[0] = b'X';
         assert!(decode(&f).is_err());
-        // bad version
+        // bad version (2 routes to the CRX2 path; 4 hits the
+        // `unsupported version` rejection directly)
         let mut f = build(&[], &z);
         f[4] = 2;
+        assert!(decode(&f).is_err());
+        let mut f = build(&[], &z);
+        f[4] = 4;
         assert!(decode(&f).is_err());
         // header length beyond input
         let mut f = build(&[], &z);

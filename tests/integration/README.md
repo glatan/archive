@@ -244,7 +244,7 @@
 | Coverage | Test cases |
 | --- | --- |
 | crate roundtrip / level API | `test_rzip_roundtrip_level_matrix`<br>`test_rzip_roundtrip_binary_payload` |
-| system `rzip` interop | `test_rzip_decode_system_archive`<br>`test_rzip_encode_system_decode_compat`<br>`test_rzip_encode_system_decode_binary_payload`<br>`test_rzip_encode_system_decode_multichunk_payload` |
+| system `rzip` interop | `test_rzip_decode_system_archive`<br>`test_rzip_encode_system_decode_compat`<br>`test_rzip_encode_system_decode_binary_payload`<br>`test_rzip_encode_system_decode_multichunk_payload`<br>`test_rzip_encode_system_decode_level_edges`<br>`test_rzip_encode_system_decode_backend_matrix` |
 
 ### `sevenz.rs`
 

@@ -239,7 +239,9 @@ impl BlockTypeState {
 
         let block_type_code = type_tree.decode_symbol(reader)? as usize;
         let block_type = if block_type_code == 1 {
-            self.ring[1] + 1
+            // RFC 7932 §6: symbol 1 means previous type + 1, wrapping
+            // to 0 when the current type is the maximal possible.
+            (self.ring[1] + 1) % spec.num_types
         } else if block_type_code == 0 {
             self.ring[0]
         } else {
@@ -247,7 +249,8 @@ impl BlockTypeState {
                 .checked_sub(2)
                 .ok_or(Error::InvalidData("brotli: invalid block type code"))?
         };
-        // RFC 7932 §6: block type values must be in [0, NBLTYPES-1].
+        // RFC 7932 §6: explicit block types (symbols 2+) must be in
+        // [0, NBLTYPES-1].
         if block_type >= spec.num_types {
             return Err(Error::InvalidData(
                 "brotli: block type out of range for NBLTYPES",
@@ -1247,6 +1250,23 @@ mod tests {
         let mut reader = BitReader::new(&[0b0000_0001]);
         assert_eq!(state.prepare_next(&mut reader, &spec).unwrap(), 0);
         assert_eq!(state.prepare_next(&mut reader, &spec).unwrap(), 1);
+    }
+
+    #[test]
+    fn test_block_type_symbol_1_wraps_to_zero() {
+        // RFC 7932 §6: at the maximal type, symbol 1 wraps to type 0.
+        let spec = BlockTypeInfo {
+            num_types: 2,
+            type_tree: Some(huffman::HuffmanTable::from_simple_code(&[1], None, 4, 15).unwrap()),
+            len_tree: Some(huffman::HuffmanTable::from_simple_code(&[0], None, 26, 15).unwrap()),
+            initial_len: 1,
+        };
+        let mut state = BlockTypeState::new(&spec);
+        let mut reader = BitReader::new(&[0; 8]);
+        assert_eq!(state.prepare_next(&mut reader, &spec).unwrap(), 0);
+        assert_eq!(state.prepare_next(&mut reader, &spec).unwrap(), 1);
+        // Second consecutive symbol-1 switch wraps 1 -> 0.
+        assert_eq!(state.prepare_next(&mut reader, &spec).unwrap(), 0);
     }
 
     #[test]

@@ -15,8 +15,9 @@
 //! - **Replacement.** Once the table fills, new strings evict the
 //!   least-recently-used entry instead of growing the table.
 //!
-//! Ported from the newtua_dos transliteration of XADMaster `XADARCCrushHandle` (LGPL-3.0-or-later). nomarch is used
-//! only as a test-time oracle, not as an implementation reference.
+//! Ported from the newtua_dos transliteration of XADMaster `XADARCCrushHandle` (LGPL-3.0-or-later). unar is used
+//! only as a test-time oracle (nomarch does not implement method
+//! 0x0a), not as an implementation reference.
 //!
 //! Licensing: incorporated under LGPL-3.0 section 2 (GPL-3.0) and
 //! combined with this AGPL-3.0 work via AGPL-3.0 section 13.

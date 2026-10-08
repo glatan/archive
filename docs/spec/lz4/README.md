@@ -30,7 +30,7 @@
 | 12 | EndMark (`0x00000000`) | LZ4 Frame Format: Frame Descriptor / Data Blocks / EndMark | ✅ | `test_empty_input` |
 | 13 | Content_Checksum (xxhash32、オプション) | LZ4 Frame Format: Frame Descriptor / Data Blocks / EndMark | ✅ | `test_content_checksum_mismatch` |
 | 14 | Block_Checksum (xxhash32、オプション) | LZ4 Frame Format: Frame Descriptor / Data Blocks / EndMark | ✅ | `test_block_checksum_present_for_uncompressed_block`, `test_block_checksum_mismatch` |
-| 15 | 不正バージョンエラー | LZ4 Frame Format: Frame Descriptor / Data Blocks / EndMark | ✅ | デコーダーで検証 |
+| 15 | 不正バージョンエラー | LZ4 Frame Format: Frame Descriptor / Data Blocks / EndMark | ✅ | `test_rejects_invalid_flg_version` (FLG version != 01 は HC 検証より先に `InvalidData`) |
 | 16 | 入力短すぎエラー | LZ4 Frame Format: Frame Descriptor / Data Blocks / EndMark | ✅ | `test_input_too_short` |
 | 17 | Skippable Frame (0x184D2A50-5F) support | LZ4 Frame Format: Frame Descriptor / Data Blocks / EndMark | ✅ | `test_skippable_frame_decode` |
 | 18 | FLG reserved bits (bit 1) validation | LZ4 Frame Format: Frame Descriptor / Data Blocks / EndMark | ✅ | `test_flg_reserved_bit1_rejected` |
@@ -50,7 +50,7 @@
 | 27 | 最小マッチ長 4 | [LZ4 Block Format](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) | ✅ | `MIN_MATCH` 定数、ラウンドトリップ |
 | 28 | 最終シーケンスはマッチなし | [LZ4 Block Format](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) | ✅ | `emit_literals` |
 | 29 | 重複コピー (offset < match_len) | [LZ4 Block Format](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) | ✅ | `test_overlap_copy` |
-| 30 | マッチオフセット 0 エラー | [LZ4 Block Format](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) | ✅ | デコーダーで検証 |
+| 30 | マッチオフセット 0 エラー | [LZ4 Block Format](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) | ✅ | `test_decode_block_malformed` (offset=0 を含む) |
 | 31 | マッチオフセット超過エラー | [LZ4 Block Format](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) | ✅ | デコーダーで検証 |
 | 32 | 辞書 prefix 参照マッチ | [LZ4 Block Format](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) | ✅ | `test_decode_with_dict_roundtrip`, `test_encode_with_dict_roundtrip` |
 | 33 | Last-5-literals 制約 | [LZ4 Block Format](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) | ✅ | `LAST_LITERALS=5`、エンコーダーで適用 |
@@ -91,7 +91,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 49 | Legacy frame format (magic 0x184C2102)。legacy ブロックは 8MB 固定・最終ブロック以外は全埋め | LZ4 Legacy Frame | ✅ | `LEGACY_MAGIC` 定数、decode: `decode_legacy_frame()`、encode: `encode_legacy()` / `encode_legacy_with_options()` (`LEGACY_BLOCK_SIZE = 8MB` で chunked) |
+| 49 | Legacy frame format (magic 0x184C2102)。legacy ブロックは 8MB 固定・最終ブロック以外は全埋め | LZ4 Legacy Frame | ✅ | `LEGACY_MAGIC` 定数、decode: `decode_legacy_frame()`、encode: `encode_legacy()` (`LEGACY_BLOCK_SIZE = 8MB` で chunked)。leniency: `block_size == 0` も終端として受理する (legacy format の正式な終端は EOF または次 magic のみ)。展開上限なし (`usize::MAX`) で `decode_bounded` による事後制限は可能 |
 | 50 | Content_Size mismatch error (decode 時に検証) | LZ4 Frame: Content_Size | ✅ | デコーダーで検証 |
 | 51 | Block decompressed size ≤ Block_MaxSize 検証 | LZ4 Frame: Data Blocks | ✅ | 実装済み — `decompress_block` の `max_output` に Block_MaxSize を適用、展開超過は `Error::InvalidData`。`test_block_decompressed_size_exceeds_max_rejected` `test_block_size_at_max_accepted` |
 | 52 | Block_MaxSize ID → size mapping: 4=64KB, 5=256KB, 6=1MB, 7=4MB | LZ4 Frame: BD | ✅ | 実装済み |
@@ -99,6 +99,7 @@
 | 54 | Multi-frame (concatenated frames) | LZ4 Frame | ✅ | `test_multi_frame_standard_concat`, `test_multi_frame_legacy_then_standard`, `test_multi_frame_standard_then_legacy`, `test_multi_frame_three_legacy` |
 | 55 | Block-dependent mode: encode | LZ4 Frame: FLG | ✅ | `encode_block_dependent()`, `test_block_dependent_header_flag`, `test_block_dependent_roundtrip`, `test_block_dependent_roundtrip_large`, `test_block_dependent_with_block_sizes` |
 | 56 | Block_Size が Block_Maximum_Size を超えない | LZ4 Frame Format §Data Blocks | ✅ | 実装済み — ブロックループで宣言 Block_Size > Block_MaxSize を reject (圧縮/非圧縮共通、EOF チェックより前)。`test_block_size_exceeds_max_rejected` `test_uncompressed_block_size_exceeds_max_rejected` |
+| 58 | streaming / bounded API と trailing garbage 方針 | crate contract | ✅ | `decode_reader`/`decode_bounded`/`encode_writer` 実装済み。trailing garbage: 残余 <4B は常に無視、非 magic な 4B 超の残余は output 非空のときのみ無視 (空 output なら `InvalidData`)。`encode_with_dict` に id なし dict を渡すと DictID flag なしで dict 依存 frame を生成する (decode 側は offset 範囲外エラーで検出 — silent corruption にはならない) |
 | 57 | `0x80000000` (bit31=1, size=0) は有効な空非圧縮ブロックで EndMark ではない | LZ4 Frame Format §Data Blocks | ✅ | 実装は `block_data_size==0` → 0 バイト extend で自然に受理 |
 
 ---
@@ -107,9 +108,9 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 59 |
+| ✅ 実装+テスト済み  | 60 |
 | ❌ 未実装  | 0 |
-| **合計** | **59** |
+| **合計** | **60** |
 
 
 ---

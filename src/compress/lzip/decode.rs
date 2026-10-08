@@ -133,12 +133,14 @@ pub fn decode(data: &[u8]) -> Result<Vec<u8>, Error> {
         let (decoded, lzma_consumed) = lzma_decode(&data[pos..], dict_size)?;
         pos += lzma_consumed;
 
-        // The range decoder may not consume the last 0-2 padding bytes of the
-        // LZMA stream. Find the trailer by checking candidate positions using
-        // the data_size field for verification.
+        // The range decoder may not consume the last few bytes of the LZMA
+        // stream (the encoder flushes a 5-byte cache; up to that many bytes
+        // can be left unread). Scan candidate positions using the data_size
+        // field, preferring one that fully verifies.
         let mut trailer_pos = None;
-        for padding in 0..=2u64 {
-            let tpos = pos + padding as usize;
+        let mut first_size_match = None;
+        for padding in 0..=5usize {
+            let tpos = pos + padding;
             if tpos + TRAILER_SIZE > data.len() {
                 break;
             }
@@ -152,12 +154,34 @@ pub fn decode(data: &[u8]) -> Result<Vec<u8>, Error> {
                 data[tpos + 10],
                 data[tpos + 11],
             ]);
-            if ds == decoded.len() as u64 {
+            if ds != decoded.len() as u64 {
+                continue;
+            }
+            if first_size_match.is_none() {
+                first_size_match = Some(tpos);
+            }
+            let crc_ok =
+                u32::from_le_bytes([data[tpos], data[tpos + 1], data[tpos + 2], data[tpos + 3]])
+                    == crc32::crc32(&decoded);
+            let ms = u64::from_le_bytes([
+                data[tpos + 12],
+                data[tpos + 13],
+                data[tpos + 14],
+                data[tpos + 15],
+                data[tpos + 16],
+                data[tpos + 17],
+                data[tpos + 18],
+                data[tpos + 19],
+            ]);
+            let ms_ok = ms == (tpos + TRAILER_SIZE - member_start) as u64 && ms <= MAX_MEMBER_SIZE;
+            if crc_ok && ms_ok {
                 trailer_pos = Some(tpos);
                 break;
             }
         }
-        let tpos = trailer_pos.ok_or(Error::InvalidData("lzip: cannot find trailer"))?;
+        let tpos = trailer_pos
+            .or(first_size_match)
+            .ok_or(Error::InvalidData("lzip: cannot find trailer"))?;
 
         let expected_crc =
             u32::from_le_bytes([data[tpos], data[tpos + 1], data[tpos + 2], data[tpos + 3]]);
@@ -212,9 +236,11 @@ pub fn decode(data: &[u8]) -> Result<Vec<u8>, Error> {
         }
 
         // Lzip manual ch.5: a multimember file cannot contain empty
-        // members (a member whose data size is zero).
+        // members (a member whose data size is zero). Trailing data that
+        // does not form another member (e.g. zero padding, ch.9) is allowed
+        // after a single-member file, even an empty one.
         member_count += 1;
-        if decoded.is_empty() && (member_count > 1 || pos < data.len()) {
+        if decoded.is_empty() && (member_count > 1 || data[pos..].starts_with(&MAGIC)) {
             return Err(Error::InvalidData("lzip: empty member in multimember file"));
         }
 
@@ -477,7 +503,7 @@ mod tests {
         let original = encode::encode(b"lzip padding regression payload");
         let trailer_start = original.len() - TRAILER_SIZE;
 
-        for padding_len in 0..=2usize {
+        for padding_len in 0..=5usize {
             let mut padded = original[..trailer_start].to_vec();
             padded.extend(core::iter::repeat_n(0u8, padding_len));
             padded.extend_from_slice(&original[trailer_start..]);
@@ -551,5 +577,25 @@ mod tests {
         // Empty input is rejected by lzip decoder.
         let result = decode_bounded(b"", 1024);
         assert!(result.is_err());
+    }
+
+    /// Lzip manual ch.9: trailing zero padding may be appended to a
+    /// single-member file, even when the member is empty.
+    #[test]
+    fn test_empty_member_with_trailing_padding() {
+        use super::super::encode;
+        let mut compressed = encode::encode(b"");
+        compressed.extend_from_slice(&[0u8; 16]);
+        assert!(decode(&compressed).unwrap().is_empty());
+    }
+
+    /// Trailing garbage that does not form another member header is
+    /// ignored after a single-member file, even when it is empty.
+    #[test]
+    fn test_empty_member_with_trailing_garbage() {
+        use super::super::encode;
+        let mut compressed = encode::encode(b"");
+        compressed.extend_from_slice(b"garbage after member");
+        assert!(decode(&compressed).unwrap().is_empty());
     }
 }

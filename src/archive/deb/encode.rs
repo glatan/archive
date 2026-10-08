@@ -46,14 +46,12 @@ impl DebEncoder {
         }
     }
 
-    /// Set the `debian-binary` format version. Only `<num>.<num>`
-    /// syntax is accepted (deb(5) currently defines `2.0`).
+    /// Set the `debian-binary` format version. Only `2.<num>` is
+    /// accepted (deb(5) defines major `2`; a changed major number is an
+    /// incompatible format).
     pub fn version(mut self, v: &str) -> Result<Self, Error> {
         if !v.split_once('.').is_some_and(|(a, b)| {
-            !a.is_empty()
-                && !b.is_empty()
-                && a.bytes().all(|c| c.is_ascii_digit())
-                && b.bytes().all(|c| c.is_ascii_digit())
+            a == "2" && !b.is_empty() && b.bytes().all(|c| c.is_ascii_digit())
         }) {
             return Err(Error::InvalidData("deb: bad version"));
         }
@@ -116,6 +114,18 @@ impl DebEncoder {
             Some(t) => t,
             None => build_tar(&self.data_files),
         };
+        // deb(5): control.tar permits only none/gzip/xz/zstd.
+        match self.control_compression {
+            DebCompression::None
+            | DebCompression::Gzip
+            | DebCompression::Xz
+            | DebCompression::Zstd => {}
+            _ => {
+                return Err(Error::InvalidData(
+                    "deb: control.tar compression is limited to none/gz/xz/zst",
+                ));
+            }
+        }
         let control = compress(&control, self.control_compression)?;
         let data = compress(&data, self.data_compression)?;
 
@@ -205,13 +215,11 @@ mod tests {
 
     #[test]
     fn roundtrip_compressed_members() {
+        // Permitted for both members per deb(5): none/gz/xz/zst.
         for c in [
             DebCompression::Gzip,
             DebCompression::Xz,
             DebCompression::Zstd,
-            DebCompression::Bzip2,
-            DebCompression::Lzma,
-            DebCompression::Lzw,
         ] {
             let deb = encode(&[("./control", b"Package: p\n")], &[("./f", b"payload")], c)
                 .unwrap_or_else(|e| panic!("encode failed for {c:?}: {e}"));
@@ -219,6 +227,22 @@ mod tests {
             let dm = pkg.data_member().unwrap();
             assert_eq!(dm.compression, Some(c));
             assert_eq!(dm.name, alloc::format!("data.tar{}", c.extension()));
+            assert_eq!(pkg.data_entries().unwrap()[0].data, b"payload");
+        }
+        // data.tar-only compressions per deb(5): bz2/lzma
+        // (`.Z`/lzw is a legacy extension supported by neither list).
+        for c in [
+            DebCompression::Bzip2,
+            DebCompression::Lzma,
+            DebCompression::Lzw,
+        ] {
+            let mut enc = DebEncoder::new().data_compression(c);
+            enc.add_control_file("./control", b"Package: p\n");
+            enc.add_data_file("./f", b"payload");
+            let pkg = decode::decode(&enc.finish().unwrap())
+                .unwrap_or_else(|e| panic!("decode {c:?}: {e}"));
+            let dm = pkg.data_member().unwrap();
+            assert_eq!(dm.compression, Some(c));
             assert_eq!(pkg.data_entries().unwrap()[0].data, b"payload");
         }
     }
@@ -259,7 +283,7 @@ mod tests {
     #[test]
     fn version_validation() {
         assert!(DebEncoder::new().version("2.0").is_ok());
-        assert!(DebEncoder::new().version("3.1").is_ok());
+        assert!(DebEncoder::new().version("3.1").is_err());
         assert!(DebEncoder::new().version("2").is_err());
         assert!(DebEncoder::new().version("x.y").is_err());
         assert!(DebEncoder::new().version("").is_err());
@@ -268,5 +292,22 @@ mod tests {
         let pkg =
             decode::decode(&DebEncoder::new().version("2.1").unwrap().finish().unwrap()).unwrap();
         assert_eq!(pkg.version, "2.1");
+    }
+
+    #[test]
+    fn control_tar_compression_restricted() {
+        // deb(5): control.tar permits only none/gz/xz/zst.
+        assert!(
+            DebEncoder::new()
+                .control_compression(DebCompression::Bzip2)
+                .finish()
+                .is_err()
+        );
+        assert!(
+            DebEncoder::new()
+                .control_compression(DebCompression::Zstd)
+                .finish()
+                .is_ok()
+        );
     }
 }

@@ -116,7 +116,7 @@ magic bytes からフォーマットを自動検出する。
 - `.lzh`: offset 2 の `-l`-`-` メソッドマーカー + offset 20 の header level byte で識別（store メソッドのみ。`-lh5-` 等の圧縮エントリは非対応）。
 - `.arj`: `0x60 0xEA` signature で識別（method 0 stored のみ。圧縮・暗号化エントリは非対応）。
 - `.arc`: `0x1A` marker + method byte で識別（method 1/2 stored のみ。packed/squeezed/crunched は非対応）。
-- lzsa ストリーム: `7b 9e` magic + traits byte で識別（raw ブロックは検出不可のため `--format` が必要）。
+- lzsa ストリーム: `7b 9e` magic + traits byte で識別（raw ブロックは検出不可であり、CLI ではストリームのみ対応 — raw ブロックは library API のみ）。
 
 自動検出に対応しない形式（raw deflate, brotli, snappy, lzma, xpress, xpress-huff, lznt1, lzf, fastlz, lzrw1, lzrw1a, lzrw2, lzrw3, lzrw3a, zx0, zx1, zx2, zx5, zx0b, zx1b, zx2b, zx5b, mppc, lzs, lzxd, cmpsc など）は `--format` で明示する。
 lzxd の decode は、ストリーム外パラメータであるウィンドウサイズに仕様上の最大値（32MiB）を仮定してデコードする。小さいウィンドウで生成されたストリームであっても、後方参照距離はそのウィンドウサイズ以下に収まるため正常に展開できる。

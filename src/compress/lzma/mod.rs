@@ -525,7 +525,7 @@ fn lzma_decode_impl(
             // EOS marker: distance = 0xFFFFFFFF, length = MATCH_MIN_LEN
             if dist == 0xFFFF_FFFF {
                 if len != MATCH_MIN_LEN {
-                    return Err(Error::InvalidData("lzip: invalid EOS marker"));
+                    return Err(Error::InvalidData("lzma: invalid EOS marker"));
                 }
                 saw_eos = true;
                 break;
@@ -536,33 +536,38 @@ fn lzma_decode_impl(
             rep1 = rep0;
             rep0 = dist;
 
-            if rep0 as usize >= output.len() {
-                return Err(Error::InvalidData("lzip: distance out of range"));
+            // lzip manual 6.2: distances range from 0 to dict_size - 1,
+            // and a distance of position references a virtual zero byte
+            // preceding the first output byte.
+            if rep0 as usize > output.len() || rep0 as usize >= dict_size {
+                return Err(Error::InvalidData("lzma: distance out of range"));
             }
 
-            let start = output.len() - rep0 as usize - 1;
-            for i in 0..len {
-                output.push(output[start + i]);
+            let distance = rep0 as usize + 1;
+            for _ in 0..len {
+                let idx = output.len().wrapping_sub(distance);
+                output.push(if idx == usize::MAX { 0 } else { output[idx] });
             }
             state = state_after_match(state);
         } else if rc.decode_bit(&mut model.is_rep_g0[state])? == 0 {
             if rc.decode_bit(&mut model.is_rep0_long[state][pos_state])? == 0 {
                 // ── ShortRep (rep0, length=1) ──
-                if rep0 as usize >= output.len() {
-                    return Err(Error::InvalidData("lzip: distance out of range"));
+                if rep0 as usize > output.len() || rep0 as usize >= dict_size {
+                    return Err(Error::InvalidData("lzma: distance out of range"));
                 }
-                let byte = output[output.len() - rep0 as usize - 1];
-                output.push(byte);
+                let idx = output.len().wrapping_sub(rep0 as usize + 1);
+                output.push(if idx == usize::MAX { 0 } else { output[idx] });
                 state = state_after_short_rep(state);
             } else {
                 // ── LongRep0 ──
                 let len = model.rep_len_dec.decode(&mut rc, pos_state)? as usize + MATCH_MIN_LEN;
-                if rep0 as usize >= output.len() {
-                    return Err(Error::InvalidData("lzip: distance out of range"));
+                if rep0 as usize > output.len() || rep0 as usize >= dict_size {
+                    return Err(Error::InvalidData("lzma: distance out of range"));
                 }
-                let start = output.len() - rep0 as usize - 1;
-                for i in 0..len {
-                    output.push(output[start + i]);
+                let distance = rep0 as usize + 1;
+                for _ in 0..len {
+                    let idx = output.len().wrapping_sub(distance);
+                    output.push(if idx == usize::MAX { 0 } else { output[idx] });
                 }
                 state = state_after_rep(state);
             }
@@ -587,12 +592,13 @@ fn lzma_decode_impl(
             rep0 = dist;
 
             let len = model.rep_len_dec.decode(&mut rc, pos_state)? as usize + MATCH_MIN_LEN;
-            if rep0 as usize >= output.len() {
-                return Err(Error::InvalidData("lzip: distance out of range"));
+            if rep0 as usize > output.len() || rep0 as usize >= dict_size {
+                return Err(Error::InvalidData("lzma: distance out of range"));
             }
-            let start = output.len() - rep0 as usize - 1;
-            for i in 0..len {
-                output.push(output[start + i]);
+            let distance = rep0 as usize + 1;
+            for _ in 0..len {
+                let idx = output.len().wrapping_sub(distance);
+                output.push(if idx == usize::MAX { 0 } else { output[idx] });
             }
             state = state_after_rep(state);
         }
@@ -603,12 +609,12 @@ fn lzma_decode_impl(
             return Err(Error::UnexpectedEof);
         }
     } else if !saw_eos {
-        return Err(Error::InvalidData("lzip: missing EOS marker"));
+        return Err(Error::InvalidData("lzma: missing EOS marker"));
     }
 
     // Verify range coder finished cleanly for EOS-terminated streams.
     if expected_size.is_none() && !rc.is_finished() {
-        return Err(Error::InvalidData("lzip: range coder not finished cleanly"));
+        return Err(Error::InvalidData("lzma: range coder not finished cleanly"));
     }
 
     decoder_state.state = state;
@@ -1125,7 +1131,7 @@ mod tests {
 
         let result = lzma_decode(&encoded, 4096);
         assert!(
-            matches!(result, Err(Error::InvalidData("lzip: invalid EOS marker"))),
+            matches!(result, Err(Error::InvalidData("lzma: invalid EOS marker"))),
             "expected invalid EOS marker error, got {result:?}"
         );
     }

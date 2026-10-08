@@ -219,8 +219,8 @@ pub(crate) fn copy_from_output(out: &mut Vec<u8>, pos: usize, len: usize) {
     }
 }
 
-/// The LZRW3/LZRW3-A three-byte hash shared by compressor and decompressor
-/// table updates: `((40543 * ((b0<<8) ^ (b1<<4) ^ b2)) >> 4) & mask`.
+/// The LZRW2/LZRW3/LZRW3-A three-byte hash used by each compressor (and by the
+/// LZRW3/LZRW3-A decompressor table updates): `((40543 * ((b0<<8) ^ (b1<<4) ^ b2)) >> 4) & mask`.
 ///
 /// `mask` selects the value range: `0xFFF` yields a 12-bit index (LZRW3),
 /// `0x1FF` yields a partition number that must be shifted left by the

@@ -278,14 +278,10 @@ fn resolve(input: &[u8], kind: HashKind, raws: Vec<RawEntry>) -> Result<Vec<GitP
     let mut resolved: Vec<Option<(ObjectType, Vec<u8>)>> = (0..raws.len()).map(|_| None).collect();
     let mut resolving = alloc::vec![false; raws.len()];
 
-    // First resolve all non-delta objects so every possible REF_DELTA
-    // base name is known.
+    // Object ID -> index, filled as objects resolve. REF_DELTA bases
+    // may themselves be delta entries, whose names are only known
+    // once their content has been resolved.
     let mut name_index: BTreeMap<Vec<u8>, usize> = BTreeMap::new();
-    for (i, raw) in raws.iter().enumerate() {
-        if let RawKind::Full(t) = raw.kind {
-            name_index.insert(object_id_with_kind(kind, t, &raw.payload), i);
-        }
-    }
 
     fn resolve_at(
         i: usize,
@@ -322,7 +318,7 @@ fn resolve(input: &[u8], kind: HashKind, raws: Vec<RawEntry>) -> Result<Vec<GitP
                 .get(id.as_slice())
                 .ok_or_else(|| invalid("git-pack: thin pack (ref-delta base missing)"))?,
         };
-        resolve_at(
+        let r = resolve_at(
             base_idx,
             raws,
             offset_index,
@@ -330,25 +326,57 @@ fn resolve(input: &[u8], kind: HashKind, raws: Vec<RawEntry>) -> Result<Vec<GitP
             resolved,
             resolving,
             depth + 1,
-        )?;
+        );
+        resolving[i] = false;
+        r?;
         let (bt, bdata) = resolved[base_idx].clone().unwrap();
         let out = apply_delta(&bdata, &raws[i].payload)?;
         resolved[i] = Some((bt, out));
-        resolving[i] = false;
         Ok(())
+    }
+
+    // Resolve in passes: every pass inserts freshly resolved object
+    // IDs into the name index, so REF_DELTA chains onto delta entries
+    // converge in at most raws.len() passes. A pass with no progress
+    // surfaces the first error (thin pack, cycle, corrupt delta).
+    loop {
+        let mut progress = false;
+        let mut first_err = None;
+        for i in 0..raws.len() {
+            if resolved[i].is_some() {
+                continue;
+            }
+            match resolve_at(
+                i,
+                &raws,
+                &offset_index,
+                &name_index,
+                &mut resolved,
+                &mut resolving,
+                0,
+            ) {
+                Ok(()) => {
+                    let (t, data) = resolved[i].as_ref().unwrap();
+                    name_index.insert(object_id_with_kind(kind, *t, data), i);
+                    progress = true;
+                }
+                Err(e) => {
+                    if first_err.is_none() {
+                        first_err = Some(e);
+                    }
+                }
+            }
+        }
+        if !progress {
+            if let Some(e) = first_err {
+                return Err(e);
+            }
+            break;
+        }
     }
 
     let mut entries = Vec::with_capacity(raws.len());
     for i in 0..raws.len() {
-        resolve_at(
-            i,
-            &raws,
-            &offset_index,
-            &name_index,
-            &mut resolved,
-            &mut resolving,
-            0,
-        )?;
         let (t, data) = resolved[i].take().unwrap();
         let id = object_id_with_kind(kind, t, &data);
         entries.push(GitPackEntry {
@@ -712,6 +740,32 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[1].data(), b"456x");
         assert_eq!(entries[1].object_type(), ObjectType::Blob);
+    }
+
+    #[test]
+    fn ref_delta_chained_onto_delta() {
+        // REF_DELTA whose base is itself a REF_DELTA entry: valid
+        // self-contained pack (gitformat-pack "The base object could
+        // also be deltified if it's in the same pack").
+        let base = b"0123456789abcdef";
+        let base_e = blob_entry(base);
+        // d1: copy base[4..7] + insert x -> "456x" (type Blob).
+        let d1 = [16u8, 4, 0x91, 4, 3, 1, b'x'];
+        let base_id = object_id_with_kind(HashKind::Sha1, ObjectType::Blob, base);
+        let mut e1 = obj_header(7, d1.len() as u64);
+        e1.extend_from_slice(&base_id);
+        e1.extend_from_slice(&zlib::encode::encode(&d1));
+        // d2: base is the resolved d1 object ("456x"):
+        // copy [1..2] + insert z -> "5z".
+        let d2 = [4u8, 2, 0x91, 1, 1, 1, b'z'];
+        let d1_id = object_id_with_kind(HashKind::Sha1, ObjectType::Blob, b"456x");
+        let mut e2 = obj_header(7, d2.len() as u64);
+        e2.extend_from_slice(&d1_id);
+        e2.extend_from_slice(&zlib::encode::encode(&d2));
+        let p = pack(&[base_e, e1, e2]);
+        let entries = decode(&p).unwrap();
+        assert_eq!(entries[1].data(), b"456x");
+        assert_eq!(entries[2].data(), b"5z");
     }
 
     #[test]

@@ -24,7 +24,8 @@
 //!
 //! Flag bits: 0x01 garbled (password XOR on the packed stream),
 //! 0x04 continued into the next volume (split file), 0x08 extended
-//! file-start-position field present inside `first_hdr_size`.
+//! file-start-position field present inside `first_hdr_size`,
+//! 0x40 secured (ARJ security envelope — rejected as Unsupported).
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -176,6 +177,9 @@ fn parse_volume(input: &[u8]) -> Result<Vec<Frag>, Error> {
             return Ok(frags); // end of archive
         }
         let (end, fixed, name) = parse_header(input, pos)?;
+        if fixed[4] & 0x40 != 0 {
+            return Err(Error::Unsupported("arj: security-envelope entry"));
+        }
         if first {
             // Main header: file_type 2, no payload.
             first = false;
@@ -203,8 +207,9 @@ fn parse_volume(input: &[u8]) -> Result<Vec<Frag>, Error> {
 }
 
 /// De-garble a packed stream: byte `i` is XORed with
-/// `password[i % len].wrapping_add(modifier)`. The transform is
-/// symmetric, so the encoder reuses it to garble output.
+/// `password[i % len].wrapping_add(modifier)`. Semantics follow
+/// XADMaster's ARJPasswordModifier + XOR handle behavior. The
+/// transform is symmetric, so the encoder reuses it to garble output.
 pub(crate) fn ungarble(data: &mut [u8], password: &[u8], pmod: u8) {
     for (i, b) in data.iter_mut().enumerate() {
         *b ^= password[i % password.len()].wrapping_add(pmod);
@@ -545,6 +550,14 @@ mod tests {
         let mut a = crate::archive::arj::encode::encode(&[("f", b"x")]).unwrap();
         patch_second(&mut a, |h| h[4] |= 0x01); // garbled flag
         assert!(matches!(decode(&a), Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn rejects_security_envelope() {
+        let mut a = crate::archive::arj::encode::encode(&[("f", b"x")]).unwrap();
+        patch_second(&mut a, |h| h[4] |= 0x40); // secured flag
+        assert!(matches!(decode(&a), Err(Error::Unsupported(_))));
+        assert!(matches!(decode_parts(&[&a]), Err(Error::Unsupported(_))));
     }
 
     #[test]

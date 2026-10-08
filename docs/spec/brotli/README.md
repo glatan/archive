@@ -45,7 +45,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 14 | 122KB 静的辞書参照 (word_idx + transform_idx) | RFC 7932 §8 | ✅ | `test_brotli_decode_static_dictionary_identity_reference` |
-| 15 | 辞書変換: IDENTITY / OMIT_LAST_N / UPPERCASE_FIRST / UPPERCASE_ALL / OMIT_FIRST_N | RFC 7932 §8 Appendix B | ✅ | `dictionary.rs` の `TRANSFORMS` テーブル (144 エントリ) |
+| 15 | 辞書変換: IDENTITY / OMIT_LAST_N / UPPERCASE_FIRST / UPPERCASE_ALL / OMIT_FIRST_N | RFC 7932 §8 Appendix B | ✅ | `dictionary.rs` の `TRANSFORMS` テーブル (121 トリプレット、RFC §8 "121 different forms" と一致) |
 | 16 | Affix テーブル (50 種の接頭辞/接尾辞) | RFC 7932 §8 Appendix B | ✅ | `dictionary.rs` の `AFFIXES` |
 
 ### §9 Compressed Data Format
@@ -57,7 +57,7 @@
 | 19 | Final empty stream marker (ISLAST=1, ISLASTEMPTY=1) | RFC 7932 §9.2 | ✅ | `test_decode_empty_stream` |
 | 20 | Uncompressed metablock decode | RFC 7932 §9.2 | ✅ | `test_decode_uncompressed_hello_stream`, `test_decode_last_uncompressed_metablock` |
 | 21 | Metadata metablock parse / reserved bit reject | RFC 7932 §9.2 | ✅ | `test_parse_metadata_header`, `test_decode_metadata_then_empty`, `test_metadata_reserved_bit_rejected` |
-| 22 | Compressed metablock: NBLTYPES{L,I,D} / block type switching | RFC 7932 §6/§9.2 | ✅ | `test_parse_compressed_metablock_info_with_literal_block_switch`, `test_block_type_state_switches_block_types` |
+| 22 | Compressed metablock: NBLTYPES{L,I,D} / block type switching (symbol 0=prev-prev、1=prev+1 で最大値 wrap→0、2+=明示) | RFC 7932 §6/§9.2 | ✅ | `test_parse_compressed_metablock_info_with_literal_block_switch`, `test_block_type_state_switches_block_types`, `test_block_type_symbol_1_wraps_to_zero` |
 
 ### §9.1/§10 Window Size and Decoding Algorithm
 
@@ -72,7 +72,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 26 | Uncompressed metablock 生成 | RFC 7932 §9.2 | ✅ | `test_brotli_encode_roundtrip`, `test_brotli_encode_writer_roundtrip` |
-| 27 | Multi-metablock (65,536B 超) 分割 | RFC 7932 §9.2 | ✅ | `test_brotli_encode_multi_metablock_roundtrip` |
+| 27 | Multi-metablock (MAX_METABLOCK_LEN = 16,777,215B 超) 分割 | RFC 7932 §9.2 | ✅ | `test_brotli_encode_multi_metablock_roundtrip` |
 | 28 | Literal-only compressed metablock (insert-only command, simple prefix codes) | RFC 7932 §9.2 / §3.4 / §5 | ✅ | `test_brotli_encode_repeated_run_uses_compressed_metablock`, `test_brotli_encode_low_cardinality_literals_use_compressed_metablock` |
 
 ### システム互換
@@ -100,14 +100,14 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 39 | HSKIP: code length code 順序 (1,2,3,4,0,5,17,6,16,7,8,...,15) | RFC 7932 §3.5 | ✅ | read_code_length_code_lengths() |
-| 40 | Oversubscribed/undersubscribed prefix code 検証 | RFC 7932 §3 | ✅ | Huffman builder |
+| 40 | Oversubscribed/undersubscribed prefix code 検証 | RFC 7932 §3 | ✅ | `read_code_lengths` / `read_code_length_code_lengths` の space 計算 (32768/32 ちょうど消費を要求) |
 | 41 | NPOSTFIX / NDIRECT parameter parsing from metablock header | RFC 7932 §9.2 | ✅ | parse_compressed_metablock_info() |
 | 42 | WBITS value range validation (10-24) + reserved pattern (WBITS=9) reject | RFC 7932 §9.1 | ✅ | `parse_window_bits()`, `test_parse_window_bits_rejects_reserved_pattern` |
 | 43 | Uncompressed metablock: byte alignment requirement | RFC 7932 §9.2 | ✅ | デコーダーで align |
 | 44 | Max backward distance = min(window_size, output_so_far) | RFC 7932 §8/§10 | ✅ | copy_from_distance() |
 | 45 | Simple prefix code: シンボル値がアルファベットサイズ未満であること | RFC 7932 §3.4 | ✅ | read_simple_prefix_code(): symbol >= alphabet_size で InvalidData; from_simple_code() でも同様 |
 | 46 | Complex prefix code: 2 個以上の非ゼロコード長が必要 | RFC 7932 §3.5 | ✅ | `non_zero_count < 2` で InvalidData。`test_complex_prefix_single_nonzero_code_length_rejected` |
-| 47 | Special distance が 0 以下に解決した場合 reject | RFC 7932 §4 | ✅ | decode.rs `RecentDistances::resolve`: distance <= 0 で InvalidData |
+| 47 | Special distance が 0 以下に解決した場合 reject | RFC 7932 §4 | ✅ | decode.rs `RecentDistances::resolve_short_code`: distance <= 0 で InvalidData |
 | 48 | Distance code 0 はリングバッファを更新しない | RFC 7932 §4 | ✅ | decode.rs: code 0 で should_push_distance=false、recent_distances.push をスキップ |
 | 49 | NBLTYPES = largest block type + 1 の検証 | RFC 7932 §6 | ✅ | `block_type >= num_types` で InvalidData |
 | 50 | Context map: 値域が [0..NTREES-1] であること | RFC 7932 §7.3 | ✅ | read_context_map(): value >= ntrees で InvalidData |
@@ -120,6 +120,12 @@
 | 57 | NTREES = context map 内の異なる値の個数 (全 tree index が使用されること) | RFC 7932 §7.3 | ✅ | `test_context_map_rejects_unused_tree_index` |
 | 58 | dictionary 参照: copy_len ∈ [4,24] かつ transform_id ≤ 120 でなければ reject | RFC 7932 §8 | ✅ | `test_copy_static_dictionary_rejects_out_of_range_copy_len` `test_copy_static_dictionary_rejects_out_of_range_transform` |
 | 59 | static dictionary reference を解決した distance はリングバッファに push しない | RFC 7932 §10 / §4 | ✅ | 辞書参照 distance (`distance > max_allowed_distance`) は `recent_distances` push を抑止。`test_dictionary_distance_not_pushed_to_recent_ring` `test_decode_dictionary_reference_preserves_distance_ring` |
+| 60 | Simple prefix code のシンボル重複は reject | RFC 7932 §3.4 | ✅ | `read_simple_prefix_code` の `symbols.contains` チェック、`test_simple_prefix_duplicate_symbol_rejected` |
+| 61 | Code length code が非ゼロ長 1 個のみ → 全シンボルゼロ長の singleton として受理 | RFC 7932 §3.5 | ✅ | `read_code_length_code_lengths` の `non_zero_count == 1` 受理経路 |
+| 62 | Distance ring buffer は metablock 境界でリセットされない | RFC 7932 §4/§10 | ✅ | `RecentDistances` はストリーム先頭で 1 回のみ生成 (cross-metablock 継続) |
+| 63 | insert-and-copy code 0..127 は distance code 0 暗黙 (copy なし) | RFC 7932 §5 | ✅ | `decode_command` の `cell_idx < 2 → Some(0)` |
+| 64 | Context map の RLE 長が map サイズ超過 → reject | RFC 7932 §7.3 | ✅ | `read_context_map` の "context map repeat overflow" |
+| 65 | Backward distance は metablock 境界を跨いで参照可能 | RFC 7932 §10 | ✅ | 単一 output バッファで自然に対応 (design 上自明) |
 
 ---
 
@@ -127,8 +133,8 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 59 |
+| ✅ 実装+テスト済み  | 65 |
 | ⚠️ 部分実装  | 0 |
 | ❌ 未実装  | 0 |
-| **合計** | **59** |
+| **合計** | **65** |
 

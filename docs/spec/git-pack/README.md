@@ -38,7 +38,7 @@
 |---|------|----------|-----------|----------------|
 | 10 | OFS_DELTA (type 6): "offset encoding" の n バイト前エントリを base とする | "object entries" + "offset encoding" 節 | ✅ | `decode_real_pack` (git 実物 ofs-delta), `ofs_delta_handbuilt` |
 | 11 | OFS_DELTA の base は必ず先行エントリ (n > 0 かつ pack 内の既知エントリオフセット) | 同上 | ✅ | `ofs_delta_bad_base` |
-| 12 | REF_DELTA (type 7): hash 長 (v2=20B / v3=32B) のオブジェクト名で pack 内 base を引く | "object entries" | ✅ | `decode_ref_delta_pack` (ref.pack 実物 fixture), `v3_ref_delta_handbuilt` |
+| 12 | REF_DELTA (type 7): hash 長 (v2=20B / v3=32B) のオブジェクト名で pack 内 base を引く。base は delta エントリでも可 ("The base object could also be deltified") — 名前は解決後にしか判らないため fixpoint パスで解決 | "object entries" | ✅ | `decode_ref_delta_pack` (ref.pack 実物 fixture), `v3_ref_delta_handbuilt`, `ref_delta_chained_onto_delta` |
 | 13 | thin pack (REF_DELTA base が pack 内に不在) は reject | 同上 + 通常 pack は self-contained | ✅ | `thin_pack_rejected` |
 | 14 | delta データは `size_of_base` `size_of_result` の size encoding に続く命令列 | "deltified representation" 節 | ✅ | `apply_delta_copy_insert`, `delta_chain_depth` |
 | 15 | `size_of_base` は実 base サイズと一致必須 | 同上 | ✅ | `apply_delta_errors` (src size mismatch) |
@@ -46,7 +46,7 @@
 | 17 | insert 命令 (MSB=0、非ゼロ): 次 n バイトをそのまま出力 | 同上 | ✅ | `apply_delta_copy_insert` |
 | 18 | 命令 0 (reserved) は reject | 同上 ("reserved") | ✅ | `apply_delta_errors` |
 | 19 | copy が base 範囲外 / insert が delta 残量超過 / 結果が `size_of_result` 不一致は reject | 同上 + crate 防御 | ✅ | `apply_delta_errors` |
-| 20 | delta チェーンは base 先解決で再帰適用。深さ上限 64 (git 既定深さ 50 に十分な余裕) で過剰チェーンを防御 | "deltified representation" 節 + crate 防御 | ✅ | `delta_chain_depth` (2 段), 深さ上限はコード上の上限 |
+| 20 | delta チェーンは base 先解決で再帰適用 (OFS/REF 混在可)。深さ上限 64 (git 既定深さ 50 に十分な余裕) で過剰チェーンを防御。delta cycle は `resolving` フラグで検出 | "deltified representation" 節 + crate 防御 | ✅ | `delta_chain_depth` (2 段), 深さ上限はコード上の上限 |
 
 ## pack チェックサム / idx
 
@@ -56,7 +56,7 @@
 | 22 | idx v2: magic `FF 74 4F 63` + version 2 | "pack-*.idx files" v2 | ✅ | `decode_real_idx` |
 | 23 | idx v2: fanout[256] (単調増加)、sorted SHA-1 名表、CRC32 表、4B offset 表、8B large-offset 表 (MSB=1 のエントリが指す) | 同節 | ✅ | `decode_real_idx`, `idx_large_offset_table` (合成 idx による large offset 経路) |
 | 24 | idx 末尾は pack チェックサム + idx チェックサム (自身の SHA-1)。両者を検証 | 同節 | ✅ | `decode_real_idx`, `idx_bad_checksums_rejected` |
-| 24a | idx v1: fanout[256] + sorted (u32 offset + 20B sha1) 24B 行 + trailer (pack checksum 20B + idx checksum 20B)。非単調 fanout / サイズ不一致 / 未ソートは reject | "pack-*.idx files" v1 | ✅ | `decode_idx_v1` は `len == 1024 + 24n + 40` (trailer 必須) を要求し、末尾 idx checksum を SHA-1 検証。pack checksum は parse のみ。`decode_idx_v1_trailer_verified` |
+| 24a | idx v1: fanout[256] + sorted (u32 offset + 20B sha1) 24B 行 + trailer (pack checksum 20B + idx checksum 20B)。非単調 fanout / サイズ不一致 / 未ソートは reject | "pack-*.idx files" v1 | ✅ | `decode_idx_v1` は `len == 1024 + 24n + 40` (trailer 必須) を要求し、末尾 idx checksum を SHA-1 検証。pack checksum は parse のみ。v1 decode は SHA-1 (20B 行) 専用 — SHA-256 の v1 idx は理論上ありうるが git が生成しないため対象外。`decode_idx_v1_trailer_verified`, `decode_idx_v1_handbuilt`, `decode_idx_v1_rejects_bad_input`, `idx_v1_rejected_for_sha256` |
 | 25 | encode: pack v2 を出力し、`finish_with_index` で対応 idx v2 を生成。git `index-pack` が受理する | gitformat-pack 全体 | ✅ | `encode_roundtrip`, `encode_roundtrip_with_index` + git interop (手動確認: `git index-pack`/`verify-pack` が受理、生成 idx は git 生成物とバイト一致) |
 | 25a | encode: `add_delta_object` が先行エントリを base とする OFS_DELTA (type 6) を出力。delta 命令列は greedy block matcher で生成 (delta 生成戦略は仕様非規定)。実 `git index-pack`/`verify-pack` が depth-2 chain を受理 | "object entries" + "deltified representation" 節 | ✅ | `delta_encoder_object_roundtrip`, `delta_chain_of_three`, `delta_rejects_bad_base_index`, `create_delta_roundtrip_various`, `delta_with_index_roundtrip`, `ofs_offset_encoding`, `ofs_delta_pack_accepted_by_git_index_pack` |
 | 25b | encode: `add_ref_delta_object` が REF_DELTA (type 7) (hash 長の base オブジェクト名埋め込み) を出力。実 `git index-pack --strict` が受理 | "object entries" | ✅ | `ref_delta_roundtrip`, `ref_delta_rejects_bad_base_index`, `ref_delta_pack_accepted_by_git_index_pack` |
@@ -78,7 +78,7 @@
 | 29 | `archive list`/`read` は hex 名 + `object-type` メタデータで一覧化 | CLI semantics | ✅ | `read.rs` の `Format::GitPack` アーム |
 | 30 | `archive extract` は各オブジェクトを hex 名ファイルとして出力 | CLI semantics | ✅ | `extract.rs` の `Format::GitPack` アーム |
 | 31 | `archive pack git-pack` は入力ファイルを blob オブジェクトとして格納 (non-deltified) | CLI semantics | ✅ | `write_archive.rs` `pack_git_pack` |
-| 32 | fuzz algorithm `git-pack` | fuzz harness | ✅ | `fuzz/src/algorithms.rs` |
+| 32 | fuzz algorithm `git-pack` / `git-pack-delta` / `git-pack-sha256` | fuzz harness | ✅ | `fuzz/src/algorithms.rs` |
 
 ### Intentional scope (実装対象外)
 
@@ -86,6 +86,6 @@
 |---|------|------|
 | 33 | thin pack の受理・外部 base 結合 (`index-pack --fix-thin` 相当) | thin pack は送信用途中形式で、リポジトリ上の pack は常に self-contained |
 | 34 | pack v1 (idx なし旧形式) の read/write | v1 は現行 Git が出力しない |
-| 35 | `.rev` / `.mtimes` / multi-pack-index (`.midx`) / `.bitmap` | いずれも pack 補助・複数 pack 管理用の別形式 (gitformat-pack 別節 / gitformat-multi-pack-index) |
+| 35 | `.rev` / `.mtimes` / multi-pack-index (`.midx`) / `.bitmap` | いずれも pack 補助・複数 pack 管理用の別形式 (gitformat-pack は MIDX の BTMP/RIDX chunk に言及するのみ。bitmap 本体は別文書、midx は gitformat-multi-pack-index) |
 | 36 | SHA-256 リポジトリ層の統合 (loose object、refs) | pack v3 の read/write・idx v2 32B names は行 2/12/25c で対応済み。repo 層の object store 統合は pack コンテナ scope 外 |
 | 37 | packed-refs / loose object (`.git/objects/xx/`) の読み書き | pack とは別の object store 形式 |

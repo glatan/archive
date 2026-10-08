@@ -667,11 +667,28 @@ pub(crate) fn write_string(field: &mut [u8], s: &str) {
 }
 
 /// Write a value as zero-padded octal ASCII into a fixed-width header field.
+/// If the value does not fit in `width` octal digits, fall back to GNU
+/// binary (base-256) encoding instead of silently truncating: byte0 bit7
+/// set, remaining field bytes hold the value big-endian. Values that
+/// still do not fit saturate at the representable maximum.
 pub(crate) fn write_octal(field: &mut [u8], value: u64, width: usize) {
     let s = alloc::format!("{value:0>width$o}");
     let bytes = s.as_bytes();
-    let len = bytes.len().min(field.len());
-    field[..len].copy_from_slice(&bytes[..len]);
+    if bytes.len() <= field.len() {
+        field[..bytes.len()].copy_from_slice(bytes);
+        return;
+    }
+    field.fill(0);
+    field[0] = 0x80;
+    let nbytes = field.len() - 1;
+    let mut v = value;
+    if nbytes < 8 && value >> (nbytes * 8) != 0 {
+        // Cannot represent the full value: saturate rather than wrap.
+        v = u64::MAX >> ((8 - nbytes) * 8);
+    }
+    for i in 0..nbytes.min(8) {
+        field[field.len() - 1 - i] = (v >> (i * 8)) as u8;
+    }
 }
 
 /// B-5: Write a size value to the 12-byte size field.
@@ -948,6 +965,23 @@ fn truncate_to(s: &str, max_bytes: usize) -> String {
 mod tests {
     use super::*;
     use crate::archive::tar::decode;
+
+    /// A numeric field whose value exceeds the octal width is written as
+    /// GNU base-256 binary instead of silently truncating digits.
+    #[test]
+    fn test_write_octal_base256_fallback() {
+        let mut field = [0u8; 12];
+        // 12 octal digits fit the field; a 13th digit needs base-256.
+        write_octal(&mut field, 0o777777777777, 11);
+        assert_eq!(field[0] & 0x80, 0);
+        write_octal(&mut field, 0o777777777777 + 1, 11);
+        assert_eq!(field[0], 0x80);
+        let mut v = 0u64;
+        for &b in &field[1..] {
+            v = (v << 8) | b as u64;
+        }
+        assert_eq!(v, 0o777777777777 + 1);
+    }
 
     #[test]
     fn test_roundtrip_single_file() {

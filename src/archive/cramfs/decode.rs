@@ -577,6 +577,32 @@ mod tests {
     }
 
     #[test]
+    fn rejects_bad_signature_flags_and_small_size() {
+        let f = build(&[("a", S_IFREG | 0o644, b"x")]);
+        // Corrupt "Compressed ROMFS" signature (superblock offset 16).
+        let mut bad = f.clone();
+        bad[16] = b'X';
+        assert!(decode(&bad).is_err());
+        // Unsupported feature flag.
+        let mut bad = f.clone();
+        let flags = u32le(&bad, 8) | 0x1000;
+        bad[8..12].copy_from_slice(&flags.to_le_bytes());
+        assert!(decode(&bad).is_err());
+        // size field below the 76-byte superblock+root-inode minimum.
+        let mut bad = f;
+        bad[4..8].copy_from_slice(&40u32.to_le_bytes());
+        assert!(decode(&bad).is_err());
+    }
+
+    #[test]
+    fn decodes_fifo_as_other_kind() {
+        let f = build(&[("pipe", 0x1000 | 0o644, b"")]);
+        let img = decode(&f).unwrap();
+        assert_eq!(img.entries[0].kind, CramfsKind::Other(0x1000));
+        assert!(img.entries[0].data.is_empty());
+    }
+
+    #[test]
     fn fsid_crc_verified_as_info() {
         let mut f = build(&[("a", S_IFREG | 0o644, b"x")]);
         // Without FSID_VERSION_2 the field is not a valid checksum.

@@ -1182,6 +1182,18 @@ mod tests {
         assert!(decode_block(&[0x50, 0x01], 64).is_err());
         // Match offset pointing beyond available history.
         assert!(decode_block(&[0x04, 0xFF, 0xFF], 64).is_err());
+        // Match offset must be non-zero (LZ4 Block Format:
+        // offset encodes distance-1 implicitly; 0 is invalid).
+        assert!(decode_block(&[0x10, 0x78, 0x00, 0x00, 0x00], 64).is_err());
+    }
+
+    #[test]
+    fn test_rejects_invalid_flg_version() {
+        // FLG bits 7-6 must be 01; any other version is rejected
+        // before the header checksum is consulted.
+        let mut frame = super::super::encode::encode(b"x");
+        frame[4] = (frame[4] & 0x3F) | 0x80; // version = 10
+        assert!(matches!(decode(&frame), Err(Error::InvalidData(_))));
     }
 
     #[test]

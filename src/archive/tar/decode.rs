@@ -90,9 +90,23 @@ pub fn decode(input: &[u8]) -> Result<Vec<TarEntry>, Error> {
         let mut header = TarHeader::parse(block)?;
         pos += BLOCK_SIZE;
 
+        // POSIX ustar: typeflags '2'-'6' (symlink/char/block/dir/fifo)
+        // store no data logical records; a nonzero size on these types
+        // must be ignored when reading, or foreign archives desync.
+        let has_data = !matches!(
+            header.file_type,
+            FileType::SymLink
+                | FileType::CharDevice
+                | FileType::BlockDevice
+                | FileType::Directory
+                | FileType::Fifo
+        );
+
         // For GNU sparse files, skip extended sparse header blocks and
         // use the on-tape data size instead of the logical size.
-        let tape_data_size = if header.file_type == FileType::GnuSparse {
+        let tape_data_size = if !has_data {
+            0
+        } else if header.file_type == FileType::GnuSparse {
             // If isextended flag is set, read 512-byte extension blocks
             // until one without the flag is found. Each block has 21
             // sparse entries (24 bytes each = 504 bytes) plus a 1-byte
@@ -168,8 +182,9 @@ pub fn decode(input: &[u8]) -> Result<Vec<TarEntry>, Error> {
                 continue;
             }
             FileType::PaxGlobalHeader => {
-                // POSIX.1-2001: global PAX headers affect all subsequent entries.
-                global_pax_attrs = parse_pax_attributes(&data);
+                // POSIX: a 'g' record persists per keyword until another
+                // 'g' record supplies a new value for that same keyword.
+                global_pax_attrs.extend(parse_pax_attributes(&data));
                 continue;
             }
             _ => {
@@ -521,6 +536,103 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].header.name, "test.txt");
         assert_eq!(entries[0].data, b"Hello, tar!");
+    }
+
+    /// Build a minimal ustar header block for testing.
+    fn build_header(name: &[u8], typeflag: u8, size: u64) -> [u8; BLOCK_SIZE] {
+        let mut h = [0u8; BLOCK_SIZE];
+        h[..name.len()].copy_from_slice(name);
+        fn write_field(field: &mut [u8], value: u64, width: usize) {
+            let s = alloc::format!("{value:0>width$o}");
+            field[..width].copy_from_slice(&s.as_bytes()[..width]);
+        }
+        write_field(&mut h[100..108], 0o644, 7); // mode
+        write_field(&mut h[108..116], 0, 7); // uid
+        write_field(&mut h[116..124], 0, 7); // gid
+        write_field(&mut h[124..136], size, 11); // size
+        write_field(&mut h[136..148], 0, 11); // mtime
+        h[156] = typeflag;
+        h[257..263].copy_from_slice(b"ustar\0");
+        h[263..265].copy_from_slice(b"00");
+        h[148..156].fill(b' ');
+        let sum: u32 = h.iter().map(|&b| b as u32).sum();
+        let cksum = alloc::format!("{sum:06o} ");
+        h[148..155].copy_from_slice(cksum.as_bytes());
+        h
+    }
+
+    /// POSIX: typeflags '2'-'6' store no data records; a nonzero size
+    /// field (seen in some foreign archives) must be ignored on read,
+    /// otherwise the decoder consumes the following header as payload.
+    #[test]
+    fn test_nonzero_size_directory_does_not_desync() {
+        let mut archive = Vec::new();
+        archive.extend_from_slice(&build_header(b"dir/", b'5', 512));
+        archive.extend_from_slice(&build_header(b"file.txt", b'0', 3));
+        archive.extend_from_slice(b"abc");
+        archive.extend_from_slice(&[0u8; BLOCK_SIZE - 3]);
+        archive.extend_from_slice(&[0u8; BLOCK_SIZE * 2]);
+        let entries = decode(&archive).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].header.name, "dir/");
+        assert!(entries[0].data.is_empty());
+        assert_eq!(entries[1].header.name, "file.txt");
+        assert_eq!(entries[1].data, b"abc");
+    }
+
+    /// POSIX: a 'g' global header persists per keyword until another 'g'
+    /// supplies a new value for the same keyword.
+    #[test]
+    fn test_global_pax_headers_merge_per_key() {
+        let g1_data = b"15 comment=one\n";
+        let g2_data = b"13 charset=x\n";
+        let mut archive = Vec::new();
+        archive.extend_from_slice(&build_header(
+            b"pax_global_header",
+            b'g',
+            g1_data.len() as u64,
+        ));
+        archive.extend_from_slice(g1_data);
+        archive.resize(archive.len() + BLOCK_SIZE - g1_data.len(), 0);
+        archive.extend_from_slice(&build_header(b"a.txt", b'0', 1));
+        archive.extend_from_slice(b"a");
+        archive.extend_from_slice(&[0u8; BLOCK_SIZE - 1]);
+        archive.extend_from_slice(&build_header(
+            b"pax_global_header",
+            b'g',
+            g2_data.len() as u64,
+        ));
+        archive.extend_from_slice(g2_data);
+        archive.resize(archive.len() + BLOCK_SIZE - g2_data.len(), 0);
+        archive.extend_from_slice(&build_header(b"b.txt", b'0', 1));
+        archive.extend_from_slice(b"b");
+        archive.extend_from_slice(&[0u8; BLOCK_SIZE - 1]);
+        archive.extend_from_slice(&[0u8; BLOCK_SIZE * 2]);
+        let entries = decode(&archive).unwrap();
+        assert_eq!(entries.len(), 2);
+        // The second 'g' must not erase `comment` from the first.
+        assert_eq!(entries[0].header.pax_comment.as_deref(), Some("one"));
+        assert_eq!(entries[1].header.pax_comment.as_deref(), Some("one"));
+        assert_eq!(entries[1].header.pax_charset.as_deref(), Some("x"));
+    }
+
+    /// GNU base-256 encodes negative values in twos complement;
+    /// a field of all 0xFF must decode to -1, not a rejected huge u64.
+    #[test]
+    fn test_negative_base256_mtime() {
+        let mut h = build_header(b"old", b'0', 1);
+        h[136..148].fill(0xFF);
+        h[148..156].fill(b' ');
+        let sum: u32 = h.iter().map(|&b| b as u32).sum();
+        let cksum = alloc::format!("{sum:06o} ");
+        h[148..155].copy_from_slice(cksum.as_bytes());
+        let mut archive = Vec::new();
+        archive.extend_from_slice(&h);
+        archive.push(b'x');
+        archive.extend_from_slice(&[0u8; BLOCK_SIZE - 1]);
+        archive.extend_from_slice(&[0u8; BLOCK_SIZE * 2]);
+        let entries = decode(&archive).unwrap();
+        assert_eq!(entries[0].header.mtime, -1);
     }
 
     /// Two consecutive 512-byte zero blocks form a valid empty archive.
