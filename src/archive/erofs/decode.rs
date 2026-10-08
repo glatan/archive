@@ -546,12 +546,22 @@ impl Img<'_> {
         } else {
             4
         };
-        // Extents follow the inode and xattr ibody, 8-byte aligned,
-        // preceded by a 4-byte `erofs_inode_chunk_info`.
+        // The chunk array (block map or index entries) follows the
+        // inode and xattr ibody, aligned to the entry size. The
+        // 4-byte erofs_inode_chunk_info lives in the inode i_u
+        // union, not before the array (kernel erofs_map_chunks:
+        // ALIGN(iloc + inode_isize + xattr_isize, unit)).
         let eoff = ino_off
-            .checked_add((ino.isize + ino.xattr_isize + 7) & !7)
-            .and_then(|v| v.checked_add(4))
+            .checked_add(ino.isize)
+            .and_then(|v| v.checked_add(ino.xattr_isize))
+            .and_then(|v| v.checked_add(esz - 1))
+            .map(|v| v & !(esz - 1))
             .ok_or(Error::InvalidData("erofs extent offset overflow"))?;
+        let addrmask = if ino.chunk_format & CHUNK_FORMAT_48BIT != 0 {
+            (1u64 << 48) - 1
+        } else {
+            (1u64 << 32) - 1
+        };
         let eend = eoff
             .checked_add(
                 nchunks
@@ -571,11 +581,11 @@ impl Img<'_> {
             } else {
                 let e = &extents[i * 8..i * 8 + 8];
                 (
-                    u64::from(u32le(e, 4)) | (u64::from(u16le(e, 0)) << 32),
+                    (u64::from(u32le(e, 4)) | (u64::from(u16le(e, 0)) << 32)) & addrmask,
                     u16le(e, 2),
                 )
             };
-            if blk == NULL_ADDR || (esz == 4 && blk == 0xFFFF_FFFF) {
+            if blk == addrmask || blk == NULL_ADDR {
                 out.resize(out.len() + take, 0);
                 continue;
             }
@@ -1625,6 +1635,105 @@ mod tests {
             },
         ]);
         b.build(root)
+    }
+
+    /// Add a chunk-based inode (block map or 8-byte index form)
+    /// whose chunk array is  bytes placed right after the
+    /// inode core, and whose logical size is .
+    fn add_chunked(b: &mut ImgBuilder, size: u32, chunk_format: u16, idx: &[u8]) -> u64 {
+        let nid = b.add_inode(
+            idx.len(),
+            DATALAYOUT_CHUNK_BASED,
+            0o100644,
+            1,
+            size,
+            u32::from(chunk_format),
+        );
+        let off = b.inode_off(nid) + 32;
+        b.data[off..off + idx.len()].copy_from_slice(idx);
+        nid
+    }
+
+    #[test]
+    fn decodes_chunked_inode_block_map() {
+        let mut b = ImgBuilder::new();
+        let c0 = b.add_block(&vec![0xAA; BLK]);
+        let c1 = b.add_block(&vec![0xBB; BLK]);
+        // Block map: two 4-byte block addresses, one per 4096-byte
+        // chunk (chunk blkbits = 0).
+        let mut idx = Vec::new();
+        idx.extend_from_slice(&le32(c0 as u32));
+        idx.extend_from_slice(&le32(c1 as u32));
+        let nid = add_chunked(&mut b, (2 * BLK) as u32, 0, &idx);
+        let root = b.add_dir(&[DirEnt {
+            nid,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let out = decode(&b.build(root)).expect("decode");
+        let f = &out.entries[0];
+        assert_eq!(f.data.len(), 2 * BLK);
+        assert!(f.data[..BLK].iter().all(|&c| c == 0xAA));
+        assert!(f.data[BLK..].iter().all(|&c| c == 0xBB));
+    }
+
+    #[test]
+    fn decodes_chunked_inode_index_with_hole() {
+        let mut b = ImgBuilder::new();
+        let c0 = b.add_block(&vec![0xCC; BLK]);
+        // 8-byte chunk index entries: chunk0 -> block c0,
+        // chunk1 -> NULL (hole, startblk all-ones within mask).
+        let mut idx = Vec::new();
+        idx.extend_from_slice(&le16(0));
+        idx.extend_from_slice(&le16(0));
+        idx.extend_from_slice(&le32(c0 as u32));
+        idx.extend_from_slice(&le16(0));
+        idx.extend_from_slice(&le16(0));
+        idx.extend_from_slice(&le32(0xFFFF_FFFF));
+        let nid = add_chunked(&mut b, (2 * BLK) as u32, 0x20, &idx);
+        let root = b.add_dir(&[DirEnt {
+            nid,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let out = decode(&b.build(root)).expect("decode");
+        let f = &out.entries[0];
+        assert_eq!(f.data.len(), 2 * BLK);
+        assert!(f.data[..BLK].iter().all(|&c| c == 0xCC));
+        assert!(f.data[BLK..].iter().all(|&c| c == 0));
+    }
+
+    #[test]
+    fn decodes_48bit_rootnid() {
+        let mut b = ImgBuilder::new();
+        let f = b.add_file(b"hi");
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        b.set_incompat(INCOMPAT_48BIT);
+        let mut img = b.build(root);
+        // With INCOMPAT_48BIT, sb+14 is ; the root nid
+        // lives in the 8-byte  field at sb offset 112.
+        img[SUPER_OFF + 14..SUPER_OFF + 16].copy_from_slice(&le16(0));
+        img[SUPER_OFF + 112..SUPER_OFF + 120].copy_from_slice(&le64(root));
+        let out = decode(&img).expect("decode");
+        assert_eq!(out.entries.len(), 1);
+        assert_eq!(out.entries[0].data, b"hi");
+    }
+
+    #[test]
+    fn rejects_chunked_unknown_format_bits() {
+        let mut b = ImgBuilder::new();
+        let c0 = b.add_block(&vec![0xAA; BLK]);
+        let nid = add_chunked(&mut b, BLK as u32, 0x80, &le32(c0 as u32));
+        let root = b.add_dir(&[DirEnt {
+            nid,
+            name: b"f",
+            ftype: 8,
+        }]);
+        assert!(matches!(decode(&b.build(root)), Err(Error::Unsupported(_))));
     }
 
     #[test]

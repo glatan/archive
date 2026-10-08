@@ -374,7 +374,9 @@ fn parse_version(data: &[u8]) -> Result<String, Error> {
             .split('.')
             .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
         && text.contains('.');
-    if !valid {
+    // deb(5): if the major number has changed, an incompatible change
+    // has been made and the program should stop.
+    if !valid || !text.starts_with("2.") {
         return Err(Error::InvalidData("deb: malformed format version"));
     }
     Ok(text.to_string())
@@ -457,6 +459,26 @@ mod tests {
         enc.add_file("data.tar", b"d");
         let input = enc.finish().unwrap();
         assert!(decode(&input).is_err());
+    }
+
+    #[test]
+    fn rejects_major_version_change() {
+        // deb(5): a changed major number means an incompatible format.
+        let mut enc = ar::encode::ArEncoder::new();
+        enc.add_file(DEBIAN_BINARY, b"3.0\n");
+        enc.add_file("control.tar", b"c");
+        enc.add_file("data.tar", b"d");
+        assert!(decode(&enc.finish().unwrap()).is_err());
+    }
+
+    #[test]
+    fn rejects_duplicate_control_member() {
+        let mut enc = ar::encode::ArEncoder::new();
+        enc.add_file(DEBIAN_BINARY, b"2.0\n");
+        enc.add_file("control.tar", b"a");
+        enc.add_file("control.tar.gz", b"b");
+        enc.add_file("data.tar", b"d");
+        assert!(decode(&enc.finish().unwrap()).is_err());
     }
 
     #[test]

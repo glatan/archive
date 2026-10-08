@@ -154,6 +154,14 @@ fn test_rzip_encode_system_decode_backend_matrix() {
         ("b_bzip2", Backend::Bzip2),
     ] {
         let archive = rzip::encode::encode_with_backend(&input, backend);
-        assert_rzip_archive_system_decode_compat(archive, stem, &input);
+        // Upstream rzip 2.1 only supports CTYPE_NONE(3)/CTYPE_BZIP2(4);
+        // GZIP/LZO ctypes are lrzip-derived crate extensions that system
+        // rzip cannot decode, so they only get a crate roundtrip check.
+        match backend {
+            Backend::Gzip | Backend::Lzo => {
+                assert_eq!(rzip::decode::decode(&archive).unwrap(), input);
+            }
+            _ => assert_rzip_archive_system_decode_compat(archive, stem, &input),
+        }
     }
 }

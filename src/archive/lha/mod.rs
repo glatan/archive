@@ -22,7 +22,7 @@
 //!   (falling back to `-lh0-` when compression does not
 //!   shrink the input). Level 0 requires the whole filename to fit
 //!   in one byte
-//!   (at most 255 bytes); levels 1/2/3 carry the name through
+//!   (at most 233 bytes — the u8 header-size field bounds 22 + name); levels 1/2/3 carry the name through
 //!   extended headers.
 //!
 //! Layout (level 0):

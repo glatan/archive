@@ -27,8 +27,8 @@
 | 7 | level 2 で `ctrl & 0x1f == 31` かつ offset-low == 0xff の場合、さらに u16be の距離拡張が続く。距離 = ext16 + 8192 (8192..=73727) | fastlz.c: `code == 255 && ofs == 31<<8` → `ref = op - ofs - MAX_L2_DISTANCE - 1` | ✅ | `decode_l2_far_match`、`fastlz_reference_vector_l2_far_match` (統合) |
 | 8 | 拡張長バイトは offset low バイトの前に来る (far match は offset-low の 0xff 後に u16) | fastlz.c | ✅ | `fastlz_reference_vector_l2_far_match` (統合) |
 | 9 | match コピーは 1 バイトずつ (重複コピー許容) | fastlz.c / LZ77 系規約 | ✅ | `roundtrip_various` (`[0u8; 1000]` 等) |
-| 10 | ストリーム終端 = 入力消費完了。level 1 は残り < 2 バイトで終了 (リファレンス同様末尾 1 バイトを許容)、level 2 は残り 0 で終了 | fastlz.c loop condition | ✅ | 全 roundtrip テスト |
-| 11 | 空入力は空ストリームに対応 | fastlz.c | ✅ | `empty_input` |
+| 10 | ストリーム終端 = 入力消費完了。level 1 は残り < 2 バイトで終了 (リファレンス同様末尾 1 バイトを許容)、level 2 は残り 0 で終了。far match の ext16 直前の残存チェックは参照 (3B 要求) より寛容で、ext16 でちょうど終わる入力も受理する | fastlz.c loop condition / `FASTLZ_BOUND_CHECK` | ✅ | 全 roundtrip テスト |
+| 11 | 空入力は空ストリームに対応 | crate contract (参照実装は length 0 入力で未定義動作のため規範外) | ✅ | `empty_input` |
 | 12 | 先頭バイト上位 3bit が 2 以上 (level 3+) のストリームは拒否 | fastlz.c (未サポート level) | ✅ | `rejects_bad_level` |
 
 ## バリデーション / エラー処理
@@ -48,7 +48,9 @@
 | 18 | `encode` はリファレンス同様 64 KiB 未満で level 1、以上で level 2 を選択。`encode_level1` / `encode_level2` で明示も可 | fastlz.c: `fastlz_compress` | ✅ | `roundtrip_various` (70000B で level-2 経路) |
 | 19 | level 2 エンコーダは距離 >= 8192 のマッチを far 形式で出力 | fastlz.c | ✅ | `decode_l2_far_match` + roundtrip |
 | 20 | level 1 エンコーダは 264 バイト超のマッチを連続マッチに分割して出力 (各片は 0 または >=3 の残りを残すよう調整) | fastlz.c: `MAX_LEN 264` | ✅ | `roundtrip_various` (`[0u8; 1000]`) |
-| 21 | エンコーダのマッチ探索は greedy 単一候補ハッシュ (3B プレフィックス、15bit ハッシュ)。fastlz.c との出力バイト一致は保証しない (仕様上正当なバリエーション) | 実装選択 | ✅ | roundtrip で検証 |
+| 21 | エンコーダのマッチ探索は greedy 単一候補ハッシュ (3B プレフィックス、15bit ハッシュ。参照の 13bit Knuth 乗算ハッシュとは別構成)。fastlz.c との出力バイト一致は保証しない (仕様上正当なバリエーション) | 実装選択 | ✅ | roundtrip で検証 |
+| 23 | encoder の参照実装との差分: L2 far 距離上限 73727 (参照 encoder は < 73725 のみ使用)、L1 距離 <=8192 (参照は <8192)、far match 最小長 3B (参照は dist>=8191 で >=5B)、マッチ延長を入力末尾まで実施 (参照は末尾 ~13B を常に literal)、L1 長 match 分割は decoded 264B 単位 (参照は len_arg 262B 基準)。いずれも wire 上 valid なストリームを生成 | 実装選択 | ✅ | roundtrip + `fastlz_reference_vector_*` で decoder 互換を検証 |
+| 24 | fuzz harness (encode/decode/decode_bounded 全経路 + regression 配線) | fuzz/ 構成 | ✅ | `fuzz/src/algorithms.rs` `Algorithm::Fastlz` |
 
 ## その他
 

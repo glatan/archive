@@ -14,6 +14,8 @@
 - format-1 sibling descriptor (展開辞書に第 2 doubleword を持つ形式)
 - symbol translation / order preservation
 - entropy encoding (CMPSC-enhancement facility、z14+)
+- 圧縮データ operand の先頭 bit offset (GR1 CBN) — 実装は常に bit0 から parse (byte コンテナ codec としての scope)
+- GR0 bit46 ZP (zero-padding、CMPSC-enhancement)
 - method-16 の deflate 圧縮辞書フラグ (0x40) は拒否
 
 ## Index symbol ストリーム
@@ -28,10 +30,12 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 4 | エントリは 8 バイト。bits0-2 = PSL。PSL=0 は unpreceded entry: bits3-5 = CSL (1-7)、bytes1-7 に EC 列 | POP App.D Expansion Dictionary | ✅ | `cmpsc_expand_alphabet_and_chains` (統合) |
-| 5 | PSL>0 は preceded entry: bits3-15 = PPTR (predecessor index)、bytes2-6 に EC 列 (最大 5)、byte7 = OFST | 同上 | ✅ | 同上 (258 "ABC" = PPTR 256 + EC 'C') |
+| 4 | エントリは 8 バイト。bits0-2 = PSL。PSL=0 は unpreceded entry: bits3-4 = 0 (非ゼロは data exception として reject)、bits5-7 = CSL (1-7)、bytes1-7 に EC 列 | POP App.D Expansion Dictionary | ✅ | `cmpsc_expand_alphabet_and_chains` (統合) / `expand_rejects_bad_unpreceded_entry` |
+| 5 | PSL>0 は preceded entry: bits3-15 = PPTR (predecessor index)、bytes2-6 に EC 列 (最大 5)、byte7 = OFST。PSL 6/7 は model-dependent (実装は 5 として扱う — architecturally permitted) | 同上 | ✅ | 同上 (258 "ABC" = PPTR 256 + EC 'C') |
 | 6 | 展開は PPTR chain を遡り unpreceded entry まで再帰し、ルートから順に EC を出力 (OFST 方式と等価、dict が整合的な場合。実装は PPTR chain 方式) | 同上 / model-dependent note | ✅ | `expand_preceded_chain` |
 | 7 | predecessor cycle・index 範囲外は拒否。出力は `max_output` で制限 | crate contract | ✅ | `cmpsc_rejects_malformed` (統合) |
+| 21 | index symbol 0-255 は展開辞書を参照せず、値のバイトをそのまま出力 (alphabet entry の内容が不正でも影響しない) | POP App.D Expansion Process | ✅ | `expand_alphabet_bypasses_dictionary` |
+| 22 | unpreceded entry の bits3-4 非ゼロ / CSL=0 は拒否 (POP: data exception 許容の厳格側を選択) | POP App.D Expansion Dictionary | ✅ | `expand_rejects_bad_unpreceded_entry` |
 
 ## 圧縮辞書 (compression、format-0)
 

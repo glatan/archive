@@ -66,17 +66,17 @@
 | 29 | crate 出力を system `lrzip` が decode 可能 (non-LZMA backend matrix) | system `lrzip` interoperability behavior | ✅ | `test_lrzip_encode_bzip2_system_decode_compat`, `test_lrzip_encode_gzip_system_decode_compat`, `test_lrzip_encode_none_system_decode_compat`, `test_lrzip_encode_lzo_system_decode_compat`, `test_lrzip_encode_zpaq_system_decode_compat` |
 | 30 | system `lrzip` 生成 match-rich LZMA archive の decode | system `lrzip` interoperability behavior | ✅ | `test_lrzip_decode_system_lzma_repeated_archive` |
 | 31 | encode_writer (std::io::Write 対応) | crate-local `.lrz` container contract | ✅ | doctest |
-| 32 | decode_reader / decode_to_writer (std::io 対応) | crate-local `.lrz` container contract | ✅ | doctest, `test_decode_to_writer_roundtrip` |
+| 32 | decode_reader / decode_to_writer (std::io 対応) | crate-local `.lrz` container contract | ✅ | doctest, `test_decode_to_writer_roundtrip`。reader path は slice `decode()` より検証が弱い既知差分: `next_head != 0` (1 chunk 内 multi-block) は `Unsupported`、MD5 flag は読まず digest 未検証、stream header の `last_head` を無視して block を順読み |
 | 33 | Backend type byte encoding (数値) | lrzip header | ✅ | 実装済み |
-| 34 | Unknown backend type reject | lrzip header | ✅ | 実装済み |
-| 35 | Variable-width match offset token format | lrzip token layer | ✅ | 実装済み |
+| 34 | Unknown backend type reject | lrzip header | ✅ | `test_decompress_block_rejects_unknown_ctype` |
+| 35 | Variable-width match offset token format | lrzip token layer | ✅ | `test_reencode_stream0_for_lrzip_reduces_match_offset_width` |
 | 36 | MD5 checksum flag (header byte 21): パース + 検証 + emit | lrzip header | ✅ | decode: `md5_flag != 0` 時にデコード結果の MD5 を検証 (`test_decode_md5_flag_valid`, `test_decode_md5_flag_mismatch`, `test_decode_md5_flag_truncated`)。encode: `encode_with_md5` で flag + 末尾 digest を出力 (`test_encode_with_md5_roundtrip`, `test_encode_with_md5_empty`, `test_encode_with_md5_backend_matrix`) |
 | 37 | Reserved byte 23: encode 時は 0 | lrzip header | ✅ | エンコーダーで 0 書き出し |
 | 38 | MD5 flag 付き crate 出力を system `lrzip -d` が decode (digest 検証通過) | system `lrzip` interoperability behavior | ✅ | `test_lrzip_encode_md5_system_decode_compat` |
-| 39 | v0.6 RCD 構造 (RCD0 幅 1-8、EOF flag、chunk decompressed size、stream header ctype/c_len/u_len/last_head) | magic.header.txt v0.6 RCD | ✅ | `decode.rs` RCD パース実装 |
+| 39 | v0.6 RCD 構造 (RCD0 幅 1-8、EOF flag、chunk decompressed size、stream header ctype/c_len/u_len/last_head) | magic.header.txt v0.6 RCD | ✅ | `decode.rs` RCD パース実装、`test_invalid_chunk_bytes_zero`、`test_invalid_chunk_bytes_too_large` |
 | 40 | v0.6 data blocks: stream0 末端の empty literal (type 0, len 0) + CRC32 | magic.header.txt v0.6 Data blocks | ✅ | `decode_chunk_streams` で `legacy_crc32` 検証、`test_crc32_verified` |
 | 41 | magic bytes 6-13 の Source File Size は unknown 時 0 (upstream 記載) | magic.header.txt | ✅ | 実装済み — `total_size == 0` は unknown として size 検査を skip (decode / streaming reader 双方)。`test_zero_total_size_is_unknown` |
-| 42 | v0.7 節 (byte 14 streaming flag、byte 23 last-block、LRZC、CryptoDesc、minor=0x07) | magic.header.txt v0.7 | ❌ | intentional scope。対象を 0.6x に限定しているため、minor > 6 は `Error::Unsupported` で拒否する (`test_decode_rejects_minor_above_6`) |
+| 42 | v0.7 節 (byte 14 streaming flag、byte 23 last-block、LRZC、CryptoDesc、minor=0x07) および v0.5x 以前の旧レイアウト (固定長 stream header、RCD0 なし) | magic.header.txt v0.7 / v0.5x | ❌ | intentional scope。対象を 0.6x に限定しているため、`minor != 6` は `Error::Unsupported` で拒否する (slice / reader 両 path。旧レイアウトを v0.6 として誤パースしないよう `minor < 6` も拒否) (`test_decode_rejects_minor_above_6`, `test_decode_rejects_minor_below_6`) |
 
 ---
 

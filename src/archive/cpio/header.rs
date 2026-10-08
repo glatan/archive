@@ -208,8 +208,10 @@ impl CpioHeader {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::UnexpectedEof`] if data is shorter than 110 bytes,
-    /// [`Error::InvalidData`] for unrecognized magic numbers or malformed hex fields.
+    /// Returns [`Error::UnexpectedEof`] if data is shorter than the
+    /// fixed-size header of the detected format (26/76/110 bytes for
+    /// bin/odc/newc), [`Error::InvalidData`] for unrecognized magic numbers
+    /// or malformed fields.
     ///
     /// # Examples
     ///
@@ -299,8 +301,8 @@ impl CpioHeader {
                     nlink: parse_octal_field(&data[36..42])?,
                     mtime: parse_octal_field(&data[48..59])?,
                     filesize: parse_octal_field(&data[65..76])?,
-                    devmajor: dev,
-                    devminor: 0,
+                    devmajor: (dev >> 8) & 0xFF,
+                    devminor: dev & 0xFF,
                     rdevmajor: (rdev >> 8) & 0xFF,
                     rdevminor: rdev & 0xFF,
                     namesize: parse_octal_field(&data[59..65])?,

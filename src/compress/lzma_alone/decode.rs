@@ -34,10 +34,11 @@ const HEADER_SIZE: usize = 13;
 /// marker is required in the LZMA stream.
 const UNKNOWN_SIZE: u64 = u64::MAX;
 
-/// The range decoder may leave the last 0-2 flush bytes of the LZMA stream
-/// unread. Anything beyond this slack is treated as trailing data and
-/// rejected.
-const MAX_DECODER_SLACK: usize = 2;
+/// The range decoder may leave some of the LZMA stream's final bytes unread:
+/// the encoder flushes a 5-byte cache, so at most that many bytes can remain
+/// after the end-of-payload marker. Anything beyond this slack is treated as
+/// trailing data and rejected.
+const MAX_DECODER_SLACK: usize = 5;
 
 /// Returns true when the unread input tail fits the range decoder slack.
 const fn within_slack(consumed: usize, stream_len: usize) -> bool {

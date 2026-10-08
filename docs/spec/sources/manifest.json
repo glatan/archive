@@ -76,7 +76,7 @@
   },
   {
    "id": "appnote",
-   "format": "zip",
+   "format": "zip/cmpsc",
    "title": "APPNOTE.TXT - .ZIP File Format Specification",
    "version": "6.3.10 (November 1, 2022)",
    "url": "https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT",
@@ -88,7 +88,8 @@
    "title": "The .xz File Format",
    "version": "1.2.1 (2024-04-08)",
    "url": "https://tukaani.org/xz/xz-file-format-1.2.1.txt",
-   "filename": "xz-file-format-1.2.1.txt"
+   "filename": "xz-file-format-1.2.1.txt",
+   "license": "public domain (xz documentation)"
   },
   {
    "id": "lz4-frame-format",
@@ -128,7 +129,9 @@
    "title": "The .lzma File Format",
    "version": "2022-07-13 (tukaani-project/xz doc/)",
    "url": "https://raw.githubusercontent.com/tukaani-project/xz/master/doc/lzma-file-format.txt",
-   "filename": "lzma-file-format-20220713.txt"
+   "filename": "lzma-file-format-20220713.txt",
+   "license": "public domain (xz documentation)",
+   "note": "2022-07-13 は最終内容変更日。スナップショットの Last modified は 2024-04-08 の編集改版"
   },
   {
    "id": "lzma-specification",
@@ -136,7 +139,8 @@
    "title": "lzma-specification.txt (LZMA SDK DOC; Igor Pavlov)",
    "version": "LZMA SDK draft 2015-06-14 (jljusten/LZMA-SDK mirror)",
    "url": "https://raw.githubusercontent.com/jljusten/LZMA-SDK/master/DOC/lzma-specification.txt",
-   "filename": "lzma-specification.txt"
+   "filename": "lzma-specification.txt",
+   "license": "public domain (LZMA SDK)"
   },
   {
    "id": "lzip-manual",
@@ -144,7 +148,8 @@
    "title": "Lzip Manual",
    "version": "1.26 (19 July 2026)",
    "url": "https://www.nongnu.org/lzip/manual/lzip_manual.html",
-   "filename": "lzip_manual_1.26.html"
+   "filename": "lzip_manual_1.26.html",
+   "license": "free documentation (manual's own unlimited-permission statement)"
   },
   {
    "id": "rfc1321",
@@ -160,7 +165,8 @@
    "title": "deb — Debian binary package format",
    "version": "deb(5) dpkg man page (unstable)",
    "url": "https://manpages.debian.org/unstable/dpkg-dev/deb.5.en.html",
-   "filename": "deb_5_unstable.html"
+   "filename": "deb_5_unstable.html",
+   "license": "GPL-2.0-or-later (document; consulted as format spec only, no code copied)"
   },
   {
    "id": "rpm-format-v6",
@@ -234,7 +240,8 @@
    "title": "LZSA stream format",
    "version": "lzsa v1.4.1",
    "url": "https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/StreamFormat.md",
-   "filename": "lzsa_StreamFormat_1.4.1.md"
+   "filename": "lzsa_StreamFormat_1.4.1.md",
+   "license": "zlib"
   },
   {
    "id": "lzsa-block-v1",
@@ -242,7 +249,8 @@
    "title": "LZSA1 block format",
    "version": "lzsa v1.4.1",
    "url": "https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/BlockFormat_LZSA1.md",
-   "filename": "lzsa_BlockFormat_LZSA1_1.4.1.md"
+   "filename": "lzsa_BlockFormat_LZSA1_1.4.1.md",
+   "license": "zlib"
   },
   {
    "id": "lzsa-block-v2",
@@ -250,7 +258,8 @@
    "title": "LZSA2 block format",
    "version": "lzsa v1.4.1",
    "url": "https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/BlockFormat_LZSA2.md",
-   "filename": "lzsa_BlockFormat_LZSA2_1.4.1.md"
+   "filename": "lzsa_BlockFormat_LZSA2_1.4.1.md",
+   "license": "zlib"
   },
   {
    "id": "zx0-readme",
@@ -348,7 +357,8 @@
    "version": "dsnet/compress master",
    "note": "非公式。bzip2-1.0.6 参照実装からの逆解析。一次情報源は引き続き参照実装",
    "url": "https://raw.githubusercontent.com/dsnet/compress/master/doc/bzip2-format.pdf",
-   "filename": "bzip2-format_dsnet.pdf"
+   "filename": "bzip2-format_dsnet.pdf",
+   "license": "BSD-3-Clause"
   },
   {
    "id": "lrzip-magic-header",
@@ -356,7 +366,48 @@
    "title": "lrzip doc/magic.header.txt (.lrz file format)",
    "version": "ckolivas/lrzip master",
    "url": "https://raw.githubusercontent.com/ckolivas/lrzip/master/doc/magic.header.txt",
-   "filename": "lrzip_magic.header.txt"
+   "filename": "lrzip_magic.header.txt",
+   "license": "GPL-2.0-or-later"
+  },
+  {
+   "id": "rzip-2.1-rzip-c",
+   "format": "rzip",
+   "title": "rzip 2.1 rzip.c (.rz container writer/reader)",
+   "version": "rzip 2.1 (upstream orig tarball, Debian pool)",
+   "url": "https://sources.debian.org/data/main/r/rzip/2.1-5/rzip.c",
+   "filename": "rzip_2.1_rzip.c",
+   "note": "upstream rzip 2.1-5 (sources.debian.org raw)。orig tarball sha256 4bb96f4d58ccf16749ed3f836957ce97dbcff3e3ee5fd50266229a48f89815b7 (pkg/rzip/PKGBUILD と一致) と内容一致確認済み。format facts の動作参照のみ、コード取り込みなし",
+   "license": "GPL-2.0-or-later"
+  },
+  {
+   "id": "rzip-2.1-stream-c",
+   "format": "rzip",
+   "title": "rzip 2.1 stream.c (block stream layout / CTYPE constants)",
+   "version": "rzip 2.1 (upstream orig tarball, Debian pool)",
+   "url": "https://sources.debian.org/data/main/r/rzip/2.1-5/stream.c",
+   "filename": "rzip_2.1_stream.c",
+   "note": "upstream rzip 2.1-5 (sources.debian.org raw)。orig tarball sha256 4bb96f4d58ccf16749ed3f836957ce97dbcff3e3ee5fd50266229a48f89815b7 (pkg/rzip/PKGBUILD と一致) と内容一致確認済み。format facts の動作参照のみ、コード取り込みなし",
+   "license": "GPL-2.0-or-later"
+  },
+  {
+   "id": "rzip-2.1-rzip-h",
+   "format": "rzip",
+   "title": "rzip 2.1 rzip.h (version/NUM_STREAMS constants & prototypes)",
+   "version": "rzip 2.1 (upstream orig tarball, Debian pool)",
+   "url": "https://sources.debian.org/data/main/r/rzip/2.1-5/rzip.h",
+   "filename": "rzip_2.1_rzip.h",
+   "note": "upstream rzip 2.1-5 (sources.debian.org raw)。orig tarball sha256 4bb96f4d58ccf16749ed3f836957ce97dbcff3e3ee5fd50266229a48f89815b7 (pkg/rzip/PKGBUILD と一致) と内容一致確認済み。format facts の動作参照のみ、コード取り込みなし",
+   "license": "GPL-2.0-or-later"
+  },
+  {
+   "id": "rzip-2.1-crc32-c",
+   "format": "rzip",
+   "title": "rzip 2.1 crc32.c (legacy CRC32 table reference)",
+   "version": "rzip 2.1 (upstream orig tarball, Debian pool)",
+   "url": "https://sources.debian.org/data/main/r/rzip/2.1-5/crc32.c",
+   "filename": "rzip_2.1_crc32.c",
+   "note": "upstream rzip 2.1-5 (sources.debian.org raw)。orig tarball sha256 4bb96f4d58ccf16749ed3f836957ce97dbcff3e3ee5fd50266229a48f89815b7 (pkg/rzip/PKGBUILD と一致) と内容一致確認済み。format facts の動作参照のみ、コード取り込みなし",
+   "license": "GPL-2.0-or-later"
   },
   {
    "id": "lha-header-doc",
@@ -404,7 +455,8 @@
    "title": "lzrw1-a.c ('DEFINITION OF COMPRESSED FILE FORMAT' 節がフォーマット記述)",
    "version": "LZRW1-A (Ross N. Williams, 1991、funet mirror)",
    "url": "https://ftp.funet.fi/pub/misc/compression/lzrw1-a.c",
-   "filename": "lzrw1-a.c"
+   "filename": "lzrw1-a.c",
+   "license": "public domain"
   },
   {
    "id": "lzrw1a-notes",
@@ -412,7 +464,8 @@
    "title": "lzrw1-a.txt (release/format notes)",
    "version": "LZRW1-A (1991、funet mirror)",
    "url": "https://ftp.funet.fi/pub/misc/compression/lzrw1-a.txt",
-   "filename": "lzrw1-a.txt"
+   "filename": "lzrw1-a.txt",
+   "license": "copyrighted document (reference only)"
   },
   {
    "id": "lzrw1-source",
@@ -420,7 +473,8 @@
    "title": "lzrw1.c (DCC'91 論文収録コード、フォーマットは decompressor が定義)",
    "version": "LZRW1 (Ross N. Williams, 1991、funet mirror)",
    "url": "https://ftp.funet.fi/pub/misc/compression/lzrw1.c",
-   "filename": "lzrw1.c"
+   "filename": "lzrw1.c",
+   "license": "public domain"
   },
   {
    "id": "lzrw1-paper",
@@ -428,7 +482,8 @@
    "title": "lzrw1.tex (DCC'91 'An Extremely Fast Ziv-Lempel Data Compression Algorithm')",
    "version": "LZRW1 paper (1991、funet mirror)",
    "url": "https://ftp.funet.fi/pub/misc/compression/lzrw1.tex",
-   "filename": "lzrw1.tex"
+   "filename": "lzrw1.tex",
+   "license": "copyrighted paper (document reference)"
   },
   {
    "id": "lzrw2-source",
@@ -436,7 +491,8 @@
    "title": "lzrw2.c ('DEFINITION OF COMPRESSED FILE FORMAT' 節がフォーマット記述)",
    "version": "LZRW2 (Ross N. Williams, 1991、funet mirror)",
    "url": "https://ftp.funet.fi/pub/misc/compression/lzrw2.c",
-   "filename": "lzrw2.c"
+   "filename": "lzrw2.c",
+   "license": "public domain"
   },
   {
    "id": "lzrw2-notes",
@@ -444,7 +500,8 @@
    "title": "lzrw2.txt (release/format notes)",
    "version": "LZRW2 (1991、funet mirror)",
    "url": "https://ftp.funet.fi/pub/misc/compression/lzrw2.txt",
-   "filename": "lzrw2.txt"
+   "filename": "lzrw2.txt",
+   "license": "copyrighted document (reference only)"
   },
   {
    "id": "lzrw3-source",
@@ -452,7 +509,8 @@
    "title": "lzrw3.c ('DEFINITION OF COMPRESSED FILE FORMAT' 節がフォーマット記述)",
    "version": "LZRW3 (Ross N. Williams, 1991、funet mirror)",
    "url": "https://ftp.funet.fi/pub/misc/compression/lzrw3.c",
-   "filename": "lzrw3.c"
+   "filename": "lzrw3.c",
+   "license": "public domain"
   },
   {
    "id": "lzrw3-notes",
@@ -460,7 +518,8 @@
    "title": "lzrw3.txt (release/format notes)",
    "version": "LZRW3 (1991、funet mirror)",
    "url": "https://ftp.funet.fi/pub/misc/compression/lzrw3.txt",
-   "filename": "lzrw3.txt"
+   "filename": "lzrw3.txt",
+   "license": "copyrighted document (reference only)"
   },
   {
    "id": "lzrw3a-source",
@@ -468,7 +527,8 @@
    "title": "lzrw3-a.c ('DEFINITION OF COMPRESSED FILE FORMAT' 節がフォーマット記述)",
    "version": "LZRW3-A (Ross N. Williams, 1991、funet mirror)",
    "url": "https://ftp.funet.fi/pub/misc/compression/lzrw3-a.c",
-   "filename": "lzrw3-a.c"
+   "filename": "lzrw3-a.c",
+   "license": "public domain"
   },
   {
    "id": "lzrw3a-notes",
@@ -476,7 +536,8 @@
    "title": "lzrw3-a.txt (release/format notes)",
    "version": "LZRW3-A (1991、funet mirror)",
    "url": "https://ftp.funet.fi/pub/misc/compression/lzrw3-a.txt",
-   "filename": "lzrw3-a.txt"
+   "filename": "lzrw3-a.txt",
+   "license": "copyrighted document (reference only)"
   },
   {
    "id": "lzrw4-notes",
@@ -484,7 +545,8 @@
    "title": "lzrw4.txt (experimental sketch; production 版は存在しない)",
    "version": "LZRW4 (Ross N. Williams)",
    "url": "https://ftp.funet.fi/pub/misc/compression/lzrw4.txt",
-   "filename": "lzrw4.txt"
+   "filename": "lzrw4.txt",
+   "license": "public domain"
   },
   {
    "id": "lzrw45-covering",
@@ -492,7 +554,8 @@
    "title": "lzrw45_covering (LZRW4/5 covering note)",
    "version": "Ross N. Williams",
    "url": "https://ftp.funet.fi/pub/misc/compression/lzrw45_covering",
-   "filename": "lzrw45_covering"
+   "filename": "lzrw45_covering",
+   "license": "copyrighted document (reference only)"
   },
   {
    "id": "lzrw5-source",
@@ -500,7 +563,8 @@
    "title": "lzrw5.txt ('half-baked' draft code + format notes)",
    "version": "LZRW5 (Ross N. Williams)",
    "url": "https://ftp.funet.fi/pub/misc/compression/lzrw5.txt",
-   "filename": "lzrw5.txt"
+   "filename": "lzrw5.txt",
+   "license": "public domain"
   },
   {
    "id": "lzrw-headers",
@@ -508,7 +572,8 @@
    "title": "lzrw_headers.h (LZRW* 参照実装の portability/interface ヘッダ)",
    "version": "LZRW support code (Ross N. Williams, 1991、funet mirror)",
    "url": "https://ftp.funet.fi/pub/misc/compression/lzrw_headers.h",
-   "filename": "lzrw_headers.h"
+   "filename": "lzrw_headers.h",
+   "license": "public domain"
   },
   {
    "id": "liblzf-source",
@@ -548,7 +613,8 @@
    "title": "POSIX.1-2017 pax — extended tar/ustar & cpio formats",
    "version": "IEEE Std 1003.1-2017 (onlinepubs 9699919799)",
    "url": "https://pubs.opengroup.org/onlinepubs/9699919799/utilities/pax.html",
-   "filename": "posix_pax_9699919799.html"
+   "filename": "posix_pax_9699919799.html",
+   "license": "copyrighted standard (IEEE/The Open Group, reference only)"
   },
   {
    "id": "gnu-tar-formats",
@@ -556,7 +622,44 @@
    "title": "GNU tar manual: Controlling Archive Format / Formats",
    "version": "GNU tar manual (unstable)",
    "url": "https://www.gnu.org/software/tar/manual/html_node/Formats.html",
-   "filename": "gnu_tar_formats.html"
+   "filename": "gnu_tar_formats.html",
+   "license": "GFDL (GNU tar manual, document reference)"
+  },
+  {
+   "id": "gnu-tar-basic",
+   "format": "tar",
+   "title": "GNU tar manual: Basic Tar Format (Tar Internals)",
+   "version": "GNU tar manual 1.35.90 (multipage HTML)",
+   "url": "https://www.gnu.org/software/tar/manual/html_node/Basic-Tar-Format.html",
+   "filename": "gnu_tar_basic.html",
+   "license": "GFDL (GNU tar manual, document reference)"
+  },
+  {
+   "id": "gnu-tar-extensions",
+   "format": "tar",
+   "title": "GNU tar manual: GNU Extensions to the Archive Format (typeflags D/V/M/N etc.)",
+   "version": "GNU tar manual 1.35.90 (multipage HTML)",
+   "url": "https://www.gnu.org/software/tar/manual/html_node/Extensions.html",
+   "filename": "gnu_tar_extensions.html",
+   "license": "GFDL (GNU tar manual, document reference)"
+  },
+  {
+   "id": "gnu-tar-internals",
+   "format": "tar",
+   "title": "GNU tar manual: Tar Internals (appendix index)",
+   "version": "GNU tar manual 1.35.90 (multipage HTML)",
+   "url": "https://www.gnu.org/software/tar/manual/html_node/Tar-Internals.html",
+   "filename": "gnu_tar_internals.html",
+   "license": "GFDL (GNU tar manual, document reference)"
+  },
+  {
+   "id": "gnu-tar-sparse-formats",
+   "format": "tar",
+   "title": "GNU tar manual: Storing Sparse Files (GNU.sparse.* / old-style sparse formats)",
+   "version": "GNU tar manual 1.35.90 (multipage HTML)",
+   "url": "https://www.gnu.org/software/tar/manual/html_node/Sparse-Formats.html",
+   "filename": "gnu_tar_sparse_formats.html",
+   "license": "GFDL (GNU tar manual, document reference)"
   },
   {
    "id": "cpio-5-freebsd",
@@ -581,6 +684,14 @@
    "version": "FreeBSD man page",
    "url": "https://man.freebsd.org/cgi/man.cgi?ar(5)",
    "filename": "ar_5_freebsd.html"
+  },
+  {
+   "id": "gnu-ar-binutils-doc",
+   "format": "ar",
+   "title": "GNU binutils manual: ar (GNU archive format extensions)",
+   "version": "binutils manual (current)",
+   "url": "https://sourceware.org/binutils/docs/binutils/ar.html",
+   "filename": "gnu_ar_binutils.html"
   },
   {
    "id": "zarch-pop-12",
@@ -636,7 +747,8 @@
    "title": "TIFF Revision 6.0 (Section 9: PackBits Compression)",
    "version": "TIFF 6.0 (June 3, 1992)",
    "url": "https://download.osgeo.org/libtiff/doc/TIFF6.pdf",
-   "filename": "tiff6.pdf"
+   "filename": "tiff6.pdf",
+   "license": "copyrighted document (Adobe/Aldus, reference only)"
   },
   {
    "id": "yenc-draft",
@@ -1075,6 +1187,54 @@
    "license": "MIT"
   },
   {
+   "id": "lzrw1-reference",
+   "format": "lzrw1",
+   "title": "lzrw1.c decoder behavior (funet mirror)",
+   "version": "LZRW1 (Ross N. Williams, 1991)",
+   "note": "仕様はソース内コメントに同梱 (public domain)。sources/lzrw1.c・lzrw1.tex にスナップショット済み",
+   "reference_url": [
+    "http://www.ross.net/compression/lzrw1.html",
+    "https://ftp.funet.fi/pub/misc/compression/"
+   ],
+   "license": "public domain"
+  },
+  {
+   "id": "lzrw2-reference",
+   "format": "lzrw2",
+   "title": "lzrw2.c compressed file format description",
+   "version": "LZRW2 (Ross N. Williams, 1991)",
+   "note": "仕様はソース内コメントに同梱 (public domain)。sources/lzrw2.c・lzrw2.txt にスナップショット済み",
+   "reference_url": [
+    "http://www.ross.net/compression/lzrw2.html",
+    "https://ftp.funet.fi/pub/misc/compression/"
+   ],
+   "license": "public domain"
+  },
+  {
+   "id": "lzrw3-reference",
+   "format": "lzrw3",
+   "title": "lzrw3.c 'format of compressed data'",
+   "version": "LZRW3 (Ross N. Williams, 1991)",
+   "note": "仕様はソース内コメントに同梱 (public domain)。sources/lzrw3.c・lzrw3.txt にスナップショット済み",
+   "reference_url": [
+    "http://www.ross.net/compression/lzrw3.html",
+    "https://ftp.funet.fi/pub/misc/compression/"
+   ],
+   "license": "public domain"
+  },
+  {
+   "id": "lzrw3a-reference",
+   "format": "lzrw3a",
+   "title": "lzrw3-a.c 'DEFINITION OF COMPRESSED FILE FORMAT'",
+   "version": "LZRW3-A (Ross N. Williams, 1991)",
+   "note": "仕様はソース内コメントに同梱 (public domain)。sources/lzrw3-a.c・lzrw3-a.txt にスナップショット済み",
+   "reference_url": [
+    "http://www.ross.net/compression/lzrw3a.html",
+    "https://ftp.funet.fi/pub/misc/compression/"
+   ],
+   "license": "public domain"
+  },
+  {
    "id": "lzrw1a-reference",
    "format": "lzrw1a",
    "title": "lzrw1-a.c 'DEFINITION OF COMPRESSED FILE FORMAT'",
@@ -1089,7 +1249,7 @@
   {
    "id": "lzf-reference",
    "format": "lzf",
-   "title": "liblzf lzf_c.c / lzf_d.c format description",
+   "title": "liblzf lzf_c.c format description",
    "version": "liblzf 3.6",
    "note": "正式な仕様書なし。ソース内コメントがデファクト仕様 (BSD-2-Clause OR GPL-2.0-or-later)。sources/liblzf_lzf_c.c にスナップショット済み",
    "reference_url": [
@@ -1114,9 +1274,9 @@
   {
    "id": "arj-format",
    "format": "arj",
-   "title": "ARJ archive format / TECHNOTE.ARJ",
+   "title": "ARJ archive format / TECHNOTE.DOC",
    "version": "ARJ 2.x de facto",
-   "note": "正式標準なし。TECHNOTE.TXT (ARJ/UNARJ 配布物同梱) 相当の記述を参照。安定な単一ファイル URL なし",
+   "note": "正式標準なし。TECHNOTE.DOC (ARJ/UNARJ 配布物同梱) 相当の記述を参照。安定な単一ファイル URL なし",
    "reference_url": "http://fileformats.archiveteam.org/wiki/ARJ",
    "license": "format document"
   },
@@ -1296,13 +1456,24 @@
   {
    "id": "xadmaster",
    "format": "arc/arj",
-   "title": "XADMaster (The Unarchiver) — LZH handle sources",
+   "title": "XADMaster (The Unarchiver) — ARC/ARJ handle sources",
    "version": "—",
    "note": "LGPL-2.1-or-later。port source は arc/arj の newtua_dos 経由 transliteration のみ (newtua_dos 項参照)。lha 由来の port (lzh_dyn/lzh_st0/st1 の adapted 記述) は -lh1-〜-lh3- 実装削除 + ar002 への参照張り替えにより解消済み",
    "reference_url": [
     "https://github.com/MacPaw/XADMaster"
    ],
    "license": "LGPL-2.1-or-later"
+  },
+  {
+   "id": "virtualdub-rle90",
+   "format": "arc",
+   "title": "VirtualDub blog entry_345 (RLE90 de-facto notes)",
+   "version": "—",
+   "note": "arc/rle90.rs が de-facto 一致の傍証として引用する観察参照 (移植元ではない)",
+   "reference_url": [
+    "https://www.virtualdub.org/blog2/entry_345.html"
+   ],
+   "license": "—"
   },
   {
    "id": "lha-114i-source",
@@ -1507,6 +1678,18 @@
    "license": "public domain (liblzma core)"
   },
   {
+   "id": "liblzma",
+   "format": "xz",
+   "title": "liblzma LZMA2 coder semantics (xz-utils)",
+   "version": "tukaani-project/xz",
+   "note": "public domain。LZMA2 chunk format の de-facto semantics の動作参照 (xz-file-format.txt は LZMA2 props byte のみ規定し chunk format は仕様範囲外)。BCJ/Delta port source については liblzma-source 項を参照。コード取り込みなし",
+   "reference_url": [
+    "https://github.com/tukaani-project/xz",
+    "https://tukaani.org/xz/"
+   ],
+   "license": "public domain"
+  },
+  {
    "id": "lzma-sdk-sources",
    "format": "sevenz/lzma/util",
    "title": "LZMA SDK C sources (Bcj2.c / Ppmd*.c / 7zIn.c / range coder)",
@@ -1616,10 +1799,10 @@
   },
   {
    "id": "libarchive",
-   "format": "mtree/rpm/mscab/iso9660",
+   "format": "mtree/rpm/mscab/iso9660/ar",
    "title": "libarchive / bsdtar (mtree dialect reference + interop oracle)",
    "version": "libarchive 3.x",
-   "note": "BSD-2-Clause。mtree は archive_read_support_format_mtree.c の方言挙動を動作参照 (コード取り込みなし)。bsdtar バイナリは mscab/rpm/iso9660/lha/arj/arc/deb 等の writer 検証・展開 oracle としてテスト時のみ起動。リンク・同梱なし",
+   "note": "BSD-2-Clause。mtree は archive_read_support_format_mtree.c の方言挙動を動作参照 (コード取り込みなし)。bsdtar バイナリは mscab/rpm/iso9660/lha/arj/arc/deb/ar 等の writer 検証・展開 oracle としてテスト時のみ起動。リンク・同梱なし",
    "reference_url": [
     "https://github.com/libarchive/libarchive",
     "https://www.libarchive.org/"

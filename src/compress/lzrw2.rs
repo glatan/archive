@@ -286,7 +286,8 @@ mod tests {
             binary.extend_from_slice(&i.to_le_bytes());
         }
         rt(&binary);
-        // > 4096 phrases exercise the cyclic wrap of the phrase table.
+        // `binary` above exceeds 4096 phrases and exercises the cyclic
+        // wrap of the phrase table; `long` adds a longer compressible run.
         let mut long = Vec::new();
         for i in 0..6000u32 {
             long.extend_from_slice(&(i % 251).to_le_bytes());

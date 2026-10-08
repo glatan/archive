@@ -10,6 +10,7 @@ use super::*;
 //   - bsdtar-plain.iso:      plain ISO9660 (uppercase names, `;1` versions)
 //   - bsdtar-rockridge.iso:  Rock Ridge 1.12 + SUSP 1.10 extensions
 //   - bsdtar-joliet.iso:     Joliet supplementary volume descriptor
+//   - bsdtar-eltorito.iso:   El Torito boot record + catalog + boot.img
 // Source tree: iso-tree/{hello.txt(14B), bigfile.dat(3000B),
 // sub/{one.dat(1B), deep/two.dat(1B)}, link.txt -> hello.txt}.
 

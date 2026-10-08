@@ -184,8 +184,7 @@ impl TarHeader {
         let uid = parse_octal(&block[108..116])?;
         let gid = parse_octal(&block[116..124])?;
         let size = parse_octal_u64(&block[124..136])?;
-        let mtime = i64::try_from(parse_octal_u64(&block[136..148])?)
-            .map_err(|_| Error::InvalidData("mtime out of range"))?;
+        let mtime = parse_octal_i64(&block[136..148])?;
         let file_type = FileType::from_byte(block[156]);
         let link_name = parse_str(&block[157..257]);
 
@@ -239,8 +238,8 @@ impl TarHeader {
 
         if file_type == FileType::GnuSparse {
             // atime/ctime sit where UStar keeps the prefix field.
-            atime = i64::try_from(parse_octal_u64(&block[345..357])?).unwrap_or(0);
-            ctime = i64::try_from(parse_octal_u64(&block[357..369])?).unwrap_or(0);
+            atime = parse_octal_i64(&block[345..357]).unwrap_or(0);
+            ctime = parse_octal_i64(&block[357..369]).unwrap_or(0);
             // Parse 4 sparse entries from header bytes 386-481
             // Each entry: 12 bytes offset (octal) + 12 bytes numbytes (octal)
             sparse_map = parse_gnu_sparse_entries(&block[386..482]);
@@ -357,6 +356,24 @@ pub(crate) fn parse_gnu_sparse_entries(data: &[u8]) -> Vec<(u64, u64)> {
 }
 
 /// Parse an octal ASCII number field (u64).
+/// Parse a numeric field as i64. GNU base-256 binary encoding is read
+/// as two's complement (byte0 bit7 = binary flag, bit6 = sign), so
+/// negative values such as pre-1970 mtimes are preserved.
+fn parse_octal_i64(field: &[u8]) -> Result<i64, Error> {
+    if !field.is_empty() && field[0] & 0x80 != 0 {
+        let mut v: i128 = (field[0] & 0x7f) as i128;
+        for &b in &field[1..] {
+            v = (v << 8) | b as i128;
+        }
+        if field[0] & 0x40 != 0 {
+            v -= 1i128 << (field.len() * 8 - 1);
+        }
+        return i64::try_from(v).map_err(|_| Error::InvalidData("time field out of range"));
+    }
+    let v = parse_octal_u64(field)?;
+    i64::try_from(v).map_err(|_| Error::InvalidData("time field out of range"))
+}
+
 fn parse_octal_u64(field: &[u8]) -> Result<u64, Error> {
     // Handle binary encoding (base-256) for large values
     if !field.is_empty() && field[0] & 0x80 != 0 {

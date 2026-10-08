@@ -38,6 +38,8 @@ const RUNB: u16 = 1;
 /// Default block size (900KB, block size level 9).
 const DEFAULT_BLOCK_SIZE: u8 = 9;
 
+// Same `randtable.c` constant data as in decode.rs; test-only here (used to
+// cross-check the decode-side randomization table).
 #[cfg(test)]
 const BZ2_RNUMS: [i32; 512] = [
     619, 720, 127, 481, 931, 816, 813, 233, 566, 247, 985, 724, 205, 454, 863, 491, 741, 242, 949,

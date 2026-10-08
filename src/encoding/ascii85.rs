@@ -158,7 +158,12 @@ pub fn decode_rfc1924(input: &[u8]) -> Result<Vec<u8>, Error> {
             .iter()
             .position(|&a| a == c)
             .ok_or(Error::InvalidData("ascii85: invalid rfc1924 character"))?;
-        v = v * 85 + idx as u128;
+        // 85^20 exceeds u128::MAX; reject out-of-range encodings rather
+        // than overflowing (which would panic in debug builds).
+        v = v
+            .checked_mul(85)
+            .and_then(|v| v.checked_add(idx as u128))
+            .ok_or(Error::InvalidData("ascii85: rfc1924 value out of range"))?;
     }
     Ok(v.to_be_bytes().to_vec())
 }
@@ -224,6 +229,13 @@ mod tests {
     }
 
     #[test]
+    fn adobe_group_overflow_wraps() {
+        // `uuuuu` is 85^5-1 = 4437053124, which exceeds u32::MAX; like
+        // reference decoders the value wraps to the low 32 bits.
+        assert_eq!(decode(b"uuuuu").unwrap(), 142_085_828u32.to_be_bytes());
+    }
+
+    #[test]
     fn rfc1924_example() {
         // RFC 1924: the IPv6 address 1080:0:0:0:8:800:200C:417A encodes as
         // "4)+k&C#VzJ4br>0wv%Yp" (RFC example text).
@@ -240,5 +252,17 @@ mod tests {
         assert!(encode_rfc1924(&[0; 15]).is_err());
         assert!(decode_rfc1924(b"0123456789012345678").is_err());
         assert!(decode_rfc1924(b"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"").is_err());
+    }
+
+    #[test]
+    fn rfc1924_overflow_rejected() {
+        // 85^20-1 > u128::MAX: twenty `~` digits must be rejected, not
+        // overflow (debug panic) or wrap.
+        assert!(matches!(
+            decode_rfc1924(b"~~~~~~~~~~~~~~~~~~~~"),
+            Err(Error::InvalidData(_))
+        ));
+        // Largest representable value is still accepted.
+        assert!(decode_rfc1924(&encode_rfc1924(&[0xFF; 16]).unwrap()).is_ok());
     }
 }

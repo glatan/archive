@@ -32,7 +32,7 @@
 | 20 | ビット順序: データはLSB-first、ハフマンコードはMSB-first構築 | RFC 1951 §3.1.1 | ✅ | `test_reverse_bits`, Huffman/BitReader 系テスト |
 | 21 | ハフマンテーブル構築 (RFC例: bit lengths → codes) | RFC 1951 §3.2.2 | ✅ | `test_huffman_table_build`, `test_huffman_rfc1951_example` |
 | 22 | 最大マッチ長 258 | RFC 1951 §3.2.5 | ✅ | `test_encode_length` (258のテストあり) |
-| 23 | 最大後方距離 32768 | RFC 1951 §3.2.5 | ✅ | `test_roundtrip_large_distance` |
+| 23 | 最大後方距離 32768 | RFC 1951 §3.2.5 | ✅ | 境界自体は `test_encode_distance_boundaries` (32768→code 29) で直接検証。`test_roundtrip_large_distance`, `test_distance_max_32768` は大距離間隔を持つ入力の roundtrip |
 | 24 | 最大非圧縮ブロック 65535バイト | RFC 1951 §3.2.4 | ✅ | `test_stored_block_max_65535` |
 | 25 | 重複コピー (distance < length) | RFC 1951 §3.2.5 | ✅ | `test_fixed_huffman_overlap_copy_direct`, `test_distance_one_self_copy` |
 | 26 | エンコード: 非圧縮ブロック (BTYPE=00) | RFC 1951 §3.2.4 | ✅ | `test_roundtrip_stored` |
@@ -47,7 +47,7 @@
 | 34 | 動的ハフマンの直接デコードテスト | RFC 1951 §3.2.7 | ✅ | `test_dynamic_huffman_direct` (手動構築 BTYPE=10 ブロック) |
 | 35 | distance=1 自己参照コピー (RLEパターン) | RFC 1951 §3.2.5 | ✅ | `test_distance_one_self_copy` |
 | 36 | 複数ブロック (BFINAL=0→1) | RFC 1951 §3.2.3 | ✅ | `test_multiple_blocks` |
-| 37 | コード長リピートの境界テスト | RFC 1951 §3.2.7 | ✅ | `test_code_length_repeat_exact_boundary` |
+| 37 | コード長リピートの境界テスト | RFC 1951 §3.2.7 | ✅ | `test_code_length_repeat_overflow`, `test_code_length_repeat16_no_previous`。`test_code_length_repeat_exact_boundary` は roundtrip のみ (テストコメントも同旨) |
 | 38 | encode_length 境界値 (3, 10, 258) | RFC 1951 §3.2.5 | ✅ | `test_encode_length_boundaries` |
 | 39 | encode_distance 境界値 (1, 32768) | RFC 1951 §3.2.5 | ✅ | `test_encode_distance_boundaries` |
 | 40 | encode_length(0) パニック | RFC 1951 §3.2.5 | ✅ | `test_encode_length_zero_panics` |
@@ -66,8 +66,8 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 51 | Max Huffman code length 15 bits。エンコーダは kraft_limit で over-subscription を修復し complete code (Σ2^-len = 1) のみを emit | RFC 1951 §3.2.2 | ✅ | `test_deflate_complete_dist_tree`, `test_build_code_lengths_over_subscribed_complete` |
-| 52 | Oversubscribed Huffman tree rejection | RFC 1951 §3.2.2 | ✅ | `HuffmanTable::from_lengths` で Kraft 剰余追跡 (zlib inflate 方式) により over-subscribed 木を reject。incomplete (under-subscribed) 木・空 dist テーブル・1 シンボル dist は従来通り受理。`test_huffman_table_oversubscribed` `test_oversubscribed_huffman_rejected` `test_oversubscribed_dist_tree_rejected` `test_oversubscribed_code_length_code_rejected` |
+| 51 | Max Huffman code length 15 bits。エンコーダは kraft_limit で over-subscription を修復し complete code (Σ2^-len = 1) を emit。ただし全 literal 時は §3.2.7 許容の特例として `dist_lengths[0]=1` の単一コード (incomplete, Kraft=1/2) を emit する | RFC 1951 §3.2.2 / §3.2.7 | ✅ | `test_deflate_complete_dist_tree`, `test_build_code_lengths_over_subscribed_complete` |
+| 52 | Oversubscribed Huffman tree rejection | RFC 1951 §3.2.2 | ✅ | `HuffmanTable::from_lengths` で Kraft 剰余追跡 (zlib inflate 方式) により over-subscribed 木を reject。incomplete (under-subscribed) 木・空 dist テーブル・1 シンボル dist は lit/len・CL・dist のいずれの木でも従来通り受理 (zlib `inflate_table` は lit/len・CL 木の incomplete を reject するため本実装の方が寛容)。`test_huffman_table_oversubscribed` `test_oversubscribed_huffman_rejected` `test_oversubscribed_dist_tree_rejected` `test_oversubscribed_code_length_code_rejected` |
 | 53 | Distance codes 30-31 は invalid | RFC 1951 §3.2.5 | ✅ | テーブル範囲外 |
 | 54 | HLIT range 257-286 validation | RFC 1951 §3.2.7 | ✅ | パーサーで検証 |
 | 55 | Byte alignment after BTYPE=00 block | RFC 1951 §3.2.4 | ✅ | decode_uncompressed() |
@@ -77,6 +77,9 @@
 | 59 | コード長リピートコード (16/17/18) は HLIT+257 → HDIST+1 の境界をまたいで適用される。全コード長は HLIT+HDIST+258 要素の単一シーケンス | RFC 1951 §3.2.7 | ✅ | `decode_dynamic_huffman` は lit/dist を単一 `lengths` バッファとして処理 |
 | 60 | マルチバイト整数は LSB-first (little-endian) で格納される (LEN/NLEN 等) | RFC 1951 §3.1 | ✅ | `read_u16_le` 等 |
 | 61 | HDIST=31/32 の受理 (dist code 30/31 のコード長が 0 なら RFC 上は合法) | RFC 1951 §3.2.7 / §3.3 | ✅ | 予約された距離コード 30/31 のコード長が非ゼロであれば拒否し、コード長 0 であれば受理する。`test_dynamic_huffman_hdist_31_zero_lengths_accepted`, `test_dynamic_huffman_hdist_32_zero_lengths_accepted`, `test_dynamic_huffman_hdist_31_nonzero_reserved_length_rejected` |
+| 62 | 動的ブロックで lit/len symbol 256 (EOB) のコード長が 0 → reject | RFC 1951 §3.2.7 | ✅ | `test_dynamic_huffman_missing_eob` |
+| 63 | プリセット辞書 (`decode_with_dict` / `encode_with_dict`) | RFC 1951 §3.2.3 注記 | ✅ | zlib 層および mscab から利用。往復・誤辞書 reject は zlib 層テスト (`test_decode_with_dict_roundtrip`, `test_decode_with_dict_wrong_dict_rejected`) で検証 |
+| 64 | ストリーム終端の lenient 受理: BitReader は末尾の不足ビットをゼロ埋め、BFINAL ブロック後の末尾ゴミバイトは無検証で無視 | RFC 1951 §3.2.3 (実装上の寛容差分) | ✅ | strict 実装より寛容 (zlib 同様)。部分読み `decode_stream`・出力上限 `decode_bounded`・`encode_max_match` は内部利用向け API |
 
 ---
 
@@ -84,8 +87,8 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 61 |
+| ✅ 実装+テスト済み  | 64 |
 | ⚠️ 部分実装  | 0 |
 | ❌ 未実装  | 0 |
-| **合計** | **61** |
+| **合計** | **64** |
 

@@ -78,22 +78,22 @@
 
 | フォーマット | 基準仕様 | ✅ | ⚠️ | ❌ | 合計 |
 |---|---|---|---|---|---|
-| [DEFLATE](deflate/README.md) | RFC 1951 | 61 | 0 | 0 | 61 |
-| [gzip](gzip/README.md) | RFC 1952 | 40 | 0 | 1 | 41 |
+| [DEFLATE](deflate/README.md) | RFC 1951 | 64 | 0 | 0 | 64 |
+| [gzip](gzip/README.md) | RFC 1952 | 41 | 0 | 1 | 42 |
 | [zstd](zstd/README.md) | RFC 8878 | 140 | 0 | 0 | 140 |
 | [zstd-seekable](zstd-seekable/README.md) | Zstandard Seekable Format v0.1.0 | 23 | 0 | 0 | 23 |
-| [bzip2](bzip2/README.md) | bzip2 1.0.x 参照実装 (de facto) | 70 | 0 | 0 | 70 |
-| [lzip](lzip/README.md) | lzip マニュアル | 41 | 0 | 0 | 41 |
-| [`.lzma`](lzma_alone/README.md) | lzma-file-format.txt (tukaani/xz doc) | 27 | 0 | 0 | 27 |
+| [bzip2](bzip2/README.md) | bzip2 1.0.x 参照実装 (de facto) | 76 | 0 | 1 | 77 |
+| [lzip](lzip/README.md) | lzip マニュアル | 45 | 0 | 0 | 45 |
+| [`.lzma`](lzma_alone/README.md) | lzma-file-format.txt (tukaani/xz doc) | 30 | 0 | 0 | 30 |
 | [LZW](lzw/README.md) | ncompress `compress42.c` (de facto) | 26 | 0 | 0 | 26 |
-| [LZ4](lz4/README.md) | LZ4 Frame/Block Format | 59 | 0 | 0 | 59 |
-| [LZO](lzo/README.md) | kernel `Documentation/lzo.txt` + lzop format | 42 | 0 | 0 | 42 |
+| [LZ4](lz4/README.md) | LZ4 Frame/Block Format | 60 | 0 | 0 | 60 |
+| [LZO](lzo/README.md) | kernel `Documentation/lzo.txt` + lzop format | 45 | 0 | 0 | 45 |
 | [Snappy](snappy/README.md) | snappy format_description / framing_format | 37 | 0 | 0 | 37 |
-| [Brotli](brotli/README.md) | RFC 7932 | 59 | 0 | 0 | 59 |
+| [Brotli](brotli/README.md) | RFC 7932 | 65 | 0 | 0 | 65 |
 | [zlib](zlib/README.md) | RFC 1950 | 20 | 0 | 0 | 20 |
 | [xca](xca/README.md) | [MS-XCA] (Microsoft Open Specifications) | 40 | 0 | 0 | 40 |
 | [lzf](lzf/README.md) | liblzf `lzfP.h` / ning LZFFormat (de facto) | 20 | 0 | 0 | 20 |
-| [fastlz](fastlz/README.md) | fastlz.c 参照実装 (MIT) | 22 | 0 | 0 | 22 |
+| [fastlz](fastlz/README.md) | fastlz.c 参照実装 (MIT) | 24 | 0 | 0 | 24 |
 | [zx0](zx0/README.md) | ZX0 v2 README (BSD-3) | 23 | 0 | 0 | 23 |
 | [zx1](zx1/README.md) | ZX1 README (BSD-3) | 23 | 0 | 0 | 23 |
 | [zx2](zx2/README.md) | ZX2 README (BSD-3) | 22 | 0 | 0 | 22 |
@@ -101,35 +101,35 @@
 | [vcdiff](vcdiff/README.md) | RFC 3284 | 30 | 0 | 0 | 30 |
 | [mppc](mppc/README.md) | RFC 2118 + [MS-RDPBCGR] | 32 | 0 | 0 | 32 |
 | [lzs](lzs/README.md) | RFC 2395 (§2.2 = ANSI X3.241 informational 転記) | 26 | 0 | 0 | 26 |
-| [lzrw1](lzrw1/README.md) | lzrw1.c 参照実装 (public domain) | 21 | 0 | 0 | 21 |
+| [lzrw1](lzrw1/README.md) | lzrw1.c 参照実装 (public domain) | 22 | 0 | 0 | 22 |
 | [lzrw1a](lzrw1a/README.md) | lzrw1-a.c 参照実装 (public domain) | 20 | 0 | 0 | 20 |
 | [lzrw2](lzrw2/README.md) | lzrw2.c 参照実装 (public domain) | 22 | 0 | 0 | 22 |
 | [lzrw3](lzrw3/README.md) | lzrw3.c 参照実装 (public domain) | 23 | 0 | 0 | 23 |
 | [lzrw3a](lzrw3a/README.md) | lzrw3-a.c 参照実装 (public domain) | 23 | 0 | 0 | 23 |
 | [lzsa](lzsa/README.md) | LZSA StreamFormat / BlockFormat_LZSA1/LZSA2 v1.4.1 | 33 | 0 | 0 | 33 |
 | [lzxd](lzxd/README.md) | [MS-PATCH] LZX DELTA (Microsoft Open Specifications) | 22 | 0 | 0 | 22 |
-| [cmpsc](cmpsc/README.md) | IBM z/Arch POP App.D / ESA/390 Data Compression + APPNOTE method 16 | 20 | 0 | 0 | 20 |
-| [rzip](rzip/README.md) | rzip `.rz` format (upstream 2.1) | 20 | 0 | 0 | 20 |
+| [cmpsc](cmpsc/README.md) | IBM z/Arch POP App.D / ESA/390 Data Compression + APPNOTE method 16 | 22 | 0 | 0 | 22 |
+| [rzip](rzip/README.md) | rzip `.rz` format (upstream 2.1) | 21 | 0 | 0 | 21 |
 | [lrzip](lrzip/README.md) | magic.header.txt + upstream de facto facts (crate-local subset) | 41 | 0 | 1 | 42 |
 | [packbits](packbits/README.md) | Apple TN1023 + TIFF 6.0 §9 | 12 | 0 | 3 | 15 |
-| [xz](xz/README.md) | xz-file-format.txt 1.2.1 | 59 | 0 | 0 | 59 |
+| [xz](xz/README.md) | xz-file-format.txt 1.2.1 | 62 | 0 | 0 | 62 |
 | [ZPAQ](zpaq/README.md) | ZPAQ Level 1/2 specification (zpaq206.pdf) | 55 | 0 | 4 | 59 |
 
 ### アーカイブフォーマット
 
 | フォーマット | 基準仕様 | ✅ | ⚠️ | ❌ | 合計 |
 |---|---|---|---|---|---|
-| [tar](tar/README.md) | POSIX.1-1988 ustar / GNU tar / POSIX.1-2001 PAX | 61 | 0 | 0 | 61 |
+| [tar](tar/README.md) | POSIX.1-1988 ustar / GNU tar / POSIX.1-2017 PAX | 62 | 1 | 0 | 63 |
 | [cpio](cpio/README.md) | POSIX `odc` / SVR4 `newc`/`newcrc`/`bin` | 42 | 1 | 0 | 43 |
-| [ar](ar/README.md) | IEEE Std 1003.1 Issue 7 (Issue 8 は記述削除) / GNU ar / BSD ar | 27 | 0 | 0 | 27 |
-| [deb](deb/README.md) | deb(5) (dpkg) | 26 | 0 | 2 | 28 |
+| [ar](ar/README.md) | IEEE Std 1003.1 Issue 7 (Issue 8 は記述削除) / GNU ar / BSD ar | 29 | 0 | 2 | 31 |
+| [deb](deb/README.md) | deb(5) (dpkg) | 27 | 0 | 2 | 29 |
 | [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 36 | 0 | 2 | 38 |
 | [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 46 | 0 | 1 | 47 |
 | [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 29 | 0 | 0 | 29 |
 | [mscfb](mscfb/README.md) | [MS-CFB] Compound File Binary File Format v20210625 | 22 | 0 | 2 | 24 |
-| [cramfs](cramfs/README.md) | Linux kernel cramfs.rst + fs/cramfs/README + cramfs_fs.h | 21 | 0 | 3 | 24 |
+| [cramfs](cramfs/README.md) | Linux kernel cramfs.rst + fs/cramfs/README + cramfs_fs.h | 25 | 0 | 3 | 28 |
 | [romfs](romfs/README.md) | Linux kernel romfs.rst | 22 | 0 | 1 | 23 |
-| [erofs](erofs/README.md) | Linux kernel erofs.rst + erofs-utils `include/erofs_fs.h` (MIT) | 34 | 0 | 1 | 35 |
+| [erofs](erofs/README.md) | Linux kernel erofs.rst + erofs-utils `include/erofs_fs.h` (MIT) | 38 | 0 | 1 | 39 |
 | [iso9660](iso9660/README.md) | ECMA-119 + SUSP 1.10 + RRIP 1.12 + Joliet + El Torito 1.0 / zisofs | 44 | 0 | 1 | 45 |
 | [crx3](crx3/README.md) | Chromium components/crx_file/crx3.proto | 15 | 0 | 2 | 17 |
 | [pea](pea/README.md) | PEA file format spec (pea_help.pdf) + PeaZip pea.pas/pea_utils.pas | 20 | 0 | 3 | 23 |
@@ -149,7 +149,7 @@
 | フォーマット | 基準仕様 | ✅ | ⚠️ | ❌ | 合計 |
 |---|---|---|---|---|---|
 | [uuencode](uuencode/README.md) | IEEE Std 1003.1-2017 uuencode | 21 | 0 | 0 | 21 |
-| [ascii85](ascii85/README.md) | PDF 32000-1:2008 §7.4.3 + RFC 1924 | 17 | 0 | 0 | 17 |
+| [ascii85](ascii85/README.md) | PDF 32000-1:2008 §7.4.3 + RFC 1924 | 18 | 0 | 0 | 18 |
 | [yenc](yenc/README.md) | yEnc revised draft 1.3 (yenc.org) | 24 | 0 | 2 | 26 |
 | [macbinary](macbinary/README.md) | MacBinary II Standard Proposal (24-Jul-1987) | 14 | 0 | 6 | 20 |
 | [binhex](binhex/README.md) | BinHex 4.0 Definition (Peter N Lewis 1991) + RFC 1741 | 21 | 0 | 3 | 24 |
@@ -164,10 +164,10 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 2385 |
-| ⚠️ 部分実装 | 1 |
-| ❌ 未実装 | 55 |
+| ✅ 実装+テスト済み | 2434 |
+| ⚠️ 部分実装 | 2 |
+| ❌ 未実装 | 58 |
 | — 該当なし | 6 |
-| **合計** | **2447** |
+| **合計** | **2500** |
 
-**全体カバー率**: 2385 / 2447 = **97.5%** (❌ 行 (intentional exclusion・要修正候補を含む) および該当なし除外後: 2385 / 2386 = **99.96%**)
+**全体カバー率**: 2418 / 2483 = **97.4%** (❌ 行 (intentional exclusion・要修正候補を含む) および該当なし除外後: 2418 / 2419 = **99.96%**)

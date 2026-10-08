@@ -85,7 +85,10 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
     }
 
     let minor = input[5];
-    if minor > MAX_VERSION_MINOR {
+    // Only the v0.6 layout is implemented; older versions (v0.5x
+    // fixed-size stream headers, no RCD0 marker) differ on the
+    // wire and would mis-parse rather than fail cleanly.
+    if minor != MAX_VERSION_MINOR {
         return Err(Error::Unsupported("lrzip: unsupported minor version"));
     }
 
@@ -473,6 +476,13 @@ fn parse_header(header: &[u8; 24]) -> Result<u64, Error> {
         return Err(Error::Unsupported("lrzip: unsupported version"));
     }
 
+    // Same version gate as `decode`: only the v0.6 layout is
+    // implemented; older layouts (v0.5x fixed-size stream
+    // header, no RCD0) and v0.7 must not be parsed as v0.6.
+    if header[5] != MAX_VERSION_MINOR {
+        return Err(Error::Unsupported("lrzip: unsupported minor version"));
+    }
+
     if header[22] != 0 {
         return Err(Error::Unsupported("lrzip: encrypted files not supported"));
     }
@@ -574,6 +584,35 @@ mod tests {
         input[5] = 7; // minor
         let result = decode(&input);
         assert!(matches!(result, Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn test_decode_rejects_minor_below_6() {
+        // v0.5x and older use a different (fixed-size) stream
+        // header layout; mis-parsing them as v0.6 is worse than a
+        // clean rejection.
+        for minor in [0u8, 1, 5] {
+            let mut input = [0u8; 24];
+            input[0..4].copy_from_slice(MAGIC);
+            input[5] = minor;
+            assert!(matches!(decode(&input), Err(Error::Unsupported(_))));
+            // reader path must apply the same version gate
+            assert!(decode_reader(&input[..]).is_err());
+        }
+    }
+
+    #[test]
+    fn test_decompress_block_rejects_unknown_ctype() {
+        assert!(matches!(
+            decompress_block(
+                b"x",
+                0x7F,
+                4096,
+                LzmaProperties::from_props_byte(93).unwrap(),
+                16
+            ),
+            Err(Error::Unsupported(_))
+        ));
     }
 
     fn build_lrzip_with_lzma_props(data: &[u8], props: LzmaProperties) -> Vec<u8> {

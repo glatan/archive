@@ -23,11 +23,11 @@
 | 2 | `0x00000000` グループは `z` (1文字) で省略可能 | PDF 32000 §7.4.3 | ✅ | `adobe_z_shorthand` |
 | 3 | `z` はグループ内に現れてはならない (単独文字) | PDF 32000 §7.4.3 | ✅ | `adobe_z_shorthand` の `9jqz` 拒否 |
 | 4 | 最終部分グループ n octet (1-3) は n+1 文字で encode、decode は残り digit を最大値で補完して先頭 n octet を取る | PDF 32000 §7.4.3 | ✅ | `adobe_partial_tail` |
-| 5 | 入力中の whitespace は無視 | PDF 32000 §7.4.3 | ✅ | `adobe_whitespace_and_no_delims` |
-| 6 | `<~` `~>` デリミタ: あってもなくても decode 可能 | PDF 32000 §7.4.3 | ✅ | `adobe_whitespace_and_no_delims` |
+| 5 | 入力中の whitespace は無視 | PDF 32000 §7.4.3 | ✅ | `adobe_whitespace_and_no_delims`。whitespace 集合は SP/TAB/LF/CR/VT(0x0B)/FF(0x0C) (`is_ws`) |
+| 6 | `<~` `~>` デリミタ: あってもなくても decode 可能。先頭 `<~` と末尾 `~>` は独立に剥がすため片側のみの入力も受理 | PDF 32000 §7.4.3 | ✅ | `adobe_whitespace_and_no_delims` |
 | 7 | 部分グループ残り 1 文字は不正 | PDF 32000 §7.4.3 | ✅ | `adobe_partial_tail` (`"!"` 拒否) |
 | 8 | `y` (btoa 拡張) と alphabet 外文字の拒否 | PDF 32000 §7.4.3 | ✅ | `adobe_rejects_y_and_junk` |
-| 9 | 85^5-1 > u32::MAX のグループは参照実装同様 wrap (u64 累積→下位32bit) | 実装選択 | ✅ | `decode_group` |
+| 9 | 85^5-1 > u32::MAX のグループは参照実装同様 wrap (u64 累積→下位32bit) | 実装選択 | ✅ | `adobe_group_overflow_wraps` (`uuuuu` → `142085828`) |
 | 10 | encode は `<~` `~>` で括る | PDF 32000 §7.4.3 | ✅ | 全 encode テスト |
 | 11 | CPython `base64.a85decode(adobe=True)` で自前出力を復号可能 | de facto interop | ✅ | `test_ascii85_python_a85decode_compat` (統合) |
 | 12 | CPython `base64.a85encode(adobe=True)` 出力を decode 可能 | de facto interop | ✅ | `test_ascii85_python_a85encode_decode` (統合) |
@@ -38,18 +38,19 @@
 |---|------|----------|------|----------------|
 | 13 | alphabet: `0-9 A-Z a-z !#$%&()*+-;<=>?@^_` + backtick + `{|}~` の 85 文字 | RFC 1924 | ✅ | `rfc1924_example` |
 | 14 | 16 octet の 128bit 値を 20 文字の big-endian base85 で表現 | RFC 1924 | ✅ | `rfc1924_example` (RFC 例 `4)+k&C#VzJ4br>0wv%Yp`) |
-| 15 | encode は 16 octet 以外を拒否、decode は 20 文字以外を拒否 | RFC 1924 (固定長) | ✅ | `rfc1924_lengths` |
+| 15 | encode は 16 octet 以外を拒否、decode は whitespace 除去後 20 文字を要求 | RFC 1924 (固定長) | ✅ | `rfc1924_lengths` |
 | 16 | alphabet 外文字の拒否 | RFC 1924 | ✅ | `rfc1924_lengths` |
-| 17 | git/python 式 (4 octet 単位) base85 との桁順一致検証 | de facto interop | ✅ | `test_ascii85_rfc1924_python_b85_compat` (統合) |
+| 17 | 85^20-1 > u128::MAX のエンコード列は `Error::InvalidData` で reject (checked 累積、wrap/panic しない) | RFC 1924 §4.1 値域 + エラー規約 | ✅ | `rfc1924_overflow_rejected` |
+| 18 | git/python 式 (4 octet 単位) base85 との桁順一致検証 | de facto interop | ✅ | `test_ascii85_rfc1924_python_b85_compat` (統合) |
 
 ## 集計
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 17 |
+| ✅ 実装+テスト済み  | 18 |
 | ⚠️ 部分対応  | 0 |
 | ❌ 未対応  | 0 |
-| **合計** | **17** |
+| **合計** | **18** |
 
 variant 表の btoa (decode ⚠️※ / encode ❌) は集計対象外の intentional scope。`y` 省略と `xbtoa Begin/End` 行はいずれも非対応のまま (`y` は `Error::Unsupported` で明示拒否)。
 

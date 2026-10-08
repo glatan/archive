@@ -11,7 +11,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 1 | 先頭 4 バイトは copy flag。先頭バイトが値を持ち残りは 0 | lzrw1.c: `FLAG_BYTES 4` | ✅ | `decode_copy_flag`、`lzrw1_reference_vector_*` (統合) |
+| 1 | 先頭 4 バイトは copy flag。lzrw1-a.c の記述では「残りは 0」だが、lzrw1.c エンコーダは byte0 のみ書き込み byte1-3 は未初期化。デコーダも byte0 のみ評価し byte1-3 を完全に無視 (≠0 でも受理) | lzrw1.c: `FLAG_BYTES 4` + decoder 動作 | ✅ | `decode_copy_flag`、`lzrw1_reference_vector_*` (統合) |
 | 2 | flag == 1 (FLAG_COPY) の場合、remainder はデータそのまま | lzrw1.c: `FLAG_COPY` | ✅ | `decode_copy_flag` + noise roundtrip、`lzrw1_reference_vector_noise` (統合) |
 | 3 | flag == 0 (FLAG_COMPRESS) の場合、remainder は 0 個以上のグループ | lzrw1.c: `FLAG_COMPRESS` | ✅ | `lzrw1_reference_vector_fox` 等 (統合) |
 | 4 | 各グループは 2 バイトの control + 最大 16 アイテム。最終グループは 1-16 アイテムでよい | lzrw1.c decoder 動作 | ✅ | `lzrw1_reference_vector_*` (統合) |
@@ -22,13 +22,13 @@
 | 9 | 長さ 1-2 の copy item も受理 (参照エンコーダは生成しないがフォーマット上は合法) | lzrw1.c decoder | ✅ | `decode_short_copy` |
 | 10 | copy の重複コピー (len > offset) を許容 | lzrw1.c / LZ77 規約 | ✅ | `roundtrip_various` (`[0u8; 2000]`) |
 | 11 | 空入力は空出力に対応 | crate contract | ✅ | `empty_input` |
-| 12 | flag が 0/1 以外のストリームは拒否 | lzrw1.c | ✅ | `rejects_bad_flag` |
+| 12 | flag が 0/1 以外のストリームは拒否 | lzrw1.c | ✅ | `rejects_bad_flag`。参照デコーダは flag≠1 を全て compressed として処理するため、本 reject は参照より厳格な hardening |
 
 ## バリデーション / エラー処理
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 13 | 4 バイト未満の入力 (flag 切り詰め) の拒否 | lzrw1.c | ✅ | `rejects_truncated_flag` |
+| 13 | 1-3 バイトの入力 (flag 切り詰め) の拒否。0 バイト入力は空出力として受理 (#11) | lzrw1.c | ✅ | `rejects_truncated_flag` |
 | 14 | copy item 途中での入力終端の拒否 | lzrw1.c | ✅ | `rejects_truncated_copy_item`、`lzrw1_rejects_malformed` (統合) |
 | 15 | copy offset が 0 または出力済みバイト数超過は拒否 | lzrw1.c | ✅ | `rejects_bad_offset`、`lzrw1_rejects_malformed` (統合) |
 | 16 | `decode_bounded` で出力上限を強制 (compressed/verbatim 双方) | crate contract | ✅ | `bounded_decode` |
@@ -40,13 +40,14 @@
 |---|------|----------|------|----------------|
 | 18 | decode→encode→decode ラウンドトリップ | lzrw1.c | ✅ | `roundtrip_various`、`lzrw1_roundtrips` (統合) |
 | 19 | 圧縮後サイズが入力 + flag を下回らない場合は verbatim 形式 (flag=1) を出力 | lzrw1.c overrun 経路 | ✅ | noise roundtrip で検証 |
-| 20 | エンコーダのマッチ探索は greedy 単一候補ハッシュ (3B プレフィックス、12bit)。リファレンスとの出力バイト一致は保証しない (参照コード自身が non-deterministic と明記) | lzrw1.c 注記 5 | ✅ | roundtrip + 参照デコーダ相互運用で検証 |
+| 20 | エンコーダのマッチ探索は greedy 単一候補ハッシュ (3B プレフィックス、12bit)。40543 乗算の取り出しシフト位置は参照と異なる (TPN 記載済みの意図的差分)。リファレンスとの出力バイト一致は保証しない (参照コード自身が non-deterministic と明記) | lzrw1.c 注記 5 | ✅ | roundtrip + 参照デコーダ相互運用で検証 |
 
 ## その他
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
 | 21 | CLI `--format lzrw1` で decode/encode (magic がないため自動検出なし) | crate CLI contract | ✅ | archive-cli 配線 |
+| 22 | ストリーム末尾に control word 未満 (1 バイト) の孤立残りがある場合は無視して受理 | lzrw1.c decoder (`control |= *p_src++ << 8` は領域外読み、参照は UB) | ✅ | 寛容化 — 本実装は安全側として受理。参照デコーダは読み飛ばし |
 
 ## 出典 / 検証メモ
 

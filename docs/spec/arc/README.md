@@ -48,7 +48,7 @@
 | 13 | method 0x0a (crushed): LSB-first adaptive LZW (literal-bit 切替・usage 置換) → RLE90 展開、size 一致必須 | de facto | ✅ | `crush::tests` (ベクタ、EOF/truncated)、`test_arc_method0a_decode`、unar oracle |
 | 14 | method 0x0b (distilled): numnodes/codelength 検証 + LSB-first Huffman walk + 8KiB LZSS + 固定 offset 表、size 一致必須 | de facto | ✅ | `distill::tests` (literal/match/malformed)、`test_arc_method0b_decode` (XADMaster 一致確認ベクタ) |
 | 15 | method 12-19 (unknown)・40+ (reserved) は `Error::Unsupported` | crate scope | ✅ | `rejects_compressed_method`, `test_arc_rejects_compressed_method` |
-| 15a | method 20-29 (informational items)・30-39 (control items): 通常 member と同一ヘッダを parse して payload `length` バイトを skip、entry は生成しない | ARC spec (SEA technical memo、ARC 6.0) | ✅ | `skips_info_control_items`, `rejects_truncated_info_item`, `test_arc_skips_info_control_items` |
+| 15a | method 20-29 (informational items)・30-39 (control items): 通常 member と同一ヘッダを parse して payload `length` バイトを skip、entry は生成しない (SEA memo: orig file size・name は無視可能と規定) | ARC spec (SEA technical memo、ARC 6.0) | ✅ | `skips_info_control_items`, `rejects_truncated_info_item`, `test_arc_skips_info_control_items` |
 | 16 | method 1 以上の CRC-16 (CRC-16/ARC、poly 0x8005 reflected) を検証、不一致は reject | ARC spec | ✅ | `rejects_bad_crc`, `method1_rejects_bad_crc`, `method3_rejects_bad_crc`, `test_arc_method1_rejects_bad_crc` |
 | 17 | method 1 member は orig-length を持たず `size` は stored size と同値。`crc16`/`date`/`time` は通常通り検証・返却される | ARC spec (Arcinfo bytes 26-29 注記) | ✅ | `method1_member`, `method1_rejects_bad_crc` |
 
@@ -57,7 +57,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 18 | `ArcEncoder::add_file` / `encode`: method-2 member + name 1-12B・NUL/パス区切りなし | ARC spec | ✅ | `roundtrip`, `rejects_long_name` |
-| 19 | 終端 `0x1A 0x00` を付与 | ARC spec | ✅ | 往復テスト |
+| 19 | 終端 `0x1A 0x00` を付与 | ARC spec | ✅ | 往復テスト (decode は EOF 終了も許容 — lax) |
 | 20 | method-1 member の emit: `add_file_with_method(name, data, date, time, 1)` — `[0x1A][1][name 13B][size u32le][date u16][time u16][crc16 u16][data]` (orig-length なし) | ARC spec (Arcinfo bytes 26-29 注記) | ✅ | `method1_roundtrip`, `method1_header_layout`, `rejects_unsupported_encode_method`, `test_arc_method1_encode_decode_roundtrip`, `test_arc_method1_header_layout`, `test_arc_rejects_unsupported_encode_method`、arc/nomarch/unar oracle 展開 (`test_arc_encode_extracted_by_oracle`) |
 | 21 | method 3-9・0x0a・0x0b の emit: `add_file_with_method` で packed/squeezed/crunched (3 種) /squashed/crushed/distilled member を生成 | de facto | ✅ | `test_arc_compressed_encode_decode_roundtrip`、`test_arc_method5_6_7_edge_roundtrip`、`test_arc_method0a_encode_roundtrip`、`test_arc_method0b_encode_roundtrip`、`crunch::tests::encode_*`・`crush::tests::encode_*`・`distill::tests::encode_*`、oracle 展開 (`test_arc_encode_extracted_by_oracle`: 1/4/8/9→arc+nomarch+unar、5/6→arc+nomarch、7→arc、0x0a→unar、0x0b は対応 oracle なし) |
 
@@ -76,5 +76,5 @@
 | 25 | method 5-9・0x0a・0x0b の圧縮ワイヤ形式は書面仕様なし (de facto) | — | XADMaster port (newtua_dos、LGPL) / nomarch / hyc-arc (GPL oracle) / compcol (MIT) の挙動一致で妥当性確認。method 9 の LZW 可変幅は compcol 記述と異なり nomarch/newtua 側 (9→13bit 可変) を採用。encode 側は method 5-7 を arc/nomarch oracle、0x0a を unar/newtua で展開確認済み。0x0b は利用可能 oracle が decode を持たないため、decode は XADMaster port 一致ベクタ、encode は newtua decoder 相互検証 (リポジトリ外) のみ |
 | 26 | self-unpacking (SFX) archive の先頭最大 3B prefix は非対応 | — | Arcinfo SELF-UNPACKING 節。decode は先頭 `0x1A` 必須、detect も同様 |
 | 27 | method 20-29/30-39 の sub-record 構造 (`u16 len` + `u8 subtype` + data) は解釈しない | — | corion SEA memo 節。payload は長さ分 skip のみ (#15a) |
-| 28 | date/time は MS-DOS bit layout (Arcinfo bytes 20-23) の raw u16 として保持し意味解釈しない | — | date 全 0 = 日付なし、の意味付けも呼び出し側に委ねる |
+| 28 | date/time は MS-DOS bit layout (Arcinfo bytes 20-23、corion Table 0009) の raw u16 として保持し意味解釈しない (sec/2 精度のため奇数秒は表現不可) | — | date 全 0 = 日付なし、の意味付けも呼び出し側に委ねる |
 | 29 | Spark/Archimedes 拡張 (method|0x80、dir entry 0x1e/0x1f) は非対応 | — | XADMaster/newtua が実装する拡張。基準仕様 (corion) の範囲外 |

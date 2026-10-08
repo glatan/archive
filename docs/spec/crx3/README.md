@@ -12,12 +12,12 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
 | 1 | magic `Cr24` (offset 0, 4B) 検証 | crx3.proto ファイルフォーマットコメント | ✅ | `rejects_bad_inputs` |
-| 2 | version == 3 (LE u32) のみ受理 | 同上 | ✅ | `rejects_bad_inputs` |
+| 2 | version == 3 (LE u32) が CRX3 パスの条件 (v2 は #17 の CRX2 パスへ、それ以外は `unsupported version` で拒否) | 同上 | ✅ | `rejects_bad_inputs` (v4 拒否を追加) |
 | 3 | header 長 N (LE u32) で `CrxFileHeader` を区切る | 同上 | ✅ | 全テスト |
 | 4 | N が過大なものを拒否 (16 MiB 上限) | crx3.proto 「reject CRX₃ files that contain an N that is too large」 | ✅ | `rejects_bad_inputs` |
 | 5 | ヘッダ末尾以降を ZIP アーカイブとして decode | 同上 | ✅ | `test_crx3_python_oracle` |
 | 6 | ヘッダ後が ZIP でない入力を拒否 | 同上 | ✅ | `test_crx3_rejects_non_zip_tail` |
-| 17 | CRX2 (version 2) の decode | Chromium `crx_file.h` / `crx_verifier.cc` | ✅ | 固定ヘッダ + `ProofAlgorithm::RsaPkcs1` の decode を実装 (公開鍵/署名は生値で公開)。`crx_id` は v2 で wire 非格納のため `SHA-256(public_key)[..16]` から導出して `Crx3Image::crx_id` で公開 (crx3.proto の導出規則と同一)。`decodes_crx2`, `rejects_truncated_crx2_header`, `crx2_crx_id_derived_from_pubkey`。署名検証は #14 で intentional scope。CRX の作成は Chromium 側ツールの領域 (intentional scope) |
+| 17 | CRX2 (version 2) の decode | Chromium `crx_file.h` / `crx_verifier.cc` | ✅ | 固定ヘッダ (key_len/sig_len/key/sig、各 64KiB 上限 `MAX_CRX2_PROOF_LEN`) + `ProofAlgorithm::RsaPkcs1` の decode を実装 (公開鍵/署名は生値で公開)。`crx_id` は v2 で wire 非格納のため `SHA-256(public_key)[..16]` から導出して `Crx3Image::crx_id` で公開 (crx3.proto の導出規則と同一)。`decodes_crx2`, `rejects_truncated_crx2_header`, `crx2_crx_id_derived_from_pubkey`。署名検証は #14 で intentional scope。CRX の作成は Chromium 側ツールの領域 (intentional scope) |
 
 ## protobuf ヘッダ層 (CrxFileHeader)
 
@@ -26,9 +26,9 @@
 | 7 | `sha256_with_rsa` (field 2, repeated) → proof 一覧 | crx3.proto CrxFileHeader | ✅ | `decodes_header_and_zip` |
 | 8 | `sha256_with_ecdsa` (field 3, repeated) → proof 一覧 | 同上 | ✅ | `decodes_header_and_zip` |
 | 9 | `verified_contents` (field 4) → gzip 圧縮 JSON を生バイトで保持 | 同上 | ✅ | `decodes_header_and_zip` |
-| 10 | `signed_header_data` (field 10000) → `SignedData.crx_id` (16B) を抽出 | 同上 + SignedData message | ✅ | `decodes_header_and_zip` / oracle テスト |
+| 10 | `signed_header_data` (field 10000) → `SignedData.crx_id` (16B) を抽出。非 16B の crx_id はエラーでなく無視 (`crx_id=None`、緩和実装) | 同上 + SignedData message | ✅ | `decodes_header_and_zip` / oracle テスト |
 | 11 | `AsymmetricKeyProof` の `public_key` (1) / `signature` (2) を保持 | crx3.proto AsymmetricKeyProof | ✅ | 全テスト |
-| 12 | wire type 0 (varint) / 1 (64-bit) / 5 (32-bit) の既知フィールドは値をスキップして継続、wire type 3/4/6/7 (SGROUP/EGROUP/reserved) ・不正 varint・範囲外フィールド番号・LEN 長超過を拒否 | protobuf wire format | ✅ | `for_each_len_field` (decode.rs:155-)、`rejects_bad_inputs` |
+| 12 | wire type 0 (varint) / 1 (64-bit) / 5 (32-bit) の既知フィールドは値をスキップして継続、wire type 3/4/6/7 (SGROUP/EGROUP/reserved) ・不正 varint・範囲外フィールド番号・LEN 長超過を拒否 | protobuf wire format | ✅ | `for_each_len_field` (decode.rs:160-)、`rejects_bad_inputs`。wire type 3/4/6/7・field=0・LEN 超過の個別経路は fuzz 依存 (専用 unit test なし) |
 | 13 | 未知フィールドはスキップ (proto2 の前方互換) | proto2 仕様 | ✅ | for_each_len_field の既定分岐 |
 | 15 | crx_id と公開鍵の整合性検証 | crx3.proto SignedData (crx_id = SHA-256(public_key) 先頭 16B) | ✅ | `Crx3Image::verify_crx_id` で `sha256_with_rsa` の先頭公開鍵と照合する。`crx_id_matches_rsa_pubkey`, `crx_id_mismatch_reported`, `crx_id_none_when_no_signed_data` |
 
@@ -36,7 +36,7 @@
 
 | # | 項目 | 状態 | 備考 |
 |---|------|------|------|
-| 14 | 署名検証 (RSA-PSS / ECDSA P-256) | ❌ intentional scope | proof の中身は公開するが検証はしない。検証には RSA/ECDSA 実装が必要で archive 展開の領域外 |
+| 14 | 署名検証 (RSA-PSS / ECDSA P-256) | ❌ intentional scope | proof の中身は公開するが検証はしない (署名対象プリイメージは `"CRX3 SignedData\x00" + signed_header_size(LE u32) + signed_header_data + archive` — 実装 `Crx3Proof::signature` doc に記載)。検証には RSA/ECDSA 実装が必要で archive 展開の領域外 |
 | 16 | verified_contents の中身検証 | ❌ intentional scope | gzip JSON の展開・照合は拡張署名検証の一部 |
 
 ## 集計
