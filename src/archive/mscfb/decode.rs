@@ -3,7 +3,9 @@
 use alloc::collections::BTreeSet;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::cmp::Ordering;
 
+use super::{key_cmp, sort_key};
 use crate::error::Error;
 
 const SIGNATURE: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
@@ -217,6 +219,68 @@ impl<'a> File<'a> {
         self.walk(e.right, prefix, out, visited, depth + 1)
     }
 
+    /// Descend one sibling red-black tree per the [MS-CFB] 2.6.4
+    /// ordering looking for `key`; returns the matching stream ID.
+    /// The descent is bounded by the entry count so a malformed
+    /// (cyclic) tree cannot loop forever.
+    fn find_sibling(&self, mut sid: u32, key: &[u16]) -> Result<Option<u32>, Error> {
+        let mut steps = 0usize;
+        while sid != NOSTREAM {
+            if steps >= self.entries.len() {
+                return Err(Error::InvalidData("mscfb"));
+            }
+            steps += 1;
+            let e = self.entries.get(sid as usize).ok_or(Error::UnexpectedEof)?;
+            sid = match key_cmp(key, &sort_key(&e.name)) {
+                Ordering::Less => e.left,
+                Ordering::Greater => e.right,
+                Ordering::Equal => return Ok(Some(sid)),
+            };
+        }
+        Ok(None)
+    }
+
+    /// Resolve a '/'-separated stream path by descending each
+    /// storage's sibling red-black tree under the [MS-CFB] 2.6.4
+    /// ordering. The returned entry carries the on-disk (canonically
+    /// cased) name.
+    fn lookup(&self, path: &str) -> Result<Option<CfbEntry>, Error> {
+        let comps: Vec<&str> = path.split('/').collect();
+        let mut sid = self.entries[0].child;
+        let mut canon = String::new();
+        for (i, c) in comps.iter().enumerate() {
+            if c.is_empty() {
+                return Ok(None);
+            }
+            let Some(node) = self.find_sibling(sid, &sort_key(c))? else {
+                return Ok(None);
+            };
+            let e = &self.entries[node as usize];
+            if !canon.is_empty() {
+                canon.push('/');
+            }
+            canon.push_str(&e.name);
+            if i + 1 == comps.len() {
+                // The last component must name a stream object.
+                return if e.obj_type == 0x02 {
+                    Ok(Some(CfbEntry {
+                        name: canon,
+                        data: self.stream_data(e.start, e.size)?,
+                        meta: e.meta,
+                    }))
+                } else {
+                    Ok(None)
+                };
+            }
+            // Intermediate components must name storage objects.
+            if e.obj_type != 0x01 {
+                return Ok(None);
+            }
+            sid = e.child;
+        }
+        Ok(None)
+    }
+
     /// Enforce the directory-entry invariants that `walk` tolerates
     /// ([MS-CFB] 2.6.1/2.6.4): color flags are red or black only,
     /// sibling/child IDs follow the NOSTREAM conventions for their
@@ -267,7 +331,7 @@ impl<'a> File<'a> {
     fn validate_level(
         &self,
         sid: u32,
-        names: &mut BTreeSet<String>,
+        names: &mut BTreeSet<Vec<u16>>,
         visited: &mut BTreeSet<u32>,
     ) -> Result<(), Error> {
         if sid == NOSTREAM {
@@ -279,9 +343,8 @@ impl<'a> File<'a> {
         let e = self.entries.get(sid as usize).ok_or(Error::UnexpectedEof)?;
         self.validate_level(e.left, names, visited)?;
         // 2.6.4: sibling names must be unique under the sorting
-        // relationship, which compares uppercased UTF-16 code points;
-        // approximated here by full uppercase folding.
-        if !names.insert(e.name.to_uppercase()) {
+        // relationship, which compares uppercased UTF-16 code units.
+        if !names.insert(sort_key(&e.name)) {
             return Err(Error::InvalidData("mscfb"));
         }
         if e.obj_type == 0x01 {
@@ -513,6 +576,51 @@ pub fn decode_strict(input: &[u8]) -> Result<Vec<CfbEntry>, Error> {
 /// CLSID identifies the compound file's content type.
 pub fn root_meta(input: &[u8]) -> Result<CfbEntryMeta, Error> {
     Ok(parse(input)?.entries[0].meta)
+}
+
+/// Compare two '/'-joined entry paths component-wise under the
+/// [MS-CFB] 2.6.4 sort rule (uppercased name length first, then
+/// uppercased UTF-16 code unit values).
+fn path_cmp(a: &str, b: &str) -> Ordering {
+    let mut ai = a.split('/');
+    let mut bi = b.split('/');
+    loop {
+        match (ai.next(), bi.next()) {
+            (Some(x), Some(y)) => match key_cmp(&sort_key(x), &sort_key(y)) {
+                Ordering::Equal => {}
+                ord => return ord,
+            },
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+        }
+    }
+}
+
+/// Decode like [`decode`], then order the entries by the [MS-CFB]
+/// 2.6.4 directory sort rule applied per path component: within a
+/// storage, siblings compare by uppercased name length first and then
+/// by uppercased UTF-16 code unit values, and a storage's subtree is
+/// listed at the storage's sibling position. Unlike [`decode`], whose
+/// order reflects the on-disk red-black tree, the result is ordered
+/// even when the file's directory tree is not.
+pub fn decode_sorted(input: &[u8]) -> Result<Vec<CfbEntry>, Error> {
+    let mut entries = decode(input)?;
+    entries.sort_by(|a, b| path_cmp(&a.name, &b.name));
+    Ok(entries)
+}
+
+/// Look up a single stream by '/'-separated path and return its
+/// entry, or `None` when no stream matches.
+///
+/// Component matching follows the [MS-CFB] 2.6.4 directory ordering:
+/// names compare as uppercase-mapped UTF-16 code units, so the lookup
+/// is case-insensitive (`"foo.TXT"` finds `"Foo.txt"`). Resolution
+/// descends each storage's sibling red-black tree, so a file whose
+/// directory trees do not follow the 2.6.4 sort order may fail to
+/// resolve entries that [`decode`] still enumerates.
+pub fn get_stream(input: &[u8], path: &str) -> Result<Option<CfbEntry>, Error> {
+    parse(input)?.lookup(path)
 }
 
 #[cfg(test)]
@@ -1012,5 +1120,157 @@ mod tests {
         let out = decode(&f).unwrap();
         assert_eq!(out.len(), 2);
         assert!(decode_strict(&f).is_err());
+    }
+
+    /// Build a conformant image via the encoder so its sibling
+    /// trees follow the 2.6.4 balanced-tree layout.
+    fn encode_file(streams: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut enc = crate::archive::mscfb::encode::CfbEncoder::new();
+        for &(p, d) in streams {
+            enc.add_stream(p, d);
+        }
+        enc.finish().unwrap()
+    }
+
+    #[test]
+    fn get_stream_resolves_sibling_tree() {
+        let f = encode_file(&[
+            ("Storage/Foo.txt", b"foo contents"),
+            ("Storage/Bar", b"bar"),
+            ("Storage/Sub/Deep", b"deep"),
+            ("Top", b"top"),
+        ]);
+        // Exact-case lookup descends the sibling red-black trees.
+        let e = get_stream(&f, "Storage/Foo.txt").unwrap().unwrap();
+        assert_eq!(e.name, "Storage/Foo.txt");
+        assert_eq!(e.data, b"foo contents");
+        assert_eq!(
+            get_stream(&f, "Storage/Sub/Deep").unwrap().unwrap().data,
+            b"deep"
+        );
+        assert_eq!(get_stream(&f, "Top").unwrap().unwrap().data, b"top");
+        // The 2.6.4 uppercase mapping makes lookup case-insensitive;
+        // the returned entry keeps the on-disk casing.
+        let e = get_stream(&f, "storage/foo.TXT").unwrap().unwrap();
+        assert_eq!(e.name, "Storage/Foo.txt");
+        assert_eq!(e.data, b"foo contents");
+        assert_eq!(
+            get_stream(&f, "STORAGE/SUB/DEEP").unwrap().unwrap().data,
+            b"deep"
+        );
+    }
+
+    #[test]
+    fn get_stream_misses_unknown_and_non_stream_paths() {
+        let f = encode_file(&[("Storage/Foo.txt", b"x"), ("Top", b"t")]);
+        // Unknown names, storage objects, paths that continue through
+        // a stream, and empty components all miss.
+        assert!(get_stream(&f, "Storage/Baz").unwrap().is_none());
+        assert!(get_stream(&f, "Storage").unwrap().is_none());
+        assert!(get_stream(&f, "Top/Child").unwrap().is_none());
+        assert!(get_stream(&f, "").unwrap().is_none());
+        assert!(get_stream(&f, "Storage/Foo.txt/").unwrap().is_none());
+        // Corrupt input still reports an error.
+        assert!(get_stream(&f[..100], "Top").is_err());
+    }
+
+    #[test]
+    fn decode_sorted_orders_by_264_sort_rule() {
+        let f = encode_file(&[
+            ("Storage 1/Stream Small", b"small"),
+            ("Storage 1/Stream Big", b"big"),
+            ("Storage 1/Deep/Nested", b"nested"),
+            ("Top", b"top"),
+        ]);
+        // 2.6.4 order: uppercased name length first ("Top" < "Storage 1"
+        // despite 'S' < 'T'), then code units; a storage's subtree is
+        // listed at the storage's sibling position.
+        let sorted = decode_sorted(&f).unwrap();
+        let names: Vec<&str> = sorted.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "Top",
+                "Storage 1/Deep/Nested",
+                "Storage 1/Stream Big",
+                "Storage 1/Stream Small"
+            ]
+        );
+        // The conformant file already enumerates in this order.
+        let out = decode(&f).unwrap();
+        let plain: Vec<&str> = out.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(plain, names);
+    }
+
+    #[test]
+    fn decode_sorted_fixes_unsorted_tree() {
+        // "b" sorts after "A" under the 2.6.4 rule ("B" > "A"), but the
+        // fixture stores it in "A"'s left subtree, so in-order
+        // enumeration yields "b" before "A".
+        let entries: &[De] = &[
+            De {
+                name: "Root Entry",
+                ty: 5,
+                left: NOSTREAM,
+                right: NOSTREAM,
+                child: 1,
+                start: 0,
+                size: 0,
+            },
+            De {
+                name: "A",
+                ty: 2,
+                left: 2,
+                right: NOSTREAM,
+                child: NOSTREAM,
+                start: 0,
+                size: 3,
+            },
+            De {
+                name: "b",
+                ty: 2,
+                left: NOSTREAM,
+                right: NOSTREAM,
+                child: NOSTREAM,
+                start: 1,
+                size: 3,
+            },
+        ];
+        let mut fat = vec![FREESECT; 4];
+        fat[0] = 0xFFFF_FFFD;
+        fat[1] = ENDOFCHAIN; // dir
+        fat[2] = ENDOFCHAIN; // minifat
+        fat[3] = ENDOFCHAIN; // mini stream
+        let mut minifat = vec![FREESECT; 128];
+        minifat[0] = ENDOFCHAIN;
+        minifat[1] = ENDOFCHAIN;
+        let mut ms = alloc::vec![0u8; 512];
+        ms[0..3].copy_from_slice(b"AAA");
+        ms[64..67].copy_from_slice(b"BBB");
+        let mfsec = alloc::vec![0u8; 512];
+        let sectors: &[(u32, &[u8])] = &[(3, &ms), (2, &mfsec)];
+        let f = build_cfb(&Fx {
+            entries,
+            fat: &fat,
+            difat: &[0],
+            mini_fat: &minifat,
+            first_dir: 1,
+            minifat_sector: 2,
+            root_start: 3,
+            root_size: 512,
+            sectors,
+        });
+        // Lenient decode keeps the on-disk tree order.
+        let out = decode(&f).unwrap();
+        let names: Vec<&str> = out.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["b", "A"]);
+        // decode_sorted imposes the 2.6.4 order regardless.
+        let sorted = decode_sorted(&f).unwrap();
+        let names: Vec<&str> = sorted.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, ["A", "b"]);
+        // Tree-descent lookup follows the 2.6.4 branches, so "b" is
+        // unreachable here even though decode still enumerates it.
+        assert_eq!(get_stream(&f, "A").unwrap().unwrap().data, b"AAA");
+        assert!(get_stream(&f, "B").unwrap().is_none());
     }
 }

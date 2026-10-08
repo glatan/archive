@@ -22,13 +22,20 @@
 //! block sizes). El Torito boot records (VD type 0) are
 //! recognised: the boot catalog validation entry and all
 //! initial/section entries are parsed, and the referenced boot
-//! image is extracted into `ElToritoEntry::image` (`IsoImage::el_torito`).
+//! image is extracted into `ElToritoEntry::image` (`IsoImage::el_torito`);
+//! Section Entry Extension records (indicator 0x44) attach to
+//! the preceding section entry via `ElToritoEntry::extensions`.
 //! Descriptor metadata — system/volume-set/publisher/preparer/
 //! application and copyright/abstract/bibliographic identifiers,
 //! volume set size / sequence number (§8.4.10-8.4.11), and the four
 //! 17-byte volume timestamps (ECMA-119 §8.4.5, §8.4.19-8.4.29) — is
 //! exposed via `IsoImage::meta` (primary) and `IsoImage::joliet_meta`
-//! (supplementary). The descriptor's File Structure Version (§8.4.30)
+//! (supplementary), together with the SVD volume flags byte
+//! (§8.5.3) and the 512-byte Application Use area (§8.4.32).
+//! Per-record, the raw File Flags byte and the Volume Sequence
+//! Number (§9.1.6/§9.1.9) are exposed as `IsoEntry::file_flags`
+//! and `IsoEntry::volume_seq_number`. The descriptor's File
+//! Structure Version (§8.4.30)
 //! and `seq ∈ 1..=size` consistency are validated on decode.
 //! Extended attribute records (ECMA-119 §9.5) are parsed into
 //! `IsoEntry::xa` and act as a fallback for owner/group/mode/

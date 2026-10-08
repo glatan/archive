@@ -126,7 +126,8 @@ pub fn decode_with_password_bytes(input: &[u8], password: &[u8]) -> Result<Vec<Z
 /// are resolved against each segment's start offset, so entries
 /// stored on any disk are extracted. An optional `0x08074b50`
 /// spanning signature at the start of the first segment is tolerated
-/// (it is part of the byte stream offsets are relative to).
+/// (it is part of the byte stream offsets are relative to). So is the
+/// single-segment temporary spanning marker `0x30304b50` (§8.5.4).
 /// Empty parts are rejected.
 pub fn decode_parts(parts: &[&[u8]]) -> Result<Vec<ZipEntry>, Error> {
     decode_parts_impl(parts, None)
@@ -2532,6 +2533,66 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].data(), b"payload");
         assert_eq!(entries[1].data(), b"other");
+    }
+
+    #[test]
+    fn split_parts_temporary_spanning_marker_tolerated() {
+        use crate::traits::ArchiveEntry;
+        let mut enc = crate::archive::zip::encode::ZipEncoder::new();
+        enc.add_file("a.txt", b"payload");
+        enc.add_file("b.txt", b"other");
+        let archive = enc.finish().unwrap();
+
+        // APPNOTE 8.5.4: when spanning is begun but a single segment
+        // turns out to be enough, the 0x08074b50 spanning signature
+        // that opened segment 1 is rewritten as the temporary
+        // spanning marker 0x30304b50. The marker occupies the first
+        // four bytes of the stream, so every stored absolute offset
+        // counts it.
+        let eocd_pos = archive
+            .windows(4)
+            .rposition(|w| w == [0x50, 0x4b, 0x05, 0x06])
+            .unwrap();
+        let cd_off =
+            u32::from_le_bytes(archive[eocd_pos + 16..eocd_pos + 20].try_into().unwrap()) as usize;
+        // Collect each CD record local_header_offset position.
+        let mut lh_offs = Vec::new();
+        let mut p = cd_off;
+        while archive[p..p + 4] == [0x50, 0x4b, 0x01, 0x02] {
+            lh_offs.push(p + 42);
+            let name_len = u16::from_le_bytes(archive[p + 28..p + 30].try_into().unwrap()) as usize;
+            let extra_len =
+                u16::from_le_bytes(archive[p + 30..p + 32].try_into().unwrap()) as usize;
+            let com_len = u16::from_le_bytes(archive[p + 32..p + 34].try_into().unwrap()) as usize;
+            p += 46 + name_len + extra_len + com_len;
+        }
+
+        let mut with_marker = Vec::with_capacity(archive.len() + 4);
+        with_marker.extend_from_slice(&[0x50, 0x4b, 0x30, 0x30]);
+        with_marker.extend_from_slice(&archive);
+        // Shift every stored absolute offset by the marker length.
+        for pos in lh_offs {
+            let pos = pos + 4;
+            let old = u32::from_le_bytes(with_marker[pos..pos + 4].try_into().unwrap());
+            with_marker[pos..pos + 4].copy_from_slice(&(old + 4).to_le_bytes());
+        }
+        let eocd_pos = eocd_pos + 4;
+        let old_cd = u32::from_le_bytes(
+            with_marker[eocd_pos + 16..eocd_pos + 20]
+                .try_into()
+                .unwrap(),
+        );
+        with_marker[eocd_pos + 16..eocd_pos + 20].copy_from_slice(&(old_cd + 4).to_le_bytes());
+
+        // A single segment with the marker is not actually split:
+        // both the parts API and plain decode accept it.
+        let entries = decode_parts(&[&with_marker]).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].data(), b"payload");
+        assert_eq!(entries[1].data(), b"other");
+        let entries = decode(&with_marker).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].data(), b"payload");
     }
 
     #[test]

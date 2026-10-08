@@ -125,15 +125,15 @@
 | [deb](deb/README.md) | deb(5) (dpkg) | 26 | 0 | 2 | 28 |
 | [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 36 | 0 | 2 | 38 |
 | [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 46 | 0 | 1 | 47 |
-| [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 28 | 0 | 1 | 29 |
-| [mscfb](mscfb/README.md) | [MS-CFB] Compound File Binary File Format v20210625 | 21 | 1 | 2 | 24 |
+| [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 29 | 0 | 0 | 29 |
+| [mscfb](mscfb/README.md) | [MS-CFB] Compound File Binary File Format v20210625 | 22 | 0 | 2 | 24 |
 | [cramfs](cramfs/README.md) | Linux kernel cramfs.rst + fs/cramfs/README + cramfs_fs.h | 21 | 0 | 3 | 24 |
 | [romfs](romfs/README.md) | Linux kernel romfs.rst | 22 | 0 | 1 | 23 |
 | [erofs](erofs/README.md) | Linux kernel erofs.rst + erofs-utils `include/erofs_fs.h` (MIT) | 34 | 0 | 1 | 35 |
-| [iso9660](iso9660/README.md) | ECMA-119 + SUSP 1.10 + RRIP 1.12 + Joliet + El Torito 1.0 / zisofs | 43 | 0 | 2 | 45 |
+| [iso9660](iso9660/README.md) | ECMA-119 + SUSP 1.10 + RRIP 1.12 + Joliet + El Torito 1.0 / zisofs | 44 | 0 | 1 | 45 |
 | [crx3](crx3/README.md) | Chromium components/crx_file/crx3.proto | 15 | 0 | 2 | 17 |
 | [pea](pea/README.md) | PEA file format spec (pea_help.pdf) + PeaZip pea.pas/pea_utils.pas | 20 | 0 | 3 | 23 |
-| [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 27 | 1 | 1 | 29 |
+| [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 27 | 0 | 2 | 29 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
 | [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 30 | 0 | 1 | 31 |
 | [lha](lha/README.md) | lha header documentation + jLHA Notes + lzhformat.html + 奥村氏 ar002/lzss.c (PD) + lhasa (ISC) | 24 | 0 | 0 | 24 |
@@ -141,7 +141,7 @@
 | [arc](arc/README.md) | SEA ARC file format description + hyc/arc `Arcinfo` | 24 | 0 | 1 | 30 |
 | [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 38 | 0 | 0 | 38 |
 | [xar](xar/README.md) | xarformat (mackyle/xar wiki) | 34 | 0 | 3 | 37 |
-| [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 150 | 2 | 6 | 159 |
+| [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 153 | 0 | 5 | 159 |
 | [7z](sevenz/README.md) | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) | 121 | 0 | 0 | 121 |
 
 ### エンコードフォーマット
@@ -164,10 +164,10 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 2321 |
-| ⚠️ 部分実装 | 5 |
-| ❌ 未実装 | 53 |
+| ✅ 実装+テスト済み | 2330 |
+| ⚠️ 部分実装 | 1 |
+| ❌ 未実装 | 51 |
 | — 該当なし | 6 |
-| **合計** | **2385** |
+| **合計** | **2388** |
 
-**全体カバー率**: 2321 / 2385 = **97.3%** (❌ 行 (intentional exclusion・要修正候補を含む) および該当なし除外後: 2321 / 2326 = **99.8%**)
+**全体カバー率**: 2330 / 2388 = **97.6%** (❌ 行 (intentional exclusion・要修正候補を含む) および該当なし除外後: 2330 / 2331 = **99.96%**)
