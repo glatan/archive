@@ -123,7 +123,7 @@
 | [cpio](cpio/README.md) | POSIX `odc` / SVR4 `newc`/`newcrc`/`bin` | 42 | 1 | 0 | 43 |
 | [ar](ar/README.md) | IEEE Std 1003.1 Issue 7 (Issue 8 は記述削除) / GNU ar / BSD ar | 29 | 0 | 2 | 31 |
 | [deb](deb/README.md) | deb(5) (dpkg) | 27 | 0 | 2 | 29 |
-| [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 36 | 0 | 3 | 39 |
+| [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 37 | 0 | 2 | 39 |
 | [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 46 | 0 | 1 | 47 |
 | [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 29 | 0 | 0 | 29 |
 | [mscfb](mscfb/README.md) | [MS-CFB] Compound File Binary File Format v20210625 | 22 | 0 | 2 | 24 |
@@ -135,13 +135,13 @@
 | [pea](pea/README.md) | PEA file format spec (pea_help.pdf) + PeaZip pea.pas/pea_utils.pas | 20 | 0 | 3 | 23 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 27 | 0 | 2 | 29 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
-| [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 33 | 0 | 2 | 35 |
+| [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 34 | 0 | 1 | 35 |
 | [lha](lha/README.md) | lha header documentation + jLHA Notes + lzhformat.html + 奥村氏 ar002/lzss.c (PD) + lhasa (ISC) | 24 | 0 | 0 | 24 |
 | [arj](arj/README.md) | ARJ technical note (ARJ 2.x) + UNARJ/newtua_dos 参照実装 | 24 | 0 | 3 | 27 |
 | [arc](arc/README.md) | SEA ARC file format description + hyc/arc `Arcinfo` | 24 | 0 | 1 | 30 |
 | [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 38 | 0 | 0 | 38 |
 | [xar](xar/README.md) | xarformat (mackyle/xar wiki) | 34 | 0 | 3 | 37 |
-| [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 153 | 0 | 5 | 159 |
+| [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 154 | 0 | 5 | 160 |
 | [7z](sevenz/README.md) | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) | 121 | 0 | 0 | 121 |
 
 ### エンコードフォーマット
@@ -164,10 +164,10 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 2437 |
+| ✅ 実装+テスト済み | 2440 |
 | ⚠️ 部分実装 | 2 |
-| ❌ 未実装 | 60 |
+| ❌ 未実装 | 58 |
 | — 該当なし | 6 |
-| **合計** | **2505** |
+| **合計** | **2506** |
 
-**全体カバー率**: 2437 / 2499 = **97.5%** (❌ 行 (intentional exclusion・要修正候補を含む) および該当なし除外後: 2437 / 2439 = **99.9%**)
+**全体カバー率**: 2440 / 2500 = **97.6%** (❌ 行 (intentional exclusion・要修正候補を含む) および該当なし除外後: 2440 / 2442 = **99.9%**)

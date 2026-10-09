@@ -1929,7 +1929,7 @@
    "format": "rpm",
    "title": "rpm include/rpm/rpmtag.h (tag 定数)",
    "version": "rpm master",
-   "note": "digest/signature 検証の tag 定数 (269/272/273/1004/5092/5093/5097) の書面参照。数値定数のみ、コード取り込みなし",
+   "note": "digest/signature 検証と v6 emit の tag 定数 (269/272/273/999/1004/1035/5011/5062/5092/5093/5097/5112/5113/5114/5115/5116/5121/5122) の書面参照。数値定数のみ、コード取り込みなし",
    "reference_url": [
     "https://github.com/rpm-software-management/rpm/blob/master/include/rpm/rpmtag.h"
    ],

@@ -13,6 +13,13 @@
 //! The Huffman codes are decoded with *inverted* bits (blast.c XORs each bit
 //! with 1 before accumulating), so the canonical code assignment is reversed
 //! compared to the usual convention.
+//!
+//! This file also provides a minimal *encoder* for the write path:
+//! `dcl_implode_encode` emits a literal-only stream (header `lit=0` raw
+//! literals, `dict=4`) carrying one 9-bit literal (tag 0 + raw byte) per input
+//! byte followed by the end-of-stream marker (length symbol 15 + extra bits
+//! 255 = length 519).  No back-references are emitted, so the output is a
+//! valid but non-compressing method-10 stream.
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -297,134 +304,188 @@ pub(super) fn dcl_implode_decode(data: &[u8]) -> Result<Vec<u8>, Error> {
 }
 
 // ---------------------------------------------------------------------------
+// Literal-only encoder (write path)
+// ---------------------------------------------------------------------------
+
+/// Minimal bit writer for the LSB-first DCL bitstream.
+struct BitWriter {
+    data: Vec<u8>,
+    current_byte: u8,
+    bit_pos: u8,
+}
+
+impl BitWriter {
+    fn new() -> Self {
+        Self {
+            data: Vec::new(),
+            current_byte: 0,
+            bit_pos: 0,
+        }
+    }
+
+    /// Write `count` bits from `value`, LSB-first.
+    fn write_bits(&mut self, value: u32, count: u8) {
+        for i in 0..count {
+            let bit = ((value >> i) & 1) as u8;
+            self.current_byte |= bit << self.bit_pos;
+            self.bit_pos += 1;
+            if self.bit_pos == 8 {
+                self.data.push(self.current_byte);
+                self.current_byte = 0;
+                self.bit_pos = 0;
+            }
+        }
+    }
+
+    fn finish(mut self) -> Vec<u8> {
+        if self.bit_pos > 0 {
+            self.data.push(self.current_byte);
+        }
+        self.data
+    }
+}
+
+/// Encode a Huffman symbol using the blast.c-style inverted-bit canonical
+/// code.  The caller must provide the code length and canonical code
+/// value (as produced by `HuffTable::build`).
+///
+/// blast.c `decode()` reads bits LSB-first and inverts each bit before
+/// accumulating MSB-first into the code.  To *encode* we therefore need
+/// to reverse that: take the canonical code, emit its bits MSB-first,
+/// but invert each bit before writing to the LSB-first bitstream.
+fn write_huffman_code(writer: &mut BitWriter, code: u32, len: u8) {
+    // Emit MSB first, inverted.
+    for i in (0..len).rev() {
+        let bit = (code >> i) & 1;
+        // Invert the bit to match decode's `^ 1`.
+        writer.write_bits(bit ^ 1, 1);
+    }
+}
+
+/// Encode a literal using the blast.c format (lit=0 header: raw 8-bit value).
+fn encode_literal_raw(writer: &mut BitWriter, byte: u8) {
+    // tag bit 0 = literal
+    writer.write_bits(0, 1);
+    // raw 8-bit literal
+    writer.write_bits(byte as u32, 8);
+}
+
+/// Encode an end-of-stream marker.
+/// Length 519 = base[15] + extra = 264 + 255.
+/// Length code 15 has extra[15] = 8 extra bits.
+fn encode_end_marker(writer: &mut BitWriter, len_codes: &[(u32, u8)]) {
+    // tag bit 1 = length/distance
+    writer.write_bits(1, 1);
+    // length symbol 15
+    write_huffman_code(writer, len_codes[15].0, len_codes[15].1);
+    // extra bits: need 264 + x = 519, so x = 255
+    writer.write_bits(255, 8);
+}
+
+/// Compute the canonical `(code, length)` pairs implied by a `HuffTable`.
+fn compute_canonical_codes_from_table(table: &HuffTable, n_symbols: usize) -> Vec<(u32, u8)> {
+    let mut codes = vec![(0u32, 0u8); n_symbols];
+    let mut code: u32 = 0;
+    let mut sym_idx = 0;
+
+    for len in 1..=MAXBITS {
+        let cnt = table.count[len] as usize;
+        for i in 0..cnt {
+            let sym = table.symbols[sym_idx + i] as usize;
+            if sym < n_symbols {
+                codes[sym] = (code, len as u8);
+            }
+            code += 1;
+        }
+        sym_idx += cnt;
+        code <<= 1;
+    }
+
+    codes
+}
+
+/// Compress `data` into a literal-only PKWARE DCL Implode stream (ZIP
+/// Method 10).
+///
+/// Emits the `lit=0` (raw literals) / `dict=4` header, then one 9-bit
+/// literal (tag bit 0 + raw byte) per input byte, terminated by the
+/// end-of-stream marker (length 519).  No length/distance pairs are
+/// emitted, so the output is a valid but non-compressing stream.
+pub(super) fn dcl_implode_encode(data: &[u8]) -> Vec<u8> {
+    // The EOS marker needs the canonical code for length symbol 15; the
+    // code-length descriptors are compile-time constants, so table
+    // construction cannot fail.
+    let len_lengths = expand_rep(&LENLEN_REP, 16).expect("static length table");
+    let len_table = HuffTable::build(&len_lengths).expect("static length table");
+    let len_codes = compute_canonical_codes_from_table(&len_table, 16);
+
+    let mut writer = BitWriter::new();
+    // Header: lit = 0 (raw 8-bit literals), dict = 4.
+    writer.write_bits(0, 8);
+    writer.write_bits(4, 8);
+
+    for &byte in data {
+        encode_literal_raw(&mut writer, byte);
+    }
+    encode_end_marker(&mut writer, &len_codes);
+    writer.finish()
+}
+
+/// Helper used by tests: encode a length/distance pair.
+#[cfg(test)]
+fn encode_match(
+    writer: &mut BitWriter,
+    length: usize,
+    distance: usize,
+    dict: u8,
+    len_codes: &[(u32, u8)],
+    dist_codes: &[(u32, u8)],
+) {
+    // tag bit 1 = length/distance
+    writer.write_bits(1, 1);
+
+    // Find the length symbol.  LEN_BASE is not monotonically increasing
+    // (index 0 = 3, index 1 = 2), so we check each symbol to find the one
+    // whose base + extra-bits range covers `length`.
+    let mut len_sym = 0;
+    for i in 0..16 {
+        let base = LEN_BASE[i] as usize;
+        let max_extra = if LEN_EXTRA[i] > 0 {
+            (1 << LEN_EXTRA[i]) - 1
+        } else {
+            0
+        };
+        if length >= base && length <= base + max_extra {
+            len_sym = i;
+            break;
+        }
+    }
+    let len_extra_val = length - LEN_BASE[len_sym] as usize;
+
+    write_huffman_code(writer, len_codes[len_sym].0, len_codes[len_sym].1);
+    writer.write_bits(len_extra_val as u32, LEN_EXTRA[len_sym]);
+
+    // Distance: blast.c uses `dist_shift = if length == 2 { 2 } else { dict }`
+    let dist_shift = if length == 2 { 2 } else { dict };
+    let dist_minus_1 = (distance - 1) as u32;
+    let dist_sym = dist_minus_1 >> dist_shift;
+    let dist_low = dist_minus_1 & ((1 << dist_shift) - 1);
+
+    write_huffman_code(
+        writer,
+        dist_codes[dist_sym as usize].0,
+        dist_codes[dist_sym as usize].1,
+    );
+    writer.write_bits(dist_low, dist_shift);
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Minimal bit writer for constructing test data, LSB-first.
-    struct BitWriter {
-        data: Vec<u8>,
-        current_byte: u8,
-        bit_pos: u8,
-    }
-
-    impl BitWriter {
-        fn new() -> Self {
-            Self {
-                data: Vec::new(),
-                current_byte: 0,
-                bit_pos: 0,
-            }
-        }
-
-        /// Write `count` bits from `value`, LSB-first.
-        fn write_bits(&mut self, value: u32, count: u8) {
-            for i in 0..count {
-                let bit = ((value >> i) & 1) as u8;
-                self.current_byte |= bit << self.bit_pos;
-                self.bit_pos += 1;
-                if self.bit_pos == 8 {
-                    self.data.push(self.current_byte);
-                    self.current_byte = 0;
-                    self.bit_pos = 0;
-                }
-            }
-        }
-
-        fn finish(mut self) -> Vec<u8> {
-            if self.bit_pos > 0 {
-                self.data.push(self.current_byte);
-            }
-            self.data
-        }
-    }
-
-    /// Encode a Huffman symbol using the blast.c-style inverted-bit canonical
-    /// code.  The caller must provide the code length and canonical code
-    /// value (as produced by `HuffTable::build`).
-    ///
-    /// blast.c `decode()` reads bits LSB-first and inverts each bit before
-    /// accumulating MSB-first into the code.  To *encode* we therefore need
-    /// to reverse that: take the canonical code, emit its bits MSB-first,
-    /// but invert each bit before writing to the LSB-first bitstream.
-    fn write_huffman_code(writer: &mut BitWriter, code: u32, len: u8) {
-        // Emit MSB first, inverted.
-        for i in (0..len).rev() {
-            let bit = (code >> i) & 1;
-            // Invert the bit to match decode's `^ 1`.
-            writer.write_bits(bit ^ 1, 1);
-        }
-    }
-
-    /// Helper: encode a literal using the blast.c format.
-    fn encode_literal_raw(writer: &mut BitWriter, byte: u8) {
-        // tag bit 0 = literal
-        writer.write_bits(0, 1);
-        // raw 8-bit literal
-        writer.write_bits(byte as u32, 8);
-    }
-
-    /// Helper: encode an end-of-stream marker.
-    /// Length 519 = base[15] + extra = 264 + 255.
-    /// Length code 15 has extra[15] = 8 extra bits.
-    fn encode_end_marker(writer: &mut BitWriter, len_codes: &[(u32, u8)]) {
-        // tag bit 1 = length/distance
-        writer.write_bits(1, 1);
-        // length symbol 15
-        write_huffman_code(writer, len_codes[15].0, len_codes[15].1);
-        // extra bits: need 264 + x = 519, so x = 255
-        writer.write_bits(255, 8);
-    }
-
-    /// Helper: encode a length/distance pair.
-    fn encode_match(
-        writer: &mut BitWriter,
-        length: usize,
-        distance: usize,
-        dict: u8,
-        len_codes: &[(u32, u8)],
-        dist_codes: &[(u32, u8)],
-    ) {
-        // tag bit 1 = length/distance
-        writer.write_bits(1, 1);
-
-        // Find the length symbol.  LEN_BASE is not monotonically increasing
-        // (index 0 = 3, index 1 = 2), so we check each symbol to find the one
-        // whose base + extra-bits range covers `length`.
-        let mut len_sym = 0;
-        for i in 0..16 {
-            let base = LEN_BASE[i] as usize;
-            let max_extra = if LEN_EXTRA[i] > 0 {
-                (1 << LEN_EXTRA[i]) - 1
-            } else {
-                0
-            };
-            if length >= base && length <= base + max_extra {
-                len_sym = i;
-                break;
-            }
-        }
-        let len_extra_val = length - LEN_BASE[len_sym] as usize;
-
-        write_huffman_code(writer, len_codes[len_sym].0, len_codes[len_sym].1);
-        writer.write_bits(len_extra_val as u32, LEN_EXTRA[len_sym]);
-
-        // Distance: blast.c uses `dist_shift = if length == 2 { 2 } else { dict }`
-        let dist_shift = if length == 2 { 2 } else { dict };
-        let dist_minus_1 = (distance - 1) as u32;
-        let dist_sym = dist_minus_1 >> dist_shift;
-        let dist_low = dist_minus_1 & ((1 << dist_shift) - 1);
-
-        write_huffman_code(
-            writer,
-            dist_codes[dist_sym as usize].0,
-            dist_codes[dist_sym as usize].1,
-        );
-        writer.write_bits(dist_low, dist_shift);
-    }
 
     #[test]
     fn test_expand_rep_lenlen() {
@@ -574,25 +635,36 @@ mod tests {
         assert!(result.is_err());
     }
 
-    /// Compute canonical codes from a HuffTable for encoding in tests.
-    fn compute_canonical_codes_from_table(table: &HuffTable, n_symbols: usize) -> Vec<(u32, u8)> {
-        let mut codes = vec![(0u32, 0u8); n_symbols];
-        let mut code: u32 = 0;
-        let mut sym_idx = 0;
-
-        for len in 1..=MAXBITS {
-            let cnt = table.count[len] as usize;
-            for i in 0..cnt {
-                let sym = table.symbols[sym_idx + i] as usize;
-                if sym < n_symbols {
-                    codes[sym] = (code, len as u8);
-                }
-                code += 1;
-            }
-            sym_idx += cnt;
-            code <<= 1;
+    #[test]
+    fn test_dcl_implode_encode_roundtrip() {
+        // Literal-only encoder output decodes back to the input for empty,
+        // small, and repetitive payloads.
+        for data in [
+            &b""[..],
+            &b"a"[..],
+            &b"Hello, world!"[..],
+            &vec![0xAA; 1024][..],
+        ] {
+            let compressed = dcl_implode_encode(data);
+            // Header: lit = 0 (raw literals), dict = 4.
+            assert_eq!(compressed[0], 0);
+            assert_eq!(compressed[1], 4);
+            let decoded = dcl_implode_decode(&compressed).unwrap();
+            assert_eq!(&decoded, data);
         }
+    }
 
-        codes
+    #[test]
+    fn test_dcl_implode_encode_random_roundtrip() {
+        // Pseudo-random bytes (LCG) roundtrip through the literal-only
+        // encoder.
+        let mut data = vec![0u8; 997];
+        let mut state = 0x1234_5678u32;
+        for byte in &mut data {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            *byte = (state >> 24) as u8;
+        }
+        let compressed = dcl_implode_encode(&data);
+        assert_eq!(dcl_implode_decode(&compressed).unwrap(), data);
     }
 }

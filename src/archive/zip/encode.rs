@@ -1,4 +1,9 @@
 //! ZIP archive encoding.
+//!
+//! [`ZipEncoder`] assembles a whole archive in memory ([`ZipEncoder::finish`])
+//! or emits it as split/spanned (multi-disk) segments
+//! ([`ZipEncoder::finish_parts`]); [`ZipStreamWriter`] streams an archive to a
+//! `std::io::Write` sink without a final assembly buffer.
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -60,6 +65,10 @@ pub enum ZipCompression {
     Implode,
     /// Compress the entry with Deflate64 (method 9).
     Deflate64,
+    /// Compress the entry with PKWARE DCL Implode (method 10), emitting a
+    /// literal-only stream: one 9-bit literal per input byte and no
+    /// back-references, so the output does not reduce the data.
+    DclImplode,
     /// Compress the entry with IBM z/OS CMPSC (method 16), emitting an
     /// alphabet-only (uncompressed) CMPSC stream. Requires the `cmpsc`
     /// feature; the stream carries one index symbol per input byte and does
@@ -178,7 +187,13 @@ struct EncodedEntry {
     uncompressed_size: u64,
     use_data_descriptor: bool,
     force_zip64: bool,
+    /// Offset of the local file header, relative to the start of the disk
+    /// that carries it (`disk_start`). Equal to the absolute offset for
+    /// single-disk archives.
     local_header_offset: u64,
+    /// Number of the disk on which this entry's local header starts
+    /// (0 for single-disk archives).
+    disk_start: u16,
     aes: Option<ZipAesExtraField>,
     internal_attributes: u16,
     external_attributes: u32,
@@ -341,8 +356,100 @@ impl ZipEncoder {
             prepared.central_directory_offset,
             prepared.needs_zip64_archive,
             &prepared.archive_comment_bytes,
+            EocdDiskLayout::single_disk(prepared.entries.len() as u64),
         )?;
         Ok(output)
+    }
+
+    /// Finish the archive as a split/spanned (multi-disk) archive: a
+    /// sequence of byte segments of at most `max_segment_size` bytes each,
+    /// suitable for [`super::decode::decode_parts`] or for writing out as
+    /// `.z01`, `.z02`, ..., `.zip` files (the naming is the caller's
+    /// responsibility, APPNOTE §8.3).
+    ///
+    /// The segments form one logical byte stream (§8). Records are never
+    /// cut at a segment boundary: the atomic units are each local file
+    /// header with its name and extra field, each data descriptor, each
+    /// central directory record, and the end-of-archive tail (the ZIP64
+    /// EOCD record, its locator and the EOCD stay together on the last
+    /// disk, §4.3.15). Only compressed entry data may be split across
+    /// segments. Per-entry disk-start and disk-relative local header
+    /// offsets, the central-directory disk fields and the EOCD/ZIP64 disk
+    /// fields are filled in accordingly.
+    ///
+    /// Returns [`Error::InvalidData`] when `max_segment_size` is zero or an
+    /// atomic record does not fit in a single segment, and
+    /// [`Error::Unsupported`] when more than 65535 segments would be
+    /// produced (the 16-bit disk fields cannot express more). A result of
+    /// one segment is byte-identical to [`finish`](Self::finish).
+    pub fn finish_parts(self, max_segment_size: usize) -> Result<Vec<Vec<u8>>, Error> {
+        if max_segment_size == 0 {
+            return Err(Error::InvalidData("zip: segment size too small"));
+        }
+        let mut prepared = PreparedArchive::new(self)?;
+        let plan = plan_split(
+            &prepared.entries,
+            prepared.needs_zip64_archive,
+            prepared.archive_comment_bytes.len(),
+            max_segment_size as u64,
+        )?;
+
+        // Resolve each entry's disk placement into its header fields. A
+        // disk-relative offset never exceeds the absolute offset it
+        // replaces, and pinning `force_zip64` where the absolute offset
+        // already required ZIP64 keeps the emitted record sizes identical
+        // to the ones the plan was computed from.
+        for (entry, &(disk, rel_offset)) in
+            prepared.entries.iter_mut().zip(plan.entry_headers.iter())
+        {
+            if needs_zip64_entry(entry) {
+                entry.force_zip64 = true;
+            }
+            entry.disk_start = u16::try_from(disk)
+                .map_err(|_| Error::Unsupported("zip: too many archive parts"))?;
+            entry.local_header_offset = rel_offset;
+        }
+
+        let mut output = Vec::with_capacity(
+            usize::try_from(plan.total_size)
+                .map_err(|_| Error::Unsupported("zip: archive too large"))?,
+        );
+        for entry in &prepared.entries {
+            write_local_file_header(&mut output, entry)?;
+        }
+        let central_directory_start = output.len() as u64;
+        for entry in &prepared.entries {
+            write_central_directory_record(&mut output, entry)?;
+        }
+        let central_directory_size = output.len() as u64 - central_directory_start;
+        let last_disk = plan.part_starts.len() as u64 - 1;
+        write_end_of_central_directory(
+            &mut output,
+            prepared.entries.len() as u64,
+            central_directory_size,
+            plan.cd_offset,
+            prepared.needs_zip64_archive,
+            &prepared.archive_comment_bytes,
+            EocdDiskLayout {
+                this_disk: last_disk as u16,
+                cd_disk: plan.cd_disk as u16,
+                entries_this_disk: plan.entries_on_last_disk,
+                disk_base: plan.part_starts[plan.part_starts.len() - 1],
+                total_disks: plan.part_starts.len() as u64,
+            },
+        )?;
+        debug_assert_eq!(output.len() as u64, plan.total_size);
+
+        let mut parts = Vec::with_capacity(plan.part_starts.len());
+        for (index, &start) in plan.part_starts.iter().enumerate() {
+            let end = plan
+                .part_starts
+                .get(index + 1)
+                .copied()
+                .unwrap_or(plan.total_size);
+            parts.push(output[start as usize..end as usize].to_vec());
+        }
+        Ok(parts)
     }
 
     /// Finish the archive and write it to a stream without assembling the final bytes first.
@@ -377,6 +484,7 @@ impl ZipEncoder {
             prepared.central_directory_offset,
             prepared.needs_zip64_archive,
             &prepared.archive_comment_bytes,
+            EocdDiskLayout::single_disk(prepared.entries.len() as u64),
         )
         .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err.to_string()))?;
         writer.write_all(&record)?;
@@ -536,6 +644,7 @@ impl<W: std::io::Write> ZipStreamWriter<W> {
             central_directory_offset,
             needs_zip64_archive,
             &[], // streaming writer has no archive comment
+            EocdDiskLayout::single_disk(self.entries.len() as u64),
         )
         .map_err(io_invalid_data)?;
         self.writer.write_all(&record)?;
@@ -619,6 +728,7 @@ impl PreparedArchive {
                 use_data_descriptor: entry.options.use_data_descriptor,
                 force_zip64: entry.options.force_zip64,
                 local_header_offset: 0,
+                disk_start: 0,
                 aes,
                 internal_attributes: entry.options.internal_attributes,
                 external_attributes: entry.options.external_attributes,
@@ -670,6 +780,140 @@ impl PreparedArchive {
     }
 }
 
+/// Layout of a split/spanned archive produced by [`plan_split`].
+struct SplitPlan {
+    /// Absolute stream offset at which each segment (disk) begins.
+    /// Always starts at 0 and is strictly increasing.
+    part_starts: Vec<u64>,
+    /// `(disk index, disk-relative offset)` of each entry's local file
+    /// header, in entry order.
+    entry_headers: Vec<(u64, u64)>,
+    /// Disk on which the first central directory record begins.
+    cd_disk: u64,
+    /// Disk-relative offset of the central directory's first record.
+    cd_offset: u64,
+    /// Central directory records that start on the last disk (the disk
+    /// carrying the EOCD).
+    entries_on_last_disk: u64,
+    /// Total length of the emitted stream.
+    total_size: u64,
+}
+
+/// Place an atomic record of `len` bytes at `pos`, opening a new segment
+/// when it would straddle the `max` boundary. Returns the record's start
+/// offset. Every push to `part_starts` is followed by at least one byte
+/// of content, so no empty segment is produced.
+fn place_atomic_record(
+    part_starts: &mut Vec<u64>,
+    disk_base: &mut u64,
+    pos: &mut u64,
+    len: u64,
+    max: u64,
+) -> Result<u64, Error> {
+    if len > max {
+        return Err(Error::InvalidData("zip: segment size too small"));
+    }
+    if *pos - *disk_base + len > max {
+        // Does not fit in the remainder of the current segment; the new
+        // segment starts at the record boundary (`pos > *disk_base`
+        // always holds here because `len <= max`).
+        part_starts.push(*pos);
+        *disk_base = *pos;
+    }
+    let start = *pos;
+    *pos += len;
+    Ok(start)
+}
+
+/// Compute the segment boundaries of a split archive (APPNOTE §8),
+/// filling each segment greedily up to `max` bytes.
+///
+/// Local file headers (including name and extra field), data
+/// descriptors, central directory records and the end-of-archive tail
+/// (ZIP64 EOCD + locator + EOCD, kept together per §4.3.15) are atomic:
+/// they never straddle a segment boundary. Compressed entry data is the
+/// only unit that may be split mid-stream.
+fn plan_split(
+    entries: &[EncodedEntry],
+    needs_zip64_archive: bool,
+    archive_comment_len: usize,
+    max: u64,
+) -> Result<SplitPlan, Error> {
+    let mut plan = SplitPlan {
+        part_starts: vec![0],
+        entry_headers: Vec::with_capacity(entries.len()),
+        cd_disk: 0,
+        cd_offset: 0,
+        entries_on_last_disk: 0,
+        total_size: 0,
+    };
+    let mut disk_base = 0u64;
+    let mut pos = 0u64;
+
+    for entry in entries {
+        // Local file header + name + extra: atomic.
+        let head = 30 + entry.name_bytes.len() as u64 + local_extra_field(entry).len() as u64;
+        let start =
+            place_atomic_record(&mut plan.part_starts, &mut disk_base, &mut pos, head, max)?;
+        plan.entry_headers
+            .push((plan.part_starts.len() as u64 - 1, start - disk_base));
+
+        // Compressed data: splittable at any byte boundary.
+        let mut remaining = entry.compressed_data.len() as u64;
+        while remaining > 0 {
+            let space = max - (pos - disk_base);
+            if space == 0 {
+                plan.part_starts.push(pos);
+                disk_base = pos;
+                continue;
+            }
+            let take = remaining.min(space);
+            pos += take;
+            remaining -= take;
+        }
+
+        // Data descriptor: atomic.
+        let descriptor = data_descriptor_len(entry);
+        if descriptor > 0 {
+            place_atomic_record(
+                &mut plan.part_starts,
+                &mut disk_base,
+                &mut pos,
+                descriptor,
+                max,
+            )?;
+        }
+    }
+
+    let mut cd_record_disks = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let len = central_directory_record_len(entry);
+        let start = place_atomic_record(&mut plan.part_starts, &mut disk_base, &mut pos, len, max)?;
+        if index == 0 {
+            plan.cd_disk = plan.part_starts.len() as u64 - 1;
+            plan.cd_offset = start - disk_base;
+        }
+        cd_record_disks.push(plan.part_starts.len() as u64 - 1);
+    }
+
+    // End-of-archive tail: ZIP64 EOCD record + ZIP64 EOCD locator + EOCD
+    // must reside on the same (last) disk (APPNOTE §4.3.15).
+    let tail = if needs_zip64_archive { 76 } else { 0 } + 22 + archive_comment_len as u64;
+    place_atomic_record(&mut plan.part_starts, &mut disk_base, &mut pos, tail, max)?;
+
+    if plan.part_starts.len() > 0xFFFF {
+        // Disk indexes are 16-bit; 0xFFFF is the ZIP64-extra sentinel.
+        return Err(Error::Unsupported("zip: too many archive parts"));
+    }
+    let last_disk = plan.part_starts.len() as u64 - 1;
+    plan.entries_on_last_disk = cd_record_disks
+        .iter()
+        .filter(|&&disk| disk == last_disk)
+        .count() as u64;
+    plan.total_size = pos;
+    Ok(plan)
+}
+
 impl From<&ZipHeader> for ZipEntryOptions {
     fn from(header: &ZipHeader) -> Self {
         Self {
@@ -685,6 +929,7 @@ impl From<&ZipHeader> for ZipEntryOptions {
                 93 => ZipCompression::Zstd,
                 95 => ZipCompression::Xz,
                 98 => ZipCompression::Ppmd,
+                10 => ZipCompression::DclImplode,
                 16 => ZipCompression::Cmpsc,
                 _ => ZipCompression::Store,
             },
@@ -802,6 +1047,7 @@ fn compress_data(data: &[u8], compression: ZipCompression) -> Result<(u16, Vec<u
         }
         ZipCompression::Implode => Ok((6, super::implode::implode_encode(data, true, true))),
         ZipCompression::Deflate64 => Ok((9, crate::compress::deflate64::encode::encode(data))),
+        ZipCompression::DclImplode => Ok((10, super::dcl_implode::dcl_implode_encode(data))),
         ZipCompression::Ppmd => {
             #[cfg(feature = "sevenz")]
             {
@@ -854,6 +1100,7 @@ const fn compression_method_id(compression: ZipCompression) -> u16 {
         ZipCompression::Reduce(factor) => factor as u16 + 1,
         ZipCompression::Implode => 6,
         ZipCompression::Deflate64 => 9,
+        ZipCompression::DclImplode => 10,
         ZipCompression::Cmpsc => 16,
     }
 }
@@ -871,6 +1118,8 @@ fn compute_version_needed(compression: ZipCompression, zip64: bool, aes: bool) -
         ZipCompression::Bzip2 => version = version.max(ZIP_VERSION_BZIP2),
         ZipCompression::Lzma | ZipCompression::Ppmd => version = version.max(63),
         ZipCompression::Deflate64 => version = version.max(21),
+        // APPNOTE §4.4.3.2: DCL Implode needs version 2.5.
+        ZipCompression::DclImplode => version = version.max(25),
         _ => {}
     }
     version
@@ -955,7 +1204,7 @@ fn write_central_directory_record(output: &mut Vec<u8>, entry: &EncodedEntry) ->
     output.extend_from_slice(
         &u16_len(entry.comment_bytes.len(), "zip: comment too long")?.to_le_bytes(),
     );
-    output.extend_from_slice(&0u16.to_le_bytes()); // disk number start
+    output.extend_from_slice(&entry.disk_start.to_le_bytes()); // disk number start
     output.extend_from_slice(&entry.internal_attributes.to_le_bytes());
     output.extend_from_slice(&entry.external_attributes.to_le_bytes());
     if zip64 {
@@ -982,6 +1231,7 @@ fn method_compression(method: u16, aes: Option<&ZipAesExtraField>) -> ZipCompres
         93 => ZipCompression::Zstd,
         95 => ZipCompression::Xz,
         98 => ZipCompression::Ppmd,
+        10 => ZipCompression::DclImplode,
         16 => ZipCompression::Cmpsc,
         _ => ZipCompression::Store,
     }
@@ -996,6 +1246,36 @@ fn streamed_compression(entry: &StreamedEntry) -> ZipCompression {
     method_compression(entry.compression_method, entry.aes.as_ref())
 }
 
+/// Disk-placement fields of the end-of-archive tail (EOCD, plus ZIP64
+/// EOCD and locator when emitted). For a single-disk archive every field
+/// takes its default (all disks 0, one disk total).
+#[derive(Debug, Clone, Copy)]
+struct EocdDiskLayout {
+    /// Number of the disk carrying the EOCD record (the last disk).
+    this_disk: u16,
+    /// Number of the disk on which the central directory starts.
+    cd_disk: u16,
+    /// Number of central directory entries stored on `this_disk`.
+    entries_this_disk: u64,
+    /// Absolute offset in the output stream where `this_disk` begins.
+    disk_base: u64,
+    /// Total number of disks in the archive set.
+    total_disks: u64,
+}
+
+impl EocdDiskLayout {
+    /// Disk fields for a single-disk archive.
+    const fn single_disk(total_entries: u64) -> Self {
+        Self {
+            this_disk: 0,
+            cd_disk: 0,
+            entries_this_disk: total_entries,
+            disk_base: 0,
+            total_disks: 1,
+        }
+    }
+}
+
 fn write_end_of_central_directory(
     output: &mut Vec<u8>,
     total_entries: u64,
@@ -1003,41 +1283,46 @@ fn write_end_of_central_directory(
     central_directory_offset: u64,
     zip64: bool,
     archive_comment: &[u8],
+    disk: EocdDiskLayout,
 ) -> Result<(), Error> {
     if zip64 {
-        let zip64_eocd_offset = output.len() as u64;
+        // The ZIP64 EOCD record and its locator always sit on the last disk
+        // (APPNOTE §4.3.15); the locator offset is relative to that disk.
+        let zip64_eocd_offset = output.len() as u64 - disk.disk_base;
         output.extend_from_slice(&ZIP64_EOCD_SIGNATURE.to_le_bytes());
         output.extend_from_slice(&44u64.to_le_bytes());
         output.extend_from_slice(&ZIP_VERSION_ZIP64.to_le_bytes());
         output.extend_from_slice(&ZIP_VERSION_ZIP64.to_le_bytes());
-        output.extend_from_slice(&0u32.to_le_bytes());
-        output.extend_from_slice(&0u32.to_le_bytes());
-        output.extend_from_slice(&total_entries.to_le_bytes());
+        output.extend_from_slice(&(disk.this_disk as u32).to_le_bytes());
+        output.extend_from_slice(&(disk.cd_disk as u32).to_le_bytes());
+        output.extend_from_slice(&disk.entries_this_disk.to_le_bytes());
         output.extend_from_slice(&total_entries.to_le_bytes());
         output.extend_from_slice(&central_directory_size.to_le_bytes());
         output.extend_from_slice(&central_directory_offset.to_le_bytes());
 
         output.extend_from_slice(&ZIP64_EOCD_LOCATOR_SIGNATURE.to_le_bytes());
-        output.extend_from_slice(&0u32.to_le_bytes());
+        output.extend_from_slice(&(disk.this_disk as u32).to_le_bytes());
         output.extend_from_slice(&zip64_eocd_offset.to_le_bytes());
-        output.extend_from_slice(&1u32.to_le_bytes());
+        output.extend_from_slice(&(disk.total_disks as u32).to_le_bytes());
     }
 
     let comment_len = u16::try_from(archive_comment.len())
         .map_err(|_| Error::Unsupported("zip: archive comment too long"))?;
 
     output.extend_from_slice(&EOCD_SIGNATURE.to_le_bytes());
-    output.extend_from_slice(&0u16.to_le_bytes());
-    output.extend_from_slice(&0u16.to_le_bytes());
+    output.extend_from_slice(&disk.this_disk.to_le_bytes());
+    output.extend_from_slice(&disk.cd_disk.to_le_bytes());
     if zip64 {
         output.extend_from_slice(&u16::MAX.to_le_bytes());
         output.extend_from_slice(&u16::MAX.to_le_bytes());
         output.extend_from_slice(&u32::MAX.to_le_bytes());
         output.extend_from_slice(&u32::MAX.to_le_bytes());
     } else {
+        let disk_entries = u16::try_from(disk.entries_this_disk)
+            .map_err(|_| Error::Unsupported("zip: too many entries"))?;
         let entry_count = u16::try_from(total_entries)
             .map_err(|_| Error::Unsupported("zip: too many entries"))?;
-        output.extend_from_slice(&entry_count.to_le_bytes());
+        output.extend_from_slice(&disk_entries.to_le_bytes());
         output.extend_from_slice(&entry_count.to_le_bytes());
         output.extend_from_slice(
             &u32::try_from(central_directory_size)
@@ -2196,5 +2481,263 @@ mod tests {
         assert_eq!(h.unix_gid, header.unix_gid);
         assert_eq!(h.unicode_path, header.unicode_path);
         assert_eq!(h.unicode_comment, header.unicode_comment);
+    }
+
+    // --- Split/spanned (multi-disk) emit via `finish_parts` (APPNOTE 8) ---
+
+    /// Parse the concatenated stream and return the atomic record
+    /// ranges ([start, end)) that must not straddle a segment boundary.
+    fn collect_record_ranges(stream: &[u8]) -> Vec<(usize, usize)> {
+        let mut atomics = Vec::new();
+        let mut pos = 0usize;
+        // Local file headers until the central directory.
+        while stream[pos..pos + 4] == LOCAL_FILE_HEADER_SIGNATURE.to_le_bytes() {
+            let flags = u16::from_le_bytes(stream[pos + 6..pos + 8].try_into().unwrap());
+            let name_len =
+                u16::from_le_bytes(stream[pos + 26..pos + 28].try_into().unwrap()) as usize;
+            let extra_len =
+                u16::from_le_bytes(stream[pos + 28..pos + 30].try_into().unwrap()) as usize;
+            atomics.push((pos, pos + 30 + name_len + extra_len));
+            let data_start = pos + 30 + name_len + extra_len;
+            if flags & DATA_DESCRIPTOR_FLAG != 0 {
+                // Sizes are not in the local header; scan forward for the
+                // data descriptor signature emitted by our writer (test
+                // payloads never contain it).
+                let dd = stream[data_start..]
+                    .windows(4)
+                    .position(|w| w == DATA_DESCRIPTOR_SIGNATURE.to_le_bytes())
+                    .map(|i| data_start + i)
+                    .unwrap();
+                atomics.push((dd, dd + 16));
+                pos = dd + 16;
+            } else {
+                let csize =
+                    u32::from_le_bytes(stream[pos + 18..pos + 22].try_into().unwrap()) as usize;
+                pos = data_start + csize;
+            }
+        }
+        // Central directory records.
+        while stream[pos..pos + 4] == CENTRAL_DIRECTORY_HEADER_SIGNATURE.to_le_bytes() {
+            let name_len =
+                u16::from_le_bytes(stream[pos + 28..pos + 30].try_into().unwrap()) as usize;
+            let extra_len =
+                u16::from_le_bytes(stream[pos + 30..pos + 32].try_into().unwrap()) as usize;
+            let comment_len =
+                u16::from_le_bytes(stream[pos + 32..pos + 34].try_into().unwrap()) as usize;
+            let end = pos + 46 + name_len + extra_len + comment_len;
+            atomics.push((pos, end));
+            pos = end;
+        }
+        // Tail block (ZIP64 EOCD + locator + EOCD) is atomic.
+        atomics.push((pos, stream.len()));
+        atomics
+    }
+
+    #[test]
+    fn test_finish_parts_roundtrip() {
+        let mut encoder = ZipEncoder::new();
+        encoder.add_file("a.txt", b"aaaa");
+        encoder.add_file_stored("dir/b.bin", &[0x55; 300]);
+        encoder.add_file_with_options(
+            "c.txt",
+            b"cccc",
+            &ZipEntryOptions {
+                use_data_descriptor: true,
+                ..ZipEntryOptions::default()
+            },
+        );
+        let parts = encoder.finish_parts(160).unwrap();
+        assert!(parts.len() > 1);
+        assert!(
+            parts
+                .iter()
+                .all(|part| !part.is_empty() && part.len() <= 160)
+        );
+
+        let slices: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+        let entries = decode::decode_parts(&slices).unwrap();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].name, "a.txt");
+        assert_eq!(entries[0].data, b"aaaa");
+        assert_eq!(entries[1].name, "dir/b.bin");
+        assert_eq!(entries[1].data, vec![0x55; 300]);
+        assert_eq!(entries[2].name, "c.txt");
+        assert_eq!(entries[2].data, b"cccc");
+    }
+
+    #[test]
+    fn test_finish_parts_roundtrip_zip64() {
+        // ZIP64 tail (EOCD record + locator + EOCD) stays atomic on the
+        // last disk.
+        let mut encoder = ZipEncoder::new();
+        encoder.add_file_with_options(
+            "a.txt",
+            b"zip64 payload",
+            &ZipEntryOptions {
+                force_zip64: true,
+                ..ZipEntryOptions::default()
+            },
+        );
+        encoder.add_file_stored("b.bin", &[0x33; 200]);
+        let parts = encoder.finish_parts(120).unwrap();
+        assert!(parts.len() > 1);
+        let slices: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+        let entries = decode::decode_parts(&slices).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].data, b"zip64 payload");
+        assert_eq!(entries[1].data, vec![0x33; 200]);
+    }
+
+    #[test]
+    fn test_finish_parts_records_not_split() {
+        let mut encoder = ZipEncoder::new();
+        encoder.add_file_stored("a.txt", &[0x41; 100]);
+        encoder.add_file_with_options(
+            "b.txt",
+            &[0x42; 50],
+            &ZipEntryOptions {
+                use_data_descriptor: true,
+                ..ZipEntryOptions::default()
+            },
+        );
+        encoder.add_file_stored("c.txt", &[0x43; 80]);
+        let parts = encoder.finish_parts(120).unwrap();
+        assert!(parts.len() > 1);
+
+        let stream: Vec<u8> = parts.concat();
+        let atomics = collect_record_ranges(&stream);
+        let mut boundary = 0usize;
+        for part in &parts[..parts.len() - 1] {
+            boundary += part.len();
+            // The boundary may fall inside a splittable data range but
+            // must never land strictly inside an atomic record.
+            for &(start, end) in &atomics {
+                assert!(
+                    !(start < boundary && boundary < end),
+                    "segment boundary {boundary} splits atomic record {start}..{end}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_finish_parts_disk_fields() {
+        // Two stored entries; a 150-byte segment cap puts the local
+        // header of b.txt at the start of disk 1.
+        let mut encoder = ZipEncoder::new();
+        encoder.add_file_stored("a.txt", &[0x41; 100]);
+        encoder.add_file_stored("b.txt", &[0x42; 100]);
+        let parts = encoder.finish_parts(150).unwrap();
+        assert!(parts.len() > 1);
+
+        let stream: Vec<u8> = parts.concat();
+        // Segment start offsets in the concatenated stream.
+        let mut starts = Vec::with_capacity(parts.len());
+        let mut off = 0usize;
+        for part in &parts {
+            starts.push(off);
+            off += part.len();
+        }
+
+        // EOCD disk fields.
+        let eocd = stream
+            .windows(4)
+            .rposition(|w| w == EOCD_SIGNATURE.to_le_bytes())
+            .unwrap();
+        let this_disk = u16::from_le_bytes(stream[eocd + 4..eocd + 6].try_into().unwrap()) as usize;
+        let cd_disk = u16::from_le_bytes(stream[eocd + 6..eocd + 8].try_into().unwrap()) as usize;
+        let disk_entries =
+            u16::from_le_bytes(stream[eocd + 8..eocd + 10].try_into().unwrap()) as usize;
+        let total = u16::from_le_bytes(stream[eocd + 10..eocd + 12].try_into().unwrap());
+        let cd_offset =
+            u32::from_le_bytes(stream[eocd + 16..eocd + 20].try_into().unwrap()) as usize;
+        assert_eq!(this_disk, parts.len() - 1);
+        assert_eq!(total, 2);
+        let cd_abs = starts[cd_disk] + cd_offset;
+        assert_eq!(
+            stream[cd_abs..cd_abs + 4],
+            CENTRAL_DIRECTORY_HEADER_SIGNATURE.to_le_bytes()
+        );
+
+        // Each central directory record: disk number start (+34) and the
+        // local header offset (+42) are disk-relative.
+        let mut cd_pos = cd_abs;
+        let mut count_on_last = 0usize;
+        for _ in 0..2 {
+            let disk_start =
+                u16::from_le_bytes(stream[cd_pos + 34..cd_pos + 36].try_into().unwrap()) as usize;
+            let lh_off =
+                u32::from_le_bytes(stream[cd_pos + 42..cd_pos + 46].try_into().unwrap()) as usize;
+            let lh_abs = starts[disk_start] + lh_off;
+            assert_eq!(
+                stream[lh_abs..lh_abs + 4],
+                LOCAL_FILE_HEADER_SIGNATURE.to_le_bytes()
+            );
+            // EOCD disk-entries counts CD records residing on the last disk.
+            if cd_pos >= starts[this_disk] {
+                count_on_last += 1;
+            }
+            let name_len =
+                u16::from_le_bytes(stream[cd_pos + 28..cd_pos + 30].try_into().unwrap()) as usize;
+            let extra_len =
+                u16::from_le_bytes(stream[cd_pos + 30..cd_pos + 32].try_into().unwrap()) as usize;
+            let com_len =
+                u16::from_le_bytes(stream[cd_pos + 32..cd_pos + 34].try_into().unwrap()) as usize;
+            cd_pos += 46 + name_len + extra_len + com_len;
+        }
+        assert_eq!(disk_entries, count_on_last);
+    }
+
+    #[test]
+    fn test_finish_parts_single_segment() {
+        // A generous segment size produces one segment identical to
+        // finish(): all disk fields stay zero.
+        let mut encoder = ZipEncoder::new();
+        encoder.add_file("a.txt", b"aaaa");
+        encoder.add_file_stored("b.bin", &[0x77; 500]);
+        let single = encoder.finish().unwrap();
+
+        let mut encoder = ZipEncoder::new();
+        encoder.add_file("a.txt", b"aaaa");
+        encoder.add_file_stored("b.bin", &[0x77; 500]);
+        let parts = encoder.finish_parts(1_048_576).unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0], single);
+    }
+
+    #[test]
+    fn test_finish_parts_data_spans_disks() {
+        // A stored entry larger than the segment cap is cut mid-data.
+        let mut encoder = ZipEncoder::new();
+        encoder.add_file_stored("big.bin", &[0x5A; 400]);
+        let parts = encoder.finish_parts(120).unwrap();
+        assert!(parts.len() >= 4);
+        // The first boundary lands strictly inside the compressed data
+        // (head = 30-byte local header + 7-byte name).
+        let head_len = 30 + "big.bin".len();
+        assert!(parts[0].len() > head_len);
+        assert!(parts[0].len() < head_len + 400);
+
+        let slices: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+        let entries = decode::decode_parts(&slices).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].data, vec![0x5A; 400]);
+    }
+
+    #[test]
+    fn test_finish_parts_too_small() {
+        let mut encoder = ZipEncoder::new();
+        encoder.add_file_stored("a.txt", b"data");
+        assert!(matches!(
+            encoder.finish_parts(0),
+            Err(Error::InvalidData(_))
+        ));
+        // A local file header (30 + 5 bytes) cannot fit in 10 bytes.
+        let mut encoder = ZipEncoder::new();
+        encoder.add_file_stored("a.txt", b"data");
+        assert!(matches!(
+            encoder.finish_parts(10),
+            Err(Error::InvalidData(_))
+        ));
     }
 }

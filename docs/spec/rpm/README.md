@@ -15,7 +15,7 @@
 
 | バリアント | 仕様根拠 | decode | encode | 備考 |
 |---|---|---|---|---|
-| Lead (major 3/4/6) | [format_lead.html](https://rpm-software-management.github.io/rpm/manual/format_lead.html) | ✅ | ✅ | major/minor はメタデータとして記録 (バージョンによる処理分岐なし) |
+| Lead (major 3/4/6) | [format_lead.html](https://rpm-software-management.github.io/rpm/manual/format_lead.html) | ✅ | ✅ | major/minor はメタデータとして記録 (バージョンによる処理分岐なし)。v6 準拠パッケージの実 lead は major=4 (format_v6.html "the 'version' field contains 4 for backwards compatibility"、識別は `RPMTAG_RPMFORMAT`=5114) — `.v6()` mode で major=4 を emit。`major_minor(6,0)` の既存挙動は major=6 の lead であり v6 識別子ではない |
 | payload compressor: gzip / bzip2 / lzma / xz / zstd / none | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ✅ | ✅ | tag 1125 認識、欠落時 gzip 既定 |
 | payload format: cpio `newc` / stripped `07070X` | rpm `lib/cpio.c` 挙動 | ✅ | ✅ | write は `newc` と `stripped_payload()` の両方 |
 | 署名検証 (Signature header / GPG) | [format_header.html](https://rpm-software-management.github.io/rpm/manual/format_header.html) | ❌ | — | intentional scope |
@@ -38,7 +38,7 @@
 | 12 | index/データ範囲の bounds 検査 (truncated → `UnexpectedEof`) | crate エラー規約 | ✅ | `rejects_*` 系 |
 | 12a | index entry は tag 昇順ソート・重複 tag なし | format_header.html ("entries are sorted by tag number") | ✅ | decoder 側は tag の単調増加と重複の有無を検証する (`rejects_unsorted_index_entries`, `rejects_duplicate_tag`)。encode 側 (#26) は昇順で出力する |
 | 12b | データ store の整列パディングはゼロ | format_header.html | ✅ | decoder 側はデータストアの整列パディングがゼロであるかを検証する (`rejects_nonzero_store_padding`, `accepts_aligned_zero_padding`)。encode 側はゼロパディングを出力する |
-| 38a | payload/header digest 検証 (opt-in) | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ✅ | `RpmPackage::verify_digests` で Signature/Header digest タグ (SIGTAG_MD5 1004/SHA1 269/SHA256 272,273) と payload digest (5092/5097 + algo 5093。MD5/SHA1/SHA256/SHA512) を検証。`verifies_md5_sha1_digests`, `rejects_tampered_payload_digest`, `detects_tampered_header_digest` |
+| 38a | payload/header digest 検証 (opt-in) | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ✅ | `RpmPackage::verify_digests` で Signature/Header digest タグ (SIGTAG_MD5 1004/SHA1 269/SHA256 272,273) と payload digest (5092/5097 + algo 5093。MD5/SHA1/SHA256/SHA512) を検証。v6 (`RPMTAG_RPMFORMAT`=6) では 5092/5097 を `PAYLOADSHA256`/`ALT` として 5093 selector なしで解釈し、5121/5122 (`PAYLOADSHA512`/`ALT`) も検証。`verifies_md5_sha1_digests`, `rejects_tampered_payload_digest`, `detects_tampered_header_digest` |
 
 ### payload
 
@@ -64,7 +64,8 @@
 | 30 | payload は `newc` cpio を `cpio` encoder で生成、または raw payload 指定 (`set_payload`) | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ✅ | `roundtrip_gzip` |
 | 31 | `RPMTAG_PAYLOADCOMPRESSOR` (1125) を自動 emit + gzip/bzip2/lzma/xz/zstd/none の 6 codec で圧縮出力 | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ✅ | `roundtrip_all_compressions` |
 | 32 | encoder 出力を decoder で往復 + `bsdtar` (libarchive) が payload 抽出 | system interop | ✅ | `test_rpm_encode_decode_roundtrip`, `test_rpm_encode_uncompressed_roundtrip`, `test_rpm_encode_read_by_bsdtar` |
-| 32a | stripped `07070X` payload の write: `stripped_payload()` で `07070X` + 8-hex fx + data (4B 整列) を emit、newc `TRAILER!!!` で終端。file-list tags (BASENAMES/DIRNAMES/DIRINDEXES/FILESIZES、major>=6・大容量は LONGFILESIZES) は自動 emit | rpm `lib/cpio.c` | ✅ | `stripped_roundtrip`, `stripped_v6_uses_longfilesizes`, `stripped_payload_bytes_layout`, `test_rpm_stripped_encoder_roundtrip_and_bsdtar` |
+| 32a | stripped `07070X` payload の write: `stripped_payload()` で `07070X` + 8-hex fx + data (4B 整列) を emit、newc `TRAILER!!!` で終端。file-list tags (BASENAMES/DIRNAMES/DIRINDEXES/FILESIZES、`.v6()`・major>=6・大容量は LONGFILESIZES) は自動 emit | rpm `lib/cpio.c` | ✅ | `stripped_roundtrip`, `stripped_v6_uses_longfilesizes`, `stripped_payload_bytes_layout`, `test_rpm_stripped_encoder_roundtrip_and_bsdtar` |
+| 40 | v6 必須タグセットの emit: `RPMTAG_RPMFORMAT`、`RPMTAG_ENCODING` (必須・値 "utf-8")、`RPMTAG_FILEDIGESTALGO`+`FILEDIGESTS`、`RPMTAG_PAYLOADSHA256`/`SHA256ALT`/`PAYLOADSHA512`/`ALT`、`RPMTAG_PAYLOADSIZE`/`ALT`、MIME ベース file type タグ (`RPMTAG_MIMEDICT`/`FILEMIMEINDEX`)、Signature `SHA256`(272)/`RESERVED`(999) | format_v6.html | ✅ | `RpmEncoder::v6()` opt-in mode (lead major=4 + RPMFORMAT=6 + stripped `07070X` 強制 + 上記タグ自動 emit、`signature_tag` は >999/v4 tag を reject)。MIME は `mime_types(&[&str])` caller 供給 (未指定時 `application/octet-stream`)。SHA3 系 (sig 279、tag 5123/5124) は #38 intentional scope。`v6_roundtrip`, `v6_mime_dict`, `v6_signature_tag_rejected`, `v6_managed_header_tags_rejected`, `v6_set_payload_skips_file_tags`, `test_rpm_v6_encoder_roundtrip_and_system_oracle` |
 
 ### システム相互運用
 
@@ -85,6 +86,5 @@
 
 | # | 要件 | 仕様参照 | 状態 | 備考 |
 |---|------|----------|-----------|------|
-| 38 | OpenPGP 署名検証・v6 SHA3 digest tag | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ❌ intentional scope | OpenPGP/GPG 署名検証は暗号レイヤの責務外。v6 必須の SHA3_256 digest (Sig tag 279) と payload digest tag 5121-5124 は SHA3 実装を持たないため対象外。digest 検証の実装済み部分は #38a |
+| 38 | OpenPGP 署名検証・v6 SHA3 digest tag | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ❌ intentional scope | OpenPGP/GPG 署名検証は暗号レイヤの責務外。v6 必須の SHA3_256 digest (Sig tag 279) と payload digest tag 5123-5124 (SHA3_256/ALT) は SHA3 実装を持たないため対象外 (5121/5122 の SHA512 系は `.v6()` で emit 済み、#40)。digest 検証の実装済み部分は #38a |
 | 39 | RPMTAG のパッケージ管理セマンティクス (依存関係・scriptlet・ファイル属性の install 意味) | rpm tags | ❌ | パッケージマネージャ層の責務 (intentional)。生 tag は `header.get_*` で取得可能 |
-| 40 | v6 必須タグセットの emit: `RPMTAG_RPMFORMAT`、`RPMTAG_ENCODING` (必須・値 "utf-8")、`RPMTAG_FILEDIGESTALGO`、`RPMTAG_PAYLOADSHA256`/`SHA256ALT`/`PAYLOADSHA512`/`ALT`、`RPMTAG_PAYLOADSIZE`/`ALT`、MIME ベース file type タグ (`RPMTAG_MIMEDICT`/`FILEMIMEINDEX`/`FILEMIMES`) | format_v6.html | ❌ | encoder は `major_minor(6,0)` で v6 lead を出力可能だがこれらの v6 必須タグは emit しない → v6 厳密準拠パッケージは生成不可。v4/v6 の tag emit はいずれも v4 ベースのセット |

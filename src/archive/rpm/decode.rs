@@ -63,6 +63,9 @@ const SIGTAG_MD5: u32 = 1004;
 const TAG_PAYLOADDIGEST: u32 = 5092;
 const TAG_PAYLOADDIGESTALGO: u32 = 5093;
 const TAG_PAYLOADDIGESTALT: u32 = 5097;
+const TAG_RPMFORMAT: u32 = 5114;
+const TAG_PAYLOADSHA512: u32 = 5121;
+const TAG_PAYLOADSHA512ALT: u32 = 5122;
 
 /// Package type from the Lead (`type` field).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -436,16 +439,22 @@ impl RpmPackage {
     ///   over the stored (compressed) payload.
     /// - Header 5097 (RPMTAG_PAYLOADDIGESTALT): digest over the
     ///   decompressed payload. The algorithm for both comes from
-    ///   RPMTAG_PAYLOADDIGESTALGO (5093).
+    ///   RPMTAG_PAYLOADDIGESTALGO (5093). On v6 packages
+    ///   (RPMTAG_RPMFORMAT 5114 = 6) these tags are
+    ///   RPMTAG_PAYLOADSHA256[/ALT]: SHA-256 without the obsolete
+    ///   5093 selector.
+    /// - Header 5121/5122 (RPMTAG_PAYLOADSHA512[/ALT], v6): SHA-512
+    ///   over the compressed / decompressed payload.
     ///
     /// OpenPGP signature verification remains out of scope.
     ///
     /// # Errors
     ///
     /// Returns Error::InvalidData for malformed digest tags (bad hex or
-    /// PAYLOADDIGEST without PAYLOADDIGESTALGO), Error::Unsupported for
-    /// digest algorithms without an implementation, and payload
-    /// decompression errors for PAYLOADDIGESTALT.
+    /// PAYLOADDIGEST without PAYLOADDIGESTALGO on non-v6 packages),
+    /// Error::Unsupported for digest algorithms without an
+    /// implementation, and payload decompression errors for the ALT
+    /// tags.
     pub fn verify_digests(&self) -> Result<Vec<RpmDigestCheck>, Error> {
         let mut checks = Vec::new();
 
@@ -483,48 +492,82 @@ impl RpmPackage {
             });
         }
 
-        if self.header.find(TAG_PAYLOADDIGEST).is_none()
-            && self.header.find(TAG_PAYLOADDIGESTALT).is_none()
+        // v6 packages mark themselves with RPMTAG_RPMFORMAT (5114) = 6;
+        // there, tags 5092/5097 are RPMTAG_PAYLOADSHA256[/ALT] and need
+        // no PAYLOADDIGESTALGO selector (obsolete in v6).
+        let rpmformat = match self.header.get_i32s(TAG_RPMFORMAT) {
+            Some(result) => result?.first().copied(),
+            None => None,
+        };
+        let is_v6 = rpmformat == Some(6);
+
+        if self.header.find(TAG_PAYLOADDIGEST).is_some()
+            || self.header.find(TAG_PAYLOADDIGESTALT).is_some()
         {
-            return Ok(checks);
-        }
-        let algorithm = match self.header.get_i32s(TAG_PAYLOADDIGESTALGO) {
-            Some(result) => match result?.first() {
-                Some(&1) => RpmDigestAlgorithm::Md5,
-                Some(&2) => RpmDigestAlgorithm::Sha1,
-                Some(&8) => RpmDigestAlgorithm::Sha256,
-                Some(&10) => RpmDigestAlgorithm::Sha512,
-                _ => {
-                    return Err(Error::Unsupported(
-                        "rpm: unsupported payload digest algorithm",
+            let algorithm = match self.header.get_i32s(TAG_PAYLOADDIGESTALGO) {
+                Some(result) => match result?.first() {
+                    Some(&1) => RpmDigestAlgorithm::Md5,
+                    Some(&2) => RpmDigestAlgorithm::Sha1,
+                    Some(&8) => RpmDigestAlgorithm::Sha256,
+                    Some(&10) => RpmDigestAlgorithm::Sha512,
+                    _ => {
+                        return Err(Error::Unsupported(
+                            "rpm: unsupported payload digest algorithm",
+                        ));
+                    }
+                },
+                None if is_v6 => RpmDigestAlgorithm::Sha256,
+                None => {
+                    return Err(Error::InvalidData(
+                        "rpm: PAYLOADDIGEST without PAYLOADDIGESTALGO",
                     ));
                 }
-            },
-            None => {
-                return Err(Error::InvalidData(
-                    "rpm: PAYLOADDIGEST without PAYLOADDIGESTALGO",
-                ));
+            };
+            if let Some(result) = self.header.get_strings(TAG_PAYLOADDIGEST) {
+                let actual = digest_of(algorithm, &self.payload_compressed);
+                for string in result? {
+                    checks.push(RpmDigestCheck {
+                        tag: TAG_PAYLOADDIGEST,
+                        algorithm,
+                        target: RpmDigestTarget::PayloadCompressed,
+                        expected: parse_hex_digest(&string)?,
+                        actual: actual.clone(),
+                    });
+                }
             }
-        };
-        if let Some(result) = self.header.get_strings(TAG_PAYLOADDIGEST) {
-            let actual = digest_of(algorithm, &self.payload_compressed);
-            for string in result? {
-                checks.push(RpmDigestCheck {
-                    tag: TAG_PAYLOADDIGEST,
-                    algorithm,
-                    target: RpmDigestTarget::PayloadCompressed,
-                    expected: parse_hex_digest(&string)?,
-                    actual: actual.clone(),
-                });
+            if let Some(result) = self.header.get_strings(TAG_PAYLOADDIGESTALT) {
+                let actual = digest_of(algorithm, &self.payload()?);
+                for string in result? {
+                    checks.push(RpmDigestCheck {
+                        tag: TAG_PAYLOADDIGESTALT,
+                        algorithm,
+                        target: RpmDigestTarget::PayloadUncompressed,
+                        expected: parse_hex_digest(&string)?,
+                        actual: actual.clone(),
+                    });
+                }
             }
         }
-        if let Some(result) = self.header.get_strings(TAG_PAYLOADDIGESTALT) {
-            let actual = digest_of(algorithm, &self.payload()?);
+
+        // v6 per-algorithm payload digests (5121 compressed /
+        // 5122 uncompressed); SHA-3 tags 5123/5124 are not covered.
+        for (tag, target) in [
+            (TAG_PAYLOADSHA512, RpmDigestTarget::PayloadCompressed),
+            (TAG_PAYLOADSHA512ALT, RpmDigestTarget::PayloadUncompressed),
+        ] {
+            let Some(result) = self.header.get_strings(tag) else {
+                continue;
+            };
+            let data = match target {
+                RpmDigestTarget::PayloadCompressed => self.payload_compressed.clone(),
+                _ => self.payload()?,
+            };
+            let actual = sha512::sha512(&data).to_vec();
             for string in result? {
                 checks.push(RpmDigestCheck {
-                    tag: TAG_PAYLOADDIGESTALT,
-                    algorithm,
-                    target: RpmDigestTarget::PayloadUncompressed,
+                    tag,
+                    algorithm: RpmDigestAlgorithm::Sha512,
+                    target,
                     expected: parse_hex_digest(&string)?,
                     actual: actual.clone(),
                 });

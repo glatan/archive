@@ -323,7 +323,10 @@ specifications or standards documents:
   format_lead, https://rpm-software-management.github.io/rpm/manual/)
   and rpm `lib/cpio.c` stripped payload behavior notes;
   `lib/cpio.c` was read only to confirm structural facts — no code was
-  copied. Digest/signature tag constants are referenced from rpm
+  copied. Digest/signature tag constants and the v6 required tag set
+  (RPMFORMAT/ENCODING/FILEDIGESTALGO/FILEDIGESTS/MIMEDICT/
+  FILEMIMEINDEX/PAYLOADSHA256/SHA512/PAYLOADSIZE families and
+  Signature SHA256/RESERVED) are referenced from rpm
   `include/rpm/rpmtag.h` (same license terms; numeric constants only,
   no code copied). rpm's COPYING distributes `lib/` sources under GPL-2.0-or-later
   or, at the distributor's option, LGPL-2.0-or-later, so a conversion
@@ -971,12 +974,20 @@ against de facto reference behavior:
 - ZIP Method 10 (PKWARE DCL Implode) (`src/archive/zip/dcl_implode.rs`)
   - Reference: Mark Adler's `blast.c` from zlib contrib directory
   - Reference license: zlib license (permissive, compatible with AGPL-3.0)
-  - Repository scope: Rust reimplementation of the blast.c decompression algorithm;
-    no upstream C source files are bundled
+  - Repository scope: Rust reimplementation of the blast.c decompression
+    algorithm, plus a minimal literal-only encoder (`dcl_implode_encode`)
+    that emits raw-literal runs terminated by the end-of-stream marker
+    with no match search; no upstream C source files are bundled
   - Provenance note: Huffman code tables (LITLEN_REP, LENLEN_REP, DISTLEN_REP) and
     algorithm structure are derived from blast.c's static arrays and decode logic;
     the file header of `dcl_implode.rs` plainly marks it as a modified
-    reimplementation of blast.c
+    reimplementation of blast.c. The encoder was written solely against the
+    in-tree decoder's stream contract; no external DCL encoder (pklib,
+    StormLib, etc.) was consulted
+  - Patent note: the DCL format traces to US 5,051,745 (Katz/PKWARE),
+    which expired 2010-08-21. Its claims cover the match-search encoding
+    path, which the literal-only encoder does not exercise; no formal
+    patent search was performed
   - blast.c's license notice (in blast.h, zlib license) is reproduced
     verbatim below to satisfy its notice-retention condition:
 

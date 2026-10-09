@@ -7,6 +7,7 @@
 //! - Local File Header validation and writing
 //! - Store/Deflate extraction/encoding, legacy methods (Shrunk, Reduced
 //!   factors 1-4, Imploded) and Deflate64 decode and encode
+//! - PKWARE DCL Implode (method 10) decode; literal-only encode
 //! - Traditional PKZIP and WinZip AES-128/192/256 encrypted entry read/write
 //! - Strong Encryption (APPNOTE §7) and Central Directory Encryption
 //!   (§4.3.10/§7.5) are detected and rejected as Unsupported: the APPNOTE
@@ -16,7 +17,8 @@
 //! - Data Descriptor validation on the read path
 //! - Data Descriptor emission on the write path, including encrypted entries
 //! - Unknown-size streaming entry write via `encode::ZipStreamWriter`
-//! - Split/spanned (multi-disk) archive read via `decode_parts`
+//! - Split/spanned (multi-disk) archive read via `decode_parts` and write
+//!   via `ZipEncoder::finish_parts`
 
 use alloc::string::String;
 use alloc::vec::Vec;

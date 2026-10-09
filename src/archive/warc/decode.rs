@@ -20,8 +20,9 @@
 //! `WARC-Filename` is `warcinfo`-only, `WARC-Target-URI` is
 //! required on content records and forbidden on `warcinfo`,
 //! `WARC-Profile` is `revisit`-only and mandatory there, and
-//! `WARC-Identified-Payload-Type` is forbidden on record types
-//! without a well-defined payload). `warcinfo` records must carry
+//! `WARC-Identified-Payload-Type`/`WARC-Payload-Digest` are forbidden
+//! on record types without a well-defined payload). `warcinfo`
+//! records must carry
 //! `Content-Type: application/warc-fields` (Clause 8), and
 //! Clause 7 record segmentation is validated: `continuation` records
 //! must carry `WARC-Segment-Origin-ID` plus a
@@ -325,6 +326,10 @@ const FORBIDDEN_FIELD_TYPES: &[(&str, &[&str])] = &[
     // 'continuation' segments (Annex B.8 carries the field on one).
     // 'warcinfo' and 'metadata' define no payload.
     ("warc-identified-payload-type", &["warcinfo", "metadata"]),
+    // WARC-Payload-Digest: the same wording — "may be used on WARC
+    // records with a well-defined payload and shall not be used on
+    // records without a well-defined payload".
+    ("warc-payload-digest", &["warcinfo", "metadata"]),
 ];
 
 /// Fields restricted to a single record type ("shall not be used for
@@ -1204,21 +1209,46 @@ mod tests {
 
     #[test]
     fn verifies_payload_digest_for_opaque_block() {
+        // 'resource' has a well-defined payload which is the block, so
+        // the digest is verified directly.
         let d = sha1_label(b"body");
         let data = record_lines(
-            "metadata",
-            &[format!("WARC-Payload-Digest: {d}").as_str()],
+            "resource",
+            &[
+                "WARC-Target-URI: http://e/",
+                format!("WARC-Payload-Digest: {d}").as_str(),
+            ],
             b"body",
         );
         assert!(decode(&data).is_ok());
 
         let d = sha1_label(b"other");
         let data = record_lines(
-            "metadata",
-            &[format!("WARC-Payload-Digest: {d}").as_str()],
+            "resource",
+            &[
+                "WARC-Target-URI: http://e/",
+                format!("WARC-Payload-Digest: {d}").as_str(),
+            ],
             b"body",
         );
         assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn rejects_payload_digest_on_metadata_and_warcinfo() {
+        // WARC 1.1 "named fields": WARC-Payload-Digest "shall not be
+        // used on records without a well-defined payload" — 'warcinfo'
+        // and 'metadata' define none (same constraint as
+        // WARC-Identified-Payload-Type).
+        let d = sha1_label(b"b");
+        let field = format!("WARC-Payload-Digest: {d}");
+        for t in ["warcinfo", "metadata"] {
+            let data = valid_record(t, &[field.as_str()], b"b");
+            assert!(
+                matches!(decode(&data), Err(Error::InvalidData(_))),
+                "accepted WARC-Payload-Digest on {t}"
+            );
+        }
     }
 
     #[test]
@@ -1364,11 +1394,13 @@ mod tests {
             ),
             ("WARC-Warcinfo-ID: <urn:x:w>", &["warcinfo"]),
             ("WARC-Target-URI: http://e/", &["warcinfo"]),
-            // WARC-Identified-Payload-Type: no well-defined payload.
+            // WARC-Identified-Payload-Type / WARC-Payload-Digest: no
+            // well-defined payload.
             (
                 "WARC-Identified-Payload-Type: image/jpeg",
                 &["warcinfo", "metadata"],
             ),
+            ("WARC-Payload-Digest: sha1:AAAA", &["warcinfo", "metadata"]),
             // WARC-Profile: undefined outside 'revisit' records.
             (
                 "WARC-Profile: http://netpreserve.org/warc/1.1/revisit/server-not-modified",

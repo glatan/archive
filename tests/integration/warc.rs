@@ -299,6 +299,48 @@ fn test_warc_identified_payload_type_needs_payload() {
 }
 
 #[test]
+fn test_warc_payload_digest_needs_payload() {
+    // WARC 1.1 §5: WARC-Payload-Digest carries the same "shall not be
+    // used on records without a well-defined payload" constraint as
+    // WARC-Identified-Payload-Type — 'warcinfo' and 'metadata'
+    // define none.
+    for (t, uri, ct) in [
+        ("warcinfo", None, Some("application/warc-fields")),
+        ("metadata", Some("http://e/"), None),
+    ] {
+        let data = warc_record_with(
+            t,
+            uri,
+            ct,
+            &["WARC-Payload-Digest: sha1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"],
+            b"b",
+        );
+        assert!(
+            matches!(
+                archive::archive::warc::decode::decode(&data),
+                Err(archive::error::Error::InvalidData(_))
+            ),
+            "accepted WARC-Payload-Digest on {t}"
+        );
+    }
+    // Allowed where the payload is defined (a non-sha1 algorithm
+    // label is accepted and left unverified).
+    for t in ["response", "resource", "request", "conversion"] {
+        let data = warc_record_with(
+            t,
+            Some("http://e/"),
+            None,
+            &["WARC-Payload-Digest: sha256:AAAA"],
+            b"b",
+        );
+        assert!(
+            archive::archive::warc::decode::decode(&data).is_ok(),
+            "rejected WARC-Payload-Digest on {t}"
+        );
+    }
+}
+
+#[test]
 fn test_warc_rejects_warcinfo_wrong_content_type() {
     // Clause 8: the MIME type of warcinfo records shall be
     // application/warc-fields.

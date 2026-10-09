@@ -976,3 +976,117 @@ fn test_zip_method16_encode_header_fields() {
     assert_eq!(&data[..2], &[1, 0x89]);
     assert_eq!(&data[2..6], &4096u32.to_be_bytes());
 }
+
+#[cfg(feature = "zip")]
+#[test]
+fn test_zip_method10_encode_roundtrip() {
+    // Method 10 (PKWARE DCL Implode). The crate emits a literal-only
+    // stream; coverage is a crate-internal encode -> decode roundtrip
+    // plus a check that both headers carry method 10.
+    let payload: &[u8] = b"dcl implode payload payload payload";
+    let mut encoder = zip::encode::ZipEncoder::new();
+    encoder.add_file_with_options(
+        "dcl.bin",
+        payload,
+        &zip::encode::ZipEntryOptions {
+            compression: zip::encode::ZipCompression::DclImplode,
+            ..zip::encode::ZipEntryOptions::default()
+        },
+    );
+    let archive = encoder.finish().unwrap();
+
+    // Local file header: compression method is the u16 at offset 8.
+    let local = find_signature(&archive, [0x50, 0x4b, 0x03, 0x04]);
+    assert_eq!(
+        u16::from_le_bytes(archive[local + 8..local + 10].try_into().unwrap()),
+        10
+    );
+    // Central directory record: compression method is the u16 at offset 10.
+    let central = find_signature(&archive, [0x50, 0x4b, 0x01, 0x02]);
+    assert_eq!(
+        u16::from_le_bytes(archive[central + 10..central + 12].try_into().unwrap()),
+        10
+    );
+
+    let entries = zip::decode::decode(&archive).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "dcl.bin");
+    assert_eq!(entries[0].data, payload);
+    assert_eq!(entries[0].header.compression_method, 10);
+}
+
+#[cfg(feature = "zip")]
+#[test]
+fn test_zip_finish_parts_system_unzip_compat() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_zip_parts_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // Entries sized so that 300-byte segments force several splits,
+    // including one through stored entry data.
+    let a_payload = vec![0x41u8; 400];
+    let b_payload = b"deflated payload deflated payload".to_vec();
+    let mut encoder = zip::encode::ZipEncoder::new();
+    encoder.add_file_stored("a.bin", &a_payload);
+    encoder.add_file("b.txt", &b_payload);
+    let parts = encoder.finish_parts(300).unwrap();
+    assert!(parts.len() > 1, "expected multiple segments");
+
+    // PKWARE split naming (APPNOTE §8.3): name.z01 ... name.zNN, name.zip.
+    let last = parts.len() - 1;
+    for (index, part) in parts.iter().enumerate() {
+        let path = if index == last {
+            dir.join("split.zip")
+        } else {
+            dir.join(format!("split.z{:02}", index + 1))
+        };
+        std::fs::write(&path, part).unwrap();
+    }
+    let zip_path = dir.join("split.zip");
+
+    // Crate-internal check: the segment set decodes via decode_parts.
+    let slices: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+    let entries = zip::decode::decode_parts(&slices).unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].name, "a.bin");
+    assert_eq!(entries[0].data, a_payload);
+    assert_eq!(entries[1].name, "b.txt");
+    assert_eq!(entries[1].data, b_payload);
+
+    // System oracle: unzip resolves .z01.. siblings of the .zip segment.
+    let listing = Command::new("unzip")
+        .args(["-Z1", zip_path.to_str().unwrap()])
+        .output();
+
+    if let Ok(result) = listing {
+        assert!(
+            result.status.success(),
+            "unzip -Z1 failed: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let names = String::from_utf8_lossy(&result.stdout);
+        assert!(names.contains("a.bin"), "listing: {names}");
+        assert!(names.contains("b.txt"), "listing: {names}");
+
+        for (name, payload) in [("a.bin", &a_payload), ("b.txt", &b_payload)] {
+            let extracted = Command::new("unzip")
+                .args(["-p", zip_path.to_str().unwrap(), name])
+                .output()
+                .unwrap();
+            assert!(
+                extracted.status.success(),
+                "unzip -p {name} failed: {}",
+                String::from_utf8_lossy(&extracted.stderr)
+            );
+            assert_eq!(&extracted.stdout, payload, "unzip mismatch on {name}");
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

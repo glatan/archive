@@ -10,9 +10,13 @@
 //!
 //! [`decode`] reads Lead/Signature/Header plus gzip/bzip2/lzma/xz/zstd/
 //! uncompressed `newc` or stripped payloads. [`encode`] writes packages
-//! (`newc` or stripped `07070X` payload, all six compressors).
-//! OpenPGP signature verification is intentionally out of scope; digest
-//! tags can be checked opt-in via RpmPackage::verify_digests.
+//! (`newc` or stripped `07070X` payload, all six compressors);
+//! [`encode::RpmEncoder::v6`] emits the v6 required tag set
+//! (`RPMTAG_RPMFORMAT`/`ENCODING`, payload SHA-256/SHA-512 digest and
+//! size tags, Signature `SHA256`/`RESERVED`, file digests and MIME
+//! tags for `add_file` packages). OpenPGP signature verification is
+//! intentionally out of scope; digest tags can be checked opt-in via
+//! RpmPackage::verify_digests.
 
 use alloc::vec::Vec;
 
