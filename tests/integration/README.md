@@ -97,6 +97,7 @@
 | v6 stripped payload (07070X) | `test_rpm_decode_stripped_payload` |
 | system cpio+gzip payload interop | `test_rpm_decode_system_compressed_payload` |
 | `bsdtar` payload extraction interop | `test_rpm_crate_built_read_by_bsdtar` |
+| v6 encoder roundtrip + system oracle | `test_rpm_v6_encoder_roundtrip_and_system_oracle` |
 
 ### `squashfs.rs`
 
@@ -136,7 +137,7 @@
 | 複数 record ストリーム decode (warcinfo/response/revisit) | `test_warc_decode_records` |
 | gzip 伸張経路経由の `.warc.gz` decode | `test_warc_gzip_members` |
 | `WARC-Profile` 検証 (revisit 必須・他型禁止・未知 URI は pass-through) | `test_warc_rejects_revisit_missing_profile`<br>`test_warc_rejects_profile_on_non_revisit`<br>`test_warc_accepts_revisit_with_known_profile` |
-| `WARC-Identified-Payload-Type` は payload 未定義の型 (warcinfo/metadata) で禁止 | `test_warc_identified_payload_type_needs_payload` |
+| `WARC-Identified-Payload-Type` / `WARC-Payload-Digest` は payload 未定義の型 (warcinfo/metadata) で禁止 | `test_warc_identified_payload_type_needs_payload`<br>`test_warc_payload_digest_needs_payload` |
 | warcinfo `Content-Type: application/warc-fields` 必須 (Clause 8) + encoder 側 enforcement | `test_warc_rejects_warcinfo_wrong_content_type`<br>`test_warc_encoder_warcinfo_content_type` |
 
 ### `brotli.rs`
@@ -297,6 +298,8 @@
 | reader / finish-to path | `test_zip_decode_reader_finish_to_roundtrip` |
 | checksum / size / descriptor validation | `test_zip_decode_detects_checksum_mismatch`<br>`test_zip_decode_detects_size_mismatch`<br>`test_zip_decode_detects_data_descriptor_mismatch` |
 | metadata / entry bridge | `test_zip_utf8_metadata_roundtrip_via_reader`<br>`test_zip_cp437_metadata_roundtrip_without_utf8_flag`<br>`test_zip_add_entry_roundtrip_preserves_metadata` |
+| method 10 (DCL Implode) literal-only encode | `test_zip_method10_encode_roundtrip` |
+| multi-disk emit (`finish_parts`) | `test_zip_finish_parts_system_unzip_compat` |
 
 ### `zlib.rs`
 

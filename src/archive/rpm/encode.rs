@@ -22,6 +22,7 @@ use crate::archive::cpio;
 use crate::archive::rpm::decode::{RpmCompression, RpmPackageType};
 use crate::compress::{bzip2, deflate, gzip, lzma_alone, xz, zstd};
 use crate::error::Error;
+use crate::util::{sha256, sha512};
 
 const HEADER_MAGIC: [u8; 8] = [0x8e, 0xad, 0xe8, 0x01, 0, 0, 0, 0];
 const LEAD_SIZE: usize = 96;
@@ -33,10 +34,45 @@ const TAG_RELEASE: u32 = 1002;
 const TAG_ARCH: u32 = 1022;
 const TAG_PAYLOADCOMPRESSOR: u32 = 1125;
 const TAG_FILESIZES: u32 = 1028;
+const TAG_FILEDIGESTS: u32 = 1035;
 const TAG_DIRINDEXES: u32 = 1116;
 const TAG_BASENAMES: u32 = 1117;
 const TAG_DIRNAMES: u32 = 1118;
 const TAG_LONGFILESIZES: u32 = 5008;
+const TAG_FILEDIGESTALGO: u32 = 5011;
+const TAG_ENCODING: u32 = 5062;
+const TAG_PAYLOADSHA256: u32 = 5092;
+const TAG_PAYLOADSHA256ALT: u32 = 5097;
+const TAG_PAYLOADSIZE: u32 = 5112;
+const TAG_PAYLOADSIZEALT: u32 = 5113;
+const TAG_RPMFORMAT: u32 = 5114;
+const TAG_FILEMIMEINDEX: u32 = 5115;
+const TAG_MIMEDICT: u32 = 5116;
+const TAG_PAYLOADSHA512: u32 = 5121;
+const TAG_PAYLOADSHA512ALT: u32 = 5122;
+const SIGTAG_SHA256_V6: u32 = 272;
+const SIGTAG_RESERVED: u32 = 999;
+
+/// PGPHASHALGO_SHA256 (rpm.org rpmtag.h digest algorithm numbering).
+const HASHALGO_SHA256: i32 = 8;
+/// Zeroed space reservation emitted as Signature tag 999 (RESERVED)
+/// on v6 packages, for signatures appended after the fact.
+const V6_SIG_RESERVED_BYTES: usize = 4096;
+/// Header tags the v6 emit path computes itself.
+const V6_MANAGED_HEADER_TAGS: &[u32] = &[
+    TAG_FILEDIGESTS,
+    TAG_FILEDIGESTALGO,
+    TAG_ENCODING,
+    TAG_PAYLOADSHA256,
+    TAG_PAYLOADSHA256ALT,
+    TAG_PAYLOADSIZE,
+    TAG_PAYLOADSIZEALT,
+    TAG_RPMFORMAT,
+    TAG_FILEMIMEINDEX,
+    TAG_MIMEDICT,
+    TAG_PAYLOADSHA512,
+    TAG_PAYLOADSHA512ALT,
+];
 
 /// A typed value for one RPM header tag.
 #[derive(Debug, Clone)]
@@ -153,6 +189,8 @@ pub struct RpmEncoder {
     files: Vec<(String, Vec<u8>)>,
     payload: Option<Vec<u8>>,
     stripped: bool,
+    v6: bool,
+    mime_types: Vec<String>,
 }
 
 impl RpmEncoder {
@@ -171,6 +209,8 @@ impl RpmEncoder {
             files: Vec::new(),
             payload: None,
             stripped: false,
+            v6: false,
+            mime_types: Vec::new(),
         }
     }
 
@@ -229,9 +269,13 @@ impl RpmEncoder {
 
     /// Add or replace a Header tag. Region tags (62/63) and
     /// `RPMTAG_PAYLOADCOMPRESSOR` (1125) are managed by the encoder
-    /// and rejected here.
+    /// and rejected here. In [`v6`](Self::v6) mode the v6 required
+    /// tag set is computed by the encoder as well.
     pub fn header_tag(mut self, tag: u32, value: RpmTagValue) -> Result<Self, Error> {
         if tag == SIG_REGION_TAG || tag == HDR_REGION_TAG || tag == TAG_PAYLOADCOMPRESSOR {
+            return Err(Error::InvalidData("rpm: tag managed by encoder"));
+        }
+        if self.v6 && V6_MANAGED_HEADER_TAGS.contains(&tag) {
             return Err(Error::InvalidData("rpm: tag managed by encoder"));
         }
         self.upsert_tag(tag, value);
@@ -239,10 +283,24 @@ impl RpmEncoder {
     }
 
     /// Add or replace a Signature-section tag. The region tag (62) is
-    /// managed by the encoder.
+    /// managed by the encoder. In [`v6`](Self::v6) mode only the
+    /// cryptographic-content tags permitted by format_v6.html are
+    /// accepted (267/268, 274, 276/277, 278, 279); the SHA256 (272)
+    /// and RESERVED (999) tags are emitted by the encoder, and v4
+    /// signature tags as well as tags above 999 are rejected.
     pub fn signature_tag(mut self, tag: u32, value: RpmTagValue) -> Result<Self, Error> {
         if tag == SIG_REGION_TAG || tag == HDR_REGION_TAG {
             return Err(Error::InvalidData("rpm: tag managed by encoder"));
+        }
+        if self.v6 {
+            if tag == SIGTAG_SHA256_V6 || tag == SIGTAG_RESERVED {
+                return Err(Error::InvalidData("rpm: tag managed by encoder"));
+            }
+            if !v6_sig_tag_allowed(tag) {
+                return Err(Error::InvalidData(
+                    "rpm: signature tag not permitted in v6 package",
+                ));
+            }
         }
         self.sig_tags.retain(|(t, _)| *t != tag);
         self.sig_tags.push((tag, value));
@@ -277,6 +335,50 @@ impl RpmEncoder {
         self
     }
 
+    /// Emit a v6 package (format_v6.html). The Lead version field
+    /// stays 4 (backwards compatibility: v6 is identified by
+    /// `RPMTAG_RPMFORMAT` = 6 in the Header, not the Lead) and the
+    /// Lead OS/arch numbers are forced to zero, so this overrides
+    /// [`major_minor`](Self::major_minor) and
+    /// [`lead_numbers`](Self::lead_numbers). The stripped `07070X`
+    /// payload is implied.
+    ///
+    /// The encoder then emits the v6 required tag set automatically
+    /// (caller-set values are overridden): `RPMTAG_RPMFORMAT` (5114),
+    /// `RPMTAG_ENCODING` (5062, "utf-8"), `RPMTAG_PAYLOADSHA256`/
+    /// `SHA256ALT` (5092/5097), `RPMTAG_PAYLOADSHA512`/`ALT`
+    /// (5121/5122), `RPMTAG_PAYLOADSIZE`/`ALT` (5112/5113, INT64), and
+    /// in the Signature `SHA256` (272, hex digest of the Header blob)
+    /// plus `RESERVED` (999, zeroed BIN, always the last tag). For
+    /// packages built via [`add_file`](Self::add_file) the file-scoped
+    /// tags are emitted as well: `RPMTAG_FILEDIGESTALGO` (5011,
+    /// SHA-256), per-file `RPMTAG_FILEDIGESTS` (1035), `RPMTAG_MIMEDICT`
+    /// (5116) and `RPMTAG_FILEMIMEINDEX` (5115). With
+    /// [`set_payload`](Self::set_payload) there is no file list, so
+    /// the file-scoped tags are omitted while the payload-level digest
+    /// and size tags are still emitted.
+    ///
+    /// The v4 `RPMTAG_PAYLOADDIGESTALGO` (5093) selector is obsolete in
+    /// v6 and is not emitted; the SHA-3 tags (Signature 279, Header
+    /// 5123/5124) are intentionally out of scope.
+    pub fn v6(mut self) -> Self {
+        self.v6 = true;
+        self.stripped = true;
+        self
+    }
+
+    /// Per-file MIME types for the v6 `RPMTAG_MIMEDICT` (5116) /
+    /// `RPMTAG_FILEMIMEINDEX` (5115) tags, parallel to
+    /// [`add_file`](Self::add_file) call order. The encoder builds the
+    /// deduplicated MIME dictionary and the per-file index into it.
+    /// Files without a corresponding entry (or all files when this is
+    /// not called) fall back to `application/octet-stream`. Only used
+    /// in [`v6`](Self::v6) mode; ignored otherwise.
+    pub fn mime_types(mut self, types: &[&str]) -> Self {
+        self.mime_types = types.iter().map(|s| (*s).to_string()).collect();
+        self
+    }
+
     fn upsert_tag(&mut self, tag: u32, value: RpmTagValue) {
         self.header_tags.retain(|(t, _)| *t != tag);
         self.header_tags.push((tag, value));
@@ -284,43 +386,49 @@ impl RpmEncoder {
 
     /// Emit the `.rpm` bytes.
     pub fn finish(self) -> Result<Vec<u8>, Error> {
-        // Lead
-        let mut out = Vec::with_capacity(4096);
-        out.extend_from_slice(&[0xed, 0xab, 0xee, 0xdb]);
-        out.push(self.major);
-        out.push(self.minor);
-        out.extend_from_slice(
-            &(match self.package_type {
-                RpmPackageType::Binary => 0u16,
-                RpmPackageType::Source => 1u16,
-            })
-            .to_be_bytes(),
-        );
-        out.extend_from_slice(&self.archnum.to_be_bytes());
-        let mut name = [0u8; 66];
-        name[..self.lead_name.len()].copy_from_slice(self.lead_name.as_bytes());
-        out.extend_from_slice(&name);
-        out.extend_from_slice(&self.osnum.to_be_bytes());
-        out.extend_from_slice(&5u16.to_be_bytes()); // signature_type: header-style
-        out.resize(LEAD_SIZE, 0);
-
-        // Signature header: region tag + caller tags.
-        let mut sig_tags = self.sig_tags;
-        sig_tags.push((
-            SIG_REGION_TAG,
-            RpmTagValue::Bin(region_trailer(SIG_REGION_TAG)),
-        ));
-        out.extend_from_slice(&build_header(&sig_tags));
-        while !out.len().is_multiple_of(8) {
-            out.push(0);
+        // In v6 mode the Signature may only carry the cryptographic
+        // content tags listed by format_v6.html; a tag queued before
+        // v6() was enabled is caught here.
+        if self.v6 {
+            for &(tag, _) in &self.sig_tags {
+                if !v6_sig_tag_allowed(tag) {
+                    return Err(Error::InvalidData(
+                        "rpm: signature tag not permitted in v6 package",
+                    ));
+                }
+            }
         }
 
-        // Header: region tag + compressor + caller tags. In stripped
-        // mode the file-list tags are managed by the encoder.
+        // Payload first: the v6 payload digest/size tags and the v6
+        // Signature SHA256 are computed over the final payload/header
+        // bytes, so compression precedes the section builds.
+        let caller_payload = self.payload.is_some();
+        let stripped = (self.stripped || self.v6) && !caller_payload;
+        let payload = match self.payload {
+            Some(p) => p,
+            None if stripped => build_stripped(&self.files),
+            None => build_cpio(&self.files),
+        };
+        let compressed = compress(&payload, self.compression)?;
+
+        // Header: region tag + compressor + caller tags. Stripped/v6
+        // file-list tags and the v6 required tag set are managed by
+        // the encoder and override caller-set values.
         let mut header_tags = self.header_tags;
-        let stripped = self.stripped && self.payload.is_none();
         if stripped {
-            for (t, v) in file_list_tags(&self.files, self.major) {
+            for (t, v) in file_list_tags(&self.files, self.v6 || self.major >= 6) {
+                header_tags.retain(|(x, _)| *x != t);
+                header_tags.push((t, v));
+            }
+        }
+        if self.v6 {
+            for (t, v) in v6_header_tags(
+                &self.files,
+                &self.mime_types,
+                &payload,
+                &compressed,
+                !caller_payload,
+            ) {
                 header_tags.retain(|(x, _)| *x != t);
                 header_tags.push((t, v));
             }
@@ -333,15 +441,60 @@ impl RpmEncoder {
             TAG_PAYLOADCOMPRESSOR,
             RpmTagValue::Str(compressor_name(self.compression).to_string()),
         ));
-        out.extend_from_slice(&build_header(&header_tags));
+        let header_blob = build_header(&header_tags);
 
-        // Payload.
-        let payload = match self.payload {
-            Some(p) => p,
-            None if stripped => build_stripped(&self.files),
-            None => build_cpio(&self.files),
+        // Signature header: region tag + caller tags (+ the v6 SHA256
+        // digest of the Header blob and the RESERVED space
+        // reservation).
+        let mut sig_tags = self.sig_tags;
+        if self.v6 {
+            sig_tags.push((
+                SIGTAG_SHA256_V6,
+                RpmTagValue::Str(hex_lower(&sha256::sha256(&header_blob))),
+            ));
+            sig_tags.push((
+                SIGTAG_RESERVED,
+                RpmTagValue::Bin(alloc::vec![0; V6_SIG_RESERVED_BYTES]),
+            ));
+        }
+        sig_tags.push((
+            SIG_REGION_TAG,
+            RpmTagValue::Bin(region_trailer(SIG_REGION_TAG)),
+        ));
+        let sig_blob = build_header(&sig_tags);
+
+        // Lead. v6 packages keep version 4 and zeroed OS/arch numbers
+        // for backwards compatibility (format_v6.html).
+        let mut out = Vec::with_capacity(4096);
+        out.extend_from_slice(&[0xed, 0xab, 0xee, 0xdb]);
+        let (major, minor, archnum, osnum) = if self.v6 {
+            (4, 0, 0, 0)
+        } else {
+            (self.major, self.minor, self.archnum, self.osnum)
         };
-        out.extend_from_slice(&compress(&payload, self.compression)?);
+        out.push(major);
+        out.push(minor);
+        out.extend_from_slice(
+            &(match self.package_type {
+                RpmPackageType::Binary => 0u16,
+                RpmPackageType::Source => 1u16,
+            })
+            .to_be_bytes(),
+        );
+        out.extend_from_slice(&archnum.to_be_bytes());
+        let mut name = [0u8; 66];
+        name[..self.lead_name.len()].copy_from_slice(self.lead_name.as_bytes());
+        out.extend_from_slice(&name);
+        out.extend_from_slice(&osnum.to_be_bytes());
+        out.extend_from_slice(&5u16.to_be_bytes()); // signature_type: header-style
+        out.resize(LEAD_SIZE, 0);
+
+        out.extend_from_slice(&sig_blob);
+        while !out.len().is_multiple_of(8) {
+            out.push(0);
+        }
+        out.extend_from_slice(&header_blob);
+        out.extend_from_slice(&compressed);
         Ok(out)
     }
 }
@@ -421,10 +574,111 @@ fn build_cpio(files: &[(String, Vec<u8>)]) -> Vec<u8> {
     enc.finish()
 }
 
+/// Signature tags a caller may set on a v6 package: the
+/// cryptographic-content tags of format_v6.html (legacy RSA/DSA,
+/// FILESIGNATURES, VERITYSIGNATURES/ALGO, OPENPGP, SHA3_256). The
+/// region tag (62), SHA256 (272) and RESERVED (999) are emitted by
+/// the encoder; tags above 999 and the v4 digest/size tags are
+/// illegal in a v6 Signature.
+fn v6_sig_tag_allowed(tag: u32) -> bool {
+    matches!(tag, 267 | 268 | 274 | 276 | 277 | 278 | 279)
+}
+
+/// Lowercase hex encoding for STRING digest tags.
+fn hex_lower(bytes: &[u8]) -> String {
+    use alloc::fmt::Write;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
+/// The v6 required Header tag set (format_v6.html): RPMFORMAT,
+/// ENCODING, and the payload digest/size pairs computed over the
+/// stored (compressed) and uncompressed payload bytes. When the
+/// package is built from `add_file` entries (`file_tags`), the
+/// file-scoped tags are emitted as well: FILEDIGESTALGO + per-file
+/// SHA-256 FILEDIGESTS and the MIME dictionary/index pair.
+fn v6_header_tags(
+    files: &[(String, Vec<u8>)],
+    mime_types: &[String],
+    payload: &[u8],
+    compressed: &[u8],
+    file_tags: bool,
+) -> Vec<(u32, RpmTagValue)> {
+    let mut tags = alloc::vec![
+        (TAG_RPMFORMAT, RpmTagValue::Int32(alloc::vec![6])),
+        (TAG_ENCODING, RpmTagValue::Str("utf-8".to_string())),
+        (
+            TAG_PAYLOADSHA256,
+            RpmTagValue::StrArray(alloc::vec![hex_lower(&sha256::sha256(compressed))]),
+        ),
+        (
+            TAG_PAYLOADSHA256ALT,
+            RpmTagValue::StrArray(alloc::vec![hex_lower(&sha256::sha256(payload))]),
+        ),
+        (
+            TAG_PAYLOADSHA512,
+            RpmTagValue::StrArray(alloc::vec![hex_lower(&sha512::sha512(compressed))]),
+        ),
+        (
+            TAG_PAYLOADSHA512ALT,
+            RpmTagValue::StrArray(alloc::vec![hex_lower(&sha512::sha512(payload))]),
+        ),
+        (
+            TAG_PAYLOADSIZE,
+            RpmTagValue::Int64(alloc::vec![compressed.len() as i64]),
+        ),
+        (
+            TAG_PAYLOADSIZEALT,
+            RpmTagValue::Int64(alloc::vec![payload.len() as i64]),
+        ),
+    ];
+    if file_tags {
+        tags.push((
+            TAG_FILEDIGESTALGO,
+            RpmTagValue::Int32(alloc::vec![HASHALGO_SHA256]),
+        ));
+        tags.push((
+            TAG_FILEDIGESTS,
+            RpmTagValue::StrArray(
+                files
+                    .iter()
+                    .map(|(_, data)| hex_lower(&sha256::sha256(data)))
+                    .collect(),
+            ),
+        ));
+        // MIMEDICT: deduplicated MIME dictionary; FILEMIMEINDEX:
+        // per-file index into it. Missing entries fall back to the
+        // generic binary type.
+        let mut dict: Vec<String> = Vec::new();
+        let mut index = Vec::with_capacity(files.len());
+        for i in 0..files.len() {
+            let mime = mime_types
+                .get(i)
+                .map(String::as_str)
+                .unwrap_or("application/octet-stream");
+            let di = match dict.iter().position(|d| d == mime) {
+                Some(i) => i,
+                None => {
+                    dict.push(mime.to_string());
+                    dict.len() - 1
+                }
+            };
+            index.push(di as i32);
+        }
+        tags.push((TAG_MIMEDICT, RpmTagValue::StrArray(dict)));
+        tags.push((TAG_FILEMIMEINDEX, RpmTagValue::Int32(index)));
+    }
+    tags
+}
+
 /// Header file-list tags for a stripped payload: per-file basename,
 /// deduplicated dirname list (trailing `/` retained), per-file dir
-/// index, and file sizes (`LONGFILESIZES` for v6 / >2 GiB files).
-fn file_list_tags(files: &[(String, Vec<u8>)], major: u8) -> Vec<(u32, RpmTagValue)> {
+/// index, and file sizes (`LONGFILESIZES` when `long`, i.e. for v6 /
+/// >2 GiB files).
+fn file_list_tags(files: &[(String, Vec<u8>)], long: bool) -> Vec<(u32, RpmTagValue)> {
     let mut dirs: Vec<String> = Vec::new();
     let mut dir_index = Vec::with_capacity(files.len());
     let mut basenames = Vec::with_capacity(files.len());
@@ -448,7 +702,7 @@ fn file_list_tags(files: &[(String, Vec<u8>)], major: u8) -> Vec<(u32, RpmTagVal
         (TAG_DIRNAMES, RpmTagValue::StrArray(dirs)),
         (TAG_DIRINDEXES, RpmTagValue::Int32(dir_index)),
     ];
-    if major >= 6 || files.iter().any(|(_, d)| d.len() > i32::MAX as usize) {
+    if long || files.iter().any(|(_, d)| d.len() > i32::MAX as usize) {
         tags.push((
             TAG_LONGFILESIZES,
             RpmTagValue::Int64(files.iter().map(|(_, d)| d.len() as i64).collect()),
@@ -684,5 +938,213 @@ mod tests {
         let raw = pkg.payload().unwrap();
         assert!(raw.starts_with(b"07070X"));
         assert!(raw.windows(10).any(|w| w == b"TRAILER!!!"));
+    }
+
+    fn v6() -> RpmEncoder {
+        let mut enc = basic().v6();
+        enc.add_file("etc/demo.conf", b"key=value\n");
+        enc
+    }
+
+    #[test]
+    fn v6_roundtrip() {
+        let bytes = v6().finish().unwrap();
+        let pkg = decode::decode(&bytes).unwrap();
+        // Lead stays at version 4 for backwards compatibility; v6 is
+        // identified by RPMTAG_RPMFORMAT.
+        assert_eq!(pkg.lead.major, 4);
+        assert_eq!(pkg.lead.minor, 0);
+        assert_eq!(pkg.lead.archnum, 0);
+        assert_eq!(pkg.lead.osnum, 0);
+        assert_eq!(pkg.header.get_i32s(TAG_RPMFORMAT).unwrap().unwrap(), [6]);
+        assert_eq!(
+            pkg.header.get_string(TAG_ENCODING).unwrap().unwrap(),
+            "utf-8"
+        );
+        assert_eq!(
+            pkg.header.get_i32s(TAG_FILEDIGESTALGO).unwrap().unwrap(),
+            [HASHALGO_SHA256]
+        );
+        // Per-file SHA-256 digests.
+        let digests = pkg.header.get_strings(TAG_FILEDIGESTS).unwrap().unwrap();
+        assert_eq!(digests.len(), 2);
+        assert_eq!(digests[0], hex_lower(&sha256::sha256(b"#!/bin/sh\n")));
+        // Payload digest/size pairs.
+        for tag in [
+            TAG_PAYLOADSHA256,
+            TAG_PAYLOADSHA256ALT,
+            TAG_PAYLOADSHA512,
+            TAG_PAYLOADSHA512ALT,
+        ] {
+            assert_eq!(
+                pkg.header.get_strings(tag).unwrap().unwrap().len(),
+                1,
+                "tag {tag}"
+            );
+        }
+        assert_eq!(
+            pkg.header.get_i64s(TAG_PAYLOADSIZE).unwrap().unwrap().len(),
+            1
+        );
+        assert_eq!(
+            pkg.header
+                .get_i64s(TAG_PAYLOADSIZEALT)
+                .unwrap()
+                .unwrap()
+                .len(),
+            1
+        );
+        // Payload digests verify (5092/5097 default to SHA-256 on v6;
+        // 5121/5122 are SHA-512).
+        let checks = pkg.verify_digests().unwrap();
+        assert!(checks.iter().all(|c| c.matches()), "{checks:?}");
+        for tag in [
+            SIGTAG_SHA256_V6,
+            TAG_PAYLOADSHA256,
+            TAG_PAYLOADSHA256ALT,
+            TAG_PAYLOADSHA512,
+            TAG_PAYLOADSHA512ALT,
+        ] {
+            assert!(checks.iter().any(|c| c.tag == tag), "tag {tag}");
+        }
+        // Signature carries only region + SHA256 + RESERVED; RESERVED
+        // is the last tag and all zeros.
+        let sig_tags: alloc::vec::Vec<u32> = pkg.signature.entries.iter().map(|e| e.tag).collect();
+        assert_eq!(
+            sig_tags,
+            [SIG_REGION_TAG, SIGTAG_SHA256_V6, SIGTAG_RESERVED]
+        );
+        let reserved = pkg.signature.get_bin(SIGTAG_RESERVED).unwrap().unwrap();
+        assert!(reserved.iter().all(|&b| b == 0));
+        // Stripped payload with the v6 file list.
+        let entries = pkg.payload_entries().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "./usr/bin/demo");
+        assert_eq!(entries[0].data, b"#!/bin/sh\n");
+        assert_eq!(entries[1].name, "etc/demo.conf");
+        assert!(pkg.header.find(TAG_LONGFILESIZES).is_some());
+        assert!(pkg.header.find(TAG_FILESIZES).is_none());
+        // No v4 PAYLOADDIGESTALGO selector and no SHA-3 tags.
+        assert!(pkg.header.find(5093).is_none());
+        for tag in [279u32, 5123, 5124] {
+            assert!(pkg.header.find(tag).is_none());
+            assert!(pkg.signature.find(tag).is_none());
+        }
+    }
+
+    #[test]
+    fn v6_mime_dict() {
+        // MIME entries are parallel to add_file order; the dictionary
+        // is deduplicated and FILEMIMEINDEX points into it.
+        let mut enc = basic()
+            .v6()
+            .mime_types(&["text/plain", "text/plain", "application/x-conf"]);
+        enc.add_file("etc/a.conf", b"a=1\n");
+        enc.add_file("etc/b.bin", b"\x00\x01");
+        let pkg = decode::decode(&enc.finish().unwrap()).unwrap();
+        assert_eq!(
+            pkg.header.get_strings(TAG_MIMEDICT).unwrap().unwrap(),
+            alloc::vec!["text/plain", "application/x-conf"]
+        );
+        assert_eq!(
+            pkg.header.get_i32s(TAG_FILEMIMEINDEX).unwrap().unwrap(),
+            [0, 0, 1]
+        );
+
+        // Missing entries and an unset mime_types fall back to
+        // application/octet-stream.
+        let pkg = decode::decode(&v6().finish().unwrap()).unwrap();
+        assert_eq!(
+            pkg.header.get_strings(TAG_MIMEDICT).unwrap().unwrap(),
+            alloc::vec!["application/octet-stream"]
+        );
+        assert_eq!(
+            pkg.header.get_i32s(TAG_FILEMIMEINDEX).unwrap().unwrap(),
+            [0, 0]
+        );
+    }
+
+    #[test]
+    fn v6_signature_tag_rejected() {
+        // v4 signature tags and tags >999 are illegal in a v6
+        // Signature; SHA256 (272) and RESERVED (999) are managed.
+        for tag in [269u32, 273, 1000, 1004, 1007] {
+            assert!(
+                basic()
+                    .v6()
+                    .signature_tag(tag, RpmTagValue::Str("x".into()))
+                    .is_err(),
+                "tag {tag}"
+            );
+        }
+        for tag in [SIGTAG_SHA256_V6, SIGTAG_RESERVED] {
+            assert!(
+                basic()
+                    .v6()
+                    .signature_tag(tag, RpmTagValue::Str("x".into()))
+                    .is_err(),
+                "tag {tag}"
+            );
+        }
+        // A tag queued before v6() is enabled is rejected at finish().
+        let enc = basic()
+            .signature_tag(269, RpmTagValue::Str("sig".into()))
+            .unwrap()
+            .v6();
+        assert!(enc.finish().is_err());
+        // Permitted cryptographic-content tags still work.
+        let pkg = decode::decode(
+            &v6()
+                .signature_tag(274, RpmTagValue::StrArray(alloc::vec!["sig".into()]))
+                .unwrap()
+                .finish()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            pkg.signature.get_strings(274).unwrap().unwrap(),
+            alloc::vec!["sig".to_string()]
+        );
+    }
+
+    #[test]
+    fn v6_managed_header_tags_rejected() {
+        for &tag in V6_MANAGED_HEADER_TAGS {
+            assert!(
+                basic()
+                    .v6()
+                    .header_tag(tag, RpmTagValue::Str("x".into()))
+                    .is_err(),
+                "tag {tag}"
+            );
+        }
+        // A tag queued before v6() is enabled is overridden by the
+        // encoder's value at finish().
+        let mut enc = basic()
+            .header_tag(TAG_ENCODING, RpmTagValue::Str("latin1".into()))
+            .unwrap()
+            .v6();
+        enc.add_file("f.bin", b"x");
+        let pkg = decode::decode(&enc.finish().unwrap()).unwrap();
+        assert_eq!(
+            pkg.header.get_string(TAG_ENCODING).unwrap().unwrap(),
+            "utf-8"
+        );
+    }
+
+    #[test]
+    fn v6_set_payload_skips_file_tags() {
+        // Raw payload bytes: payload-level digest/size tags are still
+        // emitted, but the file-scoped tags have no file list to cover.
+        let mut enc = basic().v6();
+        enc.set_payload(build_cpio(&enc.files));
+        let pkg = decode::decode(&enc.finish().unwrap()).unwrap();
+        assert_eq!(pkg.header.get_i32s(TAG_RPMFORMAT).unwrap().unwrap(), [6]);
+        assert!(pkg.header.find(TAG_PAYLOADSHA256).is_some());
+        assert!(pkg.header.find(TAG_PAYLOADSIZE).is_some());
+        assert!(pkg.header.find(TAG_FILEDIGESTS).is_none());
+        assert!(pkg.header.find(TAG_MIMEDICT).is_none());
+        let entries = pkg.payload_entries().unwrap();
+        assert_eq!(entries[0].data, b"#!/bin/sh\n");
     }
 }

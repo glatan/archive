@@ -424,3 +424,101 @@ fn test_rpm_stripped_encoder_roundtrip_and_bsdtar() {
     }
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// A v6 package built by `RpmEncoder::v6` carries the required tag
+/// set, verifies through `verify_digests`, and is handed to the
+/// system `rpm`/`bsdtar` tools when available (graceful skip).
+#[test]
+fn test_rpm_v6_encoder_roundtrip_and_system_oracle() {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let mut enc = rpm::encode::RpmEncoder::new()
+        .lead_name("v6demo-1.0-1")
+        .unwrap()
+        .name("v6demo")
+        .version("1.0")
+        .release("1")
+        .v6()
+        .mime_types(&["text/plain", "application/octet-stream"]);
+    enc.add_file("usr/bin/v6demo", b"#!/bin/sh\necho v6\n");
+    enc.add_file("usr/share/doc/v6demo/readme", b"v6 required tags");
+    enc.add_file("etc/v6demo.conf", b"opt=1\n");
+    let bytes = enc.finish().unwrap();
+
+    let pkg = rpm::decode::decode(&bytes).unwrap();
+    // v6 identity and required Header tags (format_v6.html).
+    assert_eq!(pkg.lead.major, 4);
+    assert_eq!(pkg.header.get_i32s(5114).unwrap().unwrap(), [6]); // RPMFORMAT
+    assert_eq!(pkg.header.get_string(5062).unwrap().unwrap(), "utf-8"); // ENCODING
+    assert_eq!(pkg.header.get_i32s(5011).unwrap().unwrap(), [8]); // FILEDIGESTALGO SHA-256
+    assert_eq!(
+        pkg.header.get_strings(1035).unwrap().unwrap().len(),
+        3 // FILEDIGESTS, one per file
+    );
+    assert!(pkg.header.find(5092).is_some()); // PAYLOADSHA256
+    assert!(pkg.header.find(5097).is_some()); // PAYLOADSHA256ALT
+    assert!(pkg.header.find(5121).is_some()); // PAYLOADSHA512
+    assert!(pkg.header.find(5122).is_some()); // PAYLOADSHA512ALT
+    assert!(pkg.header.find(5112).is_some()); // PAYLOADSIZE
+    assert!(pkg.header.find(5113).is_some()); // PAYLOADSIZEALT
+    assert_eq!(
+        pkg.header.get_strings(5116).unwrap().unwrap(),
+        ["text/plain", "application/octet-stream"] // MIMEDICT
+    );
+    assert_eq!(
+        pkg.header.get_i32s(5115).unwrap().unwrap(),
+        [0, 1, 1] // FILEMIMEINDEX
+    );
+    // Signature: region 62 + SHA256 (272) + zeroed RESERVED (999) last.
+    let sig_tags: Vec<u32> = pkg.signature.entries.iter().map(|e| e.tag).collect();
+    assert_eq!(sig_tags, [62, 272, 999]);
+    assert!(
+        pkg.signature
+            .get_bin(999)
+            .unwrap()
+            .unwrap()
+            .iter()
+            .all(|&b| b == 0)
+    );
+    let checks = pkg.verify_digests().unwrap();
+    assert!(!checks.is_empty());
+    assert!(checks.iter().all(|c| c.matches()), "{checks:?}");
+
+    let entries = pkg.payload_entries().unwrap();
+    assert_eq!(entries.len(), 3);
+    assert_eq!(entries[1].name, "usr/share/doc/v6demo/readme");
+    assert_eq!(entries[1].data, b"v6 required tags");
+
+    let uniq = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("archive_test_rpm_v6_{uniq}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rpm_path = dir.join("v6demo.rpm");
+    std::fs::write(&rpm_path, &bytes).unwrap();
+
+    // bsdtar (libarchive) extraction oracle; versions without
+    // stripped-cpio support may fail — tolerated.
+    if let Ok(result) = Command::new("bsdtar")
+        .args(["-xOf"])
+        .arg(&rpm_path)
+        .output()
+        && result.status.success()
+    {
+        assert!(
+            result
+                .stdout
+                .windows(b"v6 required tags".len())
+                .any(|w| w == b"v6 required tags"),
+            "bsdtar output missing v6 payload: {}",
+            String::from_utf8_lossy(&result.stdout)
+        );
+    }
+    // system rpm(8) query oracle; v6 support depends on the installed
+    // version — any outcome (including non-zero exit) is tolerated.
+    let _ = Command::new("rpm").args(["-qip"]).arg(&rpm_path).output();
+
+    std::fs::remove_dir_all(&dir).ok();
+}

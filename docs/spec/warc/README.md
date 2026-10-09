@@ -72,7 +72,7 @@
 | 34 | `WARC-Identified-Payload-Type` は well-defined payload を持つ record にのみ使用可 (payload 不明確な record では使用禁止) | WARC 1.1 §5 named fields | ✅ | warcinfo/metadata で禁止 (payload 定義のある response/resource/request/revisit/conversion/continuation は受理)。`accepts_identified_payload_type_on_payload_records`, `test_warc_identified_payload_type_needs_payload` |
 | 35 | warcinfo record の `Content-Type` は `application/warc-fields` 必須 | WARC 1.1 Clause 8 | ✅ | decode は missing/mismatch を `InvalidData`、encode も同値を強制 (未指定時は default emit)。Clause 8 は metadata record にも同一 shall を課すが、§6.5 が metadata の `Content-Type` を "may be used" と推奨に留める仕様内矛盾があるため metadata 側は未強制。`rejects_warcinfo_without_warc_fields_type`, `warcinfo_content_type_is_enforced`, `test_warc_rejects_warcinfo_wrong_content_type`, `test_warc_encoder_warcinfo_content_type` |
 
-| 36 | `WARC-Payload-Digest` にも同一の well-defined payload 制約 ("shall not be used on records without a well-defined payload") が課される | WARC 1.1 §5 named fields | ❌ | 未実装 — `warc-payload-digest` は `FORBIDDEN_FIELD_TYPES` に未登録で warcinfo/metadata 上でも受理される (#34 と同型要件。既存テスト `verifies_payload_digest_for_opaque_block` が metadata の digest 検証を前提とするため、強制化にはそのテスト設計の見直しが必要) |
+| 36 | `WARC-Payload-Digest` にも同一の well-defined payload 制約 ("shall not be used on records without a well-defined payload") が課される | WARC 1.1 §5 named fields | ✅ | warcinfo/metadata で禁止 (#34 と同型、`FORBIDDEN_FIELD_TYPES` 登録。digest 検証より先に constraint reject)。`rejects_payload_digest_on_metadata_and_warcinfo`, `rejects_field_forbidden_on_record_type`, `test_warc_payload_digest_needs_payload`, `verifies_payload_digest_for_opaque_block` (resource 化して digest 検証経路を維持) |
 
 ### CLI / fuzz 連携
 
