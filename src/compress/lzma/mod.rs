@@ -1,6 +1,7 @@
 //! LZMA compression and decompression core.
 //!
-//! Implements the shared LZMA algorithm used by lzip, xz, lrzip, and 7z-style paths.
+//! Implements the shared LZMA algorithm used by lzip, xz, lrzip, zip method 14,
+//! squashfs (LZMA1), erofs (MicroLZMA), and 7z-style paths.
 //!
 //! The default configuration matches lzip (`lc=3, lp=0, pb=2`), but the
 //! core can also decode and encode other valid property combinations.

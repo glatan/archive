@@ -77,7 +77,7 @@
 | 38 | F_CRC32_D / F_CRC32_C と F_ADLER32_D / F_ADLER32_C は排他 | lzop source | ✅ | デコーダーで対応 |
 | 39 | Decompressed output size 検証 (uncompressed_len と一致) | lzop block structure | ✅ | デコーダーで検証 |
 | 40 | 命令形式 `0 0 0 0 D D S S` の state==4 形式 (offset 2049-3072, len 3) | Linux kernel lzo.rst: Instruction encoding | ✅ | `test_m1_long_offset_state_4` (hand-built。エンコーダは M1 を発行しない intentional scope) |
-| 41 | lzop `version < 0x0940` の拒否 | lzop source | ✅ | `decode.rs:77`、`test_old_version_rejected` |
+| 41 | lzop `version < 0x0940` の拒否 | lzop source | ✅ | `decode.rs:93-96`、`test_old_version_rejected` |
 | 42 | bitstream version byte 17 (v1 / LZO-RLE) と v1 専用ゼロラン命令 | Linux kernel lzo.rst | ✅ | 先頭 17 + version byte (0/1) の versioned bitstream を受理 (version > 1 は `Error::Unsupported`)。v1 では M4 distance 0xbfff のゼロラン命令 (LZO-RLE) を decode。5 バイト未満の入力は先頭 17 を v0 命令バイトとして解釈。`test_v1_bitstream_version_byte`, `test_v1_zero_run_decode`, `test_v1_bitstream_short_stream_is_v0` |
 | 43 | F_MULTIPART (0x0400): メンバー連結 (各メンバーが magic + header + block list を持つ) | lzop source (`lzop.c` write_header が magic を part 毎に書く) | ✅ | メンバー境界で magic が続く限り逐次 decode、非 magic の trailing data は無視 (従来動作)。`test_decode_multipart_members` |
 | 44 | `decode_bounded` は出力上限を `Error::OutputLimitExceeded` で強制 (完全 decode 後の post-hoc 判定) | crate contract | ✅ | `test_decode_bounded_*` |

@@ -26,7 +26,7 @@
 | 10 | ランダマイズドフラグ (1bit) — 旧バージョン互換 | `compress.c` / `decompress.c` block header and selector format | ✅ | `test_decode_randomized_block_fixture`, `test_randomization_helper_roundtrip` |
 | 11 | オリジナルポインタ (BWT ptr, 24bit) | `compress.c` / `decompress.c` block header and selector format | ✅ | デコーダで範囲検証 |
 | 12 | 二段シンボルビットマップ (16bit グループマスク + 16bit/グループ) | `compress.c` / `decompress.c` block header and selector format | ✅ | `test_parse_symbol_map`, `test_symbol_map_roundtrip` |
-| 13 | n_in_use = 0 のエラー | `compress.c` / `decompress.c` block header and selector format | ✅ | デコーダ `decode.rs:193` |
+| 13 | n_in_use = 0 のエラー | `compress.c` / `decompress.c` block header and selector format | ✅ | デコーダ `decode.rs:196-197` |
 | 14 | ハフマンテーブル数 (3bit, 有効値 2-6) | `compress.c` / `decompress.c` block header and selector format | ✅ | デコーダで `2..=6` バリデーション |
 | 15 | セレクタ数 (15bit) | `compress.c` / `decompress.c` block header and selector format | ✅ | `test_invalid_selector_count` |
 | 16 | セレクタ上限 MAX_SELECTORS = 18002 (2 + 900000/50) | `compress.c` / `decompress.c` block header and selector format | ✅ | `test_invalid_selector_count` |

@@ -56,7 +56,7 @@
 これは現在の実装スコープ（current implementation scope）と外部ツールのフォーマット仕様差分に起因する。
 
 - `zpaq`
-  - crate 側は simplified archive layout を対象としており、system `zpaq` の journaling archive とは直接互換ではない
+  - JIDAC journaling archive は対応済み。system `zpaq` との相互運用は fuzz oracle (`ArchiveSpec::Zpaq`) と upstream 生成 fixture (`tests/fixtures/zpaq/`) で固定しており、`tests/integration/zpaq.rs` は crate 内 roundtrip / metadata 検証が対象
 - `7z`
   - system `7z` が生成する一部 archive metadata/property variant は未対応
   - 現在は `crate -> system 7z extract` 側を固定している
@@ -135,6 +135,9 @@
 | --- | --- |
 | 複数 record ストリーム decode (warcinfo/response/revisit) | `test_warc_decode_records` |
 | gzip 伸張経路経由の `.warc.gz` decode | `test_warc_gzip_members` |
+| `WARC-Profile` 検証 (revisit 必須・他型禁止・未知 URI は pass-through) | `test_warc_rejects_revisit_missing_profile`<br>`test_warc_rejects_profile_on_non_revisit`<br>`test_warc_accepts_revisit_with_known_profile` |
+| `WARC-Identified-Payload-Type` は payload 未定義の型 (warcinfo/metadata) で禁止 | `test_warc_identified_payload_type_needs_payload` |
+| warcinfo `Content-Type: application/warc-fields` 必須 (Clause 8) + encoder 側 enforcement | `test_warc_rejects_warcinfo_wrong_content_type`<br>`test_warc_encoder_warcinfo_content_type` |
 
 ### `brotli.rs`
 
@@ -324,6 +327,547 @@
 | frame layout / large literals | `test_zstd_multi_frame`<br>`test_zstd_encode_large_literals_roundtrip`<br>`test_zstd_encode_with_options_checksum_off_roundtrip`<br>`test_zstd_decode_skippable_frame_before_payload`<br>`test_zstd_decode_reader_with_skippable_frame_before_payload` |
 | dictionary coverage | `test_zstd_decode_with_dict_system`<br>`test_zstd_encode_with_dict_system_compat`<br>`test_zstd_train_dictionary_roundtrip`<br>`test_zstd_content_only_dictionary_roundtrip`<br>`test_zstd_decode_rejects_dictionary_mismatch_and_missing_dictionary` |
 | encoder analysis helpers | `test_zstd_encode_large_single_sequence_debug`<br>`test_zstd_encode_analyze_blocks`<br>`test_zstd_lz77_analyze`<br>`test_single_sequence_fse_minimal` |
+
+### `arc.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| arc encode decode roundtrip | `test_arc_encode_decode_roundtrip` |
+| arc multi entry roundtrip | `test_arc_multi_entry_roundtrip` |
+| arc rejects truncated | `test_arc_rejects_truncated` |
+| arc rejects compressed method | `test_arc_rejects_compressed_method` |
+| arc skips info control items | `test_arc_skips_info_control_items` |
+| arc method3 encode decode roundtrip | `test_arc_method3_encode_decode_roundtrip` |
+| arc method3 member | `test_arc_method3_member` |
+| arc method3 rejects bad crc | `test_arc_method3_rejects_bad_crc` |
+| arc method3 rejects malformed rle | `test_arc_method3_rejects_malformed_rle` |
+| arc method1 encode decode roundtrip | `test_arc_method1_encode_decode_roundtrip` |
+| arc method1 header layout | `test_arc_method1_header_layout` |
+| arc rejects unsupported encode method | `test_arc_rejects_unsupported_encode_method` |
+| arc method1 member | `test_arc_method1_member` |
+| arc method1 rejects bad crc | `test_arc_method1_rejects_bad_crc` |
+| arc rejects bad name | `test_arc_rejects_bad_name` |
+| arc decode crunched fixture | `test_arc_decode_crunched_fixture` |
+| arc decode squashed fixture | `test_arc_decode_squashed_fixture` |
+| arc compressed encode decode roundtrip | `test_arc_compressed_encode_decode_roundtrip` |
+| arc method5 6 7 edge roundtrip | `test_arc_method5_6_7_edge_roundtrip` |
+| arc method0a encode roundtrip | `test_arc_method0a_encode_roundtrip` |
+| arc encode extracted by oracle (system arc/nomarch/unar oracle) | `test_arc_encode_extracted_by_oracle` |
+| arc method5 6 7 decode | `test_arc_method5_6_7_decode` |
+| arc method0a decode | `test_arc_method0a_decode` |
+| arc method0b decode | `test_arc_method0b_decode` |
+| arc packed oracle crosscheck (system arc/nomarch/unar oracle) | `test_arc_packed_oracle_crosscheck` |
+| arc method0b encode roundtrip | `test_arc_method0b_encode_roundtrip` |
+
+### `arj.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| arj encode decode roundtrip | `test_arj_encode_decode_roundtrip` |
+| arj multi entry roundtrip | `test_arj_multi_entry_roundtrip` |
+| arj rejects truncated | `test_arj_rejects_truncated` |
+| arj rejects compressed method | `test_arj_rejects_compressed_method` |
+| arj 7z list interop (system 7z oracle) | `test_arj_7z_list_interop` |
+| arj compressed methods | `test_arj_compressed_methods` |
+| arj garbled | `test_arj_garbled` |
+| arj multi volume | `test_arj_multi_volume` |
+| arj multi volume three way | `test_arj_multi_volume_three_way` |
+| arj oracle extract | `test_arj_oracle_extract` |
+| arj method4 encode roundtrip | `test_arj_method4_encode_roundtrip` |
+| arj method4 incompressible stored | `test_arj_method4_incompressible_stored` |
+| arj finish parts roundtrip | `test_arj_finish_parts_roundtrip` |
+| arj finish parts mixed entries | `test_arj_finish_parts_mixed_entries` |
+| arj finish parts method4 | `test_arj_finish_parts_method4` |
+| arj finish parts single volume | `test_arj_finish_parts_single_volume` |
+| arj finish parts rejects tiny volume | `test_arj_finish_parts_rejects_tiny_volume` |
+| arj st1 encode roundtrip | `test_arj_st1_encode_roundtrip` |
+| arj st1 incompressible stored | `test_arj_st1_incompressible_stored` |
+| arj encoder rejects unsupported method | `test_arj_encoder_rejects_unsupported_method` |
+| arj encoder filename length boundary | `test_arj_encoder_filename_length_boundary` |
+| arj garbled write roundtrip | `test_arj_garbled_write_roundtrip` |
+| arj volume paths discovery roundtrip | `test_arj_volume_paths_discovery_roundtrip` |
+
+### `ascii85.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| ascii85 adobe roundtrip | `test_ascii85_adobe_roundtrip` |
+| ascii85 python a85decode compat (system python3 oracle) | `test_ascii85_python_a85decode_compat` |
+| ascii85 python a85encode decode (system python3 oracle) | `test_ascii85_python_a85encode_decode` |
+| ascii85 rfc1924 python b85 compat (system python3 oracle) | `test_ascii85_rfc1924_python_b85_compat` |
+
+### `binhex.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| binhex roundtrip | `test_binhex_roundtrip` |
+| binhex crc matches python crc hqx (system python3 oracle) | `test_binhex_crc_matches_python_crc_hqx` |
+| binhex decodes reference encoder (system python3 oracle) | `test_binhex_decodes_reference_encoder` |
+
+### `cmpsc.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| dictionaries | `test_dictionaries` |
+
+### `cramfs.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| cramfs decode mkfs image | `test_cramfs_decode_mkfs_image` |
+| cramfs fsid crc mismatch is informational | `test_cramfs_fsid_crc_mismatch_is_informational` |
+| cramfs fsck extract matches decode (system fsck.cramfs oracle) | `test_cramfs_fsck_extract_matches_decode` |
+| cramfs encode fsck extract (system fsck.cramfs oracle) | `test_cramfs_encode_fsck_extract` |
+| cramfs mkfs image reencode roundtrip | `test_cramfs_mkfs_image_reencode_roundtrip` |
+
+### `crx3.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| crx3 python oracle | `test_crx3_python_oracle` |
+| crx3 rejects non zip tail | `test_crx3_rejects_non_zip_tail` |
+
+### `erofs.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| erofs mkfs image layout | `test_erofs_mkfs_image_layout` |
+| erofs mkfs image contents | `test_erofs_mkfs_image_contents` |
+| erofs mkfs image superblock | `test_erofs_mkfs_image_superblock` |
+| erofs codec trait | `test_erofs_codec_trait` |
+| erofs rejects truncation | `test_erofs_rejects_truncation` |
+| erofs rejects bad superblock checksum | `test_erofs_rejects_bad_superblock_checksum` |
+| erofs fsck extract matches decode (system fsck.erofs oracle) | `test_erofs_fsck_extract_matches_decode` |
+| erofs compressed lz4hc compact | `test_erofs_compressed_lz4hc_compact` |
+| erofs compressed lz4 bigpcluster | `test_erofs_compressed_lz4_bigpcluster` |
+| erofs compressed lz4 full index | `test_erofs_compressed_lz4_full_index` |
+| erofs compressed lz4 extents | `test_erofs_compressed_lz4_extents` |
+| erofs compressed microlzma | `test_erofs_compressed_microlzma` |
+| erofs compressed multi algorithm | `test_erofs_compressed_multi_algorithm` |
+| erofs ztailpacking | `test_erofs_ztailpacking` |
+| erofs fragments | `test_erofs_fragments` |
+| erofs all fragments | `test_erofs_all_fragments` |
+| erofs ztailpacking fragments | `test_erofs_ztailpacking_fragments` |
+| erofs encode decode roundtrip | `test_erofs_encode_decode_roundtrip` |
+| erofs mkfs image reencode roundtrip | `test_erofs_mkfs_image_reencode_roundtrip` |
+| erofs encode fsck extract (system fsck.erofs oracle) | `test_erofs_encode_fsck_extract` |
+
+### `iso9660.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| iso9660 plain image | `test_iso9660_plain_image` |
+| iso9660 rockridge image | `test_iso9660_rockridge_image` |
+| iso9660 joliet image | `test_iso9660_joliet_image` |
+| iso9660 path table | `test_iso9660_path_table` |
+| iso9660 pvd metadata | `test_iso9660_pvd_metadata` |
+| iso9660 codec trait | `test_iso9660_codec_trait` |
+| iso9660 rejects truncated | `test_iso9660_rejects_truncated` |
+| iso9660 rejects corrupt | `test_iso9660_rejects_corrupt` |
+| iso9660 eltorito image | `test_iso9660_eltorito_image` |
+| iso9660 encoder roundtrip | `test_iso9660_encoder_roundtrip` |
+| iso9660 encoder rockridge | `test_iso9660_encoder_rockridge` |
+| iso9660 encoder trait | `test_iso9660_encoder_trait` |
+| iso9660 encoder bsdtar oracle (system bsdtar oracle) | `test_iso9660_encoder_bsdtar_oracle` |
+
+### `lha.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| lha encode decode roundtrip | `test_lha_encode_decode_roundtrip` |
+| lha multi entry roundtrip | `test_lha_multi_entry_roundtrip` |
+| lha rejects truncated | `test_lha_rejects_truncated` |
+| lha rejects compressed method | `test_lha_rejects_compressed_method` |
+| lha 7z list interop (system 7z oracle) | `test_lha_7z_list_interop` |
+| lha bsdtar list interop (system bsdtar oracle) | `test_lha_bsdtar_list_interop` |
+| lha level1 roundtrip | `test_lha_level1_roundtrip` |
+| lha level2 roundtrip | `test_lha_level2_roundtrip` |
+| lha level1 7z interop (system 7z oracle) | `test_lha_level1_7z_interop` |
+| lha level1 bsdtar interop (system bsdtar oracle) | `test_lha_level1_bsdtar_interop` |
+| lha level2 7z interop (system 7z oracle) | `test_lha_level2_7z_interop` |
+| lha level3 roundtrip | `test_lha_level3_roundtrip` |
+| lha level3 7z interop (system 7z oracle) | `test_lha_level3_7z_interop` |
+| lha level3 bsdtar interop (system bsdtar oracle) | `test_lha_level3_bsdtar_interop` |
+| lha level2 bsdtar interop (system bsdtar oracle) | `test_lha_level2_bsdtar_interop` |
+| lha compressed method fixtures | `test_lha_compressed_method_fixtures` |
+| lha legacymethod rejection | `test_lha_legacymethod_rejection` |
+| lha level3 fixtures | `test_lha_level3_fixtures` |
+| lha pmarc multi entry fixture | `test_lha_pmarc_multi_entry_fixture` |
+| lha level3 dir | `test_lha_level3_dir` |
+| lha fixture oracle extract | `test_lha_fixture_oracle_extract` |
+| lha compressed method roundtrip | `test_lha_compressed_method_roundtrip` |
+| lha compressed method stored fallback | `test_lha_compressed_method_stored_fallback` |
+| lha lh5 bsdtar interop (system bsdtar oracle) | `test_lha_lh5_bsdtar_interop` |
+| lha lzs lz5 bsdtar interop (system bsdtar oracle) | `test_lha_lzs_lz5_bsdtar_interop` |
+| lha pmarc oracle interop | `test_lha_pmarc_oracle_interop` |
+
+### `macbinary.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| macbinary roundtrip | `test_macbinary_roundtrip` |
+| macbinary python reference decodes ours (system python3 oracle) | `test_macbinary_python_reference_decodes_ours` |
+| macbinary decodes python reference output (system python3 oracle) | `test_macbinary_decodes_python_reference_output` |
+
+### `mscfb.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| mscfb roundtrip via python reference (system python3 oracle) | `test_mscfb_roundtrip_via_python_reference` |
+| mscfb rejects truncated fat chain (system python3 oracle) | `test_mscfb_rejects_truncated_fat_chain` |
+| mscfb encode python olefile oracle (system python3 oracle) | `test_mscfb_encode_python_olefile_oracle` |
+
+### `pea.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| pea python oracle | `test_pea_python_oracle` |
+| pea codec trait | `test_pea_codec_trait` |
+| pea rejects truncated | `test_pea_rejects_truncated` |
+| pea encode python oracle | `test_pea_encode_python_oracle` |
+| pea encode stored python oracle | `test_pea_encode_stored_python_oracle` |
+| pea archive encoder trait | `test_pea_archive_encoder_trait` |
+
+### `romfs.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| romfs genromfs image layout | `test_romfs_genromfs_image_layout` |
+| romfs genromfs image contents | `test_romfs_genromfs_image_contents` |
+| romfs codec trait | `test_romfs_codec_trait` |
+| romfs rejects truncated image | `test_romfs_rejects_truncated_image` |
+| romfs rejects corrupt checksum | `test_romfs_rejects_corrupt_checksum` |
+| romfs encoder roundtrip | `test_romfs_encoder_roundtrip` |
+| romfs encoder trait | `test_romfs_encoder_trait` |
+| romfs encoder fsck romfs oracle (system fsck.romfs oracle) | `test_romfs_encoder_fsck_romfs_oracle` |
+
+### `uuencode.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| uuencode roundtrip | `test_uuencode_roundtrip` |
+| uuencode python b2a uu decode (system python3 oracle) | `test_uuencode_python_b2a_uu_decode` |
+| uuencode python a2b uu decodes ours (system python3 oracle) | `test_uuencode_python_a2b_uu_decodes_ours` |
+| uuencode base64 roundtrip | `test_uuencode_base64_roundtrip` |
+| uuencode base64 posix doc | `test_uuencode_base64_posix_doc` |
+| uuencode base64 python decode (system python3 oracle) | `test_uuencode_base64_python_decode` |
+| uuencode base64 python decodes ours (system python3 oracle) | `test_uuencode_base64_python_decodes_ours` |
+
+### `yenc.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| yenc roundtrip | `test_yenc_roundtrip` |
+| yenc multipart roundtrip | `test_yenc_multipart_roundtrip` |
+| yenc python reference decodes ours (system python3 oracle) | `test_yenc_python_reference_decodes_ours` |
+| yenc decodes python reference output (system python3 oracle) | `test_yenc_decodes_python_reference_output` |
+
+### `zstd_seekable.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| zstd seekable decode reference text | `test_zstd_seekable_decode_reference_text` |
+| zstd seekable decode reference binary | `test_zstd_seekable_decode_reference_binary` |
+| zstd seekable range reference | `test_zstd_seekable_range_reference` |
+| zstd seekable roundtrip | `test_zstd_seekable_roundtrip` |
+| zstd seekable plain zstd decodes | `test_zstd_seekable_plain_zstd_decodes` |
+| zstd seekable rejects plain zstd | `test_zstd_seekable_rejects_plain_zstd` |
+
+### `fastlz.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| fastlz reference vector l1 text | `fastlz_reference_vector_l1_text` |
+| fastlz reference vector l1 run | `fastlz_reference_vector_l1_run` |
+| fastlz reference vector l2 marker and chain | `fastlz_reference_vector_l2_marker_and_chain` |
+| fastlz reference vector l2 far match | `fastlz_reference_vector_l2_far_match` |
+| fastlz hand built segments | `fastlz_hand_built_segments` |
+| fastlz roundtrips | `fastlz_roundtrips` |
+| fastlz rejects malformed | `fastlz_rejects_malformed` |
+
+### `git_pack.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| decode real pack | `decode_real_pack` |
+| decode real idx | `decode_real_idx` |
+| encode roundtrip | `encode_roundtrip` |
+| encode roundtrip with index | `encode_roundtrip_with_index` |
+| bad signature | `bad_signature` |
+| reject version4 | `reject_version4` |
+| truncated | `truncated` |
+| bad pack checksum | `bad_pack_checksum` |
+| bad zlib stream | `bad_zlib_stream` |
+| decode ref delta pack | `decode_ref_delta_pack` |
+| apply delta copy insert | `apply_delta_copy_insert` |
+| apply delta errors | `apply_delta_errors` |
+| ofs delta pack accepted by git index pack (system git oracle) | `ofs_delta_pack_accepted_by_git_index_pack` |
+| ref delta pack accepted by git index pack (system git oracle) | `ref_delta_pack_accepted_by_git_index_pack` |
+| v3 pack accepted by git index pack (system git oracle) | `v3_pack_accepted_by_git_index_pack` |
+| v1 idx accepted by git verify pack (system git oracle) | `v1_idx_accepted_by_git_verify_pack` |
+
+### `lzf.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| lzf hand built literal run | `lzf_hand_built_literal_run` |
+| lzf hand built matches | `lzf_hand_built_matches` |
+| lzf roundtrip text and binary | `lzf_roundtrip_text_and_binary` |
+| lzf rejects malformed | `lzf_rejects_malformed` |
+
+### `lzrw1.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| lzrw1 reference vector fox | `lzrw1_reference_vector_fox` |
+| lzrw1 reference vector a300 | `lzrw1_reference_vector_a300` |
+| lzrw1 reference vector startstr | `lzrw1_reference_vector_startstr` |
+| lzrw1 reference vector binary | `lzrw1_reference_vector_binary` |
+| lzrw1 reference vector mixed | `lzrw1_reference_vector_mixed` |
+| lzrw1 reference vector noise | `lzrw1_reference_vector_noise` |
+| lzrw1 roundtrips | `lzrw1_roundtrips` |
+| lzrw1 rejects malformed | `lzrw1_rejects_malformed` |
+
+### `lzrw1a.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| lzrw1a reference vector verbatim | `lzrw1a_reference_vector_verbatim` |
+| lzrw1a reference vector compressed | `lzrw1a_reference_vector_compressed` |
+| lzrw1a reference vector max offset | `lzrw1a_reference_vector_max_offset` |
+| lzrw1a hand built | `lzrw1a_hand_built` |
+| lzrw1a roundtrips | `lzrw1a_roundtrips` |
+| lzrw1a rejects malformed | `lzrw1a_rejects_malformed` |
+
+### `lzrw2.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| lzrw2 reference vector fox | `lzrw2_reference_vector_fox` |
+| lzrw2 reference vector a300 | `lzrw2_reference_vector_a300` |
+| lzrw2 reference vector startstr | `lzrw2_reference_vector_startstr` |
+| lzrw2 reference vector binary | `lzrw2_reference_vector_binary` |
+| lzrw2 reference vector mixed | `lzrw2_reference_vector_mixed` |
+| lzrw2 reference vector noise | `lzrw2_reference_vector_noise` |
+| lzrw2 roundtrips | `lzrw2_roundtrips` |
+| lzrw2 rejects malformed | `lzrw2_rejects_malformed` |
+
+### `lzrw3.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| lzrw3 reference vector fox | `lzrw3_reference_vector_fox` |
+| lzrw3 reference vector a300 | `lzrw3_reference_vector_a300` |
+| lzrw3 reference vector startstr | `lzrw3_reference_vector_startstr` |
+| lzrw3 reference vector binary | `lzrw3_reference_vector_binary` |
+| lzrw3 reference vector mixed | `lzrw3_reference_vector_mixed` |
+| lzrw3 reference vector noise | `lzrw3_reference_vector_noise` |
+| lzrw3 roundtrips | `lzrw3_roundtrips` |
+| lzrw3 rejects malformed | `lzrw3_rejects_malformed` |
+
+### `lzrw3a.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| lzrw3a reference vector fox | `lzrw3a_reference_vector_fox` |
+| lzrw3a reference vector a300 | `lzrw3a_reference_vector_a300` |
+| lzrw3a reference vector startstr | `lzrw3a_reference_vector_startstr` |
+| lzrw3a reference vector binary | `lzrw3a_reference_vector_binary` |
+| lzrw3a reference vector mixed | `lzrw3a_reference_vector_mixed` |
+| lzrw3a reference vector noise | `lzrw3a_reference_vector_noise` |
+| lzrw3a roundtrips | `lzrw3a_roundtrips` |
+| lzrw3a rejects malformed | `lzrw3a_rejects_malformed` |
+
+### `lzs.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| decode fixtures | `decode_fixtures` |
+| encode decode roundtrip | `encode_decode_roundtrip` |
+| window span roundtrip | `window_span_roundtrip` |
+| truncated payload rejected | `truncated_payload_rejected` |
+
+### `lzsa.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| lzsa1 stream reference vector | `lzsa1_stream_reference_vector` |
+| lzsa2 stream reference vector | `lzsa2_stream_reference_vector` |
+| lzsa1 raw block reference vector | `lzsa1_raw_block_reference_vector` |
+| lzsa2 raw block reference vector | `lzsa2_raw_block_reference_vector` |
+| decode bounded enforces limit | `decode_bounded_enforces_limit` |
+| encode roundtrips and redecodes | `encode_roundtrips_and_redecodes` |
+| multi frame roundtrip | `multi_frame_roundtrip` |
+| lzsa1 block with dictionary | `lzsa1_block_with_dictionary` |
+| lzsa2 block with dictionary | `lzsa2_block_with_dictionary` |
+| lzsa stream with dictionary | `lzsa_stream_with_dictionary` |
+| lzsa1 raw block backwards reference vector | `lzsa1_raw_block_backwards_reference_vector` |
+| lzsa2 raw block backwards reference vector | `lzsa2_raw_block_backwards_reference_vector` |
+| backwards block byte reversal property | `backwards_block_byte_reversal_property` |
+| backwards raw block roundtrip | `backwards_raw_block_roundtrip` |
+| backwards block with dictionary | `backwards_block_with_dictionary` |
+
+### `lzxd.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| lzxd verbatim literals vector | `lzxd_verbatim_literals_vector` |
+| lzxd reference data vector | `lzxd_reference_data_vector` |
+| lzxd mixed blocks vector | `lzxd_mixed_blocks_vector` |
+| lzxd generated matches and repeats | `lzxd_generated_matches_and_repeats` |
+| lzxd generated extra lengths | `lzxd_generated_extra_lengths` |
+| lzxd generated aligned block | `lzxd_generated_aligned_block` |
+| lzxd generated multichunk span | `lzxd_generated_multichunk_span` |
+| lzxd generated e8 | `lzxd_generated_e8` |
+| lzxd decode all matches decode | `lzxd_decode_all_matches_decode` |
+| lzxd rejects invalid | `lzxd_rejects_invalid` |
+| lzxd encode decode roundtrip | `lzxd_encode_decode_roundtrip` |
+| lzxd rejects match crossing chunk boundary | `lzxd_rejects_match_crossing_chunk_boundary` |
+
+### `mppc.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| decode single packet fixtures | `decode_single_packet_fixtures` |
+| decode multi packet streams | `decode_multi_packet_streams` |
+| encode decode roundtrip | `encode_decode_roundtrip` |
+| oversized input rejected | `oversized_input_rejected` |
+| decode rdp5 external fixtures | `decode_rdp5_external_fixtures` |
+| decode rdp5 stream fixture | `decode_rdp5_stream_fixture` |
+| rdp5 encode decode roundtrip | `rdp5_encode_decode_roundtrip` |
+| rdp4 encode decode roundtrip | `rdp4_encode_decode_roundtrip` |
+| rdp5 oversized input rejected | `rdp5_oversized_input_rejected` |
+| rdp6 rejected | `rdp6_rejected` |
+
+### `vcdiff.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| vcdiff xdelta3 source window | `vcdiff_xdelta3_source_window` |
+| vcdiff xdelta3 no source | `vcdiff_xdelta3_no_source` |
+| vcdiff xdelta3 near same caches | `vcdiff_xdelta3_near_same_caches` |
+| vcdiff roundtrips | `vcdiff_roundtrips` |
+| vcdiff rejects malformed | `vcdiff_rejects_malformed` |
+| vcdiff rejects bad checksum | `vcdiff_rejects_bad_checksum` |
+
+### `xar.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| decode real | `decode_real` |
+| decode md5 checksums | `decode_md5_checksums` |
+| decode stored no checksum | `decode_stored_no_checksum` |
+| decode bzip2 encoding | `decode_bzip2_encoding` |
+| decode xz and lzma encodings | `decode_xz_and_lzma_encodings` |
+| reject corrupt encoded data | `reject_corrupt_encoded_data` |
+| encode roundtrip | `encode_roundtrip` |
+| archived checksum catches tampered heap | `archived_checksum_catches_tampered_heap` |
+| archived checksum verified on valid archive | `archived_checksum_verified_on_valid_archive` |
+| encode xml escape | `encode_xml_escape` |
+| bad magic | `bad_magic` |
+| truncated | `truncated` |
+| bad toc checksum | `bad_toc_checksum` |
+| bad extracted checksum | `bad_extracted_checksum` |
+| bad version rejected | `bad_version_rejected` |
+| xar encoded data unar oracle (system unar oracle) | `xar_encoded_data_unar_oracle` |
+
+### `xca.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| xpress spec example literals | `xpress_spec_example_literals` |
+| xpress spec example match | `xpress_spec_example_match` |
+| xpress windows vector mixed | `xpress_windows_vector_mixed` |
+| xpress windows vector shared nibble | `xpress_windows_vector_shared_nibble` |
+| xpress windows vector flag overflow | `xpress_windows_vector_flag_overflow` |
+| xpress windows vector empty tail flags | `xpress_windows_vector_empty_tail_flags` |
+| xpress huffman spec example literals | `xpress_huffman_spec_example_literals` |
+| xpress huffman spec example match | `xpress_huffman_spec_example_match` |
+| lznt1 stored chunk | `lznt1_stored_chunk` |
+| lznt1 compressed chunk literals | `lznt1_compressed_chunk_literals` |
+| lznt1 compressed chunk match | `lznt1_compressed_chunk_match` |
+| xca roundtrips | `xca_roundtrips` |
+
+### `zx0.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| zx0 reference vector text | `zx0_reference_vector_text` |
+| zx0 reference vector rep offset | `zx0_reference_vector_rep_offset` |
+| zx0 reference vector long match | `zx0_reference_vector_long_match` |
+| zx0 roundtrips | `zx0_roundtrips` |
+| zx0 rejects malformed | `zx0_rejects_malformed` |
+| zx0 prefix history | `zx0_prefix_history` |
+| zx0 classic v1 stream | `zx0_classic_v1_stream` |
+| zx0 backwards reference vectors | `zx0_backwards_reference_vectors` |
+| zx0 backwards suffix history | `zx0_backwards_suffix_history` |
+| zx0 backwards roundtrips | `zx0_backwards_roundtrips` |
+| zx0 backwards suffix roundtrips | `zx0_backwards_suffix_roundtrips` |
+| zx0 backwards rejects malformed | `zx0_backwards_rejects_malformed` |
+| zx0 backwards empty | `zx0_backwards_empty` |
+
+### `zx1.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| zx1 reference vector text | `zx1_reference_vector_text` |
+| zx1 reference vector rep offset | `zx1_reference_vector_rep_offset` |
+| zx1 reference vector long match | `zx1_reference_vector_long_match` |
+| zx1 reference vector mixed | `zx1_reference_vector_mixed` |
+| zx1 reference vector far offset | `zx1_reference_vector_far_offset` |
+| zx1 roundtrips | `zx1_roundtrips` |
+| zx1 rejects malformed | `zx1_rejects_malformed` |
+| zx1 prefix history | `zx1_prefix_history` |
+| zx1 backwards reference vector text | `zx1_backwards_reference_vector_text` |
+| zx1 backwards reference vector rep offset | `zx1_backwards_reference_vector_rep_offset` |
+| zx1 backwards reference vector long match | `zx1_backwards_reference_vector_long_match` |
+| zx1 backwards reference vector suffix | `zx1_backwards_reference_vector_suffix` |
+| zx1 backwards roundtrips | `zx1_backwards_roundtrips` |
+| zx1 backwards suffix roundtrips | `zx1_backwards_suffix_roundtrips` |
+| zx1 backwards rejects malformed | `zx1_backwards_rejects_malformed` |
+
+### `zx2.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| zx2 reference vector text | `zx2_reference_vector_text` |
+| zx2 reference vector rep offset | `zx2_reference_vector_rep_offset` |
+| zx2 reference vector long match | `zx2_reference_vector_long_match` |
+| zx2 reference vector mixed | `zx2_reference_vector_mixed` |
+| zx2 reference vector far offset | `zx2_reference_vector_far_offset` |
+| zx2 roundtrips | `zx2_roundtrips` |
+| zx2 rejects malformed | `zx2_rejects_malformed` |
+| zx2 no default offset | `zx2_no_default_offset` |
+| zx2 no length increment | `zx2_no_length_increment` |
+| zx2 prefix history | `zx2_prefix_history` |
+| zx2 variant encode roundtrips | `zx2_variant_encode_roundtrips` |
+| zx2b reference vector text | `zx2b_reference_vector_text` |
+| zx2b reference vector rep offset | `zx2b_reference_vector_rep_offset` |
+| zx2b reference vector long match | `zx2b_reference_vector_long_match` |
+| zx2b variant vectors | `zx2b_variant_vectors` |
+| zx2b suffix vector | `zx2b_suffix_vector` |
+| zx2b roundtrips | `zx2b_roundtrips` |
+| zx2b rejects malformed | `zx2b_rejects_malformed` |
+
+### `zx5.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| zx5 reference vector text | `zx5_reference_vector_text` |
+| zx5 reference vector rep offset | `zx5_reference_vector_rep_offset` |
+| zx5 reference vector long match | `zx5_reference_vector_long_match` |
+| zx5 reference vector mixed | `zx5_reference_vector_mixed` |
+| zx5 reference vector alt offsets | `zx5_reference_vector_alt_offsets` |
+| zx5 roundtrips | `zx5_roundtrips` |
+| zx5 rejects malformed | `zx5_rejects_malformed` |
+| zx5 prefix history | `zx5_prefix_history` |
+| zx5 classic v1 stream | `zx5_classic_v1_stream` |
+| zx5b reference vector text | `zx5b_reference_vector_text` |
+| zx5b reference vector rep offset | `zx5b_reference_vector_rep_offset` |
+| zx5b reference vector long match | `zx5b_reference_vector_long_match` |
+| zx5b reference vector suffix | `zx5b_reference_vector_suffix` |
+| zx5b roundtrips | `zx5b_roundtrips` |
+| zx5b rejects malformed | `zx5b_rejects_malformed` |
 
 ## Related files
 

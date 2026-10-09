@@ -43,7 +43,6 @@
 | 31 | 65536バイト → 複数ブロック分割 | RFC 1951 §3.2 | ✅ | `test_stored_block_multi` |
 | 32 | LENGTH_BASE/LENGTH_EXTRA RFC 1951 仕様値照合 | RFC 1951 §3.2 | ✅ | `test_length_base_matches_rfc1951` |
 | 33 | DISTANCE_BASE/DISTANCE_EXTRA RFC 1951 仕様値照合 | RFC 1951 §3.2 | ✅ | `test_distance_base_matches_rfc1951` |
-
 | 34 | 動的ハフマンの直接デコードテスト | RFC 1951 §3.2.7 | ✅ | `test_dynamic_huffman_direct` (手動構築 BTYPE=10 ブロック) |
 | 35 | distance=1 自己参照コピー (RLEパターン) | RFC 1951 §3.2.5 | ✅ | `test_distance_one_self_copy` |
 | 36 | 複数ブロック (BFINAL=0→1) | RFC 1951 §3.2.3 | ✅ | `test_multiple_blocks` |

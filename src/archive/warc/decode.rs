@@ -18,7 +18,11 @@
 //! Per-record, the field-usage constraints of WARC 1.1 "named fields"
 //! are enforced for the eight defined record types (e.g.
 //! `WARC-Filename` is `warcinfo`-only, `WARC-Target-URI` is
-//! required on content records and forbidden on `warcinfo`), and
+//! required on content records and forbidden on `warcinfo`,
+//! `WARC-Profile` is `revisit`-only and mandatory there, and
+//! `WARC-Identified-Payload-Type` is forbidden on record types
+//! without a well-defined payload). `warcinfo` records must carry
+//! `Content-Type: application/warc-fields` (Clause 8), and
 //! Clause 7 record segmentation is validated: `continuation` records
 //! must carry `WARC-Segment-Origin-ID` plus a
 //! `WARC-Segment-Number` continuing the series by exactly one, and a
@@ -313,12 +317,24 @@ const FORBIDDEN_FIELD_TYPES: &[(&str, &[&str])] = &[
     // WARC-Target-URI: "A 'warcinfo' record shall not have a
     // WARC-Target-URI field".
     ("warc-target-uri", &["warcinfo"]),
+    // WARC-Identified-Payload-Type: "may be used on WARC records with
+    // a well-defined payload and shall not be used on records without
+    // a well-defined payload". Payloads are defined for 'response',
+    // 'resource', 'request', 'revisit' (per its WARC-Profile),
+    // 'conversion' ("the payload is defined as the record block"), and
+    // 'continuation' segments (Annex B.8 carries the field on one).
+    // 'warcinfo' and 'metadata' define no payload.
+    ("warc-identified-payload-type", &["warcinfo", "metadata"]),
 ];
 
 /// Fields restricted to a single record type ("shall not be used for
 /// other record types" / "shall not be used elsewhere").
 const SINGLE_TYPE_FIELDS: &[(&str, &str)] = &[
     ("warc-filename", "warcinfo"),
+    // WARC-Profile is "mandatory on 'revisit' type records and
+    // undefined for other record types" (the mandatory half is
+    // enforced in `check_field_constraints`).
+    ("warc-profile", "revisit"),
     ("warc-segment-origin-id", "continuation"),
     ("warc-segment-total-length", "continuation"),
 ];
@@ -366,6 +382,26 @@ fn check_field_constraints(
     }
     if type_is(record_type, TARGET_URI_TYPES) && !fields.contains_key("warc-target-uri") {
         return Err(Error::InvalidData("warc: missing WARC-Target-URI"));
+    }
+    // 'revisit': "A 'revisit' record shall contain a WARC-Profile
+    // field". An unrecognized profile URI is accepted but never
+    // interpreted ("a reader which does not recognize the profile URI
+    // shall not attempt to interpret the enclosing record") — the
+    // record is passed through and this decoder never interprets
+    // record blocks anyway.
+    if record_type.eq_ignore_ascii_case("revisit") && !fields.contains_key("warc-profile") {
+        return Err(Error::InvalidData("warc: revisit missing WARC-Profile"));
+    }
+    // Clause 8: "The MIME type of warcinfo records ... shall be
+    // application/warc-fields".
+    if record_type.eq_ignore_ascii_case("warcinfo")
+        && !fields
+            .get("content-type")
+            .is_some_and(|v| super::is_warc_fields_type(v))
+    {
+        return Err(Error::InvalidData(
+            "warc: warcinfo Content-Type must be application/warc-fields",
+        ));
     }
     Ok(())
 }
@@ -751,7 +787,14 @@ mod tests {
         if let Some(u) = uri {
             r.extend_from_slice(format!("WARC-Target-URI: {u}\r\n").as_bytes());
         }
-        r.extend_from_slice(b"Content-Type: text/plain\r\n");
+        // 'warcinfo' requires Content-Type: application/warc-fields
+        // (Clause 8).
+        let ct = if rtype == "warcinfo" {
+            "application/warc-fields"
+        } else {
+            "text/plain"
+        };
+        r.extend_from_slice(format!("Content-Type: {ct}\r\n").as_bytes());
         r.extend_from_slice(format!("Content-Length: {}\r\n", block.len()).as_bytes());
         r.extend_from_slice(b"\r\n");
         r.extend_from_slice(block);
@@ -1200,6 +1243,7 @@ mod tests {
             "revisit",
             &[
                 "WARC-Target-URI: http://e/",
+                "WARC-Profile: http://netpreserve.org/warc/1.1/revisit/identical-payload-digest",
                 "Content-Type: text/plain",
                 field.as_str(),
             ],
@@ -1248,6 +1292,17 @@ mod tests {
             "response" | "resource" | "request" | "revisit" | "conversion" | "continuation"
         ) {
             lines.push("WARC-Target-URI: http://e/".to_string());
+        }
+        if rtype == "warcinfo" {
+            // Clause 8 mandatory content type.
+            lines.push("Content-Type: application/warc-fields".to_string());
+        }
+        if rtype == "revisit" {
+            // Mandatory WARC-Profile (§5 named fields / §6 revisit).
+            lines.push(
+                "WARC-Profile: http://netpreserve.org/warc/1.1/revisit/identical-payload-digest"
+                    .to_string(),
+            );
         }
         if rtype == "continuation" {
             // Joins the series originated by record_lines()
@@ -1309,6 +1364,24 @@ mod tests {
             ),
             ("WARC-Warcinfo-ID: <urn:x:w>", &["warcinfo"]),
             ("WARC-Target-URI: http://e/", &["warcinfo"]),
+            // WARC-Identified-Payload-Type: no well-defined payload.
+            (
+                "WARC-Identified-Payload-Type: image/jpeg",
+                &["warcinfo", "metadata"],
+            ),
+            // WARC-Profile: undefined outside 'revisit' records.
+            (
+                "WARC-Profile: http://netpreserve.org/warc/1.1/revisit/server-not-modified",
+                &[
+                    "warcinfo",
+                    "response",
+                    "resource",
+                    "request",
+                    "metadata",
+                    "conversion",
+                    "continuation",
+                ],
+            ),
             (
                 "WARC-Filename: a.warc",
                 &[
@@ -1430,6 +1503,76 @@ mod tests {
                 "accepted {t} without WARC-Target-URI"
             );
         }
+    }
+
+    #[test]
+    fn rejects_revisit_without_profile() {
+        // WARC-Profile is mandatory on 'revisit' records (§5 named
+        // fields / §6 revisit).
+        let data = record_lines("revisit", &["WARC-Target-URI: http://e/"], b"b");
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn accepts_revisit_with_profile() {
+        // Both profile URIs defined by WARC 1.1 §6 'revisit', plus an
+        // unrecognized URI that passes through uninterpreted (a reader
+        // "shall not attempt to interpret" it; record blocks are never
+        // interpreted here).
+        for profile in [
+            "http://netpreserve.org/warc/1.1/revisit/identical-payload-digest",
+            "http://netpreserve.org/warc/1.1/revisit/server-not-modified",
+            "http://example.org/unknown-profile",
+        ] {
+            let field = format!("WARC-Profile: {profile}");
+            let data = record_lines(
+                "revisit",
+                &["WARC-Target-URI: http://e/", field.as_str()],
+                b"b",
+            );
+            assert!(decode(&data).is_ok(), "rejected profile {profile}");
+        }
+    }
+
+    #[test]
+    fn rejects_warcinfo_without_warc_fields_type() {
+        // Clause 8: the MIME type of warcinfo records shall be
+        // application/warc-fields. Missing Content-Type.
+        let data = record_lines("warcinfo", &[], b"f: v");
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
+        // A different Content-Type.
+        let data = record_lines("warcinfo", &["Content-Type: text/plain"], b"f: v");
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
+        // Parameters and case variation keep the same media type.
+        let data = record_lines(
+            "warcinfo",
+            &["Content-Type: Application/WARC-Fields; charset=utf-8"],
+            b"f: v",
+        );
+        assert!(decode(&data).is_ok());
+    }
+
+    #[test]
+    fn accepts_identified_payload_type_on_payload_records() {
+        // Well-defined payload: response/resource/request (entity-body
+        // or block), conversion (block), revisit (per profile), and
+        // continuation (logical record's payload; Annex B.8 example).
+        for t in ["response", "resource", "request", "conversion"] {
+            let data = valid_record(t, &["WARC-Identified-Payload-Type: text/plain"], b"b");
+            assert!(decode(&data).is_ok(), "rejected on {t}");
+        }
+        let data = valid_record(
+            "revisit",
+            &["WARC-Identified-Payload-Type: text/plain"],
+            b"b",
+        );
+        assert!(decode(&data).is_ok());
+        let data = valid_record(
+            "continuation",
+            &["WARC-Identified-Payload-Type: text/plain"],
+            b"b",
+        );
+        assert!(decode(&data).is_ok());
     }
 
     #[test]

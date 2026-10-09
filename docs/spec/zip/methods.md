@@ -33,6 +33,6 @@
 | 132 | §5.7 BZIP2 (Method 12) | §5.7 | ✅ | decode + encode (`bzip2` feature) |
 | 133 | §5.8 LZMA (Method 14): LZMA Properties Header (4B) + stream | §5.8 | ✅ | decode + encode |
 | 134 | §5.10 PPMd (Method 98): 2B parameter + stream | §5.10 | ✅ | decode + encode |
-| 135 | §5.17 IBM z/OS CMPSC (Method 16) | §5.17 | ✅ | `cmpsc` feature 有効時は `compress::cmpsc::decode` で basic method を decode (`test_decode_cmpsc_method16_roundtrip` / `test_decode_cmpsc_method16_corrupt_rejected`)。feature 無効時は `Unsupported`。entropy-encoding 拡張と flag 0x40 deflate 圧縮辞書は codec 側で拒否 (intentional scope) |
+| 135 | §5.17 IBM z/OS CMPSC (Method 16) | §5.17 | ✅ | `cmpsc` feature 有効時は `compress::cmpsc` で basic method を decode/encode (encode は alphabet-only 非圧縮 emit、`test_zip_method16_encode_roundtrip`) (`test_decode_cmpsc_method16_roundtrip` / `test_decode_cmpsc_method16_corrupt_rejected`)。feature 無効時は `Unsupported`。entropy-encoding 拡張と flag 0x40 deflate 圧縮辞書は codec 側で拒否 (intentional scope) |
 
 ---

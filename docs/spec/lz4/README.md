@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [LZ4 Frame Format spec 1.6.2](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Frame_format.md) / [LZ4 Block Format spec 1.3.1](https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md) (lz4 v1.9.4 `doc/` ピン留め、ローカルスナップショット: `docs/spec/sources/lz4_frame_format_1.6.2.md` / `lz4_block_format_1.3.1.md`) |
-| 参照実装 | なし (書面仕様のみに基づいて実装)。system `lz4` (liblz4 BSD-2-Clause / CLI GPL-2.0) はテスト時の oracle および `tests/fixtures/lz4/hello.lz4` の fixture 生成にのみ使用 |
+| 参照実装 | liblz4 `lz4.c`/`lz4frame.c` (BSD-2-Clause、legacy frame 詳細の動作参照のみ、コード取り込みなし)。system `lz4` (liblz4 BSD-2-Clause / CLI GPL-2.0) はテスト時の oracle および `tests/fixtures/lz4/hello.lz4` の fixture 生成にのみ使用 |
 
 ## 対応バリアント・仕様版
 
@@ -99,8 +99,8 @@
 | 54 | Multi-frame (concatenated frames) | LZ4 Frame | ✅ | `test_multi_frame_standard_concat`, `test_multi_frame_legacy_then_standard`, `test_multi_frame_standard_then_legacy`, `test_multi_frame_three_legacy` |
 | 55 | Block-dependent mode: encode | LZ4 Frame: FLG | ✅ | `encode_block_dependent()`, `test_block_dependent_header_flag`, `test_block_dependent_roundtrip`, `test_block_dependent_roundtrip_large`, `test_block_dependent_with_block_sizes` |
 | 56 | Block_Size が Block_Maximum_Size を超えない | LZ4 Frame Format §Data Blocks | ✅ | 実装済み — ブロックループで宣言 Block_Size > Block_MaxSize を reject (圧縮/非圧縮共通、EOF チェックより前)。`test_block_size_exceeds_max_rejected` `test_uncompressed_block_size_exceeds_max_rejected` |
-| 58 | streaming / bounded API と trailing garbage 方針 | crate contract | ✅ | `decode_reader`/`decode_bounded`/`encode_writer` 実装済み。trailing garbage: 残余 <4B は常に無視、非 magic な 4B 超の残余は output 非空のときのみ無視 (空 output なら `InvalidData`)。`encode_with_dict` に id なし dict を渡すと DictID flag なしで dict 依存 frame を生成する (decode 側は offset 範囲外エラーで検出 — silent corruption にはならない) |
 | 57 | `0x80000000` (bit31=1, size=0) は有効な空非圧縮ブロックで EndMark ではない | LZ4 Frame Format §Data Blocks | ✅ | 実装は `block_data_size==0` → 0 バイト extend で自然に受理 |
+| 58 | streaming / bounded API と trailing garbage 方針 | crate contract | ✅ | `decode_reader`/`decode_bounded`/`encode_writer` 実装済み。trailing garbage: 残余 <4B は常に無視、非 magic な 4B 超の残余は output 非空のときのみ無視 (空 output なら `InvalidData`)。`encode_with_dict` に id なし dict を渡すと DictID flag なしで dict 依存 frame を生成する (decode 側は offset 範囲外エラーで検出 — silent corruption にはならない) |
 
 ---
 

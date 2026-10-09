@@ -51,7 +51,7 @@
 
 ## 出典 / 検証メモ
 
-- 参照実装 `lzrw1.c` は public domain (Ross N. Williams, 1991)。本実装はフォーマット構造から書かれた独立実装であり、コードの移植は行っていない。
+- 参照実装 `lzrw1.c` は public domain (Ross N. Williams, 1991)。本実装はフォーマット構造から書かれた独立実装である。ただし encoder のハッシュ算術 (3 バイト混合式 + 40543 multiplier) は public domain 参照実装由来の定数を共有する (詳細: THIRD_PARTY_NOTICES LZRW 項)。
 - 統合テストの `VEC_*` は参照 C 実装をローカルでコンパイルして生成した既知解答ベクタ (decode のみ検証)。
 - 逆向き (本実装 encode → 参照 C 実装 decode) もローカルで相互運用確認済み。
 - 参照コードは「non-deterministic」 (同じ入力でも実行ごとに異なる圧縮表現を出力しうる) と明記しているため、encoder 出力の参照バイト一致は目標にしない。

@@ -1,6 +1,8 @@
 //! Delta filter shared by XZ / 7z style filter chains.
 //!
-//! Ported from the public-domain liblzma `delta_coder.c`. See
+//! Ported from the public-domain liblzma delta filter
+//! (`delta_encoder.c` / `delta_decoder.c`; `delta_coder.c` holds the
+//! shared init/dispatch). See
 //! `THIRD_PARTY_NOTICES` section 2.
 
 use alloc::vec::Vec;

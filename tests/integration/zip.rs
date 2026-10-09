@@ -905,3 +905,74 @@ fn test_zip_legacy_methods_hwzip_compat() {
         assert_eq!(entries[0].data, expected, "{fixture}");
     }
 }
+
+#[cfg(all(feature = "zip", feature = "cmpsc"))]
+#[test]
+fn test_zip_method16_encode_roundtrip() {
+    // Method 16 (IBM z/OS CMPSC). No commonly available system `unzip`
+    // implements it, so coverage is a crate-internal encode -> decode
+    // roundtrip. The encoder emits the alphabet-only (uncompressed) CMPSC
+    // stream from `compress::cmpsc::encode`, mirroring the lzxd
+    // uncompressed-encoder precedent.
+    let payload: &[u8] = b"cmpsc method 16 payload payload payload";
+    let mut encoder = zip::encode::ZipEncoder::new();
+    encoder.add_file_with_options(
+        "cmpsc.bin",
+        payload,
+        &zip::encode::ZipEntryOptions {
+            compression: zip::encode::ZipCompression::Cmpsc,
+            ..zip::encode::ZipEntryOptions::default()
+        },
+    );
+    let archive = encoder.finish().unwrap();
+    let entries = zip::decode::decode(&archive).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "cmpsc.bin");
+    assert_eq!(entries[0].data, payload);
+    assert_eq!(entries[0].header.compression_method, 16);
+}
+
+#[cfg(all(feature = "zip", feature = "cmpsc"))]
+#[test]
+fn test_zip_method16_encode_header_fields() {
+    // Both the local file header and the central directory record must carry
+    // compression method 16, and the entry payload must start with the
+    // APPNOTE method-16 dictionary header
+    // `[version=1][flags|symsize][u32be dict len]`.
+    let payload: &[u8] = b"header fields";
+    let mut encoder = zip::encode::ZipEncoder::new();
+    encoder.add_file_with_options(
+        "cmpsc.bin",
+        payload,
+        &zip::encode::ZipEntryOptions {
+            compression: zip::encode::ZipCompression::Cmpsc,
+            ..zip::encode::ZipEntryOptions::default()
+        },
+    );
+    let archive = encoder.finish().unwrap();
+
+    // Local file header: compression method is the u16 at offset 8.
+    let local = find_signature(&archive, [0x50, 0x4b, 0x03, 0x04]);
+    assert_eq!(
+        u16::from_le_bytes(archive[local + 8..local + 10].try_into().unwrap()),
+        16
+    );
+    // Central directory record: compression method is the u16 at offset 10.
+    let central = find_signature(&archive, [0x50, 0x4b, 0x01, 0x02]);
+    assert_eq!(
+        u16::from_le_bytes(archive[central + 10..central + 12].try_into().unwrap()),
+        16
+    );
+
+    // Local header layout: sig(4) ver(2) flags(2) method(2) time(2) date(2)
+    // crc(4) csize(4) usize(4) name_len(2) extra_len(2) then name + extra +
+    // compressed data.
+    let name_len = u16::from_le_bytes(archive[local + 26..local + 28].try_into().unwrap()) as usize;
+    let extra_len =
+        u16::from_le_bytes(archive[local + 28..local + 30].try_into().unwrap()) as usize;
+    let data = &archive[local + 30 + name_len + extra_len..];
+    // version=1, flags 0x80 (expansion dictionary present) | symsize 9,
+    // then the 512-entry alphabet dictionary length as u32be.
+    assert_eq!(&data[..2], &[1, 0x89]);
+    assert_eq!(&data[2..6], &4096u32.to_be_bytes());
+}

@@ -23,7 +23,7 @@
 | 2 | 終端行は `"end\n"` (空白前置なし) | POSIX STDOUT historical | ✅ | `roundtrip_text` |
 | 3 | mode は octal として解釈 | POSIX STDOUT | ✅ | `roundtrip_text` (0o644)、`roundtrip_binary_multiline` (0o600) |
 | 4 | name (decode_pathname) を `UuEntry::name` として返す | POSIX STDOUT | ✅ | 全 roundtrip テスト |
-| 5 | `begin-base64 <mode> <name>` / `====` 文書は受理して Base64 アルゴリズムで decode (`decode` が両 variant を自動判別) | POSIX base64 algorithm | ✅ | decode.rs:153 の begin-base64 判定 + `util::base64` 経路 |
+| 5 | `begin-base64 <mode> <name>` / `====` 文書は受理して Base64 アルゴリズムで decode (`decode` が両 variant を自動判別) | POSIX base64 algorithm | ✅ | uuencode.rs:153 の begin-base64 判定 + `util::base64` 経路 |
 | 6 | `begin` 行なしの入力は拒否 | POSIX STDOUT | ✅ | `rejects_no_begin` |
 
 ## データ行

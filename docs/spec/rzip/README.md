@@ -28,7 +28,7 @@
 | 14 | CRC-32 variant: ISO 3309 (polynomial 0xEDB88320) | upstream rzip CRC | ✅ | util::crc32 使用 |
 | 15 | Match minimum length: 31 bytes (rolling hash window size) | upstream rzip token | ✅ | 実装済み |
 | 16 | Match maximum length: u16::MAX (65535) | upstream rzip token | ✅ | u16 field |
-| 17 | Chunk 分割: `level * CHUNK_MULTIPLE` (= bzip_level × 100KB) の固定サイズ分割 | upstream rzip chunk (`rzip.c`) | ✅ | `chunk_size_for_level` — level→bzip_level 写像 {0,1,3,5,7,9} は upstream `levels[]` と一致 |
+| 17 | Chunk 分割: `level * CHUNK_MULTIPLE` (= compression level × 100 MiB、level==0 は CHUNK_MULTIPLE 固定) の固定サイズ分割 | upstream rzip chunk (`rzip.c`) | ✅ | `chunk_size_for_level` — level→bzip_level 写像 {0,1,3,5,7,9} は upstream `levels[]` と一致 |
 | 18 | Stream compression types: CTYPE_GZIP=1, CTYPE_LZO=2 (lrzip 由来の crate 拡張 — upstream rzip 2.1 は ctype 3/4 のみ) | crate extension | ✅ | `CTYPE_GZIP`/`CTYPE_LZO` decode/encode 対応 (feature-gated)。upstream `rzip -d` とは非互換 |
 | 19 | Empty file handling (expected_size=0) | upstream rzip container | ✅ | test_roundtrip_empty |
 | 20 | expected_size byte layout: bytes 6-9 = low u32 BE, bytes 10-13 = high u32 BE, combined as low \| (high << 32) | upstream rzip header | ✅ | decode/encode で対応 |

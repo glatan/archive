@@ -87,3 +87,4 @@
 |---|------|----------|-----------|------|
 | 38 | OpenPGP 署名検証・v6 SHA3 digest tag | [format_v6.html](https://rpm-software-management.github.io/rpm/manual/format_v6.html) | ❌ intentional scope | OpenPGP/GPG 署名検証は暗号レイヤの責務外。v6 必須の SHA3_256 digest (Sig tag 279) と payload digest tag 5121-5124 は SHA3 実装を持たないため対象外。digest 検証の実装済み部分は #38a |
 | 39 | RPMTAG のパッケージ管理セマンティクス (依存関係・scriptlet・ファイル属性の install 意味) | rpm tags | ❌ | パッケージマネージャ層の責務 (intentional)。生 tag は `header.get_*` で取得可能 |
+| 40 | v6 必須タグセットの emit: `RPMTAG_RPMFORMAT`、`RPMTAG_ENCODING` (必須・値 "utf-8")、`RPMTAG_FILEDIGESTALGO`、`RPMTAG_PAYLOADSHA256`/`SHA256ALT`/`PAYLOADSHA512`/`ALT`、`RPMTAG_PAYLOADSIZE`/`ALT`、MIME ベース file type タグ (`RPMTAG_MIMEDICT`/`FILEMIMEINDEX`/`FILEMIMES`) | format_v6.html | ❌ | encoder は `major_minor(6,0)` で v6 lead を出力可能だがこれらの v6 必須タグは emit しない → v6 厳密準拠パッケージは生成不可。v4/v6 の tag emit はいずれも v4 ベースのセット |
