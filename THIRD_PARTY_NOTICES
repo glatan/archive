@@ -40,7 +40,9 @@ specifications or standards documents:
   it is not linked or distributed
 - zstd: RFC 8878. The upstream reference implementation is dual
   BSD-3-Clause OR GPLv2 licensed; Meta's earlier BSD+PATENTS grant was
-  removed by that 2017 relicensing
+  removed by that 2017 relicensing. The system `zstd` CLI is used only
+  as a local test-time oracle (integration tests) and fixture generator
+  for `tests/fixtures/zstd/zstd_*.zst`; it is not linked or distributed
 - Brotli stream format: RFC 7932
   - The encoder and decoder are spec-informed implementations written
     against RFC 7932; no code was copied from the reference Brotli
@@ -241,7 +243,8 @@ specifications or standards documents:
   z/Architecture POP Appendix D layouts. SDL-Hercules-390/hyperion
   (QPL) was once consulted to confirm interpretation of the public
   specification; it is not an implementation basis and no code was
-  copied.
+  copied. The alphabet-only (uncompressed) encoder is additionally
+  used by the ZIP method-16 encode path (`cmpsc` feature).
   Patent note: the CMPSC facility and its base dictionary scheme date
   to 1990s ESA/390-era IBM technology. The directly relevant IBM
   patents — US 5,442,350 (CMPSC dictionary scheme, filed 1992),
@@ -556,8 +559,10 @@ specifications or standards documents:
   no code was copied. An independently written
   Python protobuf/zip generator is used only as a local test-time
   interoperability oracle; it is not linked or distributed.
-- pea: PEA file format specification (pea_help.pdf, public
-  domain) and PeaZip reference implementation sources
+- pea: PEA file format specification (pea_help.pdf; the document
+  itself is licensed GFDL, while the PEA format specification it
+  contains is declared public domain) and PeaZip reference
+  implementation sources
   (pea.pas, pea_utils.pas; LGPLv3, Giorgio Tani). Spec-informed
   implementation; the wire format was reimplemented from the
   specification and reference behavior — no code was copied.
@@ -642,7 +647,12 @@ specifications or standards documents:
   (Apache-2.0) and libgsf (LGPL-2.1) as behavioral references —
   no code was copied — and encoder output is validated with the
   `olefile` Python package (BSD-style license) as a local
-  test-time oracle; it is not linked or distributed.
+  test-time oracle; it is not linked or distributed. Patent note:
+  [MS-CFB] is a Microsoft Open Specification Promise covered
+  specification (listed under "Windows Compound Formats" in
+  [MS-DEVCENTLP]); the OSP covenant applies directly. No patents
+  mapped to this specification were found on the MIP Patent Map
+  (checked 2026-01). No formal patent search was performed.
 - binhex: "BinHex 4.0 Definition" (Peter N Lewis, Aug 1991) and
   RFC 1741 Appendix A. Spec-informed implementation; no code was
   copied. The Lewis document carries no explicit license text; it is
@@ -662,7 +672,10 @@ specifications or standards documents:
   embedded as a known-answer decode vector in the unit tests.
   Patent note: no known patent claims; PackBits is a 1980s
   byte-oriented RLE scheme.
-- zip: PKWARE APPNOTE.TXT 6.3.10. The container layer, encryption,
+- zip: PKWARE APPNOTE.TXT 6.3.10 and the WinZip AES Encryption
+  Information document (AE-x format, method 99 / extra field 0x9901;
+  copyrighted documentation, format spec reference only — pinned as
+  `docs/spec/sources/winzip_aes.html`). The container layer, encryption,
   and methods 0/8/10/12/14/93/95/98 are spec-informed; methods 1-6
   are ported from the public-domain hwzip reference (see section 2).
   `detect_sfx_prefix`/`detect_sfx_prefix_zip64` implement the
@@ -870,11 +883,14 @@ against de facto reference behavior:
     counterparts expired in 2004)
 
 - LZO / lzop
-  - Reference: Linux kernel `Documentation/lzo.txt` (LZO1X bytecodes)
-    and `Documentation/staging/lzo.rst` (v0/v1 bitstream notes;
-    "v0 cannot read v1 data"), both shipped under GPL-2.0-only as
-    part of the kernel tree, and lzop source (`lzop.h`, `p_lzo.c`,
-    GPL-2.0-or-later, Markus Oberhumer) for the lzop file format
+  - Reference: Linux kernel `Documentation/staging/lzo.rst` (LZO1X
+    bytecodes and v0/v1 bitstream notes; formerly
+    `Documentation/lzo.txt`, "v0 cannot read v1 data"), shipped under
+    GPL-2.0-only as part of the kernel tree, and lzop source
+    (`lzop.h`, `p_lzo.c`, GPL-2.0-or-later, Markus Oberhumer) for the
+    lzop file format. The system `lzop` binary is used only as a
+    local test-time oracle (integration tests) and fixture generator
+    for `tests/fixtures/lzo/hello.lzo`; it is not linked or distributed
   - Repository scope: Rust implementation of LZO1X-1 block compression and
     the lzop framing format; format facts only, no code was copied.
     lzop is GPL-2.0-or-later, so a conversion path (GPL-2.0-or-later ->
@@ -995,7 +1011,7 @@ against de facto reference behavior:
   - Upstream port license: CC0-1.0 OR MIT-0
   - Repository scope: port of that upstream PPMd7 model (structure and
     constants carried over), adapted to this crate's `no_std + alloc`
-    style and 7z method integration
+    style and 7z method integration and ZIP method 98 (PPMd)
 
 - ZPAQ (`src/compress/zpaq/**`, `src/archive/zpaq/**`)
   - Reference and port source: Matt Mahoney's ZPAQ format, context-mixing
@@ -1358,8 +1374,9 @@ External crate dependencies:
   The `archive` library crate itself has no external runtime
   dependencies. Workspace tooling members pull the following
   permissively-licensed crates (all AGPL-3.0-only compatible):
-  `archive-cli` uses `clap` (MIT OR Apache-2.0), `serde` and
-  `serde_json` (MIT OR Apache-2.0); `archive-fuzz` uses `sha3`
+  `archive-cli` and `archive-fuzz` both use `clap` (MIT OR
+  Apache-2.0), `serde` and `serde_json` (MIT OR Apache-2.0);
+  `archive-fuzz` additionally uses `sha3`
   (MIT OR Apache-2.0), `blake3` (CC0-1.0 OR Apache-2.0 OR
   Apache-2.0 WITH LLVM-exception) and `rand` (MIT OR Apache-2.0),
   with `tempfile` (MIT OR Apache-2.0) for dev tests; the root

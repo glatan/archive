@@ -60,6 +60,11 @@ pub enum ZipCompression {
     Implode,
     /// Compress the entry with Deflate64 (method 9).
     Deflate64,
+    /// Compress the entry with IBM z/OS CMPSC (method 16), emitting an
+    /// alphabet-only (uncompressed) CMPSC stream. Requires the `cmpsc`
+    /// feature; the stream carries one index symbol per input byte and does
+    /// not reduce the data, mirroring the LZXD uncompressed-encoder precedent.
+    Cmpsc,
 }
 
 /// Metadata for an encoded ZIP entry.
@@ -680,6 +685,7 @@ impl From<&ZipHeader> for ZipEntryOptions {
                 93 => ZipCompression::Zstd,
                 95 => ZipCompression::Xz,
                 98 => ZipCompression::Ppmd,
+                16 => ZipCompression::Cmpsc,
                 _ => ZipCompression::Store,
             },
             use_data_descriptor: (header.flags & DATA_DESCRIPTOR_FLAG) != 0,
@@ -818,6 +824,19 @@ fn compress_data(data: &[u8], compression: ZipCompression) -> Result<(u16, Vec<u
                 ))
             }
         }
+        ZipCompression::Cmpsc => {
+            #[cfg(feature = "cmpsc")]
+            {
+                Ok((16, crate::compress::cmpsc::encode(data)))
+            }
+            #[cfg(not(feature = "cmpsc"))]
+            {
+                let _ = data;
+                Err(Error::Unsupported(
+                    "zip: IBM z/OS CMPSC compression (method 16; enable cmpsc feature)",
+                ))
+            }
+        }
     }
 }
 
@@ -835,6 +854,7 @@ const fn compression_method_id(compression: ZipCompression) -> u16 {
         ZipCompression::Reduce(factor) => factor as u16 + 1,
         ZipCompression::Implode => 6,
         ZipCompression::Deflate64 => 9,
+        ZipCompression::Cmpsc => 16,
     }
 }
 
@@ -962,6 +982,7 @@ fn method_compression(method: u16, aes: Option<&ZipAesExtraField>) -> ZipCompres
         93 => ZipCompression::Zstd,
         95 => ZipCompression::Xz,
         98 => ZipCompression::Ppmd,
+        16 => ZipCompression::Cmpsc,
         _ => ZipCompression::Store,
     }
 }

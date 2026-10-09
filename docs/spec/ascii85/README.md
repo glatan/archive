@@ -23,7 +23,7 @@
 | 2 | `0x00000000` グループは `z` (1文字) で省略可能 | PDF 32000 §7.4.3 | ✅ | `adobe_z_shorthand` |
 | 3 | `z` はグループ内に現れてはならない (単独文字) | PDF 32000 §7.4.3 | ✅ | `adobe_z_shorthand` の `9jqz` 拒否 |
 | 4 | 最終部分グループ n octet (1-3) は n+1 文字で encode、decode は残り digit を最大値で補完して先頭 n octet を取る | PDF 32000 §7.4.3 | ✅ | `adobe_partial_tail` |
-| 5 | 入力中の whitespace は無視 | PDF 32000 §7.4.3 | ✅ | `adobe_whitespace_and_no_delims`。whitespace 集合は SP/TAB/LF/CR/VT(0x0B)/FF(0x0C) (`is_ws`) |
+| 5 | 入力中の whitespace は無視 | PDF 32000 §7.4.3 | ✅ | `adobe_whitespace_and_no_delims`。whitespace 集合は SP/TAB/LF/CR/VT(0x0B)/FF(0x0C)。注: PDF 32000 §7.2.2 の white-space 定義は {NUL(0x00),TAB,LF,FF,CR,SP} であり、本実装は VT を追加受理し NUL は alphabet 外として拒否する (PDF 仕様の方向とは逆の軽微差分; pinned PDF はテキスト抽出不可のため normative 確認は未了) (`is_ws`) |
 | 6 | `<~` `~>` デリミタ: あってもなくても decode 可能。先頭 `<~` と末尾 `~>` は独立に剥がすため片側のみの入力も受理 | PDF 32000 §7.4.3 | ✅ | `adobe_whitespace_and_no_delims` |
 | 7 | 部分グループ残り 1 文字は不正 | PDF 32000 §7.4.3 | ✅ | `adobe_partial_tail` (`"!"` 拒否) |
 | 8 | `y` (btoa 拡張) と alphabet 外文字の拒否 | PDF 32000 §7.4.3 | ✅ | `adobe_rejects_y_and_junk` |

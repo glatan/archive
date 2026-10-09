@@ -7,7 +7,10 @@
 //! over the block. `WARC-Payload-Digest` is emitted when the caller
 //! provides the payload bytes (e.g. the entity-body of an
 //! `application/http` block); payload identification is the caller's
-//! responsibility because the block is opaque here.
+//! responsibility because the block is opaque here. `warcinfo`
+//! records are emitted with `Content-Type: application/warc-fields`
+//! (Clause 8) when the caller does not set one; a mismatched
+//! `warcinfo` content type is rejected.
 
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -25,7 +28,9 @@ pub struct WarcRecord {
     pub date: String,
     /// `WARC-Target-URI`, if any.
     pub target_uri: Option<String>,
-    /// `Content-Type` of the block, if any.
+    /// `Content-Type` of the block, if any. For `warcinfo` records
+    /// this must be `application/warc-fields` (Clause 8); `None`
+    /// emits that default, any other value is rejected.
     pub content_type: Option<String>,
     /// Payload bytes whose SHA-1 goes into `WARC-Payload-Digest`.
     /// `None` emits no payload-digest field (correct for records
@@ -128,7 +133,20 @@ impl WarcEncoder {
         if let Some(u) = &r.target_uri {
             put_field(&mut hdr, "WARC-Target-URI", u);
         }
-        if let Some(ct) = &r.content_type {
+        if r.record_type.eq_ignore_ascii_case("warcinfo") {
+            // Clause 8: 'warcinfo' records shall carry
+            // "Content-Type: application/warc-fields"; emit it when
+            // the caller did not set one.
+            match &r.content_type {
+                Some(ct) if !super::is_warc_fields_type(ct) => {
+                    return Err(Error::InvalidData(
+                        "warc: warcinfo Content-Type must be application/warc-fields",
+                    ));
+                }
+                Some(ct) => put_field(&mut hdr, "Content-Type", ct),
+                None => put_field(&mut hdr, "Content-Type", "application/warc-fields"),
+            }
+        } else if let Some(ct) = &r.content_type {
             put_field(&mut hdr, "Content-Type", ct);
         }
         if self.block_digest && !has_field(&r.extra_fields, "WARC-Block-Digest") {
@@ -252,7 +270,17 @@ mod tests {
     fn rec(rtype: &str, uri: Option<&str>, block: &[u8]) -> WarcRecord {
         let mut r = WarcRecord::new(rtype, "urn:uuid:enc-1", "2024-01-01T00:00:00Z", block);
         r.target_uri = uri.map(|u| u.to_string());
-        r.content_type = Some("text/plain".to_string());
+        if rtype != "warcinfo" {
+            // 'warcinfo' gets its Clause-8 default from the encoder.
+            r.content_type = Some("text/plain".to_string());
+        }
+        if rtype == "revisit" {
+            // Mandatory WARC-Profile (§5 named fields / §6 revisit).
+            r.extra_fields.push((
+                "WARC-Profile".to_string(),
+                "http://netpreserve.org/warc/1.1/revisit/identical-payload-digest".to_string(),
+            ));
+        }
         r
     }
 
@@ -318,6 +346,28 @@ mod tests {
         let r2 = rec("warcinfo", None, b"info");
         let text2 = String::from_utf8(encode(&[r2]).unwrap()).unwrap();
         assert!(!text2.contains("WARC-Payload-Digest"));
+    }
+
+    #[test]
+    fn warcinfo_content_type_is_enforced() {
+        // Clause 8: warcinfo records shall be application/warc-fields.
+        // No caller type: the encoder supplies the required one.
+        let r = WarcRecord::new("warcinfo", "urn:x:w", "2024-01-01T00:00:00Z", b"f: v");
+        let data = encode(&[r]).unwrap();
+        let text = String::from_utf8(data.clone()).unwrap();
+        assert!(text.contains("Content-Type: application/warc-fields\r\n"));
+        // Encoder output must satisfy the decoder's warcinfo rule.
+        assert_eq!(decode::decode(&data).unwrap().len(), 1);
+        // A matching caller-supplied type (with parameters) is kept.
+        let mut r = WarcRecord::new("warcinfo", "urn:x:w", "2024-01-01T00:00:00Z", b"f: v");
+        r.content_type = Some("application/warc-fields; charset=utf-8".to_string());
+        let data = encode(&[r]).unwrap();
+        assert!(decode::decode(&data).is_ok());
+        // A mismatched type is rejected rather than emitting a record
+        // the decoder would refuse.
+        let mut r = WarcRecord::new("warcinfo", "urn:x:w", "2024-01-01T00:00:00Z", b"f: v");
+        r.content_type = Some("text/plain".to_string());
+        assert!(matches!(encode(&[r]), Err(Error::InvalidData(_))));
     }
 
     #[test]

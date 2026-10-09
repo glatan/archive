@@ -10,6 +10,10 @@
 //! length is `C1[0..3]` plus a per-variant bias (1 for LZRW1, 3 for the
 //! others), and `C1[4..7]*256 + C2` is a 12-bit field whose meaning differs
 //! per variant (history offset, phrase-table index, or hash-table index).
+//!
+//! The shared `hash3` arithmetic and `START_STRING_18` constant are adopted
+//! verbatim from Ross N. Williams' public-domain LZRW reference sources
+//! (see THIRD_PARTY_NOTICES, "LZRW family").
 
 use crate::error::Error;
 use alloc::vec::Vec;

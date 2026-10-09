@@ -7,7 +7,8 @@
    "title": "ZLIB Compressed Data Format Specification version 3.3",
    "version": "RFC 1950 (May 1996)",
    "url": "https://www.rfc-editor.org/rfc/rfc1950.txt",
-   "filename": "rfc1950.txt"
+   "filename": "rfc1950.txt",
+   "license": "IETF RFC (copyrighted document, freely distributable)"
   },
   {
    "id": "rfc1951",
@@ -15,7 +16,8 @@
    "title": "DEFLATE Compressed Data Format Specification version 1.3",
    "version": "RFC 1951 (May 1996)",
    "url": "https://www.rfc-editor.org/rfc/rfc1951.txt",
-   "filename": "rfc1951.txt"
+   "filename": "rfc1951.txt",
+   "license": "IETF RFC (copyrighted document, freely distributable)"
   },
   {
    "id": "rfc1952",
@@ -23,7 +25,8 @@
    "title": "GZIP file format specification version 4.3",
    "version": "RFC 1952 (May 1996)",
    "url": "https://www.rfc-editor.org/rfc/rfc1952.txt",
-   "filename": "rfc1952.txt"
+   "filename": "rfc1952.txt",
+   "license": "IETF RFC (copyrighted document, freely distributable)"
   },
   {
    "id": "rfc7932",
@@ -32,7 +35,8 @@
    "version": "RFC 7932 (July 2016)",
    "note": "Primary normative source; published errata checked at https://www.rfc-editor.org/errata/rfc7932",
    "url": "https://www.rfc-editor.org/rfc/rfc7932.txt",
-   "filename": "rfc7932.txt"
+   "filename": "rfc7932.txt",
+   "license": "IETF RFC (copyrighted document, freely distributable)"
   },
   {
    "id": "rfc8878",
@@ -40,7 +44,8 @@
    "title": "Zstandard Compression and the 'application/zstd' Media Type",
    "version": "RFC 8878 (February 2021)",
    "url": "https://www.rfc-editor.org/rfc/rfc8878.txt",
-   "filename": "rfc8878.txt"
+   "filename": "rfc8878.txt",
+   "license": "IETF RFC (copyrighted document, freely distributable)"
   },
   {
    "id": "rfc3284",
@@ -48,7 +53,8 @@
    "title": "The VCDIFF Generic Differencing and Compression Data Format",
    "version": "RFC 3284 (June 2002)",
    "url": "https://www.rfc-editor.org/rfc/rfc3284.txt",
-   "filename": "rfc3284.txt"
+   "filename": "rfc3284.txt",
+   "license": "IETF RFC (copyrighted document, freely distributable)"
   },
   {
    "id": "rfc2118",
@@ -56,7 +62,8 @@
    "title": "RFC 2118: Microsoft Point-To-Point Compression Protocol (MPPC)",
    "version": "March 1997",
    "url": "https://www.rfc-editor.org/rfc/rfc2118.txt",
-   "filename": "rfc2118.txt"
+   "filename": "rfc2118.txt",
+   "license": "IETF RFC (copyrighted document, freely distributable)"
   },
   {
    "id": "rfc2395",
@@ -64,7 +71,8 @@
    "title": "IP Payload Compression Using LZS",
    "version": "RFC 2395 (December 1998)",
    "url": "https://www.rfc-editor.org/rfc/rfc2395.txt",
-   "filename": "rfc2395.txt"
+   "filename": "rfc2395.txt",
+   "license": "IETF RFC (copyrighted document, freely distributable)"
   },
   {
    "id": "zstd-seekable-format",
@@ -72,7 +80,8 @@
    "title": "Zstandard Seekable Format",
    "version": "0.1.0 (contrib/seekable_format, git dev)",
    "url": "https://raw.githubusercontent.com/facebook/zstd/dev/contrib/seekable_format/zstd_seekable_compression_format.md",
-   "filename": "zstd_seekable_compression_format.md"
+   "filename": "zstd_seekable_compression_format.md",
+   "license": "BSD-3-Clause OR GPL-2.0 (facebook/zstd contrib documentation)"
   },
   {
    "id": "appnote",
@@ -80,7 +89,17 @@
    "title": "APPNOTE.TXT - .ZIP File Format Specification",
    "version": "6.3.10 (November 1, 2022)",
    "url": "https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT",
-   "filename": "APPNOTE_6.3.10.txt"
+   "filename": "APPNOTE_6.3.10.txt",
+   "license": "PKWARE copyrighted document (freely distributable spec, reference only)"
+  },
+  {
+   "id": "winzip-aes",
+   "format": "zip",
+   "title": "WinZip AES Encryption Information (AE-x format, method 99 / extra field 0x9901)",
+   "version": "winzip.com support page (fetched 2026-02)",
+   "url": "https://www.winzip.com/en/support/aes-encryption/",
+   "filename": "winzip_aes.html",
+   "license": "copyrighted documentation (WinZip, format spec reference only)"
   },
   {
    "id": "xz-file-format",
@@ -97,7 +116,8 @@
    "title": "LZ4 Frame Format Description",
    "version": "1.6.2 (2021-01-27)",
    "url": "https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Frame_format.md",
-   "filename": "lz4_frame_format_1.6.2.md"
+   "filename": "lz4_frame_format_1.6.2.md",
+   "license": "BSD-2-Clause (lz4 project documentation)"
   },
   {
    "id": "lz4-block-format",
@@ -105,7 +125,8 @@
    "title": "LZ4 Block Format Description",
    "version": "1.3.1 (2015-03-26)",
    "url": "https://raw.githubusercontent.com/lz4/lz4/v1.9.4/doc/lz4_Block_format.md",
-   "filename": "lz4_block_format_1.3.1.md"
+   "filename": "lz4_block_format_1.3.1.md",
+   "license": "BSD-2-Clause (lz4 project documentation)"
   },
   {
    "id": "snappy-format",
@@ -113,7 +134,8 @@
    "title": "Snappy format description",
    "version": "git main (pinned 2024-01)",
    "url": "https://raw.githubusercontent.com/google/snappy/main/format_description.txt",
-   "filename": "snappy_format_description.txt"
+   "filename": "snappy_format_description.txt",
+   "license": "BSD-3-Clause (Google snappy documentation)"
   },
   {
    "id": "snappy-framing",
@@ -121,7 +143,8 @@
    "title": "Snappy framing format",
    "version": "git main (pinned 2024-01)",
    "url": "https://raw.githubusercontent.com/google/snappy/main/framing_format.txt",
-   "filename": "snappy_framing_format.txt"
+   "filename": "snappy_framing_format.txt",
+   "license": "BSD-3-Clause (Google snappy documentation)"
   },
   {
    "id": "lzma-file-format",
@@ -157,7 +180,8 @@
    "title": "The MD5 Message-Digest Algorithm",
    "version": "RFC 1321 (April 1992)",
    "url": "https://www.rfc-editor.org/rfc/rfc1321.txt",
-   "filename": "rfc1321.txt"
+   "filename": "rfc1321.txt",
+   "license": "IETF RFC (copyrighted document, freely distributable)"
   },
   {
    "id": "deb-5",
@@ -174,7 +198,8 @@
    "title": "RPM Package Format v6",
    "version": "rpm.org manual (unstable)",
    "url": "https://rpm-software-management.github.io/rpm/manual/format_v6.html",
-   "filename": "rpm_format_v6.html"
+   "filename": "rpm_format_v6.html",
+   "license": "copyrighted documentation (rpm.org, reference only)"
   },
   {
    "id": "rpm-format-header",
@@ -182,7 +207,8 @@
    "title": "RPM Header Structure",
    "version": "rpm.org manual (unstable)",
    "url": "https://rpm-software-management.github.io/rpm/manual/format_header.html",
-   "filename": "rpm_format_header.html"
+   "filename": "rpm_format_header.html",
+   "license": "copyrighted documentation (rpm.org, reference only)"
   },
   {
    "id": "rpm-format-lead",
@@ -190,7 +216,8 @@
    "title": "RPM Lead Format",
    "version": "rpm.org manual (unstable)",
    "url": "https://rpm-software-management.github.io/rpm/manual/format_lead.html",
-   "filename": "rpm_format_lead.html"
+   "filename": "rpm_format_lead.html",
+   "license": "copyrighted documentation (rpm.org, reference only)"
   },
   {
    "id": "squashfs-format",
@@ -198,7 +225,8 @@
    "title": "SquashFS binary format documentation",
    "version": "SquashFS 4.0 (dr-emann.github.io)",
    "url": "https://dr-emann.github.io/squashfs/squashfs.html",
-   "filename": "squashfs_4.0.html"
+   "filename": "squashfs_4.0.html",
+   "license": "CC BY-SA 4.0 (dr-emann documentation)"
   },
   {
    "id": "squashfs-tools-lzma-wrap",
@@ -216,7 +244,8 @@
    "title": "The WARC File Format (ISO 28500) Version 1.1",
    "version": "IIPC draft 1.1",
    "url": "https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1/",
-   "filename": "warc_1.1.html"
+   "filename": "warc_1.1.html",
+   "license": "copyrighted standard (ISO 28500 / IIPC, reference only)"
   },
   {
    "id": "zim-format",
@@ -224,7 +253,8 @@
    "title": "ZIM file format (openZIM Wiki)",
    "version": "wiki (unstable)",
    "url": "https://wiki.openzim.org/wiki/ZIM_file_format",
-   "filename": "zim_file_format.html"
+   "filename": "zim_file_format.html",
+   "license": "CC BY-SA (openZIM wiki)"
   },
   {
    "id": "mtree-5",
@@ -232,7 +262,8 @@
    "title": "mtree — format of mtree dir hierarchy files",
    "version": "FreeBSD mtree(5) man page",
    "url": "https://man.freebsd.org/cgi/man.cgi?mtree(5)",
-   "filename": "mtree_5_freebsd.html"
+   "filename": "mtree_5_freebsd.html",
+   "license": "BSD-2-Clause (FreeBSD man page)"
   },
   {
    "id": "lzsa-stream-format",
@@ -267,7 +298,8 @@
    "title": "ZX0 README 'File Format'",
    "version": "ZX0 v2.2 (git main、タグなし)",
    "url": "https://raw.githubusercontent.com/einar-saukas/ZX0/main/README.md",
-   "filename": "zx0_README_v2.2.md"
+   "filename": "zx0_README_v2.2.md",
+   "license": "BSD-3-Clause (project README documentation)"
   },
   {
    "id": "zx1-readme",
@@ -275,7 +307,8 @@
    "title": "ZX1 README 'File Format'",
    "version": "ZX1 v1.5 (git main、タグなし)",
    "url": "https://raw.githubusercontent.com/einar-saukas/ZX1/main/README.md",
-   "filename": "zx1_README_v1.5.md"
+   "filename": "zx1_README_v1.5.md",
+   "license": "BSD-3-Clause (project README documentation)"
   },
   {
    "id": "zx2-readme",
@@ -283,7 +316,8 @@
    "title": "ZX2 README 'File Format'",
    "version": "ZX2 v1.1 (git main、タグなし)",
    "url": "https://raw.githubusercontent.com/einar-saukas/ZX2/main/README.md",
-   "filename": "zx2_README_v1.1.md"
+   "filename": "zx2_README_v1.1.md",
+   "license": "BSD-3-Clause (project README documentation)"
   },
   {
    "id": "zx5-readme",
@@ -291,7 +325,8 @@
    "title": "ZX5 README 'File Format'",
    "version": "ZX5 v2.0 (git main、タグなし)",
    "url": "https://raw.githubusercontent.com/einar-saukas/ZX5/main/README.md",
-   "filename": "zx5_README_v2.0.md"
+   "filename": "zx5_README_v2.0.md",
+   "license": "BSD-3-Clause (project README documentation)"
   },
   {
    "id": "zpaq-format",
@@ -300,7 +335,8 @@
    "version": "zpaq206.pdf (2016-03-22, upstream zpaq 7.15 era)",
    "note": "低レイヤ codec (ZPAQL VM / predictor component / block・model 構造) の公式仕様。crate-local archive/journaling 層は対象外のため bounded contract と併用",
    "url": "https://mattmahoney.net/dc/zpaq206.pdf",
-   "filename": "zpaq206.pdf"
+   "filename": "zpaq206.pdf",
+   "license": "public domain"
   },
   {
    "id": "ms-patch-pdf",
@@ -308,7 +344,8 @@
    "title": "[MS-PATCH] LZX DELTA Compression and Decompression",
    "version": "rev 14.1 (2025-08-19)",
    "url": "https://officeprotocoldocs-f5hpbjgea6b8gneq.b02.azurefd.net/files/MS-PATCH/%5bMS-PATCH%5d-250819.pdf",
-   "filename": "ms-patch_14.1_250819.pdf"
+   "filename": "ms-patch_14.1_250819.pdf",
+   "license": "Microsoft Open Specifications (copyrighted document, reference only)"
   },
   {
    "id": "ms-cab-pdf",
@@ -316,7 +353,8 @@
    "title": "[MS-CAB] Cabinet File Format",
    "version": "2011-03-04 (Open Specifications PDF)",
    "url": "https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf",
-   "filename": "ms-cab_20110304.pdf"
+   "filename": "ms-cab_20110304.pdf",
+   "license": "Microsoft Open Specifications (copyrighted document, reference only)"
   },
   {
    "id": "ms-xca-pdf",
@@ -324,7 +362,8 @@
    "title": "[MS-XCA] Xpress Compression Algorithm",
    "version": "rev 10.0 (2024-04-23)",
    "url": "https://winprotocoldocs-bhdugrdyduf5h2e4.b02.azurefd.net/MS-XCA/%5bMS-XCA%5d-240423.pdf",
-   "filename": "ms-xca_10.0_240423.pdf"
+   "filename": "ms-xca_10.0_240423.pdf",
+   "license": "Microsoft Open Specifications (copyrighted document, reference only)"
   },
   {
    "id": "7z-format-txt",
@@ -332,7 +371,8 @@
    "title": "7zFormat.txt",
    "version": "ip7z/7zip main (LZMA SDK 26.00 同梱文書相当)",
    "url": "https://raw.githubusercontent.com/ip7z/7zip/main/DOC/7zFormat.txt",
-   "filename": "7zformat.txt"
+   "filename": "7zformat.txt",
+   "license": "public domain (7-Zip documentation)"
   },
   {
    "id": "7z-methods-txt",
@@ -340,7 +380,8 @@
    "title": "Methods.txt",
    "version": "ip7z/7zip main (LZMA SDK 26.00 同梱文書相当)",
    "url": "https://raw.githubusercontent.com/ip7z/7zip/main/DOC/Methods.txt",
-   "filename": "7z_methods.txt"
+   "filename": "7z_methods.txt",
+   "license": "public domain (7-Zip documentation)"
   },
   {
    "id": "ncompress-compress42",
@@ -348,7 +389,8 @@
    "title": "ncompress compress42.c (de facto spec、フォーマット記述はソース内コメント)",
    "version": "ncompress-4.2.4",
    "url": "https://raw.githubusercontent.com/vapier/ncompress/ncompress-4.2.4/compress42.c",
-   "filename": "ncompress_4.2.4_compress42.c"
+   "filename": "ncompress_4.2.4_compress42.c",
+   "license": "public domain dedication (no license header in pinned file)"
   },
   {
    "id": "bzip2-format-dsnet",
@@ -415,7 +457,8 @@
    "title": "LHa for UNIX header.doc (level 0/1/2 + extended header、英語版)",
    "version": "jca02266/lha master",
    "url": "https://raw.githubusercontent.com/jca02266/lha/master/header.doc.md",
-   "filename": "lha_header.doc.md"
+   "filename": "lha_header.doc.md",
+   "license": "LHa license (custom, non-OSI)"
   },
   {
    "id": "jlha-notes-level3-header",
@@ -423,7 +466,8 @@
    "title": "jLHA Notes: Level 3 Header (Michel Ishizuka)",
    "version": "Wayback capture 2008-07-24 (original: homepage1.nifty.com/dangan)",
    "url": "https://web.archive.org/web/20080724142842id_/http://homepage1.nifty.com/dangan/en/Content/Program/Java/jLHA/Notes/Level3Header.html",
-   "filename": "jlha_notes_level3_header.html"
+   "filename": "jlha_notes_level3_header.html",
+   "license": "copyrighted documentation (reference only)"
   },
   {
    "id": "jlha-notes-compress-method",
@@ -431,7 +475,8 @@
    "title": "jLHA Notes: Compress methods (lz4/lz5/lzs, lh0-lh7/lhd のパラメータ表)",
    "version": "Wayback capture 2008-07-24 (original: homepage1.nifty.com/dangan)",
    "url": "https://web.archive.org/web/20080724142842id_/http://homepage1.nifty.com/dangan/en/Content/Program/Java/jLHA/Notes/CompressMethod.html",
-   "filename": "jlha_notes_compress_method.html"
+   "filename": "jlha_notes_compress_method.html",
+   "license": "copyrighted documentation (reference only)"
   },
   {
    "id": "jlha-notes-ext-header-list",
@@ -439,7 +484,8 @@
    "title": "jLHA Notes: list of Extended headers (0x01/0x02/0x40/0x50-0x54 等)",
    "version": "Wayback capture 2008-07-24 (original: homepage1.nifty.com/dangan)",
    "url": "https://web.archive.org/web/20080724142842id_/http://homepage1.nifty.com/dangan/en/Content/Program/Java/jLHA/Notes/ExtHeaderList.html",
-   "filename": "jlha_notes_ext_header_list.html"
+   "filename": "jlha_notes_ext_header_list.html",
+   "license": "copyrighted documentation (reference only)"
   },
   {
    "id": "joejared-lzh-format",
@@ -447,7 +493,8 @@
    "title": "LZH header format documentation (Joe Jared / Huffman Compression Engine)",
    "version": "1998-12-13, Wayback capture 2002-10-05 (original: osirusoft.com/joejared)",
    "url": "https://web.archive.org/web/20021005080911id_/http://www.osirusoft.com/joejared/lzhformat.html",
-   "filename": "lzhformat.html"
+   "filename": "lzhformat.html",
+   "license": "copyrighted documentation (reference only)"
   },
   {
    "id": "lzrw1a-source",
@@ -581,7 +628,8 @@
    "title": "liblzf lzf_c.c (フォーマット記述は冒頭コメント)",
    "version": "nemequ/liblzf master (liblzf 3.x CVS mirror)",
    "url": "https://raw.githubusercontent.com/nemequ/liblzf/master/lzf_c.c",
-   "filename": "liblzf_lzf_c.c"
+   "filename": "liblzf_lzf_c.c",
+   "license": "BSD-2-Clause OR GPL-2.0-or-later"
   },
   {
    "id": "fastlz-source",
@@ -589,7 +637,8 @@
    "title": "fastlz.c (de facto spec、MIT)",
    "version": "ariya/FastLZ master",
    "url": "https://raw.githubusercontent.com/ariya/FastLZ/master/fastlz.c",
-   "filename": "fastlz.c"
+   "filename": "fastlz.c",
+   "license": "MIT"
   },
   {
    "id": "linux-lzo-doc",
@@ -597,7 +646,8 @@
    "title": "Linux kernel Documentation/staging/lzo.rst (LZO1X byte code format)",
    "version": "torvalds/linux master",
    "url": "https://raw.githubusercontent.com/torvalds/linux/master/Documentation/staging/lzo.rst",
-   "filename": "linux_lzo.rst"
+   "filename": "linux_lzo.rst",
+   "license": "GPL-2.0-only (kernel documentation, spec reference only)"
   },
   {
    "id": "arc-format-corion",
@@ -605,7 +655,8 @@
    "title": "The ARC Archive File Format (wotsit 'arc' entry の fileformat.info mirror)",
    "version": "fileformat.info mirror (unstable)",
    "url": "https://www.fileformat.info/format/arc/corion.htm",
-   "filename": "arc_format_corion.htm"
+   "filename": "arc_format_corion.htm",
+   "license": "copyrighted documentation (reference only)"
   },
   {
    "id": "posix-pax",
@@ -667,7 +718,8 @@
    "title": "cpio(5) — FreeBSD man page (newc/crc/bin format)",
    "version": "FreeBSD man page",
    "url": "https://man.freebsd.org/cgi/man.cgi?cpio(5)",
-   "filename": "cpio_5_freebsd.html"
+   "filename": "cpio_5_freebsd.html",
+   "license": "BSD-2-Clause (FreeBSD man page)"
   },
   {
    "id": "posix-ar",
@@ -675,7 +727,8 @@
    "title": "POSIX.1-2017 ar utility (archive format notes)",
    "version": "IEEE Std 1003.1-2017",
    "url": "https://pubs.opengroup.org/onlinepubs/9699919799/utilities/ar.html",
-   "filename": "posix_ar_9699919799.html"
+   "filename": "posix_ar_9699919799.html",
+   "license": "copyrighted standard (IEEE/The Open Group, reference only)"
   },
   {
    "id": "ar-5-freebsd",
@@ -683,7 +736,8 @@
    "title": "ar(5) — FreeBSD man page (archive format)",
    "version": "FreeBSD man page",
    "url": "https://man.freebsd.org/cgi/man.cgi?ar(5)",
-   "filename": "ar_5_freebsd.html"
+   "filename": "ar_5_freebsd.html",
+   "license": "BSD-2-Clause (FreeBSD man page)"
   },
   {
    "id": "gnu-ar-binutils-doc",
@@ -691,7 +745,8 @@
    "title": "GNU binutils manual: ar (GNU archive format extensions)",
    "version": "binutils manual (current)",
    "url": "https://sourceware.org/binutils/docs/binutils/ar.html",
-   "filename": "gnu_ar_binutils.html"
+   "filename": "gnu_ar_binutils.html",
+   "license": "GFDL (binutils manual, document reference)"
   },
   {
    "id": "zarch-pop-12",
@@ -699,7 +754,8 @@
    "title": "z/Architecture Principles of Operation",
    "version": "SA22-7832-12 (Thirteenth Edition, 2019-09)",
    "url": "https://publibfp.boulder.ibm.com/epubs/pdf/a227832c.pdf",
-   "filename": "sa22-7832-12.pdf"
+   "filename": "sa22-7832-12.pdf",
+   "license": "IBM documentation"
   },
   {
    "id": "gitformat-pack",
@@ -707,7 +763,8 @@
    "title": "gitformat-pack - Git pack format",
    "version": "git v2.51.0 Documentation",
    "url": "https://raw.githubusercontent.com/git/git/v2.51.0/Documentation/gitformat-pack.adoc",
-   "filename": "gitformat-pack.adoc"
+   "filename": "gitformat-pack.adoc",
+   "license": "GPL-2.0 (git documentation, format spec reference only)"
   },
   {
    "id": "xarformat",
@@ -715,7 +772,8 @@
    "title": "xarformat - Format of a xar archive (xar project wiki)",
    "version": "mackyle/xar wiki (pinned fetch)",
    "url": "https://raw.githubusercontent.com/wiki/mackyle/xar/xarformat.wiki",
-   "filename": "xarformat.wiki"
+   "filename": "xarformat.wiki",
+   "license": "BSD-3-Clause (xar project wiki)"
   },
   {
    "id": "posix-uuencode",
@@ -723,7 +781,8 @@
    "title": "uuencode - encode a binary file (POSIX.1-2017 utilities)",
    "version": "IEEE Std 1003.1-2017 (2018 edition)",
    "url": "https://pubs.opengroup.org/onlinepubs/9699919799/utilities/uuencode.html",
-   "filename": "posix_uuencode_9699919799.html"
+   "filename": "posix_uuencode_9699919799.html",
+   "license": "copyrighted standard (IEEE/The Open Group, reference only)"
   },
   {
    "id": "rfc1924",
@@ -731,7 +790,8 @@
    "title": "A Compact Representation of IPv6 Addresses",
    "version": "RFC 1924 (April 1996)",
    "url": "https://www.rfc-editor.org/rfc/rfc1924.txt",
-   "filename": "rfc1924.txt"
+   "filename": "rfc1924.txt",
+   "license": "IETF RFC (copyrighted document, freely distributable)"
   },
   {
    "id": "pdf32000",
@@ -739,7 +799,8 @@
    "title": "Document management - Portable document format - Part 1: PDF 1.7 (ASCII85Decode §7.4.3)",
    "version": "PDF 32000-1:2008",
    "url": "https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/PDF32000_2008.pdf",
-   "filename": "pdf32000_2008.pdf"
+   "filename": "pdf32000_2008.pdf",
+   "license": "copyrighted standard (ISO/Adobe, reference only)"
   },
   {
    "id": "tiff6",
@@ -756,7 +817,8 @@
    "title": "yEncode - A quick and dirty encoding for binaries (revised draft 1.3)",
    "version": "draft 1.3 (document header v1.2, 28-Feb-2002)",
    "url": "http://www.yenc.org/yenc-draft.1.3.txt",
-   "filename": "yenc-draft_1.3.txt"
+   "filename": "yenc-draft_1.3.txt",
+   "license": "public domain (draft self-declares)"
   },
   {
    "id": "macbinary2-proposal",
@@ -764,7 +826,8 @@
    "title": "MacBinary II Standard Proposal (revised 24-Jul-1987)",
    "version": "MacBinary II (1987)",
    "url": "https://files.stairways.com/other/macbinaryii-standard-info.txt",
-   "filename": "macbinaryii-standard-info.txt"
+   "filename": "macbinaryii-standard-info.txt",
+   "license": "copyrighted documentation (reference only)"
   },
   {
    "id": "binhex40-definition",
@@ -772,7 +835,8 @@
    "title": "BinHex 4.0 Definition (Peter N Lewis)",
    "version": "August 1991",
    "url": "https://files.stairways.com/other/binhex-40-specs-info.txt",
-   "filename": "binhex-40-specs-info.txt"
+   "filename": "binhex-40-specs-info.txt",
+   "license": "no explicit license (long-circulated informational document, reference only)"
   },
   {
    "id": "rfc1741",
@@ -780,7 +844,8 @@
    "title": "MIME Content Type for BinHex Encoded Files (Appendix A: The BinHex format)",
    "version": "RFC 1741 (December 1994)",
    "url": "https://www.rfc-editor.org/rfc/rfc1741.txt",
-   "filename": "rfc1741.txt"
+   "filename": "rfc1741.txt",
+   "license": "IETF RFC (copyrighted document, freely distributable)"
   },
   {
    "id": "ms-cfb-20210625",
@@ -788,7 +853,8 @@
    "title": "[MS-CFB]: Compound File Binary File Format",
    "version": "v20210625 (12.0)",
    "url": "https://winprotocoldocs-bhdugrdyduf5h2e4.b02.azurefd.net/MS-CFB/%5bMS-CFB%5d-210625.pdf",
-   "filename": "MS-CFB.pdf"
+   "filename": "MS-CFB.pdf",
+   "license": "Microsoft Open Specifications (copyrighted document, reference only)"
   },
   {
    "id": "linux-cramfs-doc",
@@ -796,7 +862,8 @@
    "title": "Linux kernel Documentation/filesystems/cramfs.rst",
    "version": "linux master (fetched 2026-09)",
    "url": "https://raw.githubusercontent.com/torvalds/linux/master/Documentation/filesystems/cramfs.rst",
-   "filename": "cramfs.rst"
+   "filename": "cramfs.rst",
+   "license": "GPL-2.0-only (kernel documentation, spec reference only)"
   },
   {
    "id": "linux-cramfs-layout",
@@ -804,7 +871,8 @@
    "title": "Linux kernel fs/cramfs/README (filesystem layout)",
    "version": "linux master (fetched 2026-09)",
    "url": "https://raw.githubusercontent.com/torvalds/linux/master/fs/cramfs/README",
-   "filename": "cramfs_layout.txt"
+   "filename": "cramfs_layout.txt",
+   "license": "GPL-2.0-only (kernel source README, spec reference only)"
   },
   {
    "id": "linux-cramfs-fs-h",
@@ -812,7 +880,8 @@
    "title": "Linux kernel include/uapi/linux/cramfs_fs.h",
    "version": "linux master (fetched 2026-09)",
    "url": "https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/cramfs_fs.h",
-   "filename": "cramfs_fs.h"
+   "filename": "cramfs_fs.h",
+   "license": "GPL-2.0 WITH Linux-syscall-note (UAPI header, constants only)"
   },
   {
    "id": "linux-romfs-doc",
@@ -820,7 +889,8 @@
    "title": "Linux kernel Documentation/filesystems/romfs.rst",
    "version": "linux master (fetched 2026-09)",
    "url": "https://raw.githubusercontent.com/torvalds/linux/master/Documentation/filesystems/romfs.rst",
-   "filename": "romfs.rst"
+   "filename": "romfs.rst",
+   "license": "GPL-2.0-only (kernel documentation, spec reference only)"
   },
   {
    "id": "linux-erofs-doc",
@@ -828,7 +898,8 @@
    "title": "Linux kernel Documentation/filesystems/erofs.rst",
    "version": "linux master 058884d23488 (fetched 2026-09)",
    "url": "https://raw.githubusercontent.com/torvalds/linux/058884d23488/Documentation/filesystems/erofs.rst",
-   "filename": "erofs.rst"
+   "filename": "erofs.rst",
+   "license": "GPL-2.0-only (kernel documentation, spec reference only)"
   },
   {
    "id": "linux-erofs-fs-h",
@@ -837,7 +908,8 @@
    "version": "linux master e87827da8c35 (fetched 2026-09)",
    "url": "https://raw.githubusercontent.com/torvalds/linux/e87827da8c35/fs/erofs/erofs_fs.h",
    "filename": "erofs_fs.h",
-   "note": "MIT SPDX since upstream relicensing (2025-11). Retained because Z_EROFS_LI_HOLE exists only here."
+   "note": "MIT SPDX since upstream relicensing (2025-11). Retained because Z_EROFS_LI_HOLE exists only here.",
+   "license": "MIT (SPDX on-disk header, constants only)"
   },
   {
    "id": "chromium-crx3-proto",
@@ -846,7 +918,8 @@
    "version": "chromium main (fetched 2026-09)",
    "url": "https://raw.githubusercontent.com/chromium/chromium/main/components/crx_file/crx3.proto",
    "filename": "crx3.proto",
-   "note": "BSD-style license; format documentation embedded in proto comments"
+   "note": "BSD-style license; format documentation embedded in proto comments",
+   "license": "BSD-3-Clause"
   },
   {
    "id": "pea-help-pdf",
@@ -854,7 +927,8 @@
    "title": "PEA file format specifications and implementation notes (pea_help.pdf)",
    "version": "PeaZip published spec (v1.3-era document)",
    "url": "https://peazip.github.io/pea_help.pdf",
-   "filename": "pea_help.pdf"
+   "filename": "pea_help.pdf",
+   "license": "GFDL (document; the PEA format specification itself is declared public domain)"
   },
   {
    "id": "peazip-pea-pas",
@@ -863,7 +937,8 @@
    "version": "PeaZip sources branch (fetched 2026-09)",
    "url": "https://raw.githubusercontent.com/peazip/PeaZip/sources/peazip-sources/dev/pea.pas",
    "filename": "pea.pas",
-   "note": "pea_utils.pas fetched from the same directory; used as wire-format reference only, no code copied"
+   "note": "pea_utils.pas fetched from the same directory; used as wire-format reference only, no code copied",
+   "license": "LGPL-3.0"
   },
   {
    "id": "peazip-fcrypta",
@@ -951,7 +1026,8 @@
    "title": "ECMA-119 Volume and File Structure of CDROM for Information Interchange (= ISO 9660)",
    "version": "ECMA-119 4th edition (June 2019)",
    "url": "https://ecma-international.org/wp-content/uploads/ECMA-119_4th_edition_june_2019.pdf",
-   "filename": "ecma119.pdf"
+   "filename": "ecma119.pdf",
+   "license": "copyrighted standard (Ecma, reference only)"
   },
   {
    "id": "linux-isofs-doc",
@@ -959,7 +1035,8 @@
    "title": "Linux kernel Documentation/filesystems/isofs.rst",
    "version": "linux master (fetched 2026-09)",
    "url": "https://raw.githubusercontent.com/torvalds/linux/master/Documentation/filesystems/isofs.rst",
-   "filename": "isofs.rst"
+   "filename": "isofs.rst",
+   "license": "GPL-2.0-only (kernel documentation, spec reference only)"
   },
   {
    "id": "linux-iso-fs-h",
@@ -967,7 +1044,8 @@
    "title": "Linux kernel include/uapi/linux/iso_fs.h (on-disk structures)",
    "version": "linux master (fetched 2026-09)",
    "url": "https://raw.githubusercontent.com/torvalds/linux/master/include/uapi/linux/iso_fs.h",
-   "filename": "iso_fs.h"
+   "filename": "iso_fs.h",
+   "license": "GPL-2.0 WITH Linux-syscall-note (UAPI header, constants only)"
   },
   {
    "id": "linux-isofs-rock-c",
@@ -975,7 +1053,8 @@
    "title": "Linux kernel fs/isofs/rock.c (SUSP/RRIP/zisofs decoder source)",
    "version": "linux master (fetched 2026-10)",
    "url": "https://raw.githubusercontent.com/torvalds/linux/master/fs/isofs/rock.c",
-   "filename": "isofs_rock.c"
+   "filename": "isofs_rock.c",
+   "license": "GPL-2.0-only (kernel source; consulted as format reference only, no code copied)"
   },
   {
    "id": "linux-isofs-compress-c",
@@ -983,7 +1062,8 @@
    "title": "Linux kernel fs/isofs/compress.c (zisofs transparent decompression)",
    "version": "linux master (fetched 2026-10)",
    "url": "https://raw.githubusercontent.com/torvalds/linux/master/fs/isofs/compress.c",
-   "filename": "isofs_compress.c"
+   "filename": "isofs_compress.c",
+   "license": "GPL-2.0-or-later (kernel source; consulted as format reference only, no code copied)"
   },
   {
    "id": "rrip-112",
@@ -991,7 +1071,8 @@
    "title": "Rock Ridge Interchange Protocol (IEEE P1282)",
    "version": "RRIP 1.12 (1994)",
    "url": "https://people.freebsd.org/~emaste/rrip112.pdf",
-   "filename": "rrip112.pdf"
+   "filename": "rrip112.pdf",
+   "license": "IEEE P1282 draft standard document (reference only)"
   },
   {
    "id": "susp-110",
@@ -1000,7 +1081,8 @@
    "version": "SUSP 1.10 troff source archive",
    "url": "http://cd.textfiles.com/internetinfo/standards/iso/9660/rockridge/susp.shar",
    "filename": "susp.shar",
-   "note": "SP/CE/ER/ST entry framing; historical archive copy (no canonical host remains)"
+   "note": "SP/CE/ER/ST entry framing; historical archive copy (no canonical host remains)",
+   "license": "IEEE P1281 draft standard document (reference only)"
   },
   {
    "id": "joliet-spec",
@@ -1008,7 +1090,8 @@
    "title": "Joliet Specification: ISO 9660 supplementary volume descriptor UCS-2 naming",
    "version": "Microsoft Joliet spec (1995)",
    "url": "https://pismotechnic.com/cfs/jolspec.html",
-   "filename": "jolspec.html"
+   "filename": "jolspec.html",
+   "license": "Microsoft copyrighted document (reference only)"
   },
   {
    "id": "erofs-utils-erofs-fs-h",
@@ -1017,7 +1100,8 @@
    "version": "erofs-utils dev da3be8c4135a (fetched 2026-09)",
    "url": "https://raw.githubusercontent.com/erofs/erofs-utils/da3be8c4135a/include/erofs_fs.h",
    "filename": "erofs_utils_fs.h",
-   "note": "Canonical userspace on-disk header. SPDX-License-Identifier: MIT (relicensed upstream from GPL-2.0-only OR Apache-2.0 dual, e.g. v1.8.3). Re-fetch must keep MIT SPDX."
+   "note": "Canonical userspace on-disk header. SPDX-License-Identifier: MIT (relicensed upstream from GPL-2.0-only OR Apache-2.0 dual, e.g. v1.8.3). Re-fetch must keep MIT SPDX.",
+   "license": "MIT (erofs-utils on-disk header, constants only)"
   },
   {
    "id": "el-torito-spec",
@@ -1025,7 +1109,8 @@
    "title": "El Torito Bootable CD-ROM Format Specification",
    "version": "1.0 (January 1995, Phoenix/IBM)",
    "url": "https://mirrors.meulie.net/bitsavers.org/projects/cdrom/El_Torito_CD-ROM_Spec.pdf",
-   "filename": "eltorito_spec_1.0.pdf"
+   "filename": "eltorito_spec_1.0.pdf",
+   "license": "copyrighted standard (IBM/Phoenix, reference only)"
   },
   {
    "id": "zisofs-format",
@@ -1033,7 +1118,8 @@
    "title": "Description of the zisofs Format (RRIP 'ZF' entry)",
    "version": "libisofs doc (2009-04-11)",
    "url": "https://dev.lovelyhq.com/libburnia/libisofs/raw/branch/master/doc/zisofs_format.txt",
-   "filename": "zisofs_format.txt"
+   "filename": "zisofs_format.txt",
+   "license": "copyrighted documentation (reference only)"
   },
   {
    "id": "apple-iso9660-fl36",
@@ -1041,7 +1127,8 @@
    "title": "Apple Technical Note FL36: Apple Extensions to ISO 9660",
    "version": "FL36 (July 1989, revised February 1994)",
    "url": "https://preterhuman.net/macstuff/technotes/fl/fl_36.html",
-   "filename": "apple_iso9660_fl36.html"
+   "filename": "apple_iso9660_fl36.html",
+   "license": "Apple documentation"
   },
   {
    "id": "okumura-ar002-00README-txt",
@@ -1050,7 +1137,8 @@
    "version": "ar002 (1991)",
    "url": "https://okumuralab.org/~okumura/compression/ar002/00README.txt",
    "filename": "ar002_00README.txt",
-   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装"
+   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装",
+   "license": "public domain"
   },
   {
    "id": "okumura-ar002-ar-h",
@@ -1059,7 +1147,8 @@
    "version": "ar002 (1991)",
    "url": "https://okumuralab.org/~okumura/compression/ar002/ar.h",
    "filename": "ar002_ar.h",
-   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装"
+   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装",
+   "license": "public domain"
   },
   {
    "id": "okumura-ar002-decode-c",
@@ -1068,7 +1157,8 @@
    "version": "ar002 (1991)",
    "url": "https://okumuralab.org/~okumura/compression/ar002/decode.c",
    "filename": "ar002_decode.c",
-   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装"
+   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装",
+   "license": "public domain"
   },
   {
    "id": "okumura-ar002-huf-c",
@@ -1077,7 +1167,8 @@
    "version": "ar002 (1991)",
    "url": "https://okumuralab.org/~okumura/compression/ar002/huf.c",
    "filename": "ar002_huf.c",
-   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装"
+   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装",
+   "license": "public domain"
   },
   {
    "id": "okumura-ar002-maketbl-c",
@@ -1086,7 +1177,8 @@
    "version": "ar002 (1991)",
    "url": "https://okumuralab.org/~okumura/compression/ar002/maketbl.c",
    "filename": "ar002_maketbl.c",
-   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装"
+   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装",
+   "license": "public domain"
   },
   {
    "id": "okumura-ar002-compr-txt",
@@ -1095,7 +1187,8 @@
    "version": "ar002 (1991)",
    "url": "https://okumuralab.org/~okumura/compression/ar002/compr.txt",
    "filename": "ar002_compr.txt",
-   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装"
+   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装",
+   "license": "public domain"
   },
   {
    "id": "okumura-ar002-compr2-txt",
@@ -1104,7 +1197,8 @@
    "version": "ar002 (1991)",
    "url": "https://okumuralab.org/~okumura/compression/ar002/compr2.txt",
    "filename": "ar002_compr2.txt",
-   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装"
+   "note": "public domain (00README.txt: 'written by Haruhiko Okumura and released to the public domain')。奥村晴彦氏による -lh4-〜-lh7- st1 形式の一次参照実装",
+   "license": "public domain"
   },
   {
    "id": "okumura-lzss-c",
@@ -1113,7 +1207,8 @@
    "version": "1988-05-01",
    "url": "https://okumuralab.org/~okumura/compression/lzss.c",
    "filename": "lzss.c",
-   "note": "public domain (file header: 'Haruhiko Okumura; public domain')。奥村晴彦氏による -lzs- (LArc 採用の EI=11/EJ=4 インスタンス) の一次参照実装"
+   "note": "public domain (file header: 'Haruhiko Okumura; public domain')。奥村晴彦氏による -lzs- (LArc 採用の EI=11/EJ=4 インスタンス) の一次参照実装",
+   "license": "public domain"
   },
   {
    "id": "ms-rdpbcgr-pdf",
@@ -1121,7 +1216,8 @@
    "title": "[MS-RDPBCGR] Remote Desktop Protocol: Basic Connectivity and Graphics Remoting (RDP bulk compression section 3.1.8.4)",
    "version": "rev 2025-04-07",
    "url": "https://winprotocoldocs-bhdugrdyduf5h2e4.b02.azurefd.net/MS-RDPBCGR/%5bMS-RDPBCGR%5d-250407.pdf",
-   "filename": "ms-rdpbcgr_250407.pdf"
+   "filename": "ms-rdpbcgr_250407.pdf",
+   "license": "Microsoft Open Specifications (copyrighted document, reference only)"
   }
  ],
  "no_url_available": [
@@ -1153,7 +1249,7 @@
    "version": "4.2.4",
    "note": "正式な仕様書なし。Unix compress .Z フォーマットのデファクト標準。参照実装は sources/ncompress_4.2.4_compress42.c にスナップショット済み。ncompress は Unlicense で公開",
    "reference_url": "https://github.com/vapier/ncompress",
-   "license": "Unlicense (public domain 相当)"
+   "license": "public domain dedication (no license header in pinned file)"
   },
   {
    "id": "rzip-format",
@@ -1631,6 +1727,13 @@
     "https://github.com/ning/compress"
    ],
    "license": "Apache-2.0 (project license)"
+  },
+  {
+   "id": "liblz4",
+   "format": "lz4",
+   "title": "liblz4 reference implementation (lz4.c / lz4frame.c)",
+   "note": "Consulted for legacy-frame details (LEGACY_BLOCK_SIZE = 8 MiB, stored-block fallback) not covered by the written frame-format doc; no code copied",
+   "license": "BSD-2-Clause"
   },
   {
    "id": "rpm-lib-cpio",

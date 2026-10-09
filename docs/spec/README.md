@@ -87,7 +87,7 @@
 | [`.lzma`](lzma_alone/README.md) | lzma-file-format.txt (tukaani/xz doc) | 30 | 0 | 0 | 30 |
 | [LZW](lzw/README.md) | ncompress `compress42.c` (de facto) | 26 | 0 | 0 | 26 |
 | [LZ4](lz4/README.md) | LZ4 Frame/Block Format | 60 | 0 | 0 | 60 |
-| [LZO](lzo/README.md) | kernel `Documentation/lzo.txt` + lzop format | 45 | 0 | 0 | 45 |
+| [LZO](lzo/README.md) | kernel `Documentation/staging/lzo.rst` + lzop format | 45 | 0 | 0 | 45 |
 | [Snappy](snappy/README.md) | snappy format_description / framing_format | 37 | 0 | 0 | 37 |
 | [Brotli](brotli/README.md) | RFC 7932 | 65 | 0 | 0 | 65 |
 | [zlib](zlib/README.md) | RFC 1950 | 20 | 0 | 0 | 20 |
@@ -123,7 +123,7 @@
 | [cpio](cpio/README.md) | POSIX `odc` / SVR4 `newc`/`newcrc`/`bin` | 42 | 1 | 0 | 43 |
 | [ar](ar/README.md) | IEEE Std 1003.1 Issue 7 (Issue 8 は記述削除) / GNU ar / BSD ar | 29 | 0 | 2 | 31 |
 | [deb](deb/README.md) | deb(5) (dpkg) | 27 | 0 | 2 | 29 |
-| [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 36 | 0 | 2 | 38 |
+| [rpm](rpm/README.md) | rpm.org Package Format (v4/v6) | 36 | 0 | 3 | 39 |
 | [squashfs](squashfs/README.md) | SquashFS 4.0 binary format | 46 | 0 | 1 | 47 |
 | [mscab](mscab/README.md) | [MS-CAB] Cabinet File Format | 29 | 0 | 0 | 29 |
 | [mscfb](mscfb/README.md) | [MS-CFB] Compound File Binary File Format v20210625 | 22 | 0 | 2 | 24 |
@@ -135,7 +135,7 @@
 | [pea](pea/README.md) | PEA file format spec (pea_help.pdf) + PeaZip pea.pas/pea_utils.pas | 20 | 0 | 3 | 23 |
 | [zim](zim/README.md) | openZIM ZIM file format (v5/v6) | 27 | 0 | 2 | 29 |
 | [mtree](mtree/README.md) | FreeBSD mtree(5) / libarchive mtree | 25 | 0 | 2 | 27 |
-| [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 30 | 0 | 1 | 31 |
+| [warc](warc/README.md) | ISO 28500:2009 / IIPC WARC 1.1 | 33 | 0 | 2 | 35 |
 | [lha](lha/README.md) | lha header documentation + jLHA Notes + lzhformat.html + 奥村氏 ar002/lzss.c (PD) + lhasa (ISC) | 24 | 0 | 0 | 24 |
 | [arj](arj/README.md) | ARJ technical note (ARJ 2.x) + UNARJ/newtua_dos 参照実装 | 24 | 0 | 3 | 27 |
 | [arc](arc/README.md) | SEA ARC file format description + hyc/arc `Arcinfo` | 24 | 0 | 1 | 30 |
@@ -164,10 +164,10 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 2434 |
+| ✅ 実装+テスト済み | 2437 |
 | ⚠️ 部分実装 | 2 |
-| ❌ 未実装 | 58 |
+| ❌ 未実装 | 60 |
 | — 該当なし | 6 |
-| **合計** | **2500** |
+| **合計** | **2505** |
 
-**全体カバー率**: 2418 / 2483 = **97.4%** (❌ 行 (intentional exclusion・要修正候補を含む) および該当なし除外後: 2418 / 2419 = **99.96%**)
+**全体カバー率**: 2437 / 2499 = **97.5%** (❌ 行 (intentional exclusion・要修正候補を含む) および該当なし除外後: 2437 / 2439 = **99.9%**)

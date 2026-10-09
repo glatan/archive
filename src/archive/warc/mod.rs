@@ -10,7 +10,9 @@
 //! supplies the payload bytes). On decode, `sha1` digests are
 //! verified: `WARC-Block-Digest` always, and `WARC-Payload-Digest`
 //! when the payload is known to be the whole record block. Per-record
-//! field/type constraints and Clause 7 segmentation structure (segment
+//! field/type constraints (including mandatory `WARC-Profile` on
+//! `revisit`, and the Clause-8 `application/warc-fields` content type
+//! on `warcinfo`) and Clause 7 segmentation structure (segment
 //! ordering, `WARC-Segment-Total-Length`) are validated on decode.
 //! Clause 7 segmented series can be reassembled with
 //! [`decode::join`], and `WARC-Concurrent-To` capture
@@ -27,6 +29,18 @@ pub mod decode;
 
 /// WARC record stream encoding.
 pub mod encode;
+
+/// True when `value`'s media type is `application/warc-fields`
+/// (parameters ignored, case-insensitive). Clause 8 requires this
+/// type on `warcinfo` records.
+pub(crate) fn is_warc_fields_type(value: &str) -> bool {
+    value
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .eq_ignore_ascii_case("application/warc-fields")
+}
 
 /// Codec struct for trait-based WARC decode operations.
 pub struct WarcCodec;

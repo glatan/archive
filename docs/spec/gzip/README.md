@@ -35,7 +35,7 @@
 | 23 | CRC32 インクリメンタル計算 | RFC 1952 Appendix 8 | ✅ | `test_crc32_incremental` |
 | 24 | エンコード→デコード ラウンドトリップ | RFC 1952 §2.2 / §2.3.1 | ✅ | `test_roundtrip_hello`, `test_roundtrip_compressed`, `test_gzip_roundtrip_large` |
 | 25 | ISIZE の 2^32 modulo ラップ | RFC 1952 §2.3.1 | ✅ | `test_verify_isize_modulo_wrap_accepts_4gib_boundary`, `test_verify_isize_modulo_wrap_mismatch` |
-| 26 | FHCRC CRC16 検証 (RFC 1952 §2.3.1.2) | RFC 1952 §2.3.1 | ✅ | `test_fhcrc_validation` |
+| 26 | FHCRC CRC16 検証 (RFC 1952 §2.3.1) | RFC 1952 §2.3.1 | ✅ | `test_fhcrc_validation` |
 | 27 | XFL エンコーダ値 (0x02=最大, 0x04=最速) | RFC 1952 §2.3.1 | ✅ | `test_xfl_values` |
 | 28 | マルチメンバー: 異なる圧縮レベル | RFC 1952 §2.2 | ✅ | `test_multi_member_different_compression` |
 | 29 | FNAME ヌル終端なしエラー | RFC 1952 §2.3.1 | ✅ | `test_fname_unterminated` |
