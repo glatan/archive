@@ -130,7 +130,7 @@
 | 74 | NumSels が実際に必要な数より多い場合は許容 (枯渇のみエラー) | bzip2-format §2.2.3.2 | ✅ | selector 消費は使用分のみ、余剰は読み捨て |
 | 75 | 最終ストリーム後の trailing garbage は無視 | bzip2 reference behavior | ✅ | `decode` は trailer 以降を読まない (参照実装は警告、本実装は黙って無視) |
 | 76 | `BZ0` (bzip1 レガシー形式) | bzip2-format §2.2.2 | ❌ intentional scope | deprecated。`BZh0` は `test_invalid_block_size` で reject を検証 |
-| 77 | RUNA/RUNB ゼロラン長の u64 累積は saturate (wrap/panic しない) | crate エラー規約 (fuzz 耐性) | ✅ | `undo_mtf_rle2` の saturating 演算 + `test_undo_mtf_rle2_run_saturates_instead_of_overflowing` |
+| 77 | RUNA/RUNB ゼロラン長の u64 累積は saturate (wrap/panic しない) | crate エラー規約 (fuzz 耐性) | ✅ | `undo_mtf_rle2` の saturating 演算 + `test_undo_mtf_rle2_run_saturates_instead_of_overflowing`, `test_undo_mtf_rle2_saturated_run_with_nonempty_output` |
 
 ---
 

@@ -263,7 +263,19 @@ fn decode_member(f: &Frag, packed: &[u8], password: Option<&[u8]>) -> Result<Vec
 /// Decode one or more ARJ volumes, reassembling files whose flag
 /// 0x04 marks them as continued into the next volume.
 fn decode_parts_impl(parts: &[&[u8]], password: Option<&[u8]>) -> Result<Vec<ArjEntry>, Error> {
+    decode_parts_bounded(parts, password, usize::MAX)
+}
+
+/// [`decode_parts_impl`] with a total decoded-payload budget: a member
+/// whose declared original size exceeds the remaining budget fails
+/// with [`Error::OutputLimitExceeded`] before its data is materialized.
+fn decode_parts_bounded(
+    parts: &[&[u8]],
+    password: Option<&[u8]>,
+    max_output: usize,
+) -> Result<Vec<ArjEntry>, Error> {
     let mut entries = Vec::new();
+    let mut emitted = 0usize;
     // Packed-data fragments of the entry currently being assembled.
     // Non-split members finalize on their single fragment.
     let mut pending: Vec<(Frag, &[u8])> = Vec::new();
@@ -289,11 +301,15 @@ fn decode_parts_impl(parts: &[&[u8]], password: Option<&[u8]>) -> Result<Vec<Arj
             // Directories, volume labels, and chapter labels
             // (file types 3-5) carry no decodable payload.
             let is_meta = matches!(head.file_type, 3..=5);
+            if !is_meta && head.orig > max_output.saturating_sub(emitted) {
+                return Err(Error::OutputLimitExceeded { limit: max_output });
+            }
             let data = if is_meta {
                 Vec::new()
             } else {
                 decode_member(head, &blob, password)?
             };
+            emitted = emitted.saturating_add(data.len());
             entries.push(ArjEntry {
                 name: head.name.clone(),
                 method: head.method,
@@ -318,6 +334,31 @@ pub fn decode(input: &[u8]) -> Result<Vec<ArjEntry>, Error> {
         return Ok(Vec::new());
     }
     decode_parts_impl(&[input], None)
+}
+
+/// Decode with a maximum total payload size limit across all entries.
+///
+/// A member whose declared original size exceeds the remaining output
+/// budget is rejected with [`Error::OutputLimitExceeded`] before its
+/// data is materialized.
+pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<ArjEntry>, Error> {
+    if input.is_empty() {
+        return Ok(Vec::new());
+    }
+    decode_parts_bounded(&[input], None, max_output)
+}
+
+/// [`decode_bounded`] for archives whose entries are garbled with a
+/// password.
+pub fn decode_bounded_with_password(
+    input: &[u8],
+    password: &str,
+    max_output: usize,
+) -> Result<Vec<ArjEntry>, Error> {
+    if input.is_empty() {
+        return Ok(Vec::new());
+    }
+    decode_parts_bounded(&[input], Some(password.as_bytes()), max_output)
 }
 
 /// Decode an ARJ archive into entries using a password for garbled
@@ -614,6 +655,22 @@ mod tests {
         let refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
         let e = decode_parts_with_password_bytes(&refs, b"pw").unwrap();
         assert_eq!(e[0].data, data);
+    }
+
+    /// A member's declared `orig` is checked against the remaining
+    /// budget before its data is materialized (same declared-size
+    /// mechanism as the LHA `-pm1-` resource-oracle finding in fuzz
+    /// run-1791677246).
+    #[test]
+    fn decode_bounded_enforces_declared_orig() {
+        let a = crate::archive::arj::encode::encode(&[("f.bin", b"data")]).unwrap();
+        let e = decode_bounded(&a, 4).unwrap();
+        assert_eq!(e[0].data, b"data");
+        let err = decode_bounded(&a, 3).unwrap_err();
+        assert!(matches!(err, Error::OutputLimitExceeded { .. }));
+        // The password entry point applies the same budget.
+        let err = decode_bounded_with_password(&a, "unused", 3).unwrap_err();
+        assert!(matches!(err, Error::OutputLimitExceeded { .. }));
     }
 
     #[cfg(feature = "std")]

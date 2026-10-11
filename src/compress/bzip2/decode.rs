@@ -398,8 +398,9 @@ fn undo_mtf_rle2(
                 power = power.saturating_mul(2);
                 i += 1;
             }
-            // Validate run length before allocating
-            if output.len() as u64 + run_len > max_output as u64 {
+            // Validate run length before allocating; compare as a
+            // subtraction since run_len may have saturated to u64::MAX.
+            if run_len > (max_output as u64).saturating_sub(output.len() as u64) {
                 return Err(Error::InvalidData(
                     "bzip2 block data exceeds declared block size",
                 ));
@@ -589,6 +590,20 @@ mod tests {
         // the run length must saturate and be rejected, not panic.
         let symbols = vec![RUNB; 128];
         let result = undo_mtf_rle2(&symbols, &seq_to_unseq, 1, 100);
+        assert!(result.is_err());
+    }
+
+    /// Regression (fuzz run-1791677246): with a non-empty output the
+    /// `output.len() + run_len` bound check itself overflowed once
+    /// run_len saturated to u64::MAX, panicking instead of erroring.
+    #[test]
+    fn test_undo_mtf_rle2_saturated_run_with_nonempty_output() {
+        let seq_to_unseq = *b"AB";
+        // Symbol 2 = MTF index 1 emits one byte, then 128 RUNB symbols
+        // saturate the run-length accumulator.
+        let mut symbols = vec![2u16];
+        symbols.extend_from_slice(&[RUNB; 128]);
+        let result = undo_mtf_rle2(&symbols, &seq_to_unseq, 2, 100);
         assert!(result.is_err());
     }
 

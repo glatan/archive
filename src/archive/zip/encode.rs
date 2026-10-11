@@ -145,6 +145,23 @@ impl Default for ZipEntryOptions {
     }
 }
 
+/// Options controlling the segment layout produced by
+/// [`ZipEncoder::finish_parts_with`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ZipSplitOptions {
+    /// Place the whole central directory (and the end-of-archive tail)
+    /// on the last segment.
+    ///
+    /// When `false` the tail may occupy its own trailing segment with the
+    /// central directory ending on an earlier disk. That layout is legal
+    /// per APPNOTE §8 but is rejected by readers that require the central
+    /// directory to begin on the last disk (e.g. Info-ZIP `unzip`'s
+    /// multi-disk handling). Enabling this option keeps `cd_disk ==
+    /// this_disk`, at the cost of requiring the central directory plus
+    /// tail to fit within one segment.
+    pub central_directory_on_last_segment: bool,
+}
+
 /// Builder for creating ZIP archives.
 #[derive(Debug, Default)]
 pub struct ZipEncoder {
@@ -383,6 +400,16 @@ impl ZipEncoder {
     /// produced (the 16-bit disk fields cannot express more). A result of
     /// one segment is byte-identical to [`finish`](Self::finish).
     pub fn finish_parts(self, max_segment_size: usize) -> Result<Vec<Vec<u8>>, Error> {
+        self.finish_parts_with(max_segment_size, &ZipSplitOptions::default())
+    }
+
+    /// Like [`finish_parts`](Self::finish_parts) with explicit segment
+    /// layout options. See [`ZipSplitOptions`] for the available knobs.
+    pub fn finish_parts_with(
+        self,
+        max_segment_size: usize,
+        options: &ZipSplitOptions,
+    ) -> Result<Vec<Vec<u8>>, Error> {
         if max_segment_size == 0 {
             return Err(Error::InvalidData("zip: segment size too small"));
         }
@@ -392,6 +419,7 @@ impl ZipEncoder {
             prepared.needs_zip64_archive,
             prepared.archive_comment_bytes.len(),
             max_segment_size as u64,
+            options.central_directory_on_last_segment,
         )?;
 
         // Resolve each entry's disk placement into its header fields. A
@@ -838,6 +866,7 @@ fn plan_split(
     needs_zip64_archive: bool,
     archive_comment_len: usize,
     max: u64,
+    cd_on_last_segment: bool,
 ) -> Result<SplitPlan, Error> {
     let mut plan = SplitPlan {
         part_starts: vec![0],
@@ -885,31 +914,54 @@ fn plan_split(
         }
     }
 
-    let mut cd_record_disks = Vec::with_capacity(entries.len());
-    for (index, entry) in entries.iter().enumerate() {
-        let len = central_directory_record_len(entry);
-        let start = place_atomic_record(&mut plan.part_starts, &mut disk_base, &mut pos, len, max)?;
-        if index == 0 {
-            plan.cd_disk = plan.part_starts.len() as u64 - 1;
-            plan.cd_offset = start - disk_base;
-        }
-        cd_record_disks.push(plan.part_starts.len() as u64 - 1);
-    }
-
     // End-of-archive tail: ZIP64 EOCD record + ZIP64 EOCD locator + EOCD
     // must reside on the same (last) disk (APPNOTE §4.3.15).
     let tail = if needs_zip64_archive { 76 } else { 0 } + 22 + archive_comment_len as u64;
-    place_atomic_record(&mut plan.part_starts, &mut disk_base, &mut pos, tail, max)?;
+
+    if cd_on_last_segment {
+        // The whole central directory and the tail form one atomic unit
+        // so that the CD begins on the last disk (cd_disk == this_disk),
+        // the layout readers such as Info-ZIP unzip require for
+        // multi-disk archives.
+        let cd_total = entries
+            .iter()
+            .map(central_directory_record_len)
+            .sum::<u64>()
+            + tail;
+        let start = place_atomic_record(
+            &mut plan.part_starts,
+            &mut disk_base,
+            &mut pos,
+            cd_total,
+            max,
+        )?;
+        plan.cd_disk = plan.part_starts.len() as u64 - 1;
+        plan.cd_offset = start - disk_base;
+        plan.entries_on_last_disk = entries.len() as u64;
+    } else {
+        let mut cd_record_disks = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let len = central_directory_record_len(entry);
+            let start =
+                place_atomic_record(&mut plan.part_starts, &mut disk_base, &mut pos, len, max)?;
+            if index == 0 {
+                plan.cd_disk = plan.part_starts.len() as u64 - 1;
+                plan.cd_offset = start - disk_base;
+            }
+            cd_record_disks.push(plan.part_starts.len() as u64 - 1);
+        }
+        place_atomic_record(&mut plan.part_starts, &mut disk_base, &mut pos, tail, max)?;
+        let last_disk = plan.part_starts.len() as u64 - 1;
+        plan.entries_on_last_disk = cd_record_disks
+            .iter()
+            .filter(|&&disk| disk == last_disk)
+            .count() as u64;
+    }
 
     if plan.part_starts.len() > 0xFFFF {
         // Disk indexes are 16-bit; 0xFFFF is the ZIP64-extra sentinel.
         return Err(Error::Unsupported("zip: too many archive parts"));
     }
-    let last_disk = plan.part_starts.len() as u64 - 1;
-    plan.entries_on_last_disk = cd_record_disks
-        .iter()
-        .filter(|&&disk| disk == last_disk)
-        .count() as u64;
     plan.total_size = pos;
     Ok(plan)
 }
@@ -2686,6 +2738,75 @@ mod tests {
             cd_pos += 46 + name_len + extra_len + com_len;
         }
         assert_eq!(disk_entries, count_on_last);
+    }
+
+    #[test]
+    fn test_finish_parts_cd_on_last_segment() {
+        let a_payload = vec![0x41u8; 400];
+        let b_payload = b"deflated payload deflated payload".to_vec();
+        let build = || {
+            let mut encoder = ZipEncoder::new();
+            encoder.add_file_stored("a.bin", &a_payload);
+            encoder.add_file("b.txt", &b_payload);
+            encoder
+        };
+
+        // Default: the greedy plan leaves the EOCD tail alone on the
+        // last segment (cd_disk < this_disk).
+        let parts = build().finish_parts(300).unwrap();
+        assert!(parts.len() > 1);
+        assert!(
+            parts
+                .last()
+                .unwrap()
+                .starts_with(&EOCD_SIGNATURE.to_le_bytes())
+        );
+
+        // Compat: the whole central directory and tail move to the last
+        // segment so that cd_disk == this_disk.
+        let parts = build()
+            .finish_parts_with(
+                300,
+                &ZipSplitOptions {
+                    central_directory_on_last_segment: true,
+                },
+            )
+            .unwrap();
+        assert!(parts.len() > 1);
+        let last = parts.last().unwrap();
+        assert!(last.starts_with(&CENTRAL_DIRECTORY_HEADER_SIGNATURE.to_le_bytes()));
+        let eocd = last.len() - 22;
+        let this_disk = u16::from_le_bytes(last[eocd + 4..eocd + 6].try_into().unwrap()) as usize;
+        let cd_disk = u16::from_le_bytes(last[eocd + 6..eocd + 8].try_into().unwrap()) as usize;
+        let disk_entries = u16::from_le_bytes(last[eocd + 8..eocd + 10].try_into().unwrap());
+        assert_eq!(this_disk, parts.len() - 1);
+        assert_eq!(cd_disk, this_disk);
+        assert_eq!(disk_entries, 2);
+
+        let slices: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+        let entries = decode::decode_parts(&slices).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "a.bin");
+        assert_eq!(entries[0].data, a_payload);
+        assert_eq!(entries[1].name, "b.txt");
+        assert_eq!(entries[1].data, b_payload);
+    }
+
+    #[test]
+    fn test_finish_parts_cd_on_last_segment_too_small() {
+        // The whole CD + tail cannot fit in one segment: rejected rather
+        // than silently emitting an incompatible layout.
+        let mut encoder = ZipEncoder::new();
+        encoder.add_file_stored("a.txt", b"data");
+        assert!(matches!(
+            encoder.finish_parts_with(
+                40,
+                &ZipSplitOptions {
+                    central_directory_on_last_segment: true,
+                },
+            ),
+            Err(Error::InvalidData(_))
+        ));
     }
 
     #[test]

@@ -6,7 +6,7 @@
 | 参照実装 | upstream `lrzip` (Con Kolivas 他、GPL-2.0-or-later、動作参照 — format facts のみ、コード取り込みなし。GPL-2.0+→GPL-3→AGPL-13 の変換パスあり)。system `lrzip` は oracle (下記「相互運用の確認範囲」行参照)。詳細: THIRD_PARTY_NOTICES lrzip / rzip 項 |
 | 形式概要 | crate-local な `.lrz` framing を持ち、shared long-range match finder の上に lrzip-specific variable-width match offset token を載せる。system `lrzip` との完全互換 reimplementation は目標外 |
 | 内部構成 | crate-local shared `rzip`-style token/chunk logic を再利用し、その上に `LZMA` / `bzip2` / `LZO` / `gzip` / `ZPAQ` / `none` バックエンドを重ねる |
-| `magic.header.txt` でカバーしない残余の de facto 事実 | ctype 数値写像 (none/bzip2/lzo/lzma/gzip/zpaq)、stream header は CTYPE_NONE プレースホルダで実 ctype は block header 側にだけ置く layout、empty stream0 = CRC + 0-length literal token、stream-0 の token エンコーディング、可変幅 match offset、chunk sizing (~100MiB)、生データフォールバック方針 — いずれも upstream ソース由来の format fact であり、書面仕様が存在しないため例外として記録する |
+| `magic.header.txt` でカバーしない残余の de facto 事実 | ctype 数値写像 (none/bzip2/lzo/lzma/gzip/zpaq)、stream header は CTYPE_NONE プレースホルダで実 ctype は block header 側にだけ置く layout、empty stream0 = CRC + 0-length literal token、stream-0 の token エンコーディング、可変幅 match offset、chunk sizing (~100MiB)、生データフォールバック方針、system `lrzip` の LZMA block は EOS marker を持たず block header `u_len` で終端する raw stream、stdin/pipe 出力は header `dict_size == 0` — いずれも upstream ソース由来の format fact であり、書面仕様が存在しないため例外として記録する |
 | system `lrzip` 相互運用の確認範囲 | 現在の実測確認は system `lrzip` 生成の simple / match-rich LZMA archive decode と、crate 出力を system `lrzip -d` が decode できる LZMA / `bzip2` / `LZO` / `gzip` / `ZPAQ` / `none` backend matrix と MD5 flag 付き出力まで。未検証の option matrix や large-payload outer framing 全体との完全互換は保証の対象外とする |
 
 ## 対応バリアント・仕様版
@@ -65,6 +65,7 @@
 | 28 | crate 出力を system `lrzip` が decode 可能 (LZMA path) | system `lrzip` interoperability behavior | ✅ | `test_lrzip_encode_system_decode_compat` |
 | 29 | crate 出力を system `lrzip` が decode 可能 (non-LZMA backend matrix) | system `lrzip` interoperability behavior | ✅ | `test_lrzip_encode_bzip2_system_decode_compat`, `test_lrzip_encode_gzip_system_decode_compat`, `test_lrzip_encode_none_system_decode_compat`, `test_lrzip_encode_lzo_system_decode_compat`, `test_lrzip_encode_zpaq_system_decode_compat` |
 | 30 | system `lrzip` 生成 match-rich LZMA archive の decode | system `lrzip` interoperability behavior | ✅ | `test_lrzip_decode_system_lzma_repeated_archive` |
+| 30a | system `lrzip` の LZMA block は EOS-less raw stream で、block header `u_len` を終端サイズとして decode。header `dict_size == 0` (stdin/pipe 出力) は辞書制約なし (`u32::MAX`) として扱う | system `lrzip` de facto | ✅ | `test_decompress_block_lzma_without_eos_marker`, `test_decode_system_lrzip_zeros_archive`, `test_decode_system_lrzip_zeros_archive_zero_dict` |
 | 31 | encode_writer (std::io::Write 対応) | crate-local `.lrz` container contract | ✅ | doctest |
 | 32 | decode_reader / decode_to_writer (std::io 対応) | crate-local `.lrz` container contract | ✅ | doctest, `test_decode_to_writer_roundtrip`。reader path は slice `decode()` より検証が弱い既知差分: `next_head != 0` (1 chunk 内 multi-block) は `Unsupported`、MD5 flag は読まず digest 未検証、stream header の `last_head` を無視して block を順読み |
 | 33 | Backend type byte encoding (数値) | lrzip header | ✅ | 実装済み |
@@ -84,7 +85,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 41 |
+| ✅ 実装+テスト済み  | 42 |
 | ⚠️ 部分実装  | 0 |
 | ❌ 未実装 | 1 (intentional scope) |
-| **合計** | **42** |
+| **合計** | **43** |

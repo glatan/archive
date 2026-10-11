@@ -5,7 +5,7 @@
 | 基準仕様 | ARJ technical note `TECHNOTE.DOC` (ARJ/UNARJ 配布物同梱、ARJ 2.x file format description)。所在: [Just Solve Wiki: ARJ](http://fileformats.archiveteam.org/wiki/ARJ) (安定した単一ファイル URL なし)。参照実装: UNARJ 2.41 (公式 decoder、制限付き freeware — ソースは ARJ archiver 以外の製品でのみ自由利用可。本 crate への取り込み不可、参照・oracle 用途のみ)、7-Zip `NArj`、newtua_dos (LGPL-3.0、XADMaster port、method 1-4) — manifest `no_url_available` の `unarj-source`/`newtua-dos` |
 | 参照実装 | newtua_dos (LGPL-3.0-or-later、method4 の移植元・methods 1-3 の挙動参照)、XADMaster (garbled semantics の挙動参照)、UNARJ 2.41 (制限付き freeware、binary oracle のみ — ソース参照なし)、unar/7z (oracle)。詳細は基準仕様行および THIRD_PARTY_NOTICES arj 項・4a 節 |
 | 形式概要 | `0x60 0xEA` + `u16le header size` の header ブロック列 (0 = end)。基本 header は 30B 固定 + NUL 終端 filename/comment + u32 header CRC + u16 ext size。main header の後に file header 列と data が続く |
-| 実装範囲 | 展開 (read) は **method 0-4、no-data pseudo-method 8/9 (ARJ32)、file type 3 (directory) / 4 (label) / 5 (chapter label)、garbled (暗号化、パスワード必須)、および multi-volume (供給された parts の連結)** に対応する。作成 (write) は `ArjEncoder::with_method` による method 0-4 (圧縮効果が得られない場合は stored にフォールバック)、`with_password` による暗号化出力、および `finish_parts` による multi-volume 分割出力に対応する。`decode::volume_paths` (`std` feature) により、同一ディレクトリ内の sibling volume を自動探索できる。`decode_parts_with_password_bytes` で multi-volume + garbled の組み合わせにも対応する。security envelope (flag 0x40) は `Error::Unsupported` で reject |
+| 実装範囲 | 展開 (read) は **method 0-4、no-data pseudo-method 8/9 (ARJ32)、file type 3 (directory) / 4 (label) / 5 (chapter label)、garbled (暗号化、パスワード必須)、および multi-volume (供給された parts の連結)** に対応する。作成 (write) は `ArjEncoder::with_method` による method 0-4 (圧縮効果が得られない場合は stored にフォールバック)、`with_password` による暗号化出力、および `finish_parts` による multi-volume 分割出力に対応する。`decode::volume_paths` (`std` feature) により、同一ディレクトリ内の sibling volume を自動探索できる。`decode_parts_with_password_bytes` で multi-volume + garbled の組み合わせにも対応する。出力上限を課す `decode_bounded` / `decode_bounded_with_password` も提供する。security envelope (flag 0x40) は `Error::Unsupported` で reject |
 
 ## 対応バリアント・仕様版
 
@@ -42,6 +42,7 @@
 | 21 | multi-volume の自動ファイル探索 | crate extension | ✅ | `decode::volume_paths` (`std` feature) で `.arj` / `.aNN` の sibling ファイルを順序付きで列挙する。`volume_paths_discovers_siblings`, `test_arj_volume_paths_discovery_roundtrip` |
 | 11 | entry data CRC-32 を検証、不一致は reject | ARJ tech note | ✅ | decode 内検証 |
 | 12 | bounds 検査 (truncated signature/header/data、st1 block count=0 → エラー) | crate エラー規約 | ✅ | `test_arj_rejects_truncated`, `test_st1_zero_block_count_rejected` (共有 `compress::lzh::st1`), `test_fuzz_regression_arj_1_corrupt` |
+| 12a | `decode_bounded` / `decode_bounded_with_password`: member 宣言 `orig` の累計が `max_output` を超えた時点で `Error::OutputLimitExceeded` | crate エラー規約 | ✅ | `decode_bounded_enforces_declared_orig`。fuzz harness の `Arj*`/`ArjGarbled` は bounded 経路を使用 |
 | 13 | filename は UTF-8 必須 | crate エラー規約 | ✅ | `read_cstr` |
 | 19a | method 8/9 (ARJ32 no-data pseudo-method) decode と file_type 5 chapter label の受理。method 8 は CRC 非検証、method 9 は空 payload の CRC 検証を行う差異あり | ARJ32 系 de facto | ✅ | `test_arj_method8_9_no_data`, `test_arj_chapter_label` |
 

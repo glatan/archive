@@ -37,6 +37,7 @@
 | 9 | 未対応メソッド (`-lhx-` 等、実装済み以外の `-l??-`) は `Error::Unsupported` | lha note | ✅ | `rejects_unsupported_method` |
 | 10 | entry CRC-16 (CRC-16/ARC、poly 0x8005 reflected) を検証、不一致は reject | lha note | ✅ | decode 内検証 |
 | 11 | bounds 検査 (truncated header/data、st1 block count=0 → エラー) | crate エラー規約 | ✅ | `test_lha_rejects_truncated`, `test_st1_zero_block_count_rejected` (共有 `compress::lzh::st1`), `test_fuzz_regression_lha_lh4_corrupt` |
+| 11a | `decode_bounded(input, max_output)`: member 宣言 `orig` の累計が上限を超えた時点で materialize 前に `Error::OutputLimitExceeded` | crate エラー規約 | ✅ | `decode_bounded_rejects_oversized_declared_orig`, `decode_bounded_enforces_total_limit`。fuzz harness の `Lha*` バリアントは bounded 経路を使用 |
 | 12 | filename は UTF-8 必須、NUL 混入は reject。raw `0xff` バイトは `/` に正規化 (ext payload 全般 + level-0/1 基本 name field)、基本 name field の `\` も `/` に変換 | crate エラー規約 | ✅ | `sanitize_name`, `sanitize_basic_name` |
 
 

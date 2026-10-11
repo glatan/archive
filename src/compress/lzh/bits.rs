@@ -20,7 +20,7 @@ impl<'a> MsbReader<'a> {
         MsbReader { data, pos: 0 }
     }
 
-    /// Peek the next `n` bits (n <= 24) MSB-first, zero-padded past
+    /// Peek the next `n` bits (n <= 32) MSB-first, zero-padded past
     /// end of input, without consuming.
     pub(crate) fn peek(&self, n: u32) -> u32 {
         let mut v = 0u32;
@@ -36,7 +36,7 @@ impl<'a> MsbReader<'a> {
         v
     }
 
-    /// Consume `n` bits (n <= 24) MSB-first, zero-padded past end.
+    /// Consume `n` bits (n <= 32) MSB-first, zero-padded past end.
     pub(crate) fn get(&mut self, n: u32) -> u32 {
         let v = self.peek(n);
         self.pos += u64::from(n);
@@ -52,7 +52,9 @@ impl<'a> MsbReader<'a> {
 /// MSB-first bit writer (encoders and test mirror encoders).
 pub(crate) struct MsbWriter {
     bytes: Vec<u8>,
-    acc: u32,
+    /// Pending bits; wider than `u32` so `put` can accept `n` up to 32
+    /// while up to 7 bits are still buffered.
+    acc: u64,
     nbits: u32,
 }
 
@@ -65,15 +67,16 @@ impl MsbWriter {
         }
     }
 
-    /// Emit the low `n` bits of `v`, MSB of the field first.
+    /// Emit the low `n` bits of `v` (n <= 32), MSB of the field first.
     pub(crate) fn put(&mut self, v: u32, n: u32) {
-        self.acc = (self.acc << n) | (v & ((1 << n) - 1));
+        debug_assert!(n <= 32);
+        self.acc = (self.acc << n) | (u64::from(v) & ((1u64 << n) - 1));
         self.nbits += n;
         while self.nbits >= 8 {
             self.nbits -= 8;
             self.bytes.push((self.acc >> self.nbits) as u8);
         }
-        self.acc &= (1 << self.nbits) - 1;
+        self.acc &= (1u64 << self.nbits) - 1;
     }
 
     /// Flush, zero-padding the tail byte; returns the byte stream.
@@ -81,6 +84,7 @@ impl MsbWriter {
         if self.nbits > 0 {
             self.bytes.push((self.acc << (8 - self.nbits)) as u8);
         }
+        debug_assert!(self.nbits < 8);
         self.bytes
     }
 }

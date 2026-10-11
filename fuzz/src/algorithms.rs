@@ -1343,6 +1343,29 @@ pub fn decode_bounded_with(
             let entries = zpaq_archive::decode::decode_bounded(data, max_output)?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
         }
+        // LHA/ARJ member headers declare the uncompressed size up
+        // front; a corrupt `orig` field (e.g. 0xFFFFFF1C) would
+        // otherwise materialize ~4 GiB before the oracle sees it.
+        Algorithm::Lha
+        | Algorithm::LhaLh4
+        | Algorithm::LhaLh5
+        | Algorithm::LhaLh6
+        | Algorithm::LhaLh7
+        | Algorithm::LhaLzs
+        | Algorithm::LhaLz5
+        | Algorithm::LhaPm1
+        | Algorithm::LhaPm2 => {
+            let entries = lha::decode::decode_bounded(data, max_output)?;
+            Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::Arj | Algorithm::Arj1 | Algorithm::Arj2 | Algorithm::Arj3 | Algorithm::Arj4 => {
+            let entries = arj::decode::decode_bounded(data, max_output)?;
+            Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
+        }
+        Algorithm::ArjGarbled => {
+            let entries = arj::decode::decode_bounded_with_password(data, "secret", max_output)?;
+            Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
+        }
         _ => decode_with(algo, data),
     }
 }
@@ -2291,7 +2314,10 @@ fn squashfs_fixture(data: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Algorithm, decode_with, encode_with, run_special_case, special_case_labels};
+    use super::{
+        Algorithm, decode_bounded_with, decode_with, encode_with, run_special_case,
+        special_case_labels,
+    };
 
     #[test]
     fn mscab_fixture_splits_cfdata_blocks() {
@@ -2326,6 +2352,34 @@ mod tests {
                     .unwrap_or_else(|e| panic!("{algo}::{label} failed: {e}"));
                 assert_eq!(decoded, payload, "{algo}::{label}");
             }
+        }
+    }
+
+    /// Regression (fuzz run-1791677246): a corrupt `-pm1-` member header
+    /// declaring a ~4 GiB original size must fail early through the
+    /// bounded probe instead of materializing the output.
+    #[test]
+    fn lha_bounded_probe_rejects_oversized_orig() {
+        let mut a = Vec::new();
+        a.push(23u8); // level-0 hsize = 22 + name_len
+        a.push(0u8); // checksum placeholder
+        a.extend_from_slice(b"-pm1-");
+        a.extend_from_slice(&4u32.to_le_bytes()); // packed
+        a.extend_from_slice(&0xFFFF_FF1Cu32.to_le_bytes()); // orig
+        a.extend_from_slice(&0u32.to_le_bytes()); // mtime
+        a.push(0); // MS-DOS attribute
+        a.push(0); // level 0
+        a.push(1); // name_len
+        a.push(b'a');
+        a.extend_from_slice(&0u16.to_le_bytes()); // crc16
+        a[1] = a[2..2 + 23].iter().fold(0u8, |s, &b| s.wrapping_add(b));
+        a.extend_from_slice(&[0u8; 4]); // packed payload
+        a.push(0); // archive terminator
+        for algo in [Algorithm::Lha, Algorithm::LhaPm1, Algorithm::LhaPm2] {
+            assert!(
+                decode_bounded_with(algo, &a, 64 << 20).is_err(),
+                "{algo} must reject the oversized declared orig"
+            );
         }
     }
 }

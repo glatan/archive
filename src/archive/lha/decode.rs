@@ -246,7 +246,21 @@ fn sanitize_basic_name(raw: &[u8]) -> Result<String, Error> {
 /// Decode an LHA/LZH archive into entries. Stops at the terminating
 /// zero-size header field; trailing bytes after it are ignored.
 pub fn decode(input: &[u8]) -> Result<Vec<LhaEntry>, Error> {
+    decode_limited(input, usize::MAX)
+}
+
+/// Decode with a maximum total payload size limit across all entries.
+///
+/// A member whose declared original size exceeds the remaining output
+/// budget is rejected with [`Error::OutputLimitExceeded`] before its
+/// data is materialized.
+pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<LhaEntry>, Error> {
+    decode_limited(input, max_output)
+}
+
+fn decode_limited(input: &[u8], max_output: usize) -> Result<Vec<LhaEntry>, Error> {
     let mut entries = Vec::new();
+    let mut emitted = 0usize;
     let mut pos = 0usize;
     loop {
         if pos >= input.len() {
@@ -264,15 +278,24 @@ pub fn decode(input: &[u8]) -> Result<Vec<LhaEntry>, Error> {
             return Err(Error::InvalidData("lha: bad header"));
         }
         match input[pos + 20] {
-            0 | 1 => pos = decode_level01(input, pos, &mut entries)?,
+            0 | 1 => pos = decode_level01(input, pos, &mut entries, max_output, &mut emitted)?,
             2 => {
                 let size16 = u16le(&input[pos..]) as usize;
-                pos = decode_level2(input, pos, size16, &mut entries)?;
+                pos = decode_level2(input, pos, size16, &mut entries, max_output, &mut emitted)?;
             }
-            3 => pos = decode_level3(input, pos, &mut entries)?,
+            3 => pos = decode_level3(input, pos, &mut entries, max_output, &mut emitted)?,
             _ => return Err(Error::InvalidData("lha: bad header level")),
         }
     }
+}
+
+/// Reject a member whose declared original size would push the decoded
+/// total past `max_output`, before its data is materialized.
+fn check_orig_budget(orig: usize, max_output: usize, emitted: usize) -> Result<(), Error> {
+    if orig > max_output.saturating_sub(emitted) {
+        return Err(Error::OutputLimitExceeded { limit: max_output });
+    }
+    Ok(())
 }
 
 /// Decode the member payload for `method`. `raw` is the packed byte
@@ -308,7 +331,13 @@ fn decode_member_data(method: &[u8; 5], raw: &[u8], orig: usize) -> Result<Vec<u
     }
 }
 
-fn decode_level01(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Result<usize, Error> {
+fn decode_level01(
+    input: &[u8],
+    pos: usize,
+    entries: &mut Vec<LhaEntry>,
+    max_output: usize,
+    emitted: &mut usize,
+) -> Result<usize, Error> {
     let hsize = input[pos] as usize;
     if pos + 2 + hsize > input.len() {
         return Err(Error::InvalidData("lha: truncated header"));
@@ -397,7 +426,9 @@ fn decode_level01(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Resu
     if data_start + take > input.len() {
         return Err(Error::InvalidData("lha: truncated entry data"));
     }
+    check_orig_budget(orig, max_output, *emitted)?;
     let data = decode_member_data(method, &input[data_start..data_start + take], orig)?;
+    *emitted = emitted.saturating_add(data.len());
     if let Some(c) = crc16
         && !is_dir
         && crate::util::crc16::crc16(&data) != c
@@ -433,6 +464,8 @@ fn decode_level2(
     pos: usize,
     size16: usize,
     entries: &mut Vec<LhaEntry>,
+    max_output: usize,
+    emitted: &mut usize,
 ) -> Result<usize, Error> {
     // Level-2 `header size` counts the u16 size field itself.
     if size16 < 26 || pos + size16 > input.len() {
@@ -478,7 +511,9 @@ fn decode_level2(
     if data_start + take > input.len() {
         return Err(Error::InvalidData("lha: truncated entry data"));
     }
+    check_orig_budget(orig, max_output, *emitted)?;
     let data = decode_member_data(method, &input[data_start..data_start + take], orig)?;
+    *emitted = emitted.saturating_add(data.len());
     if !is_dir && crate::util::crc16::crc16(&data) != crc {
         return Err(Error::InvalidData("lha: CRC-16 mismatch"));
     }
@@ -511,7 +546,13 @@ fn decode_level2(
 /// whole header from offset 0 (including the word-size field) and is
 /// capped at 1 MiB like the reference. Extended headers use `u32`
 /// size fields and end on a `u32` zero.
-fn decode_level3(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Result<usize, Error> {
+fn decode_level3(
+    input: &[u8],
+    pos: usize,
+    entries: &mut Vec<LhaEntry>,
+    max_output: usize,
+    emitted: &mut usize,
+) -> Result<usize, Error> {
     const BASE: usize = 32;
     const MAX: usize = 1024 * 1024;
     if u16le(&input[pos..]) != 4 {
@@ -562,7 +603,9 @@ fn decode_level3(input: &[u8], pos: usize, entries: &mut Vec<LhaEntry>) -> Resul
     if data_start + take > input.len() {
         return Err(Error::InvalidData("lha: truncated entry data"));
     }
+    check_orig_budget(orig, max_output, *emitted)?;
     let data = decode_member_data(method, &input[data_start..data_start + take], orig)?;
+    *emitted = emitted.saturating_add(data.len());
     if !is_dir && crate::util::crc16::crc16(&data) != crc {
         return Err(Error::InvalidData("lha: CRC-16 mismatch"));
     }
@@ -1236,5 +1279,49 @@ mod tests {
         let e = decode(&a).unwrap();
         assert_eq!(e[0].unix_group_name.as_deref(), Some(&group[..]));
         assert_eq!(e[0].unix_user_name.as_deref(), Some(&user[..]));
+    }
+
+    /// Regression (fuzz run-1791677246, lha-pm1 corrupt): a corrupt
+    /// header declaring `orig = 0xFFFFFF1C` must be rejected by the
+    /// bounded entry point before ~4 GiB of output is materialized.
+    #[test]
+    fn decode_bounded_rejects_oversized_declared_orig() {
+        // Level-0 member header: method -pm1-, packed = 4,
+        // orig = ~4 GiB, filename "a".
+        let mut a = Vec::new();
+        a.push(23u8); // hsize = 22 + name_len
+        a.push(0u8); // checksum placeholder
+        a.extend_from_slice(b"-pm1-");
+        a.extend_from_slice(&4u32.to_le_bytes()); // packed
+        a.extend_from_slice(&0xFFFF_FF1Cu32.to_le_bytes()); // orig
+        a.extend_from_slice(&0u32.to_le_bytes()); // mtime
+        a.push(0); // MS-DOS attribute
+        a.push(0); // level 0
+        a.push(1); // name_len
+        a.push(b'a');
+        a.extend_from_slice(&0u16.to_le_bytes()); // crc16
+        a[1] = a[2..2 + 23].iter().fold(0u8, |s, &b| s.wrapping_add(b));
+        a.extend_from_slice(&[0u8; 4]); // packed payload
+        a.push(0); // archive terminator
+        let err = decode_bounded(&a, 64 << 20).unwrap_err();
+        assert!(matches!(err, Error::OutputLimitExceeded { .. }));
+    }
+
+    #[test]
+    fn decode_bounded_enforces_total_limit() {
+        let a = crate::archive::lha::encode::encode(&[
+            ("one.bin", b"hello world"),
+            ("two.bin", b"second file"),
+        ])
+        .unwrap();
+        let e = decode_bounded(&a, 1024).unwrap();
+        assert_eq!(e.len(), 2);
+        // The second member's declared orig pushes the total past the
+        // limit: rejected before decode.
+        let err = decode_bounded(&a, 12).unwrap_err();
+        assert!(matches!(err, Error::OutputLimitExceeded { .. }));
+        // Exactly the combined payload size still fits.
+        let e = decode_bounded(&a, 22).unwrap();
+        assert_eq!(e.len(), 2);
     }
 }

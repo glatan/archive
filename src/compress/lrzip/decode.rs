@@ -321,13 +321,27 @@ fn decompress_block(
     if data.is_empty() {
         return Ok(Vec::new());
     }
+    // `u_len` is a u64 read from the block header; on targets where it
+    // cannot fit a usize the block could never be materialized anyway.
+    let u_len =
+        usize::try_from(u_len).map_err(|_| Error::InvalidData("lrzip: block size too large"))?;
     match ctype {
         CTYPE_NONE => Ok(data.to_vec()),
         CTYPE_BZIP2 => crate::compress::bzip2::decode::decode(data),
-        CTYPE_LZO => crate::compress::lzo::decode::decompress_lzo1x(data, u_len as usize),
+        CTYPE_LZO => crate::compress::lzo::decode::decompress_lzo1x(data, u_len),
         CTYPE_LZMA => {
-            let (decoded, _consumed) =
-                crate::compress::lzma::lzma_decode_with_props(data, dict_size, lzma_props)?;
+            // System `lrzip` blocks are EOS-less raw LZMA streams
+            // delimited by the block header's uncompressed length;
+            // the crate encoder's in-band EOS marker is simply left
+            // unread once the declared size is reached.
+            //
+            // Streaming `lrzip` (stdin pipe) writes dict_size = 0 in
+            // the file header; treat that as "no dictionary bound" —
+            // distances remain bounded by the decoded position itself.
+            let dict_size = if dict_size == 0 { u32::MAX } else { dict_size };
+            let (decoded, _consumed) = crate::compress::lzma::lzma_decode_with_props_and_size(
+                data, dict_size, lzma_props, u_len,
+            )?;
             Ok(decoded)
         }
         CTYPE_GZIP => crate::compress::zlib::decode::decode(data),
@@ -613,6 +627,52 @@ mod tests {
             ),
             Err(Error::Unsupported(_))
         ));
+    }
+
+    /// Regression (fuzz run-1791677246, lrzip-lzma original-compress):
+    /// system `lrzip` emits EOS-less raw LZMA block streams; the block
+    /// header's `u_len` must terminate the decode instead of an in-band
+    /// EOS marker.
+    #[test]
+    fn test_decompress_block_lzma_without_eos_marker() {
+        let payload = [0u8; 64];
+        let block = lzma::lzma_encode_with_props_no_eos(&payload, 4096, LzmaProperties::LZIP);
+        let decoded = decompress_block(&block, CTYPE_LZMA, 4096, LzmaProperties::LZIP, 64).unwrap();
+        assert_eq!(decoded, payload);
+    }
+
+    /// Regression (fuzz run-1791677246): real archive produced by
+    /// system `lrzip` for 64 zero bytes (LZMA backend, MD5 flag set).
+    /// The LZMA block stream carries no EOS marker.
+    #[test]
+    fn test_decode_system_lrzip_zeros_archive() {
+        let archive = [
+            0x4c, 0x52, 0x5a, 0x49, 0x00, 0x06, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x5d, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x03,
+            0x00, 0x00, 0x08, 0x03, 0x00, 0x00, 0x16, 0x03, 0x0a, 0x0a, 0x00, 0x00, 0x40, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x07, 0x40, 0x00, 0x00, 0x00, 0x6e,
+            0x58, 0x46, 0x98, 0x00, 0x3b, 0x5d, 0x3c, 0x7d, 0x20, 0x7e, 0x37, 0xdc, 0xee, 0xed,
+            0xd3, 0x01, 0xe3, 0x5e, 0x2e, 0x58,
+        ];
+        let decoded = decode(&archive).unwrap();
+        assert_eq!(decoded, vec![0u8; 64]);
+    }
+
+    /// Same system `lrzip` archive as produced through a pipe (stdin to
+    /// stdout): the header's LZMA dict_size is written as 0, which must
+    /// not turn every match distance into an out-of-range error.
+    #[test]
+    fn test_decode_system_lrzip_zeros_archive_zero_dict() {
+        let archive = [
+            0x4c, 0x52, 0x5a, 0x49, 0x00, 0x06, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x5d, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x01, 0x00, 0x03,
+            0x00, 0x00, 0x08, 0x03, 0x00, 0x00, 0x16, 0x03, 0x0a, 0x0a, 0x00, 0x00, 0x40, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06, 0x07, 0x40, 0x00, 0x00, 0x00, 0x6e,
+            0x58, 0x46, 0x98, 0x00, 0x3b, 0x5d, 0x3c, 0x7d, 0x20, 0x7e, 0x37, 0xdc, 0xee, 0xed,
+            0xd3, 0x01, 0xe3, 0x5e, 0x2e, 0x58,
+        ];
+        let decoded = decode(&archive).unwrap();
+        assert_eq!(decoded, vec![0u8; 64]);
     }
 
     fn build_lrzip_with_lzma_props(data: &[u8], props: LzmaProperties) -> Vec<u8> {
