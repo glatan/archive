@@ -13,7 +13,7 @@
 //!
 //! The shared `hash3` arithmetic and `START_STRING_18` constant are adopted
 //! verbatim from Ross N. Williams' public-domain LZRW reference sources
-//! (see THIRD_PARTY_NOTICES, "LZRW family").
+//! (see THIRD_PARTY_NOTICES, "LZRW1 / LZRW2 / LZRW3 / LZRW3-A").
 
 use crate::error::Error;
 use alloc::vec::Vec;

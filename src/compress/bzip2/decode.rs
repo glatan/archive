@@ -48,8 +48,9 @@ const RUNB: u16 = 1;
 const MAX_SELECTORS: usize = 18002;
 
 // Constant data carried over verbatim from the reference implementation's
-// `randtable.c` (BSD-style bzip2 license); see THIRD_PARTY_NOTICES. Part of
-// the de facto format definition (randomized-RLE substitution table).
+// `randtable.c` (BSD-style bzip2 license, Copyright (C) 1996-2019 Julian
+// Seward <jseward@acm.org>); see THIRD_PARTY_NOTICES. Part of the de facto
+// format definition (randomized-RLE substitution table).
 const BZ2_RNUMS: [i32; 512] = [
     619, 720, 127, 481, 931, 816, 813, 233, 566, 247, 985, 724, 205, 454, 863, 491, 741, 242, 949,
     214, 733, 859, 335, 708, 621, 574, 73, 654, 730, 472, 419, 436, 278, 496, 867, 210, 399, 680,

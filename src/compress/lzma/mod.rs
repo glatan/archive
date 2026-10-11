@@ -5,6 +5,10 @@
 //!
 //! The default configuration matches lzip (`lc=3, lp=0, pb=2`), but the
 //! core can also decode and encode other valid property combinations.
+//!
+//! Format definition: LZMA SDK `lzma-specification.txt` (public domain).
+//! The range coder follows the public-domain Subbotin carry-less design
+//! (`util::range_coder`). See THIRD_PARTY_NOTICES.
 
 use alloc::vec::Vec;
 

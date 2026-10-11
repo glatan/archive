@@ -1,10 +1,10 @@
 //! MSB-first bit reader/writer for the LZH Huffman streams.
 //!
 //! LHA reads bits most-significant-first. The classic `getbits`/
-//! `fillbuf` implementation keeps a 16-bit left-aligned window and
-//! zero-pads past the end of input; this reader mirrors the zero-pad
-//! behaviour while tracking the real end so callers can decide whether
-//! running out of bits is an error.
+//! `fillbuf` scheme (as observed in Okumura's `ar002` and lhasa) keeps
+//! a 16-bit left-aligned window and zero-pads past the end of input;
+//! this reader mirrors the zero-pad behaviour while tracking the real
+//! end so callers can decide whether running out of bits is an error.
 
 use alloc::vec::Vec;
 

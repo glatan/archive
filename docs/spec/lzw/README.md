@@ -50,6 +50,12 @@ fuzz の `original-compress` / `original-decompress` パターンにおける誤
 
 ---
 
+## 特許ステータス (Patent Status)
+
+LZW の Unisys 特許 (US 4,558,302、Welch) は米国で 2003-06-20 に失効し、欧州各国・カナダ・日本の対応特許も 2004 年中に全て失効済み (THIRD_PARTY_NOTICES LZW 項参照)。本モジュールの実装・配布に特許上の障害はない。これは透明性のための記録であり、法的助言ではない。網羅的な特許調査 (freedom-to-operate opinion) は実施していない。
+
+---
+
 ## 集計
 
 | 状態 | 件数 |
