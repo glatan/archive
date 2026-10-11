@@ -55,7 +55,11 @@ specifications or standards documents:
   - Patent/IPR note: Google has disclosed an IPR declaration for
     RFC 7932 (https://datatracker.ietf.org/ipr/2396/); this
     implementation follows the RFC directly and introduces no new
-    algorithmic extension
+    algorithmic extension. Google's second declaration (IETF
+    Datatracker #3147, US2017036372 "context-dependent shared
+    dictionaries") covers only the shared-dictionary extension
+    (draft-vandevenne-shared-brotli-format), which is out of scope
+    for this implementation
 - LZSA: format documentation (StreamFormat.md, BlockFormat_LZSA1.md,
   BlockFormat_LZSA2.md) and reference implementation by Emmanuel Marty
   et al. (zlib license; src/matchfinder.c is CC0). Where the written
@@ -125,9 +129,21 @@ specifications or standards documents:
   No code was copied.
   The implementation additionally follows the RDP4/RDP5 packet modes
   described in [MS-RDPBCGR] section 3.1.8.4 (Microsoft Open
-  Specifications); that document is under the general Microsoft Open
-  Specifications IPR notice, and its OSP/MIP coverage has not been
-  verified for this entry.
+  Specifications). [MS-RDPBCGR] is NOT listed on the Open
+  Specification Promise (OSP) covered-specification list
+  ([MS-DEVCENTLP], revised 2023-02-24). The Microsoft Patent and
+  Program Map (checked 2026-10) lists three US patents against the
+  document — US 8,504,694 ("Remote content classification and
+  transmission using multiple transport channels"), US 9,038,162
+  ("Creating secure interactive connections with remote resources"),
+  and US 9,137,338 ("Multi-link remote protocol") — under the
+  MCPP-Legacy and MIP/Interop Windows Client+Server protocol
+  programs, and the MCPP-Legacy patent pledge remains in effect for
+  patents mapped to MCPP technical specifications. All three patents
+  concern RDP transport architecture (multi-channel and multi-link
+  transport, secure connection setup, compression-history scheduling
+  across links) rather than the MPPC bulk-compression bitstream of
+  section 3.1.8.4; no enforcement history is known.
   Licensing statement note (not a patent): RFC 2118 section 1.1
   contains an explicit field-of-use statement: "MPPC can only be used
   in products that implement the Point to Point Protocol AND for the
@@ -144,9 +160,16 @@ specifications or standards documents:
   Per docs/IMPLEMENTATION_POLICY.md (field-of-use clause handling),
   the clause is treated as inert because its practical basis (the
   Stac patents) has expired.
-  Patent note: rdesktop's comments additionally reference the separate
-  Stac/Hi/fn LZS patent family (now expired); MPPC's LZ77 token format
-  is distinct from Stac LZS.
+  Patent note: the MPPC-relevant Stac/Hi/fn patents have expired.
+  FreeBSD's sys/net/mppcd.c records that "Hi/Fn (later acquired by
+  Exar Corporation) held US patents on some implementation-critical
+  aspects of MPPC compression. These patents lapsed due to
+  non-payment of fees in 2007 and by 2015 expired altogether" —
+  consistent with the Stac LZS family expiry documented in the Stac
+  LZS entry below (last US grant 1996-07-02, so all family members
+  are past their 20-year terms). rdesktop's comments additionally
+  reference the separate Stac/Hi/fn LZS patent family (now expired);
+  MPPC's LZ77 token format is distinct from Stac LZS.
 - Stac LZS (RFC 2395, IP Payload Compression Using LZS / IPComp):
   format specification RFC 2395 (informational; section 2.2 repeats the
   ANSI X3.241-1994 bitstream grammar for informational purposes only).
@@ -261,7 +284,8 @@ specifications or standards documents:
   confirmation only; no code was copied. No known patent claims
   (plain LZ77 variant); no formal patent search was performed.
 - Snappy: Google snappy `format_description.txt` (raw block format) and
-  `framing_format.txt` (framed stream format)
+  `framing_format.txt` (framed stream format; BSD-3-Clause documents).
+  Spec-informed implementation; no known patent claims
 - xz: `xz-file-format.txt` from Tukaani. The system `xz` binary is
   invoked only as a test-time interoperability oracle; it is not
   linked or distributed. The BCJ/Delta filter cores are ported from
@@ -551,7 +575,7 @@ specifications or standards documents:
   encoder-produced images — and mkfs.cramfs output serves as a
   behavioral reference for encoder layout (no code was copied);
   they are not linked or distributed.
-- crx3: Chromium components/crx_file/crx3.proto (BSD-style
+- crx3: Chromium components/crx_file/crx3.proto (BSD-3-Clause
   license). Format documentation embedded in proto comments;
   spec-informed implementation. The protobuf wire parsing was
   written directly from the .proto definitions; no Chromium or
@@ -749,6 +773,8 @@ against de facto reference behavior:
   - Patent note: Deflate64 is a circa-2001 PKWARE extension. No specific
     patent covering it has been identified in this audit, and no formal
     patent search was performed.
+  - Trademark note: "Deflate64" is an unregistered PKWARE trademark;
+    its use here (module and method naming) is nominative only
 
 - ZIP legacy methods 1-6 (Shrinking, Reducing, Imploding)
   (`src/archive/zip/{unshrink,expand,implode,lzmatch}.rs`)
@@ -1147,16 +1173,22 @@ against de facto reference behavior:
   - MD5 (`md5.rs`): clean-room Rust implementation of RFC 1321
   - SHA-512 (`sha512.rs`): clean-room Rust implementation of FIPS 180-4;
     used by XAR/RPM digest verification
-  - Whirlpool (`whirlpool.rs`): clean-room Rust implementation of
+  - Whirlpool (`whirlpool.rs`): spec-informed Rust implementation of
     ISO/IEC 10118-3 Whirlpool-512; the S-box is the published spec
     constant and the C tables are generated at compile time from that
-    S-box and the spec's cyclic row pattern (not copied); used by PEA
-    key derivation and XAR digest verification
-  - PBKDF2 (`pbkdf2.rs`): clean-room Rust implementation of RFC 2898;
-    used by PEA key derivation (SHA-1/Whirlpool variants)
-  - EAX (`eax.rs`): clean-room Rust implementation of the EAX AEAD
+    S-box and the spec's cyclic row pattern (not copied). The
+    PeaZip/Ehrhardt `whirl512.pas` unit was consulted as a behavioral
+    reference (no code copied); used by PEA key derivation and XAR
+    digest verification
+  - PBKDF2 (`pbkdf2.rs`): spec-informed Rust implementation of RFC 2898
+    (the PeaZip/Ehrhardt `kdf.pas` unit was consulted as a behavioral
+    reference, no code copied); used by PEA key derivation
+    (SHA-1/Whirlpool variants)
+  - EAX (`eax.rs`): spec-informed Rust implementation of the EAX AEAD
     mode (Bellare-Rogaway-Wagner, patent-free by design) over
-    AES-CTR + OMAC1/CMAC; used by PEA encrypted streams
+    AES-CTR + OMAC1/CMAC; the PeaZip/Ehrhardt `aes_omac.pas` and
+    `aes_eax.pas` units were consulted as behavioral references (no
+    code copied); used by PEA encrypted streams
   - Base64 (`base64.rs`): clean-room Rust implementation of RFC 4648
     section 4 (canonical decoding); used by uuencode's Base64 mode
   - Adler-32 (`adler32.rs`): clean-room Rust

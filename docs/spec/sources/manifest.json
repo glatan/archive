@@ -184,6 +184,70 @@
    "license": "IETF RFC (copyrighted document, freely distributable)"
   },
   {
+   "id": "rfc4648",
+   "format": "util",
+   "title": "The Base16, Base32, and Base64 Data Encodings",
+   "version": "RFC 4648 (October 2006)",
+   "url": "https://www.rfc-editor.org/rfc/rfc4648.txt",
+   "filename": "rfc4648.txt",
+   "license": "IETF RFC (copyrighted document, freely distributable)"
+  },
+  {
+   "id": "fips-180-4",
+   "format": "util",
+   "title": "FIPS PUB 180-4 Secure Hash Standard (SHA-1/SHA-256/SHA-512)",
+   "version": "FIPS 180-4 (August 2015)",
+   "url": "https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf",
+   "filename": "fips180-4.pdf",
+   "license": "NIST FIPS (US government standard, freely distributable)"
+  },
+  {
+   "id": "fips-197",
+   "format": "util",
+   "title": "FIPS PUB 197 Advanced Encryption Standard (AES)",
+   "version": "FIPS 197-upd1 (May 2023 update)",
+   "url": "https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf",
+   "filename": "fips197.pdf",
+   "license": "NIST FIPS (US government standard, freely distributable)"
+  },
+  {
+   "id": "nist-sp800-38a",
+   "format": "util",
+   "title": "NIST SP 800-38A Recommendation for Block Cipher Modes of Operation",
+   "version": "SP 800-38A (December 2001)",
+   "url": "https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38a.pdf",
+   "filename": "nist_sp800_38a.pdf",
+   "license": "NIST SP (US government standard, freely distributable)"
+  },
+  {
+   "id": "nist-sp800-38b",
+   "format": "util",
+   "title": "NIST SP 800-38B Recommendation for Block Cipher Modes of Operation: the CMAC Mode for Authentication",
+   "version": "SP 800-38B (October 2016)",
+   "url": "https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-38b.pdf",
+   "filename": "nist_sp800_38b.pdf",
+   "license": "NIST SP (US government standard, freely distributable)"
+  },
+  {
+   "id": "ecma-182",
+   "format": "util",
+   "title": "ECMA-182 Data Link Protocols for Digital Cellular Communications (CRC-64 polynomial)",
+   "version": "ECMA-182 1st edition (December 1992)",
+   "url": "https://ecma-international.org/wp-content/uploads/ECMA-182_1st_edition_december_1992.pdf",
+   "filename": "ecma182.pdf",
+   "license": "Ecma standard (copyrighted document, freely downloadable)"
+  },
+  {
+   "id": "crc-catalogue",
+   "format": "util",
+   "title": "CRC Catalogue (reveng) — parametrised CRC definitions and check values",
+   "version": "reveng CRC catalogue (current)",
+   "url": "https://reveng.sourceforge.io/crc-catalogue/all.htm",
+   "filename": "crc_catalogue.html",
+   "note": "util/crc16.rs 等の check vector 出典。長年の編集により Greg Cook がメンテする parametrised CRC カタログ",
+   "license": "freely available reference document (reveng project)"
+  },
+  {
    "id": "deb-5",
    "format": "deb",
    "title": "deb — Debian binary package format",
@@ -245,7 +309,7 @@
    "version": "IIPC draft 1.1",
    "url": "https://iipc.github.io/warc-specifications/specifications/warc-format/warc-1.1/",
    "filename": "warc_1.1.html",
-   "license": "copyrighted standard (ISO 28500 / IIPC, reference only)"
+   "license": "copyrighted IIPC web specification (ISO 28500 text itself not pinned; reference only)"
   },
   {
    "id": "zim-format",
@@ -812,6 +876,16 @@
    "license": "copyrighted document (Adobe/Aldus, reference only)"
   },
   {
+   "id": "apple-tn1023",
+   "format": "packbits",
+   "title": "Apple Technical Note TN1023 'Understanding PackBits'",
+   "version": "TN1023 (February 1996)",
+   "note": "Apple のオリジナル URL (developer.apple.com tn1023) は消滅。preterhuman.net のミラーを pin 対象とする",
+   "url": "https://preterhuman.net/macstuff/technotes/tn/tn1023.html",
+   "filename": "apple_tn1023_packbits.html",
+   "license": "Apple documentation"
+  },
+  {
    "id": "yenc-draft",
    "format": "yenc",
    "title": "yEncode - A quick and dirty encoding for binaries (revised draft 1.3)",
@@ -912,13 +986,53 @@
    "license": "MIT (SPDX on-disk header, constants only)"
   },
   {
+   "id": "linux-erofs-super-c",
+   "format": "erofs",
+   "title": "Linux kernel fs/erofs/super.c",
+   "version": "linux master 058884d23488 (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/torvalds/linux/058884d23488/fs/erofs/super.c",
+   "filename": "erofs_super.c",
+   "note": "Consulted for behavioral clarification of metabox/superblock semantics only; no code copied",
+   "license": "GPL-2.0-only (kernel source, behavior reference only)"
+  },
+  {
+   "id": "linux-erofs-inode-c",
+   "format": "erofs",
+   "title": "Linux kernel fs/erofs/inode.c",
+   "version": "linux master 058884d23488 (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/torvalds/linux/058884d23488/fs/erofs/inode.c",
+   "filename": "erofs_inode.c",
+   "note": "Consulted for behavioral clarification of inode layouts only; no code copied",
+   "license": "GPL-2.0-only (kernel source, behavior reference only)"
+  },
+  {
+   "id": "linux-erofs-data-c",
+   "format": "erofs",
+   "title": "Linux kernel fs/erofs/data.c",
+   "version": "linux master 058884d23488 (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/torvalds/linux/058884d23488/fs/erofs/data.c",
+   "filename": "erofs_data.c",
+   "note": "Consulted for behavioral clarification of chunk map / read paths only; no code copied",
+   "license": "GPL-2.0-only (kernel source, behavior reference only)"
+  },
+  {
+   "id": "linux-erofs-zmap-c",
+   "format": "erofs",
+   "title": "Linux kernel fs/erofs/zmap.c",
+   "version": "linux master 058884d23488 (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/torvalds/linux/058884d23488/fs/erofs/zmap.c",
+   "filename": "erofs_zmap.c",
+   "note": "Consulted for behavioral clarification of z_erofs metabox paths only; no code copied",
+   "license": "GPL-2.0-only (kernel source, behavior reference only)"
+  },
+  {
    "id": "chromium-crx3-proto",
    "format": "crx3",
    "title": "Chromium components/crx_file/crx3.proto (CRX3 file format)",
    "version": "chromium main (fetched 2026-09)",
    "url": "https://raw.githubusercontent.com/chromium/chromium/main/components/crx_file/crx3.proto",
    "filename": "crx3.proto",
-   "note": "BSD-style license; format documentation embedded in proto comments",
+   "note": "BSD-3-Clause license; format documentation embedded in proto comments",
    "license": "BSD-3-Clause"
   },
   {
@@ -933,12 +1047,22 @@
   {
    "id": "peazip-pea-pas",
    "format": "pea",
-   "title": "PeaZip reference implementation pea.pas / pea_utils.pas (LGPLv3)",
+   "title": "PeaZip reference implementation pea.pas (LGPLv3+)",
    "version": "PeaZip sources branch (fetched 2026-09)",
    "url": "https://raw.githubusercontent.com/peazip/PeaZip/sources/peazip-sources/dev/pea.pas",
    "filename": "pea.pas",
-   "note": "pea_utils.pas fetched from the same directory; used as wire-format reference only, no code copied",
-   "license": "LGPL-3.0"
+   "note": "Used as wire-format reference only, no code copied",
+   "license": "LGPL-3.0-or-later"
+  },
+  {
+   "id": "peazip-pea-utils-pas",
+   "format": "pea",
+   "title": "PeaZip reference implementation pea_utils.pas (LGPLv3+)",
+   "version": "PeaZip sources branch (fetched 2026-09)",
+   "url": "https://raw.githubusercontent.com/peazip/PeaZip/sources/peazip-sources/dev/pea_utils.pas",
+   "filename": "pea_utils.pas",
+   "note": "Used as wire-format / crypto decode-path reference only, no code copied",
+   "license": "LGPL-3.0-or-later"
   },
   {
    "id": "peazip-fcrypta",
@@ -1386,16 +1510,15 @@
    "license": "format document"
   },
   {
-   "id": "apple-tn1023",
-   "format": "packbits",
-   "title": "Apple Technical Note TN1023 'Understanding PackBits'",
-   "version": "TN1023 (February 1996)",
-   "note": "Apple のオリジナル URL は消滅。sources/apple_tn1023_packbits.html にスナップショット済み (preterhuman.net ミラー)",
+   "id": "itu-v42-iso3309",
+   "format": "util",
+   "title": "ITU-T V.42 / ISO 3309 (CRC-32 polynomial and framing definition)",
+   "version": "ITU-T V.42 (2002) / ISO 3309",
+   "note": "docs/spec/util.md 参照仕様一覧の CRC-32 normative source (V.42 §8.1.2.6.2)。V.42 本体は itu.int から無償 PDF 入手可能だが login 経由の直リンクのため fetch 対象外としページ URL のみ記録。ISO 3309 本文は有償規格",
    "reference_url": [
-    "https://developer.apple.com/library/mac/technotes/tn1023/_index.html",
-    "https://preterhuman.net/"
+    "https://www.itu.int/rec/T-REC-V.42"
    ],
-   "license": "Apple documentation"
+   "license": "ITU recommendation (freely downloadable) / ISO 3309 (paywalled standard)"
   },
   {
    "id": "compcol",

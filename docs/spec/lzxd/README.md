@@ -64,3 +64,4 @@
 
 - 実装は [MS-PATCH] 仕様書に基づく pure-Rust 新規実装。参照コードの複製なし。
 - 相互運用検証に libmspack (LGPL 2.1) を **テスト時の参照デコーダ** としてのみ使用 (成果物への組み込みなし)。
+- 特許ノート: [MS-PATCH] は OSP 対象リスト外だが MIP Patent Map に特許割当なし (2026-01 時点)。詳細: THIRD_PARTY_NOTICES lzxd 項。
