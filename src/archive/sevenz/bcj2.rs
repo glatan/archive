@@ -226,7 +226,7 @@ pub(super) fn decode(
 ) -> Result<Vec<u8>, Error> {
     let mut rc = RangeDecoder::new(rc)?;
     let mut probs = [((BIT_MODEL_TOTAL >> 1) as u16); 258];
-    let mut out = Vec::with_capacity(expected_size);
+    let mut out = Vec::with_capacity(expected_size.min(1 << 24));
     let mut prev = 0u8;
     let mut main_pos = 0usize;
     let mut call_pos = 0usize;
@@ -243,7 +243,12 @@ pub(super) fn decode(
             prev = byte;
         }
 
-        if out.len() == expected_size || main_pos == main.len() {
+        // A J-opcode byte pushed to `out` still has its opcode pending
+        // in `main` plus a decision bit in `rc` (the encoder emits the
+        // bit even when fewer than 4 bytes remain). Only stop early
+        // when `main` is drained, or when `out` is full and the pending
+        // byte is not a branch opcode.
+        if main_pos == main.len() || (out.len() == expected_size && !is_j(prev, main[main_pos])) {
             break;
         }
 
@@ -335,6 +340,41 @@ mod tests {
         )
         .unwrap();
         assert_eq!(decoded, input);
+    }
+
+    /// Regression (fuzz run-1791677246): an input ending in a J-opcode
+    /// with fewer than 4 bytes left encodes a non-branch decision bit
+    /// for that opcode. The decoder must still consume the opcode and
+    /// its decision bit when `out` is already full.
+    #[test]
+    fn test_roundtrip_trailing_branch_opcode() {
+        for input in [
+            &[0xE9][..],
+            &[0xE8][..],
+            &[0x0F, 0x8F][..],
+            &[0x90, 0xE9][..],
+            &[0x90, 0x0F, 0x80][..],
+        ] {
+            let encoded = encode(input);
+            let decoded = decode(
+                &encoded.main,
+                &encoded.call,
+                &encoded.jump,
+                &encoded.rc,
+                input.len(),
+            )
+            .unwrap_or_else(|e| panic!("decode of {input:02x?} failed: {e}"));
+            assert_eq!(decoded, input);
+        }
+    }
+
+    /// A trailing J-opcode whose decision bit selects a real branch
+    /// cannot append its 4-byte target once `out` is full.
+    #[test]
+    fn test_decode_trailing_branch_opcode_truncated_mid_branch() {
+        let encoded = encode(&[0xE9, 0x01, 0x02, 0x03, 0x04]);
+        let err = decode(&encoded.main, &encoded.call, &encoded.jump, &encoded.rc, 1).unwrap_err();
+        assert!(matches!(err, Error::InvalidData(_)));
     }
 
     #[test]

@@ -107,7 +107,10 @@ pub(crate) fn decode(
                 return Err(Error::InvalidData("lzh: truncated stream"));
             }
             let len = c - 256 + COPY_THRESHOLD;
-            let mut src = (w + n - offset - 1) & (n - 1);
+            // `offset` is stream-controlled and can exceed the ring
+            // size; the source index is defined mod n (lhasa/ar002),
+            // so wrap instead of letting the subtraction underflow.
+            let mut src = w.wrapping_add(n).wrapping_sub(offset).wrapping_sub(1) & (n - 1);
             for _ in 0..len {
                 if out.len() >= expected {
                     break;
@@ -135,5 +138,27 @@ mod tests {
     fn test_st1_zero_block_count_rejected() {
         let err = decode(14, 4, &[0u8; 8], 1).unwrap_err();
         assert!(matches!(err, Error::InvalidData(_)));
+    }
+
+    /// Regression (fuzz run-1791677246, arj-1/2/3 corrupt): a corrupt
+    /// offset table can decode a distance far larger than the history
+    /// ring. The match source index must wrap modulo `n` (lhasa/ar002
+    /// behaviour), not underflow `w + n - offset - 1`.
+    #[test]
+    fn test_st1_oversized_match_offset_wraps_ring() {
+        use crate::compress::lzh::bits::MsbWriter;
+        let mut w = MsbWriter::new();
+        w.put(1, 16); // block command count
+        w.put(0, 5); // t_tab: zero symbols -> constant table
+        w.put(0, 5); // t_tab constant symbol
+        w.put(0, 9); // c_tab: zero symbols -> constant table
+        w.put(300, 9); // c_tab constant: match code (len 47)
+        w.put(0, 5); // p_tab: zero symbols -> constant table
+        w.put(30, 5); // p_tab constant: 30-bit distance code
+        w.put(0, 29); // distance low bits -> offset = 1 << 29
+        let input = w.finish();
+        // ARJ parameters: 15-bit ring, 5-bit offset-symbol count.
+        let out = decode(15, 5, &input, 47).unwrap();
+        assert_eq!(out, vec![b' '; 47]);
     }
 }

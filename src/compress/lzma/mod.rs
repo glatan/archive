@@ -481,7 +481,11 @@ fn lzma_decode_impl(
     // (pos_state / literal lp bits) count uncompressed bytes since the last
     // dictionary reset, so index math must use the untrimmed position.
     let pos_base = history.len() - history_len;
-    let mut output = Vec::with_capacity(history_len + expected_size.unwrap_or(0));
+    // The capacity hint is clamped: a corrupt container can declare an
+    // astronomical unpack size, and `with_capacity` must not overflow
+    // or abort on it. The Vec still grows on demand.
+    let mut output =
+        Vec::with_capacity(history_len.saturating_add(expected_size.unwrap_or(0).min(1 << 24)));
     output.extend_from_slice(&history[history.len().saturating_sub(history_len)..]);
 
     let mut state = decoder_state.state;
