@@ -1035,7 +1035,16 @@ fn test_zip_finish_parts_system_unzip_compat() {
     let mut encoder = zip::encode::ZipEncoder::new();
     encoder.add_file_stored("a.bin", &a_payload);
     encoder.add_file("b.txt", &b_payload);
-    let parts = encoder.finish_parts(300).unwrap();
+    // Info-ZIP unzip requires the central directory to begin on the last
+    // disk; the compat layout keeps the whole CD + EOCD tail on it.
+    let parts = encoder
+        .finish_parts_with(
+            300,
+            &zip::encode::ZipSplitOptions {
+                central_directory_on_last_segment: true,
+            },
+        )
+        .unwrap();
     assert!(parts.len() > 1, "expected multiple segments");
 
     // PKWARE split naming (APPNOTE §8.3): name.z01 ... name.zNN, name.zip.
@@ -1073,18 +1082,24 @@ fn test_zip_finish_parts_system_unzip_compat() {
         let names = String::from_utf8_lossy(&result.stdout);
         assert!(names.contains("a.bin"), "listing: {names}");
         assert!(names.contains("b.txt"), "listing: {names}");
+    }
 
+    // Info-ZIP cannot extract multi-disk archives at all (even zip -s
+    // output): use 7z as the extraction oracle. It resolves .z01..
+    // siblings of the .zip segment.
+    let sevenz = Command::new("7z").output();
+    if sevenz.is_ok() {
         for (name, payload) in [("a.bin", &a_payload), ("b.txt", &b_payload)] {
-            let extracted = Command::new("unzip")
-                .args(["-p", zip_path.to_str().unwrap(), name])
+            let extracted = Command::new("7z")
+                .args(["x", "-so", zip_path.to_str().unwrap(), name])
                 .output()
                 .unwrap();
             assert!(
                 extracted.status.success(),
-                "unzip -p {name} failed: {}",
+                "7z x -so {name} failed: {}",
                 String::from_utf8_lossy(&extracted.stderr)
             );
-            assert_eq!(&extracted.stdout, payload, "unzip mismatch on {name}");
+            assert_eq!(&extracted.stdout, payload, "7z mismatch on {name}");
         }
     }
 

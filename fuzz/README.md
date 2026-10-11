@@ -92,7 +92,7 @@ original-* パターンで検証するためのものである。`--pattern all`
 | `rzip` | PKGBUILD (`pkg/rzip`) | rzip `.rz` の interop |
 | `zpaq` | PKGBUILD (`pkg/zpaq`) | zpaq の interop |
 | `zip` / `unzip` | pacman `zip`/`unzip` | ZIP の interop |
-| `7z` / `7zr` / `7zz` | pacman `7zip` | 7z の interop + arj/arc/lha 等の decode oracle |
+| `7z` / `7zr` / `7zz` | pacman `7zip` | 7z の interop + arj/arc/lha/zip multi-disk 等の decode oracle |
 | `bsdtar` | pacman `libarchive` | tar/cpio/lha/rpm/xar 等の汎用 oracle |
 | `unar` / `lsar` | pacman `unarchiver` | arj/arc の decode oracle |
 | `lhasa` | pacman `lhasa` | lha の decode oracle |

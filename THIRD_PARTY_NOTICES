@@ -729,6 +729,10 @@ specifications or standards documents:
   Decryption Header, sections 4.3.10/7.5) are detected and
   rejected as unsupported, and the PKPatchMaker patching
   mechanism (extra field 0x000f) is not implemented.
+  For container-level interoperability checks the Info-ZIP `unzip`
+  binary and the `7z` binary are invoked only as local test-time
+  oracles (`unzip -Z1` multi-disk listing, `7z` split-archive
+  extraction); they are not linked or distributed.
 - 7z baseline container: `7zFormat.txt` / `Methods.txt` (LZMA SDK 26.00).
   The writer's 7z UINT64 variable-length integer encoding was
   cross-checked against the LZMA SDK `7zIn.c` decoder (public domain);
