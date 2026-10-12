@@ -70,7 +70,8 @@
 ## 実装メモ
 
 - dirent 名は `ErofsEntry.name: String` のため非 UTF-8 名を含む画像は全体を reject する (kernel/mkfs は任意バイト列を許容 — strict 側の差分)。
-- flat/chunked とも `i_size` 分を事前確保する。細工された巨大 `i_size` は割当失敗を起こしうる (入力が `blocks` と整合するかの事前照合は行わない)。
+- flat / chunked / compressed のいずれの配置でも、データ読み取り前に `i_size` 分のバッファを事前確保する。`decode_bounded` は各 inode の宣言 `i_size` を出力上限 `max_output` の残量から事前に差し引き、上限を超過した場合は割り当て前に `Error::OutputLimitExceeded` で拒否する。この上限計算には通常ファイルだけでなく、ディレクトリ、packed inode、metabox の各ペイロードも含まれる。一方、無制限の `decode` では入力データ長や `blocks` との整合性を事前に照合しないため、細工された巨大な `i_size` によってメモリ割り当て失敗を引き起こす可能性がある。
+- 残存リスク: 圧縮 inode における DEFLATE および Zstandard の pcluster 展開は、全量をメモリへ展開した後に要求長へ切り詰める方式を採っている。そのため、展開処理の途中でライブラリが一時確保するメモリは、`decode_bounded` による事前検査では制限できない（対照的に LZ4 と MicroLZMA はデコーダに出力上限を指定できるため、展開中のメモリ割り当ても制限される）。ただし、この過剰割り当てを引き起こすには整合した圧縮メタデータを備えた画像構造が必要であり、正常なエンコード出力をランダムに変異させるファジングでは該当コードパスに到達しにくい。
 - FLAT_INLINE の inline tail 読み取りは kernel の「inline data は同一 meta block 内」の制約を検査しない (lenient。z.rs 側の `emit_inline` は検査済みで非対称)。
 - 圧縮 pcluster は画像末尾で clamp される (kernel は plen 分の I/O を要求 — lenient)。NONHEAD の delta 値は CBLKCNT 以外参照しない。
 

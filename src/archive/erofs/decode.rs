@@ -7,6 +7,7 @@
 use alloc::collections::BTreeSet;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::cell::Cell;
 
 use crate::error::Error;
 use crate::util::crc32c::crc32c;
@@ -331,6 +332,12 @@ pub(crate) struct Img<'a> {
         allow(dead_code)
     )]
     pub(crate) lzma_dict_size: u32,
+    /// `decode_bounded` cap on total materialized inode data
+    /// (`usize::MAX` for `decode`). Reported in
+    /// [`Error::OutputLimitExceeded`] by [`Img::take_output`].
+    output_limit: usize,
+    /// Not-yet-consumed remainder of `output_limit`.
+    remaining: Cell<usize>,
 }
 
 impl Img<'_> {
@@ -465,6 +472,21 @@ impl Img<'_> {
                 mh,
             },
         ))
+    }
+
+    /// Charge `n` bytes of declared inode data (`i_size`) against
+    /// the decode output budget before it is materialized, so a
+    /// corrupt field is rejected with [`Error::OutputLimitExceeded`]
+    /// instead of driving an oversized allocation.
+    fn take_output(&self, n: u64) -> Result<(), Error> {
+        let rem = self.remaining.get();
+        if n > rem as u64 {
+            return Err(Error::OutputLimitExceeded {
+                limit: self.output_limit,
+            });
+        }
+        self.remaining.set(rem - n as usize);
+        Ok(())
     }
 
     /// Read `size` bytes of flat-inode data: `floor(size / blksz)`
@@ -610,6 +632,7 @@ impl Img<'_> {
     }
 
     fn read_data(&self, ino: &Inode, ino_off: usize) -> Result<Vec<u8>, Error> {
+        self.take_output(ino.size)?;
         match ino.datalayout {
             DATALAYOUT_FLAT_PLAIN => self.read_flat(ino, ino_off, false),
             DATALAYOUT_COMPRESSED_FULL | DATALAYOUT_COMPRESSED_COMPACT => {
@@ -928,6 +951,19 @@ fn walk_dir(
 
 /// Decode an erofs filesystem image.
 pub fn decode(input: &[u8]) -> Result<ErofsImage, Error> {
+    decode_limited(input, usize::MAX)
+}
+
+/// Decode with a cap on total materialized inode data.
+///
+/// Every inode's declared `i_size` is charged against `max_output`
+/// before its payload is allocated; an image whose total would
+/// exceed the limit is rejected with [`Error::OutputLimitExceeded`].
+pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<ErofsImage, Error> {
+    decode_limited(input, max_output)
+}
+
+fn decode_limited(input: &[u8], max_output: usize) -> Result<ErofsImage, Error> {
     let sb = input
         .get(SUPER_OFF..SUPER_OFF + SUPER_SIZE)
         .ok_or(Error::UnexpectedEof)?;
@@ -1116,6 +1152,8 @@ pub fn decode(input: &[u8]) -> Result<ErofsImage, Error> {
         packed: None,
         metabox: None,
         lzma_dict_size,
+        output_limit: max_output,
+        remaining: Cell::new(max_output),
     };
     let packed_nid = u64le(sb, 96);
     if packed_nid != 0 {
@@ -1734,6 +1772,43 @@ mod tests {
             ftype: 8,
         }]);
         assert!(matches!(decode(&b.build(root)), Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn bounded_decode_rejects_oversized_isize() {
+        // Fuzz regression (corrupt pattern): a mutated extended
+        // `i_size` (0x7575757575757575) on a hole inode requested an
+        // exabyte-scale allocation in `read_flat`. The bounded entry
+        // point must reject the inode before its payload is
+        // materialized.
+        let mut b = ImgBuilder::new();
+        let f = b.add_file_extended(&vec![b'x'; BLK]);
+        let root = b.add_dir(&[DirEnt {
+            nid: f,
+            name: b"f",
+            ftype: 8,
+        }]);
+        let mut img = b.build(root);
+        let off = f as usize * 32;
+        // Convert to a hole: startblk = 0xFFFFFFFFFFFF (i_u low32
+        // all-ones + i_nb high16 all-ones) makes the FLAT_PLAIN
+        // inode null-addressed.
+        img[off + 6..off + 8].copy_from_slice(&le16(0xFFFF));
+        img[off + 16..off + 20].copy_from_slice(&le32(0xFFFF_FFFF));
+        img[off + 8..off + 16].copy_from_slice(&le64(0x7575_7575_7575_7575));
+        let err = decode_bounded(&img, 1024).unwrap_err();
+        assert!(matches!(err, Error::OutputLimitExceeded { .. }));
+    }
+
+    #[test]
+    fn bounded_decode_enforces_total_limit() {
+        // build_sample charges ~5.2 KiB total (root/subdir dir
+        // payloads + 5000 + 12 + 9 + 1 entry payloads).
+        let img = build_sample();
+        let out = decode_bounded(&img, 8192).expect("decode");
+        assert_eq!(out.entries.len(), 5);
+        let err = decode_bounded(&img, 4096).unwrap_err();
+        assert!(matches!(err, Error::OutputLimitExceeded { .. }));
     }
 
     #[test]
