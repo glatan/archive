@@ -1366,6 +1366,17 @@ pub fn decode_bounded_with(
             let entries = arj::decode::decode_bounded_with_password(data, "secret", max_output)?;
             Ok(entries.into_iter().next().map_or(Vec::new(), |e| e.data))
         }
+        // erofs `i_size` is a u64 that directly sizes the payload
+        // allocation; a corrupt inode must trip the harness limit
+        // rather than request an exabyte-scale buffer.
+        Algorithm::Erofs => {
+            let image = erofs::decode::decode_bounded(data, max_output)?;
+            Ok(image
+                .entries
+                .into_iter()
+                .find(|e| e.kind == erofs::decode::ErofsKind::File)
+                .map_or(Vec::new(), |e| e.data))
+        }
         _ => decode_with(algo, data),
     }
 }
