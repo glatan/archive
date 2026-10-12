@@ -79,8 +79,10 @@ pub fn decode(input: &[u8]) -> Result<Vec<ZpaqEntry>, Error> {
 /// Decode with a maximum total payload size limit across all entries.
 ///
 /// Returns [`Error::OutputLimitExceeded`] if the combined decompressed
-/// output would exceed `max_output` bytes. A `max_output` of 0 means
-/// unlimited.
+/// output would exceed `max_output` bytes, or if the arithmetic
+/// decoder produces more than `max_output` bytes of pre-postprocessing
+/// data (see [`crate::compress::zpaq::decode::decode_bounded`]). A
+/// `max_output` of 0 means unlimited.
 pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<ZpaqEntry>, Error> {
     let mut entries = Vec::new();
     for_each_segment(input, max_output, |segment| {
@@ -113,7 +115,10 @@ fn push_segment_entry(entries: &mut Vec<ZpaqEntry>, segment: &DecodedSegment) {
 /// Run `f` over every segment of every block in `input`, in stream
 /// order. Predictor/arithmetic state is shared across the segments of
 /// each block exactly like upstream `Decompresser`. `max_output` bounds
-/// the combined payload bytes emitted across all blocks (0 = unlimited).
+/// the combined payload bytes emitted across all blocks (0 = unlimited);
+/// it also bounds the bytes produced by the arithmetic decoder so a
+/// zero-output postprocessor cannot stall the decode (see
+/// [`crate::compress::zpaq::decode::decode_bounded`]).
 fn for_each_segment(
     input: &[u8],
     max_output: usize,
@@ -121,6 +126,7 @@ fn for_each_segment(
 ) -> Result<(), Error> {
     let mut start = 0;
     let mut emitted_total = 0usize;
+    let mut decoded_total = 0usize;
     // Bound total ZPAQL work across every block of this decode.
     let budget = crate::compress::zpaq::zpaql::new_shared_budget();
     while let Some(header) = parse_block_header_at(input, start)? {
@@ -131,10 +137,14 @@ fn for_each_segment(
         };
         let mut block = BlockDecoder::new(input, &header, remaining)?;
         block.set_cycle_budget(budget.clone());
+        if max_output != 0 {
+            block.set_max_decoded(max_output.saturating_sub(decoded_total));
+        }
         while let Some(segment) = block.next_segment()? {
             emitted_total = emitted_total.saturating_add(segment.data.len());
             f(&segment)?;
         }
+        decoded_total = decoded_total.saturating_add(block.decoded());
         start = block.end_pos();
     }
     if start == 0 {

@@ -423,7 +423,7 @@ fn run_iteration(
                 // not by the original input: minimize the reproducer itself
                 // and keep the original input as provenance in `.bin`.
                 let minimized_mutated = case_err.mutated_stream.as_ref().map(|mutated| {
-                    let decoded_limit = corrupt_decoded_limit(original_size);
+                    let decoded_limit = corrupt_decoded_limit(algo, original_size);
                     // Minimization probes the mutated stream directly —
                     // outside the per-case guard — so it needs its own
                     // in-flight entry; each probe refreshes it via
@@ -463,7 +463,7 @@ fn run_iteration(
                 let minimized_error = match &minimized_mutated {
                     Some(mutated) => {
                         let _inflight = watchdog::enter(algo, pattern, iteration, mutated);
-                        corrupt_probe(algo, mutated, corrupt_decoded_limit(original_size))
+                        corrupt_probe(algo, mutated, corrupt_decoded_limit(algo, original_size))
                             .err()
                             .unwrap_or_else(|| error_str.clone())
                     }
@@ -997,7 +997,7 @@ fn run_corrupt_case(algo: Algorithm, data: &[u8]) -> Result<(Vec<u8>, usize), Ca
     let encoded_size = encoded.len();
     let mut rng = StdRng::seed_from_u64(corrupt_seed(data));
     let mutated_cap = encoded_size.saturating_add(256).clamp(1, 16 << 20);
-    let decoded_limit = corrupt_decoded_limit(data.len());
+    let decoded_limit = corrupt_decoded_limit(algo, data.len());
 
     let check = |candidate: &[u8], mutation: String, limit: usize| -> Result<(), CaseError> {
         corrupt_probe(algo, candidate, limit).map_err(|message| CaseError {
@@ -1069,9 +1069,14 @@ fn run_corrupt_case(algo: Algorithm, data: &[u8]) -> Result<(Vec<u8>, usize), Ca
             Ok(DecodeOutcome::Decoded(pristine_size)) => {
                 // Bound mutated decodes by the fixture's own dimensions: a
                 // large fixture legitimately decodes far more than the
-                // small fuzz input that selected it.
-                let fixture_limit =
-                    corrupt_decoded_limit(fixture.len()).max(pristine_size.saturating_mul(4));
+                // small fuzz input that selected it. The algorithm hard
+                // cap still wins over a large pristine output: for
+                // modeled zpaq the decode itself is the expensive part,
+                // and hitting the cap is a graceful `Err`, not a false
+                // positive.
+                let fixture_limit = corrupt_decoded_limit(algo, fixture.len())
+                    .max(pristine_size.saturating_mul(4))
+                    .min(corrupt_output_hard_cap(algo));
                 let fixture_cap = fixture.len().saturating_add(256).clamp(1, 16 << 20);
                 sweep(&mut rng, &fixture, &origin, fixture_cap, fixture_limit)?;
             }
@@ -1084,8 +1089,43 @@ fn run_corrupt_case(algo: Algorithm, data: &[u8]) -> Result<(Vec<u8>, usize), Ca
 
 /// Decoder robustness bound for a corrupt-pattern input: decoded output
 /// larger than this is treated as a resource-exhaustion failure.
-pub(crate) fn corrupt_decoded_limit(input_len: usize) -> usize {
-    input_len.saturating_mul(256).clamp(64 << 10, 64 << 20)
+pub(crate) fn corrupt_decoded_limit(algo: Algorithm, input_len: usize) -> usize {
+    input_len
+        .saturating_mul(256)
+        .clamp(64 << 10, 64 << 20)
+        .min(corrupt_output_hard_cap(algo))
+}
+
+/// Hard cap on the corrupt-pattern decode limit for the modeled ZPAQ
+/// family (`zpaq`, `zpaq-level2`, `zpaq-level3`, `zpaq-archive`).
+///
+/// Every modeled byte costs ~8 arithmetic bit-decodes plus predictor /
+/// HCOMP / PCOMP work. Measured under the `fuzz` profile: ~149 ns per
+/// decoded byte on the `zpaq_corrupt_ff_fill_hang` corrupt stream
+/// (which decodes ~1.3e9 bytes while emitting none — run-1791781005
+/// watchdog hang) and ~279 ns per emitted byte on the pristine
+/// `jidac-m3-heavy-pcomp` fixture. The generic 64 MiB ceiling can
+/// therefore take tens of seconds in the worst case; 1 MiB decodes in
+/// ~0.3 s on real streams, leaving orders of magnitude of headroom
+/// under the watchdog's 60 s budget floor.
+const ZPAQ_CORRUPT_LIMIT: usize = 1 << 20;
+
+/// Per-algorithm ceiling applied on top of [`corrupt_decoded_limit`]'s
+/// formula result (and over the fixture phase's pristine-output
+/// allowance). Most codecs keep the generic bound; modeled ZPAQ
+/// decoders are capped at [`ZPAQ_CORRUPT_LIMIT`] because their
+/// per-decoded-byte cost makes larger limits unreachable inside the
+/// watchdog hang budget. `lrzip-zpaq` is intentionally not listed: its
+/// `decode_bounded_with` path is an unbounded fallback, a separate
+/// known gap.
+fn corrupt_output_hard_cap(algo: Algorithm) -> usize {
+    match algo {
+        Algorithm::Zpaq
+        | Algorithm::ZpaqLevel2
+        | Algorithm::ZpaqLevel3
+        | Algorithm::ZpaqArchive => ZPAQ_CORRUPT_LIMIT,
+        _ => usize::MAX,
+    }
 }
 
 /// Outcome of a single decoder call on a (possibly corrupted) stream.
@@ -1329,7 +1369,7 @@ pub fn replay_failure(path: &Path, fixtures_dir: &Path) -> Result<(), String> {
             mutated.len(),
             loaded.report.mutation.as_deref().unwrap_or("unknown")
         );
-        let limit = corrupt_decoded_limit(loaded.report.original_size.max(loaded.data.len()));
+        let limit = corrupt_decoded_limit(algo, loaded.report.original_size.max(loaded.data.len()));
         // Register in-flight so a replayed hang aborts with evidence
         // instead of blocking forever.
         let _inflight = watchdog::enter(
@@ -1407,7 +1447,7 @@ fn replay_hang_artifact(path: &Path, load_err: String) -> Result<(), String> {
         // decode_outcome would skip the output cap and could re-hang on
         // streams that emit unbounded output from finite input.
         let _inflight = watchdog::enter(algo, pattern, meta.iteration, &data);
-        let limit = corrupt_decoded_limit(data.len());
+        let limit = corrupt_decoded_limit(algo, data.len());
         return match corrupt_probe(algo, &data, limit) {
             Ok(_) => {
                 eprintln!("[replay] success: hang no longer reproduces");
@@ -1485,8 +1525,8 @@ fn ratio_bucket(input_len: usize, encoded_len: usize) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        PatternFilter, RunConfig, RunMode, RunState, get_patterns, handle_failure_artifact,
-        observation_signature,
+        PatternFilter, RunConfig, RunMode, RunState, ZPAQ_CORRUPT_LIMIT, corrupt_decoded_limit,
+        corrupt_output_hard_cap, get_patterns, handle_failure_artifact, observation_signature,
     };
     use crate::algorithms::Algorithm;
     use crate::checksum;
@@ -1605,5 +1645,33 @@ mod tests {
         let a = observation_signature(Algorithm::Gzip, b"aaaa").unwrap();
         let b = observation_signature(Algorithm::Gzip, b"aaaa").unwrap();
         assert_eq!(a, b);
+    }
+
+    /// Modeled ZPAQ decoders cap the corrupt decode limit far below the
+    /// generic 64 MiB ceiling: the decode itself is the expensive part,
+    /// so the limit must fit inside the watchdog hang budget. Other
+    /// algorithms keep the previous `len*256` clamped formula.
+    #[test]
+    fn corrupt_decoded_limit_caps_modeled_zpaq() {
+        const ZPAQ_ALGOS: [Algorithm; 4] = [
+            Algorithm::Zpaq,
+            Algorithm::ZpaqLevel2,
+            Algorithm::ZpaqLevel3,
+            Algorithm::ZpaqArchive,
+        ];
+        for algo in ZPAQ_ALGOS {
+            assert_eq!(corrupt_output_hard_cap(algo), ZPAQ_CORRUPT_LIMIT);
+            assert!(corrupt_decoded_limit(algo, 16 << 20) <= ZPAQ_CORRUPT_LIMIT);
+            // Small inputs keep the 64 KiB floor.
+            assert_eq!(corrupt_decoded_limit(algo, 1), 64 << 10);
+        }
+        // lrzip-zpaq stays outside the cap list (unbounded fallback,
+        // separate known gap); all other algorithms are unchanged.
+        assert_eq!(corrupt_output_hard_cap(Algorithm::LrzipZpaq), usize::MAX);
+        for algo in [Algorithm::Gzip, Algorithm::LrzipZpaq] {
+            assert_eq!(corrupt_decoded_limit(algo, 16 << 20), 64 << 20);
+            assert_eq!(corrupt_decoded_limit(algo, 1), 64 << 10);
+            assert_eq!(corrupt_decoded_limit(algo, 4096), 4096 * 256);
+        }
     }
 }
