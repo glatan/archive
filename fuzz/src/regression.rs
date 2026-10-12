@@ -145,8 +145,10 @@ fn prepare_export(artifact: &Path, out_dir: &Path) -> Result<PreparedExport, Str
         None => None,
     };
 
-    let corrupt_limit =
-        crate::runner::corrupt_decoded_limit(loaded.report.original_size.max(loaded.data.len()));
+    let corrupt_limit = crate::runner::corrupt_decoded_limit(
+        algo,
+        loaded.report.original_size.max(loaded.data.len()),
+    );
     let template_path = out_dir.join(format!("{base}.rs"));
     Ok(PreparedExport {
         algo,

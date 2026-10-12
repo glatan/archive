@@ -295,3 +295,6 @@
 - `lzw_clear_pad_run_start.bin`
   - ファズテストで検出・保存されたバイナリ入力 (90,029 バイト)
   - `.Z` の group-of-8 pad が body 先頭ではなくブロックラン起点 (compress42.c `boff`) から測られることの回帰用 — `test_fuzz_regression_clear_pad_run_start` が compress42.c/gzip `unlzw` 参照モデルでエンコード結果を検証
+- `zpaq_corrupt_ff_fill_hang.zpaq`
+  - fuzz run-1791781005 の watchdog hang artifact (iteration=461, corrupt fixture フェーズ): `zpaq/jidac-m3-heavy-pcomp.upstream.zpaq` の m3 ブロック arithmetic payload 内 (~offset 77587〜281450) を ~204 KiB の 0xFF で変異したストリーム (331,775 バイト)
+  - 0xFF 充填で code window が `0xFFFFFFFF` に張り付いて EOS を出さず、PCOMP が入力を破棄するため emit なしに ~1.3e9 バイトを decode し続ける — 出力上限だけでは止まらないケースの回帰用 (`corrupt_ff_fill_bounded_decode_terminates` が `decode_bounded` の decoded-byte bound を検証)

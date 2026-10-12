@@ -49,8 +49,12 @@ fixture フェーズではまず **pristine (無変異) の fixture を decode**
 pristine で panic すればそのまま finding として報告し、graceful な decode エラーなら
 そのファイルはこのアルゴリズムの decode 対象外 (`.expected` 等の補助データや未対応の
 upstream バリアント) とみなして変異スケジュールをスキップする。decode 成功時は
-出力上限を `max(corrupt_decoded_limit(fixture サイズ), pristine 出力サイズ × 4)` に設定する
-ため、大きな fixture が正当な大出力を返しても誤検出にならない。
+出力上限を `min(max(corrupt_decoded_limit(algo, fixture サイズ), pristine 出力サイズ × 4), corrupt_output_hard_cap(algo))`
+に設定するため、大きな fixture が正当な大出力を返しても誤検出にならない。
+modeled zpaq 系 (`zpaq`, `zpaq-level2/3`, `zpaq-archive`) は decode 自体が 1 バイトあたり
+高コスト (predictor + HCOMP/PCOMP VM) であり、64 MiB 級の上限は hang 予算内に到達不能なため、
+hard cap を 1 MiB (`ZPAQ_CORRUPT_LIMIT`) に絞っている。上限超過は graceful エラーであり、
+誤検出にはならない。
 
 fixture はコミット済みの静的ファイルであり、self-encoded ストリームでは到達しない
 vendor 拡張や実際のマルチエントリレイアウトを decoder 経路として網羅する。
@@ -143,6 +147,9 @@ cargo run --release -p archive-fuzz -- \
 想定を超える膨張や過大な実行時間を検出した場合は、失敗としてアーティファクトを生成する。
 `corrupt` パターンでは変異ループ自体が runtime oracle に誤検出されないよう、
 実行時間と通常の decode サイズ検査を免除し、変異ごとの decode 出力上限のみを適用する。
+出力上限の既定式は `input_len × 256` clamp [64 KiB, 64 MiB] で、modeled zpaq 系のみ
+`ZPAQ_CORRUPT_LIMIT` (1 MiB) の hard cap でさらに絞る (predictor + ZPAQL VM を回す
+per-byte コストが高く、大きな上限は watchdog hang 予算に間に合わない)。
 
 ## Watchdog
 

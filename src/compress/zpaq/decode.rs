@@ -273,6 +273,19 @@ pub(crate) struct BlockDecoder<'a> {
     /// Output cap applied to this block's segment data
     /// (`usize::MAX` = unlimited).
     max_output: usize,
+    /// Cap on bytes produced by the arithmetic decoder across this
+    /// block's segments (`usize::MAX` = unlimited).
+    ///
+    /// A run of 0xFF coded bytes pins the code window at `0xFFFFFFFF`,
+    /// so the decoder keeps emitting bits nearly without consuming
+    /// input and the EOS check (`decode(0)` against the pinned window)
+    /// never fires; a postprocessor that emits nothing then lets a
+    /// loop bounded only by `max_output` run orders of magnitude past
+    /// any reasonable time budget. `max_decoded` bounds that
+    /// decoded-byte work directly.
+    max_decoded: usize,
+    /// Bytes returned by the arithmetic decoder so far.
+    decoded: usize,
     /// Total postprocessed bytes emitted by this block so far.
     emitted: usize,
     /// Absolute offset just past the last consumed byte.
@@ -297,6 +310,8 @@ impl<'a> BlockDecoder<'a> {
             first_seg: true,
             base: header.next_pos,
             max_output,
+            max_decoded: max_output,
+            decoded: 0,
             emitted: 0,
             last_pos: header.next_pos,
         })
@@ -307,6 +322,35 @@ impl<'a> BlockDecoder<'a> {
     /// block decoder returned `None`.
     pub(crate) fn end_pos(&self) -> usize {
         self.last_pos
+    }
+
+    /// Bound the total bytes this block's arithmetic decoder may
+    /// produce across all segments. `decode_bounded` sets this to the
+    /// remaining decode-global budget so a stream of zero-output
+    /// blocks cannot multiply the per-block cap by the block count.
+    pub(crate) fn set_max_decoded(&mut self, max: usize) {
+        self.max_decoded = max;
+    }
+
+    /// Bytes produced by the arithmetic decoder so far — the
+    /// decoded-side counterpart of [`BlockDecoder::emitted`].
+    pub(crate) fn decoded(&self) -> usize {
+        self.decoded
+    }
+
+    /// Charge one decoded byte to [`BlockDecoder::max_decoded`];
+    /// errors with [`Error::OutputLimitExceeded`] once exceeded.
+    fn count_decoded(&mut self) -> Result<(), Error> {
+        if self.max_decoded == usize::MAX {
+            return Ok(());
+        }
+        self.decoded += 1;
+        if self.decoded > self.max_decoded {
+            return Err(Error::OutputLimitExceeded {
+                limit: self.max_decoded,
+            });
+        }
+        Ok(())
     }
 
     /// Share `budget` with this block's HCOMP and (when a PROG segment
@@ -403,6 +447,13 @@ impl<'a> BlockDecoder<'a> {
         let mut data = Vec::new();
         loop {
             let c = self.decompress_byte()?;
+            // Charge only real data bytes (not the `-1` EOS call, not
+            // the bounded ≤64 KiB PP-program load): for PASS streams
+            // `decoded` then equals `emitted`, so the decoded bound
+            // degrades exactly to the output bound.
+            if c >= 0 {
+                self.count_decoded()?;
+            }
             self.pp.write(c)?;
             let produced = self.pp.take_output();
             if self.max_output != usize::MAX
@@ -495,10 +546,16 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 /// Decode with a maximum output size limit.
 ///
 /// Returns [`Error::OutputLimitExceeded`] if the decompressed output
-/// would exceed `max_output` bytes. A `max_output` of 0 means
-/// unlimited.
+/// would exceed `max_output` bytes — or if the arithmetic decoder
+/// produces more than `max_output` bytes of pre-postprocessing data.
+/// The decoded-side bound matters because a postprocessor can legally
+/// emit nothing per decoded byte: without it a corrupt stream whose
+/// code window is pinned (e.g. a long 0xFF span) would spin for a
+/// near-unbounded time while the output limit never trips. A
+/// `max_output` of 0 means unlimited.
 pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
     let mut output = Vec::new();
+    let mut decoded_total = 0usize;
     let mut start = 0;
     // One budget for the whole decode: per-byte `run` calls would
     // otherwise multiply the per-run cap by the stream length, letting
@@ -512,9 +569,16 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
         };
         let mut block = BlockDecoder::new(input, &header, remaining)?;
         block.set_cycle_budget(budget.clone());
+        if max_output != 0 {
+            // The decoded-byte budget is decode-global: without it a
+            // run of zero-output blocks would multiply `max_output`
+            // by the block count.
+            block.set_max_decoded(max_output.saturating_sub(decoded_total));
+        }
         while let Some(segment) = block.next_segment()? {
             output.extend_from_slice(&segment.data);
         }
+        decoded_total = decoded_total.saturating_add(block.decoded());
         if max_output != 0 && output.len() > max_output {
             return Err(Error::OutputLimitExceeded { limit: max_output });
         }
@@ -799,6 +863,22 @@ mod tests {
             0x70, 0x38, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xfd,
         ];
         assert!(matches!(decode(bad), Err(Error::InvalidData(_))));
+    }
+
+    /// Regression (fuzz run-1791781005 watchdog hang): the fixture
+    /// `jidac-m3-heavy-pcomp.upstream.zpaq` with ~204 KiB of its m3
+    /// block arithmetic payload overwritten by 0xFF decodes ~1.3e9
+    /// bytes while emitting none — the pinned `0xFFFFFFFF` code window
+    /// never yields EOS and the loaded PCOMP program discards its
+    /// input, so an output-only bound never trips. `decode_bounded`
+    /// must still terminate promptly via the decoded-byte bound.
+    #[test]
+    fn corrupt_ff_fill_bounded_decode_terminates() {
+        let data = include_bytes!("../../../tests/fixtures/fuzz/zpaq_corrupt_ff_fill_hang.zpaq");
+        assert!(matches!(
+            decode_bounded(data, 64 << 10),
+            Err(Error::OutputLimitExceeded { .. })
+        ));
     }
 
     #[test]
