@@ -513,20 +513,28 @@ fn run_iteration(
     }
 }
 
+/// MPPC is a packet codec: one packet carries at most `history` bytes of
+/// payload, so cap the input instead of misrepresenting larger inputs.
+///
+/// Other encoders have format-level size ceilings too (e.g. cramfs's 24-bit
+/// file-size field ~16 MiB, iso9660 u32::MAX, mscfb-v3 2 GiB streams) — all
+/// unreachable at the default `--max-size` of 1 MiB, but candidates for this
+/// table if the limit is ever raised.
+fn packet_cap(algo: Algorithm) -> usize {
+    match algo {
+        Algorithm::Mppc | Algorithm::MppcRdp4 => archive::compress::mppc::HISTORY_SIZE,
+        Algorithm::MppcRdp5 => archive::compress::mppc::HISTORY_SIZE_64K,
+        _ => usize::MAX,
+    }
+}
+
 fn execute_case(
     algo: Algorithm,
     pattern: TestPattern,
     data: &[u8],
     iteration: u64,
 ) -> Result<TestOutcome, CaseError> {
-    // MPPC is a packet codec: one packet carries at most `history` bytes of
-    // payload, so cap the input instead of misrepresenting larger inputs.
-    let packet_cap = match algo {
-        Algorithm::Mppc | Algorithm::MppcRdp4 => 8192,
-        Algorithm::MppcRdp5 => 65536,
-        _ => usize::MAX,
-    };
-    let data = &data[..data.len().min(packet_cap)];
+    let data = &data[..data.len().min(packet_cap(algo))];
     // Register before any library call so a hang or uncatchable abort leaves
     // a persisted breadcrumb the watchdog (or a post-mortem) can identify.
     let _inflight = watchdog::enter(algo, pattern, iteration, data);
@@ -614,6 +622,7 @@ fn run_special_cases(state: &RunState, stats: &Mutex<Stats>, iteration: &mut u64
             let elapsed = state.start.elapsed().as_secs();
             // Special cases may panic or hang inside library encode/decode;
             // capture panics as failures and leave a watchdog breadcrumb.
+            let payload = &payload[..payload.len().min(packet_cap(algo))];
             let _inflight = watchdog::enter(algo, TestPattern::Self_, *iteration, payload);
             let case_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 algorithms::run_special_case(algo, label, payload)
@@ -832,6 +841,10 @@ fn maybe_record_observation(
     data: &[u8],
     case_label: Option<&str>,
 ) {
+    // Sign and harvest the same capped view `execute_case` runs on; the
+    // uncapped input would panic packet-codec encoders inside
+    // `observation_signature` and silently drop the observation.
+    let data = &data[..data.len().min(packet_cap(algo))];
     let Some(signature) = observation_signature(algo, data) else {
         return;
     };
@@ -867,6 +880,9 @@ fn harvest_corpus_entry(
 }
 
 fn observation_signature(algo: Algorithm, data: &[u8]) -> Option<String> {
+    // Cap here too so a direct call on an oversized packet-codec input
+    // produces a signature instead of panicking inside `encode_with`.
+    let data = &data[..data.len().min(packet_cap(algo))];
     let encoded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         algorithms::encode_with(algo, data)
     }))
@@ -1645,6 +1661,27 @@ mod tests {
         let a = observation_signature(Algorithm::Gzip, b"aaaa").unwrap();
         let b = observation_signature(Algorithm::Gzip, b"aaaa").unwrap();
         assert_eq!(a, b);
+    }
+
+    /// Inputs larger than one MPPC packet's history used to panic inside
+    /// `encode_with`, get swallowed by `catch_unwind`, and silently skip the
+    /// observation. The signature path must cap them like `execute_case`.
+    #[test]
+    fn observation_signature_caps_mppc_input() {
+        let over_rdp4_cap = vec![0u8; 54014];
+        assert!(observation_signature(Algorithm::Mppc, &over_rdp4_cap).is_some());
+        assert!(observation_signature(Algorithm::MppcRdp4, &over_rdp4_cap).is_some());
+        // The signature must match the truncated packet the codec sees.
+        assert_eq!(
+            observation_signature(Algorithm::Mppc, &over_rdp4_cap),
+            observation_signature(Algorithm::Mppc, &over_rdp4_cap[..8192])
+        );
+        let over_rdp5_cap = vec![0u8; 70000];
+        assert!(observation_signature(Algorithm::MppcRdp5, &over_rdp5_cap).is_some());
+        assert_eq!(
+            observation_signature(Algorithm::MppcRdp5, &over_rdp5_cap),
+            observation_signature(Algorithm::MppcRdp5, &over_rdp5_cap[..65536])
+        );
     }
 
     /// Modeled ZPAQ decoders cap the corrupt decode limit far below the
