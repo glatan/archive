@@ -30,7 +30,7 @@
 | 6 | ヘッダーチェックサム検証 (符号付き) | POSIX.1-2017 ustar header/data layout | ✅ | `test_tar_header_signed_checksum_fallback` |
 | 7 | ファイルタイプ ('0'=通常, '5'=ディレクトリ等) | POSIX.1-2017 ustar header/data layout | ✅ | `test_file_type` |
 | 8 | 512バイトブロック境界パディング | POSIX.1-2017 ustar header/data layout | ✅ | `test_round_up_to_block` |
-| 9 | EOF検出 (ゼロブロック×2) | POSIX.1-2017 ustar header/data layout | ✅ | `test_decode_empty_archive`, `test_single_zero_block_eof` |
+| 9 | EOF検出 (ゼロブロック×2) | POSIX.1-2017 ustar header/data layout | ✅ | `test_decode_empty_archive`、`test_single_zero_block_eof`、`test_decode_truncated_prefix_invariant` (任意の切断位置でエラーまたは正当なエントリ接頭辞) |
 | 10 | GNU long name 拡張 ('L'タイプ) | GNU tar extensions | ✅ | `test_gnu_long_name`, `test_pax_and_gnu_longname_priority` |
 | 11 | 単一ファイルアーカイブ | POSIX.1-2017 ustar / GNU / PAX | ✅ | `test_tar_decode_single_file` |
 | 12 | 複数ファイルアーカイブ | POSIX.1-2017 ustar / GNU / PAX | ✅ | `test_tar_decode_multi_file` |

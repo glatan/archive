@@ -67,7 +67,7 @@
 |---|------|----------|------|----------------|
 | 25 | `encode` は LZSA1 ストリーム、`encode_lzsa2` は LZSA2 ストリームを出力 (traits byte の V で選択) | StreamFormat.md | ✅ | `encode_roundtrips_and_redecodes` (統合) |
 | 26 | フレームは 64KiB 出力単位で分割。マッチは先行フレームの履歴を参照可能 | StreamFormat.md | ✅ | `multi_frame_roundtrip` (統合) |
-| 27 | 圧縮ブロックが入力以上に膨らむ場合、または 1 コマンドのリテラル長上限 (65535) を超えるリテラルランが発生した場合、verbatim フレームにフォールバック | StreamFormat.md: uncompressed flag | ✅ | `verbatim_frame_for_incompressible` (DSZ byte2 bit7 を直接検証)。リテラルラン上限経路は未テスト |
+| 27 | 圧縮ブロックが入力以上に膨らむ場合、または 1 コマンドのリテラル長上限 (65535) を超えるリテラルランが発生した場合、verbatim フレームにフォールバック | StreamFormat.md: uncompressed flag | ✅ | `verbatim_frame_for_incompressible` (DSZ byte2 bit7 を直接検証)、`literal_len_u16_max_boundary` (u16 リテラル長上限値 65535 の decode 境界) |
 | 28 | ストリームブロックは必ずリテラルのみの最終コマンド (L=0 可) で閉じる。raw ブロックは EOD コマンドで閉じる | BlockFormat_LZSA1/2.md | ✅ | `lzsa_tool` 出力との比較 (ローカル検証) |
 | 29 | LZSA2 エンコーダは距離に応じて 5bit (≤32) / 9bit (≤512) / 13bit (≤8704) / 16bit を選択し、直前距離と一致する場合は rep-match を出力 | [BlockFormat_LZSA2.md](https://raw.githubusercontent.com/emmanuel-marty/lzsa/1.4.1/BlockFormat_LZSA2.md) | ✅ | `roundtrip_various` (tier テスト) |
 | 30 | エンコーダのマッチ探索は greedy 単一候補ハッシュ (LZSA1: 3B、LZSA2: 2B)。参照の optimal parse とのバイト一致は保証しない | 実装選択 | ✅ | roundtrip で検証 |

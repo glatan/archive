@@ -1232,4 +1232,19 @@ mod tests {
             crate::error::Error::OutputLimitExceeded { .. }
         ));
     }
+
+    #[test]
+    fn test_decode_truncated_at_every_position() {
+        // Every proper prefix of a valid .lrz container must fail: a cut
+        // lands inside the header, a chunk header, a data block, or the
+        // final eof chunk.
+        let data = b"lrzip truncation sweep: fix problem quickly with galvanized jets";
+        let compressed = super::super::encode::encode(data);
+        for cut in 1..compressed.len() {
+            assert!(
+                decode(&compressed[..cut]).is_err(),
+                "cut={cut} must not decode"
+            );
+        }
+    }
 }

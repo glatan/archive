@@ -1767,4 +1767,28 @@ mod tests {
         ));
         assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
     }
+
+    #[test]
+    fn truncated_prefix_invariant() {
+        // Records are self-delimiting and trailing blank lines are
+        // skipped, so a cut at a record boundary yields a valid prefix;
+        // every other cut must fail. Invariant: decode(prefix) is Err
+        // or a prefix of the full entry list.
+        let mut data = record("warcinfo", None, b"info block");
+        data.extend_from_slice(&record("response", Some("http://a/"), b"resp body"));
+        data.extend_from_slice(&record("resource", Some("http://b/"), b"r2"));
+        let full = decode(&data).unwrap();
+        for cut in 0..data.len() {
+            if let Ok(prefix) = decode(&data[..cut]) {
+                assert!(
+                    prefix.len() <= full.len()
+                        && full
+                            .iter()
+                            .zip(prefix.iter())
+                            .all(|(a, b)| a.name == b.name && a.data == b.data),
+                    "cut={cut}: entries must be a prefix of the full list"
+                );
+            }
+        }
+    }
 }

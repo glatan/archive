@@ -20,15 +20,15 @@
 | 8 | FCOMMENT フラグ (コメント) | RFC 1952 §2.3.1 | ✅ | `test_parse_header_fcomment` |
 | 9 | オプションフィールドの出現順序 (FEXTRA→FNAME→FCOMMENT→FHCRC) | RFC 1952 §2.3.1 | ✅ | `test_parse_header_all_flags` (全フラグ同時設定で順序検証) |
 | 10 | 最小ヘッダー (10バイト、フラグなし) パース | RFC 1952 §2.3.1 | ✅ | `test_parse_minimal_header` |
-| 11 | ヘッダー短すぎエラー | RFC 1952 §2.3.1 | ✅ | `test_too_short` |
+| 11 | ヘッダー短すぎエラー | RFC 1952 §2.3.1 | ✅ | `test_too_short`、`test_parse_header_length_boundary` (9B 拒否 / 10B 受理)、`test_truncated_at_every_position` (全切断位置で拒否) |
 | 12 | CRC32 トレーラー検証 | RFC 1952 §2.3.1 | ✅ | `test_valid_trailer_crc32_and_isize`, `test_crc32_mismatch` |
 | 13 | ISIZE トレーラー検証 | RFC 1952 §2.3.1 | ✅ | `test_valid_trailer_crc32_and_isize`, `test_verify_isize_modulo_wrap_accepts_4gib_boundary` |
 | 14 | CRC32 不一致エラー | RFC 1952 §2.3.1 | ✅ | `test_crc32_mismatch` |
 | 15 | ISIZE 不一致エラー | RFC 1952 §2.3.1 | ✅ | `test_isize_mismatch` |
-| 16 | マルチメンバーストリーム | RFC 1952 §2.2 | ✅ | `test_multi_member_gzip`, `test_multi_member_gzip_three_members` |
+| 16 | マルチメンバーストリーム | RFC 1952 §2.2 | ✅ | `test_multi_member_gzip`、`test_multi_member_gzip_three_members`、`test_multi_member_second_member_invalid` |
 | 17 | 空データのgzip | RFC 1952 §2.2 / §2.3.1 | ✅ | `test_roundtrip_empty` (エンコーダー) |
 | 18 | MTIME フィールド解釈 | RFC 1952 §2.3.1 | ✅ | `test_mtime_xfl_os_fields` |
-| 19 | XFL フィールド (2=最大圧縮, 4=最速) | RFC 1952 §2.3.1 | ✅ | `test_mtime_xfl_os_fields`, `test_xfl_fast_compression` |
+| 19 | XFL フィールド (2=最大圧縮, 4=最速) | RFC 1952 §2.3.1 | ✅ | `test_mtime_xfl_os_fields`、`test_xfl_fast_compression`、`test_xfl_arbitrary_values_accepted` (informational、任意値受理) |
 | 20 | OS フィールド | RFC 1952 §2.3.1 | ✅ | `test_mtime_xfl_os_fields` |
 | 21 | CRC32 既知ベクター (`"123456789"` → `0xCBF43926`) | RFC 1952 Appendix 8 | ✅ | `test_crc32_known_vectors` |
 | 22 | CRC32 空データ (`""` → `0x00000000`) | RFC 1952 Appendix 8 | ✅ | `test_crc32_empty` |
@@ -44,7 +44,7 @@
 | 32 | FEXTRA XLEN=0 (空) | RFC 1952 §2.3.1 | ✅ | `test_fextra_xlen_zero` |
 | 33 | FNAME 空 (ヌル終端のみ) | RFC 1952 §2.3.1 | ✅ | `test_fname_empty` |
 | 34 | FCOMMENT 空 (ヌル終端のみ) | RFC 1952 §2.3.1 | ✅ | `test_fcomment_empty` |
-| 35 | DEFLATE ストリーム切り詰めエラー | RFC 1952 §2.2 / §2.3.1 | ✅ | `test_truncated_deflate_stream` |
+| 35 | DEFLATE ストリーム切り詰めエラー | RFC 1952 §2.2 / §2.3.1 | ✅ | `test_truncated_deflate_stream`、`test_truncated_at_every_position` (全切断位置で拒否) |
 | 36 | gzip ストリーム境界の NLEN 検証 | RFC 1951 §3.2.4 (embedded DEFLATE stream) | ✅ | `find_deflate_end` 内で検証 |
 
 ### 追加要件
@@ -53,7 +53,7 @@
 |---|------|----------|-----------|----------------|
 | 37 | FNAME/FCOMMENT は ISO 8859-1 (Latin-1) | RFC 1952 §2.3.1 | ✅ | decoder は内容を解釈せずスキップ (GzipHeader に保持しない)。encoder は Latin-1 / NUL 不在を検証 (encoder_tests) |
 | 38 | FEXTRA sub-field 構造: SI1(1B) + SI2(1B) + LEN(2B) + data | RFC 1952 §2.3.1.1 | ✅ | `test_fextra_valid_multiple_subfields`。SI2=0 は将来使用のため予約 (RFC 1952 §2.3.1.1)。注: decoder はサブフィールド構造を検証して malformed を reject (`test_parse_header_invalid_fextra_subfield_rejected`) — RFC 最小要件 (skip 可能であればよい)・GNU gzip より strict |
-| 39 | Trailing data after last member の処理 | RFC 1952 §2.2 | ✅ | `decode()` は残余バイトを次メンバーとして `GzipHeader::parse` するため、有効メンバーでない trailing data は `InvalidData` で reject (RFC の厳格解釈)。空入力 `decode(&[])` は `Ok(vec![])` を返す lenient 動作 |
+| 39 | Trailing data after last member の処理 | RFC 1952 §2.2 | ✅ | `decode()` は残余バイトを次メンバーとして `GzipHeader::parse` するため、有効メンバーでない trailing data は `InvalidData` で拒否する (RFC の厳格解釈)。`test_trailing_garbage_after_member_rejected`。空入力 `decode(&[])` は `Ok(vec![])` を返す寛容な動作 |
 | 40 | エンコーダーは reserved FLG bits を全てゼロに設定 | RFC 1952 §2.3.1.2 | ✅ | encode() で flags=0x00 固定。encode_with_options() は定義済み bit 定数 (FTEXT/FHCRC/FEXTRA/FNAME/FCOMMENT) のみ OR 合成し、bits 5-7 は常に 0 |
 | 41 | FNAME は「ディレクトリ要素を除去し小文字化した原本ファイル名」(encoder 側 SHOULD、FS 依存) | RFC 1952 §2.3.1 | ❌ | エンコーダは fname をそのまま格納する intentional scope |
 | 42 | XLEN (FEXTRA 長) は u16 — 65535B 超はエンコーダが reject | RFC 1952 §2.3.1.1 | ✅ | `rejects_oversized_extra_field` |

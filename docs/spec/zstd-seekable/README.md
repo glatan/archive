@@ -26,7 +26,7 @@
 | 5 | `Compressed_Size` の累積和は seek table 直前までの全フレーム領域と一致 | format doc §Compressed_Size | ✅ | `rejects_wrong_cumulative_size` |
 | 6 | `Checksum_Flag` (descriptor bit 7) 設定時、entry 末尾に伸張データの XXH64 下位 32bit (LE) | format doc §Checksum_Flag / §Checksum | ✅ | `decode_checksum_flag_stream`、参照ベクタ (flag=1) |
 | 7 | `Reserved_Bits` (bit 6-2) は 0 必須、非0 は拒否 | format doc §Reserved_Bits | ✅ | `rejects_reserved_bits` |
-| 8 | `Unused_Bits` (bit 1-0) は解釈しない | format doc §Unused_Bits | ✅ | decoder が無視 (テスト間接) |
+| 8 | `Unused_Bits` (bit 1-0) は解釈しない | format doc §Unused_Bits | ✅ | `accepts_unused_bits` |
 
 ## 動作要件
 

@@ -512,6 +512,32 @@ mod tests {
         );
     }
 
+    /// Tar has no checksum or footer covering the archive; a cut at a
+    /// block boundary yields a valid shorter archive, and trailing
+    /// partial blocks are ignored. Invariant: decode(prefix) is Err or
+    /// a prefix of the full entry list.
+    #[test]
+    fn test_decode_truncated_prefix_invariant() {
+        let mut enc = crate::archive::tar::encode::TarEncoder::new();
+        enc.add_file("a.txt", b"first file payload");
+        enc.add_file("b.txt", b"second");
+        enc.add_file("c.bin", &[0u8, 1, 2, 3, 4, 5, 6]);
+        let archive = enc.finish();
+        let full = decode(&archive).unwrap();
+        for cut in 0..archive.len() {
+            if let Ok(prefix) = decode(&archive[..cut]) {
+                assert!(
+                    prefix.len() <= full.len()
+                        && full
+                            .iter()
+                            .zip(prefix.iter())
+                            .all(|(a, b)| a.header.name == b.header.name && a.data == b.data),
+                    "cut={cut}: entries must be a prefix of the full list"
+                );
+            }
+        }
+    }
+
     /// Verifies that `round_up_to_block` maps 0→0, non-zero sizes to the
     /// next 512-byte boundary.
     #[test]

@@ -34,7 +34,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
 | 11 | Data Fork → 128 境界 pad → Resource Fork → pad | proposal 冒頭レイアウト記述 | ✅ | `roundtrip`、`empty_forks` |
-| 12 | fork 切り詰めは `UnexpectedEof` (末尾 pad 欠落含む) | バリデーション | ✅ | `rejects_truncated` |
+| 12 | fork 切り詰めは `UnexpectedEof` (末尾 pad 欠落含む) | バリデーション | ✅ | `rejects_truncated`、`rejects_all_truncations` (全切断位置でエラー) |
 | 13 | Get Info comment 長 (99-100): 宣言あれば末尾の comment 分を読み飛ばして受理 (内容は返さない) | proposal offset 099 / FCMT 注記 | ✅ | trailing 判定ロジック |
 | 14 | 宣言外の末尾バイトは拒否 | バリデーション | ✅ | `rejects_trailing_garbage` |
 

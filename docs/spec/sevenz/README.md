@@ -28,7 +28,7 @@
 |---|---------|---------|------|----------------|
 | 1 | Signature bytes: `37 7A BC AF 27 1C` (6B) | 7zFormat.txt: SignatureHeader | ✅ | `decode()` 冒頭で検証 |
 | 2 | Archive version: Major=0x00 Minor=0x04 | 7zFormat.txt: SignatureHeader | ✅ | `decode()` version 検証、不一致は `Unsupported` |
-| 3 | StartHeader CRC-32 検証 (12B→20B の CRC) | 7zFormat.txt: StartHeader | ✅ | `decode()` CRC 検証 |
+| 3 | StartHeader CRC-32 検証 (12B→20B の CRC) | 7zFormat.txt: StartHeader | ✅ | `decode()` CRC 検証、`test_decode_truncated_at_every_position` (全切断位置で拒否) |
 | 4 | NextHeaderOffset (u64 LE) | 7zFormat.txt: StartHeader | ✅ | `decode()` パース + overflow 検査 |
 | 5 | NextHeaderSize (u64 LE) | 7zFormat.txt: StartHeader | ✅ | `decode()` パース + overflow 検査 |
 | 6 | NextHeaderCRC (u32 LE) | 7zFormat.txt: StartHeader | ✅ | `decode()` 次ヘッダ CRC 検証 |
@@ -175,7 +175,7 @@
 | 67b | RISC-V BCJ (`0B`) | Methods.txt: BCJ RISC-V | ✅ | decode + encode: `SevenZFilter::RiscVBcj` |
 | 68 | Brotli (`04 F7 11 xx`) | Methods.txt: External codecs `F7 11` (Tino Reichardt) | ✅ | pinned Methods.txt に整合: `04 F7 11 02` を Brotli、`04 F7 11 01` を ZSTD (zstd feature 時は decode 対応) として扱う。encode は `02` を emit。`test_encode_brotli_method_roundtrip` |
 | 68a | Deflate (0x04 0x01 0x08): no properties, encode/decode | Methods.txt: Deflate | ✅ | `SevenZMethod::Deflate`, `test_decode_folder_deflate_method`, `test_encode_deflate_method_roundtrip`, system interop |
-| 68b | Deflate64 (0x04 0x01 0x09): no properties, encode/decode | Methods.txt: Deflate64 + PKWARE APPNOTE §5.6 (概要) + Info-ZIP deflate64 de facto 挙動 (距離コード 30/31・14bit 拡張・長さコード 285・16bit 拡張は APPNOTE 未記載のため参照実装観察に基づく)。encode は DEFLATE 互換 subset (code 285 不使用・32KB window) | ✅ | `test_decode_folder_deflate64_method`, `test_sevenz_deflate64_method_system_decode_compat`, `test_encode_deflate64_method_roundtrip`, `roundtrip_long_runs`, `test_sevenz_deflate64_method_system_extract_compat` |
+| 68b | Deflate64 (0x04 0x01 0x09): no properties, encode/decode | Methods.txt: Deflate64 + PKWARE APPNOTE §5.6 (概要) + Info-ZIP deflate64 de facto 挙動 (距離コード 30/31・14bit 拡張・長さコード 285・16bit 拡張は APPNOTE 未記載のため参照実装観察に基づく)。encode は DEFLATE 互換 subset (code 285 不使用・32KB window) | ✅ | `test_decode_folder_deflate64_method`、`test_sevenz_deflate64_method_system_decode_compat`、`test_encode_deflate64_method_roundtrip`、`roundtrip_long_runs`、`test_sevenz_deflate64_method_system_extract_compat`。単体境界: `test_deflate64_max_distance_65536`、`test_deflate64_max_match_length_65538`、`test_deflate64_dynamic_hdist_32_code31_accepted` |
 | 68c | BZip2 (0x04 0x02 0x02): no properties, encode/decode | Methods.txt: BZip2 | ✅ | `SevenZMethod::Bzip2`, `test_decode_folder_bzip2_method`, `test_encode_bzip2_method_roundtrip`, system interop |
 | 69 | Unsupported encryption methods (0x06 prefix, 7zAES 以外) | Methods.txt | ✅ | `is_encryption_method()` → `Unsupported` |
 | 70 | Unknown coder method: reject | 7zFormat.txt: Folder / Coder | ✅ | `decode_coder()` → `Unsupported("7z: unsupported coder method")` |

@@ -939,4 +939,23 @@ mod tests {
         let decoded = decode(&encoded).unwrap();
         assert_eq!(&decoded[..], &input[..]);
     }
+
+    #[test]
+    fn test_truncated_prefix_invariant() {
+        // ncompress EOF handling: an incomplete final code group is
+        // silently dropped, so truncated inputs may still decode.
+        // Invariant: decode(prefix) is Err or a prefix of the full
+        // decoded output.
+        let data = b"lzw truncation invariant: the quick brown fox jumps over the lazy dog, again and again";
+        let encoded = super::super::encode::encode(data);
+        let full = decode(&encoded).unwrap();
+        for cut in 0..encoded.len() {
+            if let Ok(prefix) = decode(&encoded[..cut]) {
+                assert!(
+                    full.starts_with(&prefix),
+                    "cut={cut}: output must be a prefix"
+                );
+            }
+        }
+    }
 }

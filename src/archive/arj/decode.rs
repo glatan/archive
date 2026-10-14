@@ -692,4 +692,20 @@ mod tests {
         assert_eq!(paths, [first, dir.join("x.a01")]);
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    #[test]
+    fn rejects_all_truncations() {
+        // The archive ends with a `60 EA 00 00` terminator header, so
+        // no proper non-empty prefix is a complete archive: every cut
+        // must fail, either at bounds checks or CRC verification.
+        // (Empty input is explicitly a valid empty archive.)
+        let a = crate::archive::arj::encode::encode(&[
+            ("one.txt", b"first entry data"),
+            ("two.bin", &[1, 2, 3, 4, 5, 6]),
+        ])
+        .unwrap();
+        for cut in 1..a.len() {
+            assert!(decode(&a[..cut]).is_err(), "cut={cut} unexpectedly decoded");
+        }
+    }
 }

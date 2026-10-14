@@ -246,6 +246,38 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_rejects_props_byte_224_unsupported_combo() {
+        // 0xE0 = 224 is the maximum *valid* properties byte
+        // (lc=4, lp=4, pb=4) but lc+lp=8 exceeds the supported
+        // literal-context range and must be rejected like XZ Utils.
+        let data = b"props";
+        let mut file = header_bytes(0xE0, DEFAULT_DICT_SIZE, data.len() as u64);
+        file.extend_from_slice(&stream_bytes(data, DEFAULT_DICT_SIZE));
+        assert!(matches!(decode(&file), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn test_decode_accepts_minimum_dict_size() {
+        // dict_size is any nonzero u32 on decode (XZ-strict encoding
+        // side enforces portability, decode is lenient). A literal-only
+        // stream decodes even with dict_size=1.
+        let data = b"ab";
+        let mut file = header_bytes(0x5D, 1, UNKNOWN_SIZE);
+        file.extend_from_slice(&stream_bytes(data, 1));
+        assert_eq!(decode(&file).unwrap(), data);
+    }
+
+    #[test]
+    fn test_decode_bounded_zero_limit() {
+        use super::super::encode;
+        let compressed = encode::encode(b"nonempty");
+        assert!(matches!(
+            decode_bounded(&compressed, 0),
+            Err(Error::OutputLimitExceeded { .. })
+        ));
+    }
+
+    #[test]
     fn test_decode_rejects_unsupported_props_combo() {
         // lc+lp > 4 is a valid properties byte but outside the supported
         // literal-context range (XZ Utils rejects it the same way).

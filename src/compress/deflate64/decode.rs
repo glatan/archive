@@ -464,4 +464,164 @@ mod tests {
     fn test_deflate64_empty_input() {
         assert!(matches!(decode(&[]), Err(Error::UnexpectedEof)));
     }
+
+    #[test]
+    fn test_deflate64_max_distance_65536() {
+        // Distance code 31 with maximum extra bits → distance 65536:
+        // the 64 KB window that gives Deflate64 its name.
+        let prefix_len = 65536usize;
+        let mut stream = Vec::new();
+
+        // Emit 65536 prefix bytes via two stored blocks (max 65535 each).
+        stream.push(0b0000_0000); // BFINAL=0, BTYPE=00
+        stream.extend_from_slice(&65535u16.to_le_bytes());
+        stream.extend_from_slice(&(!65535u16).to_le_bytes());
+        stream.push(b'X'); // position 0 — the byte we will back-reference
+        stream.extend(core::iter::repeat_n(b'Y', 65534));
+
+        stream.push(0b0000_0000); // BFINAL=0, BTYPE=00
+        stream.extend_from_slice(&1u16.to_le_bytes());
+        stream.extend_from_slice(&(!1u16).to_le_bytes());
+        stream.push(b'Y');
+
+        // Final fixed-Huffman block: length 3 at distance 65536.
+        let mut w = TestBitWriter::new();
+        w.write_bits(1, 1); // BFINAL = 1
+        w.write_bits(0b01, 2); // BTYPE = 01
+        w.write_huffman(0b000_0001, 7); // length symbol 257 → len 3
+        w.write_huffman(0b11111, 5); // distance symbol 31
+        w.write_bits(0x3FFF, 14); // extra: 49153 + 16383 = 65536
+        w.write_huffman(0b000_0000, 7); // EOB
+        stream.extend_from_slice(&w.finish());
+
+        let result = decode(&stream).unwrap();
+        assert_eq!(result.len(), prefix_len + 3);
+        assert_eq!(&result[prefix_len..], b"XYY");
+    }
+
+    #[test]
+    fn test_deflate64_max_match_length_65538() {
+        // Length code 285 with maximum extra bits → 3 + 65535 = 65538.
+        let mut stream = Vec::new();
+        stream.push(0b0000_0000); // stored 'Z'
+        stream.extend_from_slice(&1u16.to_le_bytes());
+        stream.extend_from_slice(&(!1u16).to_le_bytes());
+        stream.push(b'Z');
+
+        let mut w = TestBitWriter::new();
+        w.write_bits(1, 1); // BFINAL = 1
+        w.write_bits(0b01, 2); // BTYPE = 01
+        w.write_huffman(0b1100_0101, 8); // length symbol 285
+        w.write_bits(0xFFFF, 16); // extra: 3 + 65535 = 65538
+        w.write_huffman(0b00000, 5); // distance symbol 0 → dist 1
+        w.write_huffman(0b000_0000, 7); // EOB
+        stream.extend_from_slice(&w.finish());
+
+        let result = decode(&stream).unwrap();
+        assert_eq!(result.len(), 1 + 65538);
+        assert!(result.iter().all(|&b| b == b'Z'));
+    }
+
+    #[test]
+    fn test_deflate64_distance_30_exceeds_output() {
+        // Distance code 30 is valid in the Deflate64 table, but the
+        // distance (32769) must still be ≤ bytes emitted so far.
+        let mut stream = Vec::new();
+        stream.push(0b0000_0000); // stored 100 bytes
+        stream.extend_from_slice(&100u16.to_le_bytes());
+        stream.extend_from_slice(&(!100u16).to_le_bytes());
+        stream.extend(core::iter::repeat_n(b'Y', 100));
+
+        let mut w = TestBitWriter::new();
+        w.write_bits(1, 1); // BFINAL = 1
+        w.write_bits(0b01, 2); // BTYPE = 01
+        w.write_huffman(0b000_0001, 7); // len 3
+        w.write_huffman(0b11110, 5); // distance symbol 30 → 32769
+        w.write_bits(0, 14);
+        w.write_huffman(0b000_0000, 7); // EOB
+        stream.extend_from_slice(&w.finish());
+
+        assert!(matches!(decode(&stream), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn test_deflate64_dynamic_hdist_32_code31_accepted() {
+        // Deflate64-specific: HDIST may reach 32 and distance code 31
+        // may carry a non-zero code length (rejected in plain DEFLATE).
+        let mut w = TestBitWriter::new();
+        w.write_bits(1, 1); // BFINAL = 1
+        w.write_bits(0b10, 2); // BTYPE = 10 (dynamic Huffman)
+        w.write_bits(0, 5); // HLIT → 257 lit/len codes
+        w.write_bits(31, 5); // HDIST → 32 distance codes
+        w.write_bits(14, 4); // HCLEN → 18 code length codes
+
+        // CL lengths in CODE_LENGTH_ORDER: CL17=1, CL18=2, CL1=2 →
+        // canonical codes CL17='0', CL1='10', CL18='11'.
+        let cl_code_lengths: [u8; 18] = [0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2];
+        for &len in &cl_code_lengths {
+            w.write_bits(len as u32, 3);
+        }
+
+        // 289 entries: lit[65]=1, lit[256]=1, dist[31]=1, rest 0.
+        w.write_huffman(0b11, 2); // CL18
+        w.write_bits(54, 7); // i=0..64 zeros
+        w.write_huffman(0b10, 2); // CL1 → i=65 len 1
+        w.write_huffman(0b11, 2); // CL18
+        w.write_bits(127, 7); // i=66..203 zeros
+        w.write_huffman(0b11, 2); // CL18
+        w.write_bits(41, 7); // i=204..255 zeros
+        w.write_huffman(0b10, 2); // CL1 → i=256 len 1 (EOB)
+        w.write_huffman(0b11, 2); // CL18
+        w.write_bits(20, 7); // i=257..287 zeros (dist codes 0-30)
+        w.write_huffman(0b10, 2); // CL1 → i=288 len 1 (dist code 31)
+
+        // Emit 'A' (lit code '0') then EOB (lit code '1').
+        w.write_huffman(0b0, 1);
+        w.write_huffman(0b1, 1);
+
+        let result = decode(&w.finish()).unwrap();
+        assert_eq!(result, b"A");
+    }
+
+    #[test]
+    fn test_deflate64_dynamic_missing_eob() {
+        // lit/len symbol 256 with code length 0 → must be rejected.
+        let mut w = TestBitWriter::new();
+        w.write_bits(1, 1); // BFINAL = 1
+        w.write_bits(0b10, 2); // BTYPE = 10
+        w.write_bits(0, 5); // HLIT → 257
+        w.write_bits(0, 5); // HDIST → 1
+        w.write_bits(14, 4); // HCLEN → 18
+
+        let cl_code_lengths: [u8; 18] = [0, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2];
+        for &len in &cl_code_lengths {
+            w.write_bits(len as u32, 3);
+        }
+
+        // lit[65]=1, lit[256]=0 (missing EOB), dist[0]=1.
+        w.write_huffman(0b11, 2); // CL18
+        w.write_bits(54, 7); // i=0..64 zeros
+        w.write_huffman(0b10, 2); // CL1 → i=65 len 1
+        w.write_huffman(0b11, 2); // CL18
+        w.write_bits(127, 7); // i=66..203 zeros
+        w.write_huffman(0b11, 2); // CL18
+        w.write_bits(42, 7); // i=204..256 zeros (incl. EOB)
+        w.write_huffman(0b10, 2); // CL1 → i=257 len 1 (dist)
+
+        let result = decode(&w.finish());
+        assert!(matches!(result, Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn test_deflate64_hlit_exceeds_max() {
+        // HLIT field = 30 → 287 lit/len codes > 286 maximum.
+        let mut w = TestBitWriter::new();
+        w.write_bits(1, 1); // BFINAL = 1
+        w.write_bits(0b10, 2); // BTYPE = 10
+        w.write_bits(30, 5); // HLIT → 287
+        w.write_bits(0, 5); // HDIST → 1
+        w.write_bits(0, 4); // HCLEN → 4
+        w.write_bits(0, 8); // padding
+        assert!(matches!(decode(&w.finish()), Err(Error::InvalidData(_))));
+    }
 }

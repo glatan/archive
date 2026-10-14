@@ -892,4 +892,24 @@ mod tests {
             }
         }
     }
+
+    /// §2/§7: prefixes shorter than the 16-byte locator tag yield
+    /// empty output (locator absence = non-ZPAQ data per §7); every
+    /// proper prefix at or past the locator must fail — a cut lands
+    /// inside the block header, a segment, or the coded data.
+    #[test]
+    fn decode_truncated_at_every_position() {
+        let input = b"zpaq truncation sweep: jived fox nymph grabs quick waltz";
+        let enc = crate::compress::zpaq::encode::encode(input, 2);
+        for cut in 1..16 {
+            assert_eq!(
+                decode(&enc[..cut]).unwrap(),
+                Vec::<u8>::new(),
+                "cut={cut} inside locator must decode to empty"
+            );
+        }
+        for cut in 16..enc.len() {
+            assert!(decode(&enc[..cut]).is_err(), "cut={cut} must not decode");
+        }
+    }
 }

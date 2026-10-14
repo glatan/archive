@@ -1255,6 +1255,23 @@ mod tests {
         assert_eq!(decode_lzsa2_block(&b).unwrap(), b"xyz");
     }
 
+    #[test]
+    fn literal_len_u16_max_boundary() {
+        // The literal-length u16 fields cap a single command's literal
+        // run at 65535 — the encoder falls back to a verbatim frame
+        // beyond that. Decode-side boundary: len = 0xFFFF.
+        let mut b = vec![0x70, 249, 0xff, 0xff];
+        b.extend_from_slice(&[0xabu8; 65535]);
+        b.extend_from_slice(&[0xff, 0x0f, 0x00, 238, 0x00, 0x00]);
+        assert_eq!(decode_lzsa1_block(&b).unwrap(), vec![0xabu8; 65538]);
+
+        // LZSA2: lit-len marker 239, u16 LE = 0xFFFF.
+        let mut b = vec![0x1f, 0xfe, 0xef, 0xff, 0xff];
+        b.extend_from_slice(&[0xccu8; 65535]);
+        b.extend_from_slice(&[0xf0, 0xe8]);
+        assert_eq!(decode_lzsa2_block(&b).unwrap(), vec![0xccu8; 65535]);
+    }
+
     fn rt_prefix(data: &[u8], prefix: &[u8]) {
         assert_eq!(
             decode_with_prefix(&encode_with_prefix(data, prefix), prefix).unwrap(),

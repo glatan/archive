@@ -491,4 +491,30 @@ mod tests {
             assert_eq!(entry.data(), expected_data.as_bytes());
         }
     }
+
+    #[test]
+    fn test_decode_truncated_prefix_invariant() {
+        // ar has no archive terminator, so a cut at a member boundary
+        // (or right after the global header) decodes to a valid prefix
+        // of the entries; every other cut must fail. Invariant:
+        // decode(prefix) is Err or a prefix of the full entry list.
+        let mut encoder = crate::archive::ar::encode::ArEncoder::new();
+        encoder.add_file("t.txt", b"ar truncation sweep payload");
+        encoder.add_file("odd.bin", b"odd-sized");
+        encoder.add_file("third", b"3");
+        let archive = encoder.finish().unwrap();
+        let full = decode(&archive).unwrap();
+        for cut in 0..archive.len() {
+            if let Ok(prefix) = decode(&archive[..cut]) {
+                assert!(
+                    prefix.len() <= full.len()
+                        && full
+                            .iter()
+                            .zip(prefix.iter())
+                            .all(|(a, b)| a.name == b.name && a.data == b.data),
+                    "cut={cut}: entries must be a prefix of the full list"
+                );
+            }
+        }
+    }
 }

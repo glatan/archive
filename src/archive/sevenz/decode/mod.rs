@@ -2425,4 +2425,27 @@ mod tests {
         assert_eq!(entries[0].atime, Some(132_456_789_100_000_000));
         assert_eq!(entries[0].mtime, Some(132_456_789_200_000_000));
     }
+
+    #[test]
+    fn test_decode_truncated_at_every_position() {
+        // Every proper prefix of a valid archive must fail.
+        let mut encoder = SevenZEncoder::new();
+        let entry = SevenZEntry {
+            name: "t.txt".to_string(),
+            data: b"truncation test payload".to_vec(),
+            crc32: Some(crc32::crc32(b"truncation test payload")),
+            attributes: None,
+            ctime: None,
+            atime: None,
+            mtime: None,
+        };
+        encoder.add_entry(entry);
+        let archive = encoder.finish().unwrap();
+        for cut in 1..archive.len() {
+            assert!(
+                decode(&archive[..cut]).is_err(),
+                "cut={cut} must not decode"
+            );
+        }
+    }
 }

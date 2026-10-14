@@ -474,6 +474,62 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_fdict_rejected() {
+        // decode() must reject FDICT=1 streams; only decode_with_dict
+        // handles preset dictionaries (RFC 1950 §2.3).
+        let dict = b"the quick brown fox";
+        let data = b"the quick brown fox is fast";
+        let compressed = super::super::encode::encode_with_dict(data, dict);
+        assert!(matches!(decode(&compressed), Err(Error::Unsupported(_))));
+    }
+
+    #[test]
+    fn test_decode_with_dict_fdict_not_set_rejected() {
+        // decode_with_dict on an FDICT=0 stream must be rejected.
+        let compressed = super::super::encode::encode(b"hello");
+        assert!(matches!(
+            decode_with_dict(&compressed, b"dict"),
+            Err(Error::InvalidData(_))
+        ));
+    }
+
+    #[test]
+    fn test_cinfo_minimum_zero_accepted() {
+        // CINFO=0 (256-byte window hint) is the smallest legal value and
+        // must still decode; the window hint does not constrain decoding.
+        // CMF = 0x08 (CINFO=0, CM=8); compute FLG for FCHECK.
+        let data = b"test data";
+        let original = super::super::encode::encode(data);
+        let trailer_start = original.len() - 4;
+        let deflate_payload = &original[2..trailer_start];
+        let adler_bytes = &original[trailer_start..];
+
+        let cmf: u8 = 0x08;
+        let fcheck = (31 - (cmf as u16) * 256 % 31) % 31;
+        let flg = fcheck as u8;
+        debug_assert_eq!((cmf as u16 * 256 + flg as u16) % 31, 0);
+
+        let mut stream = alloc::vec![cmf, flg];
+        stream.extend_from_slice(deflate_payload);
+        stream.extend_from_slice(adler_bytes);
+
+        assert_eq!(decode(&stream).unwrap(), data);
+    }
+
+    #[test]
+    fn test_truncated_at_every_position() {
+        // Every proper prefix of a valid zlib stream must fail.
+        let data = b"zlib truncation boundary test payload";
+        let compressed = super::super::encode::encode(data);
+        for cut in 1..compressed.len() {
+            assert!(
+                decode(&compressed[..cut]).is_err(),
+                "cut={cut} must not decode"
+            );
+        }
+    }
+
+    #[test]
     fn test_decode_truncated_adler_still_rejected() {
         // Fewer than 4 bytes after the DEFLATE stream end is a truncated
         // ADLER32 trailer and must still be rejected.

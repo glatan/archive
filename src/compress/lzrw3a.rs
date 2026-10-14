@@ -199,6 +199,21 @@ mod tests {
     }
 
     #[test]
+    fn decode_flag_remainder_bytes_ignored() {
+        // Only flag byte 0 is evaluated; bytes 1-3 are ignored even when
+        // non-zero (matching the reference decoder).
+        let input = [1, 0xAA, 0xBB, 0xCC, b'h', b'i'];
+        assert_eq!(decode(&input).unwrap(), b"hi");
+    }
+
+    #[test]
+    fn decode_verbatim_empty() {
+        // FLAG_COPY with an empty remainder decodes to empty output.
+        let input = [1, 0, 0, 0];
+        assert_eq!(decode(&input).unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
     fn decode_copy_flag() {
         let input = [1, 0, 0, 0, b'h', b'e', b'l', b'l', b'o'];
         assert_eq!(decode(&input).unwrap(), b"hello");

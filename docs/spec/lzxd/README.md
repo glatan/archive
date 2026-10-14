@@ -13,12 +13,12 @@
 |---|------|----------|------|----------------|
 | 1 | ビットストリームは 16bit little-endian ワード列を MSB-first で消費する | [MS-PATCH] 2.1.1 | ✅ | 全ベクタで検証 |
 | 2 | 入力は `[u16le 圧縮チャンクサイズ][チャンクデータ]` の繰り返し。各チャンクは最終チャンクを除き 32KiB 展開。チャンクプリフィクスはバイトアラインされビットストリームの外側にある。各 32KiB チャンク末尾は最大 15bit の 0 パディングで 16bit アライン | [MS-PATCH] 2.2.1 | ✅ | `lzxd_generated_multichunk_span` (統合: ブロックがチャンク境界を跨ぐ)、`BitReader::finish_frame` でパディング処理 |
-| 3 | ウィンドウサイズは 2^17 (128KiB) から 2^25 (32MiB) の冪乗で、ストリーム外から供給される。範囲外・非冪乗は拒否 | [MS-PATCH] 2.1.2 | ✅ | `rejects_bad_window` |
+| 3 | ウィンドウサイズは 2^17 (128KiB) から 2^25 (32MiB) の冪乗で、ストリーム外から供給される。範囲外・非冪乗は拒否 | [MS-PATCH] 2.1.2 | ✅ | `rejects_bad_window`、`accepts_window_boundaries` (2^17/2^25 受理) |
 | 4 | reference データは subject 出力の前方に論理前置され、マッチオフセットは合計窓 (=reference+出力) 内を遡及できる | [MS-PATCH] 2.1.3 | ✅ | `lzxd_reference_data_vector` (統合) |
 | 5 | 反復オフセット R0/R1/R2 は初期値 (1,1,1)。明示マッチで R 更新 (R0←off、R1←旧R0、R2←旧R1)。R1/R2 参照は swap | [MS-PATCH] 2.1.4 | ✅ | `lzxd_generated_matches_and_repeats` (統合: R0/R1/R2 全参照) |
 | 6 | マッチ長は 2-32768。1 マッチは 32KiB 出力境界を跨がない | [MS-PATCH] 2.1.5 | ✅ | デコーダガード (`match spans chunk boundary` 拒否、`lzxd_rejects_match_crossing_chunk_boundary`) |
 | 7 | position slot 数はウィンドウサイズ依存 (≤512KiB: 2*log2、それ以上: w/128KiB+34)。footer slot 36+ は常に 17bit フット | [MS-PATCH] 2.1.6 | ✅ | `pos_slot_table` |
-| 8 | ストリーム先頭 1bit が E8 call translation フラグ。セット時は続く 2 ワードが 32bit translation size。E8 反転はチャンクごとに適用 | [MS-PATCH] 2.2.2 | ✅ | `lzxd_generated_e8` (統合) / `e8_reverse_basic` |
+| 8 | ストリーム先頭 1bit が E8 call translation フラグ。セット時は続く 2 ワードが 32bit translation size。E8 反転はチャンクごとに適用 | [MS-PATCH] 2.2.2 | ✅ | `lzxd_generated_e8` (統合) / `e8_reverse_basic` / `rejects_e8_flag_truncated` (size ワード欠落) |
 
 ## ブロック構造
 
@@ -40,7 +40,7 @@
 | 17 | チャンクサイズ 0・チャンクデータ切り詰めは拒否 | [MS-PATCH] 2.2.1 | ✅ | `rejects_bad_chunk_layout` (size0・宣言超過・prefix 不足), `rejects_truncated`, `uncompressed_roundtrip_odd_last_chunk`。leniency: チャンク末尾の奇数バイト残り・非ゼロパディングは検証せず破棄して受理 (`Source::finish_chunk` が残りをスキップ) |
 | 18 | 非合法ブロック型・超過 (over-subscribed) Huffman 木は拒否。不完全木は受理 (libmspack と同じ緩和。[MS-PATCH] §2.4 の「非空木は ≥2 要素」MUST に対して 1 要素木も受理) し、未使用コード空間への decode は実行時エラー | [MS-PATCH] 2.3-2.5 | ✅ | `lzxd_rejects_invalid` (型 5), `huffman_decode` (over-subscribed), `huffman_accepts_incomplete_tree` |
 | 19 | 出力済み+reference を超えるオフセット・32KiB 境界跨ぎマッチは拒否 | [MS-PATCH] 2.1.5 | ✅ | `lzxd_rejects_invalid` (offset 超過), `lzxd_rejects_match_crossing_chunk_boundary` |
-| 20 | `decode` は期待出力サイズで厳密終端、`decode_all` はブロックの 24bit サイズで自己終端 (`max_output` 上限付き)。uncompressed ブロックの 32KiB 境界跨ぎは quota 分割で chunk プリフィクス越しに継続して受理する (跨ぎ拒否は match のみ)。期待サイズ到達後の入力余剰は未検証で受理 | crate contract | ✅ | `lzxd_decode_all_matches_decode` (統合)。uncompressed ブロック跨ぎ経路はコード上存在するが直接テストなし (テスト側 encoder は生バイト跨ぎを生成不可) |
+| 20 | `decode` は期待出力サイズで厳密終端、`decode_all` はブロックの 24bit サイズで自己終端 (`max_output` 上限付き)。uncompressed ブロックの 32KiB 境界跨ぎは quota 分割でチャンク接頭辞越しに継続して受理する (跨ぎ拒否は match のみ)。期待サイズ到達後の入力余剰は未検証で受理 | crate contract | ✅ | `lzxd_decode_all_matches_decode` (統合)、`decode_expected_size_strict` (指定サイズの短縮によるブロック途中終端および超過による入力枯渇エラー)、`decode_all_max_output_boundaries` (limit 境界)、`decode_ignores_trailing_bytes`。uncompressed ブロック跨ぎ経路はコード上存在するが直接テストなし (テスト側 encoder は生バイト跨ぎを生成不可) |
 
 ## エンコード範囲 / 既知の制約
 

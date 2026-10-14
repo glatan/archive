@@ -265,4 +265,36 @@ mod tests {
         // Largest representable value is still accepted.
         assert!(decode_rfc1924(&encode_rfc1924(&[0xFF; 16]).unwrap()).is_ok());
     }
+
+    #[test]
+    fn adobe_delimiter_boundaries() {
+        // `<~` and `~>` are stripped independently, so each alone —
+        // and the empty bracket pair — decodes to empty output.
+        assert_eq!(decode(b"<~").unwrap(), b"");
+        assert_eq!(decode(b"~>").unwrap(), b"");
+        assert_eq!(decode(b"<~~>").unwrap(), b"");
+        // A lone '<' is not the opener: it is a data char and a
+        // single-char tail is rejected.
+        assert!(decode(b"<").is_err());
+        // A bare trailing '~' (a '~>' cut in half) is misplaced.
+        assert!(decode(b"<~9jqo^~").is_err());
+    }
+
+    #[test]
+    fn adobe_group_boundary_cuts_yield_prefix() {
+        // Groups decode independently, so cutting at a 5-char group
+        // boundary yields a valid stream whose output is a prefix of
+        // the full decode. Cuts inside a group may still succeed but
+        // produce different bytes (padded tail semantics).
+        let enc = encode(b"0123456789abcde");
+        let full = decode(&enc).unwrap();
+        assert_eq!(full, b"0123456789abcde");
+        // enc = "<~" + 3*5 chars + 4-char tail + "~>": group
+        // boundaries at 2+5k.
+        for k in 0..4usize {
+            let cut = 2 + 5 * k;
+            let d = decode(&enc[..cut]).unwrap();
+            assert_eq!(d, &full[..4 * k], "cut={cut}");
+        }
+    }
 }

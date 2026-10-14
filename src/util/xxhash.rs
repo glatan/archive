@@ -836,4 +836,52 @@ mod tests {
         h.update(&data[17..]);
         assert_eq!(h.finish(), expected);
     }
+
+    #[test]
+    fn test_xxhash64_stripe_boundary_streaming() {
+        // Lengths straddling the 32-byte stripe must hash identically
+        // in one-shot and streaming modes.
+        let data: Vec<u8> = (0u8..65).collect();
+        for len in [31usize, 32, 33, 63, 64, 65] {
+            let expected = xxhash64(&data[..len], 0);
+            for split in [1usize, 16, 32] {
+                let mut h = XxHash64::new(0);
+                for chunk in data[..len].chunks(split) {
+                    h.update(chunk);
+                }
+                assert_eq!(h.finish(), expected, "len={len} split={split}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_xxhash64_tail_boundaries() {
+        // The finalize path consumes the tail in 8/4/1-byte pieces;
+        // inputs around those internal boundaries must stay distinct.
+        let data: Vec<u8> = (0u8..33).collect();
+        let mut hashes = Vec::new();
+        for len in [3usize, 4, 7, 8, 9, 15, 16, 17, 23, 24, 25, 31] {
+            let h = xxhash64(&data[..len], 0);
+            assert!(!hashes.contains(&h), "len={len} collides");
+            hashes.push(h);
+        }
+    }
+
+    #[test]
+    fn test_xxhash32_stripe_boundary() {
+        // XXH32's stripe is 16 bytes; lengths around it must agree
+        // between one-shot and streaming, and stay distinct.
+        let data: Vec<u8> = (0u8..33).collect();
+        let mut prev = 0u32;
+        for len in [15usize, 16, 17] {
+            let expected = xxhash32(&data[..len], 0);
+            assert_ne!(expected, prev, "len={len}");
+            prev = expected;
+            let mut h = XxHash32::new(0);
+            for chunk in data[..len].chunks(4) {
+                h.update(chunk);
+            }
+            assert_eq!(h.finish(), expected);
+        }
+    }
 }

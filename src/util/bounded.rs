@@ -61,4 +61,9 @@ mod tests {
         let err = check_output_limit(usize::MAX, 1, Some(100)).unwrap_err();
         assert!(matches!(err, Error::OutputLimitExceeded { limit: 100 }));
     }
+
+    #[test]
+    fn zero_at_zero_limit() {
+        assert!(check_output_limit(0, 0, Some(0)).is_ok());
+    }
 }

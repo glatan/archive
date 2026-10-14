@@ -41,7 +41,7 @@
 | 10b | arj_flags bit2 (multi-volume): `decode_parts` で供給 parts を filename で連結 | ARJ tech note | ✅ | `test_arj_multi_volume`, `test_arj_multi_volume_three_way` |
 | 21 | multi-volume の自動ファイル探索 | crate extension | ✅ | `decode::volume_paths` (`std` feature) で `.arj` / `.aNN` の sibling ファイルを順序付きで列挙する。`volume_paths_discovers_siblings`, `test_arj_volume_paths_discovery_roundtrip` |
 | 11 | entry data CRC-32 を検証、不一致は reject | ARJ tech note | ✅ | decode 内検証 |
-| 12 | bounds 検査 (truncated signature/header/data、st1 block count=0 → エラー) | crate エラー規約 | ✅ | `test_arj_rejects_truncated`, `test_st1_zero_block_count_rejected` (共有 `compress::lzh::st1`), `test_fuzz_regression_arj_1_corrupt` |
+| 12 | bounds 検査 (truncated signature/header/data、st1 block count=0 → エラー) | crate エラー規約 | ✅ | `test_arj_rejects_truncated`、`test_st1_zero_block_count_rejected` (共有 `compress::lzh::st1`)、`test_fuzz_regression_arj_1_corrupt`、`rejects_all_truncations` (空入力を除く全切断位置で拒否) |
 | 12a | `decode_bounded` / `decode_bounded_with_password`: member 宣言 `orig` の累計が `max_output` を超えた時点で `Error::OutputLimitExceeded` | crate エラー規約 | ✅ | `decode_bounded_enforces_declared_orig`。fuzz harness の `Arj*`/`ArjGarbled` は bounded 経路を使用 |
 | 13 | filename は UTF-8 必須 | crate エラー規約 | ✅ | `read_cstr` |
 | 19a | method 8/9 (ARJ32 no-data pseudo-method) decode と file_type 5 chapter label の受理。method 8 は CRC 非検証、method 9 は空 payload の CRC 検証を行う差異あり | ARJ32 系 de facto | ✅ | `test_arj_method8_9_no_data`, `test_arj_chapter_label` |

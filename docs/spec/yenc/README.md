@@ -33,7 +33,7 @@
 |---|------|----------|------|----------------|
 | 9 | `=ybegin ` (空白必須) で開始。`size=` と `name=` が必須、欠ける場合はバイナリではなく議論文とみなす | draft "(1.2) If the parameters ... are not present then the =ybegin might be part of a text-message" | ✅ | `rejects_missing_keywords` |
 | 10 | `name=` は常に最後のパラメータで行末までが値 | draft "The filename must always be the last item" | ✅ | `get_name` + 全 decode テスト |
-| 11 | `=yend` で終端。`size=` 必須 | draft "Trailer lines must ... contain the size" | ✅ | 全 decode テスト |
+| 11 | `=yend` で終端。`size=` 必須 | draft "Trailer lines must ... contain the size" | ✅ | 全 decode テスト、`truncated_before_yend_rejected` (トレイラー行前の全切断位置でエラー)、`truncated_yend_trailer_boundaries` (`size=` を残す切断は受理、`size=` 欠落時はエラー) |
 | 12 | ブロック外のテキストは無視 | draft "yDecoder implementations must ignore any text outside the header/trailer blocks" | ✅ | `ignores_surrounding_text` |
 | 13 | データ中の `=y` キーワード行は不正 (`y` は valid なエスケープ結果ではない) | draft "'y' is not a valid encoded critical character" | ✅ | `decode` の keyword 検出 → InvalidData |
 | 14 | header `size=`・trailer `size=`・実デコード長の 3 値一致、不一致は破棄 | draft "compare the header size value with both the trailer size value and the actual size" | ✅ | `rejects_size_and_crc_mismatch` |

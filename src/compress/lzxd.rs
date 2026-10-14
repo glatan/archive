@@ -174,6 +174,51 @@ mod tests {
     }
 
     #[test]
+    fn accepts_window_boundaries() {
+        // The legal window range is 2^17..=2^25 inclusive ([MS-PATCH] 2.1.2).
+        let c = encode(b"abc");
+        for window in [1usize << 17, 1 << 18, 1 << 25] {
+            assert_eq!(decode(&c, window, &[], 3).unwrap(), b"abc");
+        }
+    }
+
+    #[test]
+    fn decode_expected_size_strict() {
+        // `decode` stops exactly at expected_size: a smaller size truncates
+        // mid-block, a larger size runs out of input and fails.
+        let c = encode(b"abc");
+        assert_eq!(decode(&c, W17, &[], 1).unwrap(), b"a");
+        assert!(decode(&c, W17, &[], 4).is_err());
+    }
+
+    #[test]
+    fn decode_all_max_output_boundaries() {
+        // decode_all self-terminates via the block size; max_output bounds
+        // the result. Exact limit passes, one below fails.
+        let c = encode(b"abc");
+        assert_eq!(decode_all(&c, W17, &[], 3).unwrap(), b"abc");
+        assert!(decode_all(&c, W17, &[], 2).is_err());
+        assert!(decode_all(&c, W17, &[], 0).is_err());
+    }
+
+    #[test]
+    fn rejects_e8_flag_truncated() {
+        // E8 flag set but the two u16 translation-size words are missing.
+        // Chunk data is one word 0x8000: its first (MSB-first) bit is 1.
+        let stream = [0x02, 0x00, 0x00, 0x80];
+        assert!(decode(&stream, W17, &[], 1).is_err());
+    }
+
+    #[test]
+    fn decode_ignores_trailing_bytes() {
+        // Once expected_size bytes are produced, remaining input is
+        // accepted unverified.
+        let mut c = encode(b"abc");
+        c.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+        assert_eq!(decode(&c, W17, &[], 3).unwrap(), b"abc");
+    }
+
+    #[test]
     fn rejects_truncated() {
         let c = encode(b"hello world");
         for n in [0usize, 1, 2, 5, c.len() - 1] {

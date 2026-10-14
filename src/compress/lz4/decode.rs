@@ -1218,6 +1218,20 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_truncated_at_every_position() {
+        // Every proper prefix of a single frame must fail: a cut lands
+        // inside the descriptor, a block, the EndMark, or the checksum.
+        let data = b"lz4 truncation sweep: pack my box with five dozen liquor jugs";
+        let compressed = crate::compress::lz4::encode::encode(data);
+        for cut in 1..compressed.len() {
+            assert!(
+                decode(&compressed[..cut]).is_err(),
+                "cut={cut} must not decode"
+            );
+        }
+    }
+
+    #[test]
     fn test_decode_bounded_zero_limit() {
         let data = b"hello lz4 bounded test data";
         let compressed = super::super::encode::encode(data);

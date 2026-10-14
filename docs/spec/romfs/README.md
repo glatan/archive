@@ -13,7 +13,7 @@
 |---|------|----------|------|----------------|
 | 1 | magic `-rom1fs-` (offset 0, 8B) 検証 | romfs.rst File System Layout | ✅ | `rejects_bad_magic_and_checksum` |
 | 2 | 全フィールド big-endian 32bit | romfs.rst 「big endian byte order」 | ✅ | 全テスト |
-| 3 | `size` フィールド (offset 8) ≤ 入力長 | romfs.rst full size 項目 | ✅ | `test_romfs_rejects_truncated_image` |
+| 3 | `size` フィールド (offset 8) ≤ 入力長 | romfs.rst full size 項目 | ✅ | `test_romfs_rejects_truncated_image`、`truncated_at_every_position` (全切断位置で拒否) |
 | 4 | スーパーブロック checksum (offset 12): 先頭 min(512, size) バイトの longword 合計が 0 になるよう格納 | romfs.rst checksum 項目 + genromfs/kernel の挙動 | ✅ | `test_romfs_rejects_corrupt_checksum` |
 | 5 | ボリューム名: offset 16 から NUL 終端、16B アライン | romfs.rst volume name 項目 | ✅ | fixture `testvol` |
 

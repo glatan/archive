@@ -307,6 +307,19 @@ mod tests {
     }
 
     #[test]
+    fn rejects_all_truncations() {
+        // Header, forks and their 128-byte padding are all required:
+        // no proper prefix of an encoded document is complete.
+        let doc = encode(&entry());
+        for cut in 0..doc.len() {
+            assert!(
+                decode(&doc[..cut]).is_err(),
+                "cut={cut} unexpectedly decoded"
+            );
+        }
+    }
+
+    #[test]
     fn rejects_high_min_version() {
         let e = entry();
         let mut doc = encode(&e);

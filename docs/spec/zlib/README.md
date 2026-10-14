@@ -12,8 +12,8 @@
 |---|------|----------|-----------|----------------|
 | 1 | `CMF` の `CM=8` (deflate) 検証 | RFC 1950 §2.2 | ✅ | `test_bad_cm`, `test_header_valid` |
 | 2 | `CMF`/`FLG` の `FCHECK` 検証 | RFC 1950 §2.2 | ✅ | `test_bad_fcheck`, `test_header_valid` |
-| 3 | `FDICT=1`: decode は `decode_with_dict()` で対応、`decode()` は reject | RFC 1950 §2.2 | ✅ | `decode()` で `Unsupported` 返却、`decode_with_dict()` でプリセット辞書デコード対応 |
-| 4 | 入力短すぎエラー | RFC 1950 §2.2 / §2.3 | ✅ | `test_too_short` |
+| 3 | `FDICT=1`: decode は `decode_with_dict()` で対応、`decode()` は拒否 | RFC 1950 §2.2 | ✅ | `test_decode_fdict_rejected` (`Unsupported` 返却)、`decode_with_dict()` でプリセット辞書デコード対応 |
+| 4 | 入力短すぎエラー | RFC 1950 §2.2 / §2.3 | ✅ | `test_too_short`、`test_truncated_zlib_header`、`test_truncated_at_every_position` (全切断位置で拒否)、`test_decode_truncated_adler_still_rejected` |
 | 5 | raw DEFLATE payload decode | RFC 1950 §2.2 / RFC 1951 | ✅ | `decode()` で実施、`test_roundtrip`, `test_roundtrip_large` |
 | 6 | Adler-32 trailer 検証 | RFC 1950 §2.2 | ✅ | `test_adler32_mismatch` |
 | 7 | encode: `CMF=0x78` / 32KiB window | RFC 1950 §2.2 | ✅ | `test_header_valid` |
@@ -23,7 +23,7 @@
 | 11 | 大入力 roundtrip | RFC 1950 §2.2 / §2.3 | ✅ | `test_roundtrip_large` |
 | 12 | `FDICT=1`: preset dictionary 対応 | RFC 1950 §2.2 | ✅ | `decode_with_dict()`, `encode_with_dict()`, `test_decode_with_dict_roundtrip`, `test_decode_with_dict_wrong_dict_rejected` |
 | 13 | `FLEVEL` (bits 6-7): 圧縮レベル情報 | RFC 1950 §2.2 | ✅ | `decode_with_info()` で `ZlibInfo.flevel` に公開。`test_decode_with_info_flevel`, `test_decode_with_info_flevel_variants` |
-| 14 | `CINFO` (bits 4-7): window size 0-7 | RFC 1950 §2.2 | ✅ | `cinfo > 7` を reject (`test_cinfo_above_7_rejected`) |
+| 14 | `CINFO` (bits 4-7): window size 0-7 | RFC 1950 §2.2 | ✅ | `cinfo > 7` を拒否 (`test_cinfo_above_7_rejected`)、`cinfo = 0` 受理 (`test_cinfo_minimum_zero_accepted`) |
 
 ### 追加要件
 
@@ -33,7 +33,7 @@
 | 16 | Adler-32 algorithm: (sum1, sum2) mod 65521 | RFC 1950 §8 | ✅ | util::adler32 |
 | 17 | Adler-32 modulus 65521 | RFC 1950 §8 | ✅ | 実装済み |
 | 18 | 全 multi-byte 数値は MSB first (big-endian) で格納 | RFC 1950 §2.1 | ✅ | Adler-32 trailer を big-endian で読み書き |
-| 19 | FDICT=0 を期待するコンテキストで FDICT=1 を reject | RFC 1950 §2.3 | ✅ | decode() は FDICT=1 で Unsupported、decode_with_dict() で対応 |
+| 19 | FDICT=0 を期待するコンテキストで FDICT=1 を拒否 | RFC 1950 §2.3 | ✅ | `test_decode_fdict_rejected`、`test_decode_with_info_fdict_rejected` (decode() / decode_with_info() は FDICT=1 で Unsupported)。逆方向: `test_decode_with_dict_fdict_not_set_rejected` |
 | 20 | ADLER32 以後のデータは zlib ストリームに含まれない (trailing data 許容) | RFC 1950 §2.2 | ✅ | DEFLATE ストリーム終端 (`byte_position()`) からトレーラーの位置を特定し、後続の残余データは無視する (`test_decode_trailing_data_ignored`, `test_decode_with_dict_trailing_data`, `test_decode_truncated_adler_still_rejected`) |
 
 ---

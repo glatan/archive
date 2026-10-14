@@ -11,7 +11,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 1 | signature `D0 CF 11 E0 A1 B1 1A E1` 検証 | [MS-CFB] §2.2 | ✅ | `rejects_bad_signature_and_truncation` |
+| 1 | signature `D0 CF 11 E0 A1 B1 1A E1` 検証 | [MS-CFB] §2.2 | ✅ | `rejects_bad_signature_and_truncation`、`truncated_at_every_position` (全切断位置で拒否) |
 | 2 | Major Version 3 (512B) / 4 (4096B) のみ受理、Byte Order `0xFFFE`、Sector Shift 0x09/0x0C、Mini Sector Shift 0x06 検証 | §2.2 | ✅ | roundtrip + reject 系 |
 | 3 | Mini Stream Cutoff `0x1000` 検証 | §2.2 | ✅ | decode 時 assert |
 | 4 | v3 は Number of Directory Sectors == 0 必須 | §2.2 | ✅ | decode 時 assert |

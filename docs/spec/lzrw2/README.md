@@ -11,8 +11,8 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 1 | 先頭 4 バイトは copy flag。先頭バイトが値を持ち残りは 0 | lzrw2.c: `FLAG_BYTES 4` | ✅ | `decode_copy_flag`、`lzrw2_reference_vector_*` (統合)。decoder は byte0 のみ判定し byte1-3 の非ゼロは参照と同様に受理 |
-| 2 | flag == 1 (FLAG_COPY) の場合、remainder はデータそのまま | lzrw2.c: `FLAG_COPY` | ✅ | `decode_copy_flag` + noise roundtrip、`lzrw2_reference_vector_noise` (統合) |
+| 1 | 先頭 4 バイトは copy flag。先頭バイトが値を持ち残りは 0 | lzrw2.c: `FLAG_BYTES 4` | ✅ | `decode_copy_flag`、`decode_flag_remainder_bytes_ignored` (byte1-3 ≠0 受理)、`lzrw2_reference_vector_*` (統合)。decoder は byte0 のみ判定し byte1-3 の非ゼロは参照と同様に受理 |
+| 2 | flag == 1 (FLAG_COPY) の場合、remainder はデータそのまま | lzrw2.c: `FLAG_COPY` | ✅ | `decode_copy_flag`、`decode_verbatim_empty` (remainder 0B) + noise roundtrip、`lzrw2_reference_vector_noise` (統合) |
 | 3 | flag == 0 (FLAG_COMPRESS) の場合、remainder は 0 個以上のグループ | lzrw2.c: `FLAG_COMPRESS` | ✅ | `lzrw2_reference_vector_fox` 等 (統合) |
 | 4 | 各グループは 2 バイトの control + 最大 16 アイテム。最終グループは 1-16 アイテムでよい | lzrw2.c format 定義 | ✅ | `lzrw2_reference_vector_*` (統合) |
 | 5 | control の bit i が item i に対応 (byte0 = items 0-7、byte1 = items 8-15)。0 = literal、1 = copy | lzrw2.c format 定義 | ✅ | `decode_copy_item`、`decode_literal_group` |

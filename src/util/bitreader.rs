@@ -505,4 +505,72 @@ mod tests {
         reader.consume(8);
         assert!(matches!(reader.read_bits(1), Err(Error::UnexpectedEof)));
     }
+
+    #[test]
+    fn test_read_bytes_served_from_bit_buffer() {
+        // peek_bits buffers bytes without consuming them; read_bytes
+        // must return those buffered bytes and keep the rest readable.
+        let data = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+        let mut reader = BitReader::new(&data);
+        assert_eq!(reader.peek_bits(32).unwrap(), 0x0403_0201);
+        assert_eq!(reader.read_bytes(3).unwrap(), &[0x01, 0x02, 0x03]);
+        for expected in [0x04u32, 0x05, 0x06, 0x07, 0x08] {
+            assert_eq!(reader.read_bits(8).unwrap(), expected);
+        }
+        assert_eq!(reader.remaining_bytes(), 0);
+    }
+
+    #[test]
+    fn test_read_bytes_put_back_past_buffered() {
+        // peek_bits fills the bit buffer (8 bytes on a 10-byte input);
+        // read_bytes(9) exceeds the buffered 8 bytes, so they are put
+        // back and the bytes are re-read from the stream.
+        let data = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A];
+        let mut reader = BitReader::new(&data);
+        reader.peek_bits(8).unwrap();
+        assert_eq!(reader.read_bytes(9).unwrap(), &data[..9]);
+        assert_eq!(reader.byte_position(), 9);
+        assert_eq!(reader.read_bits(8).unwrap(), 0x0Au32);
+    }
+
+    #[test]
+    fn test_peek_bits_at_empty_stream() {
+        let data: [u8; 0] = [];
+        let mut reader = BitReader::new(&data);
+        // peek_bits(0) succeeds even on an empty stream.
+        assert_eq!(reader.peek_bits(0).unwrap(), 0);
+        // A non-empty peek on a fully drained stream errors.
+        assert!(matches!(reader.peek_bits(1), Err(Error::UnexpectedEof)));
+    }
+
+    #[test]
+    fn test_consume_more_than_buffered() {
+        let data = [0xAB];
+        let mut reader = BitReader::new(&data);
+        assert_eq!(reader.peek_bits(8).unwrap(), 0xAB);
+        // Consuming more bits than buffered drains the whole buffer.
+        reader.consume(57);
+        assert!(matches!(reader.read_bits(1), Err(Error::UnexpectedEof)));
+    }
+
+    #[test]
+    fn test_read_bits_past_end() {
+        let data = [0xFF];
+        let mut reader = BitReader::new(&data);
+        // Reading more bits than the stream holds fails during fill.
+        assert!(matches!(reader.read_bits(9), Err(Error::UnexpectedEof)));
+        // The failed read leaves the buffered byte intact.
+        assert_eq!(reader.read_bits(8).unwrap(), 0xFF);
+    }
+
+    #[test]
+    fn test_remaining_data_unaligned() {
+        // remaining_data discards partial bits and returns whole bytes
+        // from the next byte boundary onward.
+        let data = [0xFF, 0xAA, 0xBB];
+        let mut reader = BitReader::new(&data);
+        assert_eq!(reader.read_bits(4).unwrap(), 0xF);
+        assert_eq!(reader.remaining_data(), &[0xAA, 0xBB]);
+        assert_eq!(reader.remaining_bytes(), 0);
+    }
 }

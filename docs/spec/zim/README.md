@@ -57,7 +57,7 @@
 | 18 | encode: cluster compression none (1) / xz (4) / zstd (5) を選択可能。offset table + blob 列を単一 stream で圧縮 | Clusters | ✅ | `xz_and_zstd_roundtrip`, `test_zim_encoder_xz_stored` |
 | 19 | encode: 末尾 16B MD5 archive checksum を実値出力 | Header checksumPos | ✅ | `emits_md5_checksum` |
 | 20 | encode: path pointer list は path ソート順、title pointer list は title (=path) ソートの u32 dirent index 列 | Path/Title Pointer List | ✅ | `stored_roundtrip` (decode が pathPtr 経由で解決) |
-| 21 | archive MD5 checksum 検証 | Header checksumPos | ✅ | `verifies_archive_md5`・`rejects_bad_archive_md5`・`rejects_tampered_content_via_md5` (末尾 digest 存在時のみ検証、欠落は許容)。write は実値出力済み (行 19) |
+| 21 | archive MD5 checksum 検証 | Header checksumPos | ✅ | `verifies_archive_md5`・`rejects_bad_archive_md5`・`rejects_tampered_content_via_md5` (末尾 digest 存在時のみ検証、欠落は許容)、`truncated_prefix_invariant` (任意の切断位置でエラーまたは正当なエントリ接頭辞)。write は実値出力済み (行 19) |
 | 21a | split archive (.zimaa/.zimab...) の decode | Split ZIM archives | ✅ | `decode_parts(&[&[u8]])` が part を連結して decode (分割可能位置は cluster 境界のみだが reader は任意境界でも受理)。`split_parts_roundtrip`, `split_parts_rejects_empty` |
 | 21b | title pointer list 順の entry 列 API | Title Pointer List | ✅ | `decode_title_order` が titlePtrPos の u32 index 列でソート (欠落/不正なら path 順)。`title_order_uses_title_pointer_list`, `title_order_falls_back_on_invalid_list` |
 | 21c | MIME type メタデータと title の公開 | MIME Type List, Directory Entries | ✅ | `ZimEntry::mime_type` (MIME list 参照、redirect は空) / `ZimEntry::title` (空 title は bare path にフォールバック、未終端の切り詰め title は空として扱う許容動作)。`exposes_mime_type_and_title`, `resolves_redirect` |

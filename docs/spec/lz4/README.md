@@ -27,7 +27,7 @@
 | 9 | Content_Size (8バイト LE、オプション) | LZ4 Frame Format: Frame Descriptor / Data Blocks / EndMark | ✅ | エンコーダーで常に出力、デコーダーで検証 |
 | 10 | Header_Checksum (xxhash32 の 2バイト目) | LZ4 Frame Format: Frame Descriptor / Data Blocks / EndMark | ✅ | `test_header_checksum_mismatch` |
 | 11 | ブロックサイズ bit 31 = 非圧縮フラグ | LZ4 Frame Format: Frame Descriptor / Data Blocks / EndMark | ✅ | `test_uncompressed_fallback` |
-| 12 | EndMark (`0x00000000`) | LZ4 Frame Format: Frame Descriptor / Data Blocks / EndMark | ✅ | `test_empty_input` |
+| 12 | EndMark (`0x00000000`) | LZ4 Frame Format: Frame Descriptor / Data Blocks / EndMark | ✅ | `test_empty_input`、`test_decode_truncated_at_every_position` (全切断位置で拒否) |
 | 13 | Content_Checksum (xxhash32、オプション) | LZ4 Frame Format: Frame Descriptor / Data Blocks / EndMark | ✅ | `test_content_checksum_mismatch` |
 | 14 | Block_Checksum (xxhash32、オプション) | LZ4 Frame Format: Frame Descriptor / Data Blocks / EndMark | ✅ | `test_block_checksum_present_for_uncompressed_block`, `test_block_checksum_mismatch` |
 | 15 | 不正バージョンエラー | LZ4 Frame Format: Frame Descriptor / Data Blocks / EndMark | ✅ | `test_rejects_invalid_flg_version` (FLG version != 01 は HC 検証より先に `InvalidData`) |

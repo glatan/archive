@@ -19,7 +19,7 @@
 | 9 | stored stream (n=0、level ≥ 2 のみ): `ecd ::= (elen edata)*`、`elen[4]` + data 列、len=0 で終端 | §2, §4 | ✅ | `hello.upstream-stored` fixture、`stored_mode_roundtrip` |
 | 10 | dd = `PASS=0 | PROG=1 plen pcomp pdata` (pcomp は plen bytes) | §2, §5 | ✅ | PCOMP fixtures (`hello.upstream-pcomp-id`/`inc`) |
 | 11 | 実行されない invalid opcode を含む program は受理される (実行時にのみ error) | §2 | ✅ | `zpaql.rs` `run()` は fetch/実行時にのみ検査 (program の事前スキャンなし) |
-| 12 | 13-byte locator tag + 埋め込み scan (後続 non-ZPAQ data は `"zPQ"` で始まらない) | §7 | ✅ | `find_block` rolling scan、locator 非存在は empty output |
+| 12 | 13-byte locator tag + 埋め込み scan (後続 non-ZPAQ data は `"zPQ"` で始まらない) | §7 | ✅ | `find_block` rolling scan、locator 非存在は empty output、`decode_truncated_at_every_position` (ロケータタグ未満の接頭辞は空出力、それ以降は全切断位置で拒否) |
 
 ## §3 predictor components (predict/update 意味論)
 

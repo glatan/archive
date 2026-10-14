@@ -32,7 +32,7 @@
 | 2 | filename: 13 バイト NUL 埋め。`/`・`\` を含む場合は reject | ARC spec | ✅ | `rejects_bad_name`, `test_arc_rejects_bad_name` |
 | 3 | method 1: `[name][size u32le][date u16][time u16][crc16 u16][data]` — orig-length (bytes 26-29) のみ欠落、ヘッダ 25B | ARC spec (Arcinfo bytes 26-29 注記) | ✅ | `method1_member`, `test_arc_method1_member` |
 | 4 | method 2 以上: `[name][length u32le][date u16][time u16][crc16 u16][size u32le][data]` — bytes 16-19 が stored (compressed) size、bytes 26-29 が original (uncompressed) size | ARC spec (Arcinfo bytes 16-19/26-29) | ✅ | `roundtrip`、Debian `arc` 生成 fixture `fix8.arc`/`fix9.arc` で確認 |
-| 5 | bounds 検査 (truncated header/marker/data → エラー) | crate エラー規約 | ✅ | `test_arc_rejects_truncated` |
+| 5 | bounds 検査 (truncated header/marker/data → エラー) | crate エラー規約 | ✅ | `test_arc_rejects_truncated`、`truncated_prefix_invariant` (任意の切断位置でエラーまたは正当なエントリ接頭辞) |
 | 6 | filename は UTF-8 必須 | crate エラー規約 | ✅ | `rejects_bad_name`, `test_arc_rejects_bad_name` |
 
 ### メソッド / データ

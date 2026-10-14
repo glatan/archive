@@ -25,7 +25,7 @@
 | 11 | Skippable Frame (0x184D2A50-5F) | RFC 8878 §3.1.1 | ✅ | `test_skippable_frame` |
 | 12 | フレーム短すぎエラー | RFC 8878 §3.1.1 | ✅ | `test_zstd_frame_too_short` |
 | 13 | 空入力 | RFC 8878 §3.1.1 | ✅ | `test_empty_input` |
-| 14 | マルチフレーム | RFC 8878 §3.1.1 | ✅ | `test_zstd_multi_frame` |
+| 14 | マルチフレーム | RFC 8878 §3.1.1 | ✅ | `test_zstd_multi_frame`、`test_truncated_at_every_position` (全切断位置で拒否) |
 
 ### ブロック構造
 

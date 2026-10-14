@@ -357,4 +357,24 @@ mod tests {
         assert_eq!(entries[1].name, "b.txt");
         assert_eq!(entries[1].size, Some(1));
     }
+
+    #[test]
+    fn truncated_at_line_boundaries_yields_prefix() {
+        // mtree is line-oriented with no per-line checksum, so a cut
+        // at a line boundary is a valid shorter manifest: decoded
+        // entries must be an exact prefix of the full list.
+        let data = BASIC.as_bytes();
+        let full = decode(data).unwrap();
+        for cut in 0..data.len() {
+            if data[cut] != b'\n' {
+                continue;
+            }
+            let prefix = decode(&data[..=cut]).unwrap();
+            assert!(prefix.len() <= full.len(), "cut={cut}");
+            for (a, b) in full.iter().zip(prefix.iter()) {
+                assert_eq!(a.name, b.name, "cut={cut}");
+                assert_eq!(a.kind, b.kind, "cut={cut}");
+            }
+        }
+    }
 }

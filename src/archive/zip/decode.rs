@@ -2811,4 +2811,18 @@ mod tests {
         assert_eq!(entries[0].name, "disk.txt");
         assert_eq!(entries[0].data, b"payload");
     }
+
+    #[test]
+    fn test_decode_truncated_at_every_position() {
+        // Every proper prefix of a valid archive must fail: the EOCD
+        // record sits at the end, so no truncated input can locate a
+        // complete central directory.
+        let archive = build_test_zip("t.txt", b"truncation sweep payload", 8, false, false, false);
+        for cut in 1..archive.len() {
+            assert!(
+                decode(&archive[..cut]).is_err(),
+                "cut={cut} must not decode"
+            );
+        }
+    }
 }

@@ -1778,4 +1778,18 @@ mod tests {
         let stream = bits_to_bytes(&bits);
         assert_eq!(decode(&stream).unwrap(), b"timetime");
     }
+
+    #[test]
+    fn test_decode_truncated_at_every_position() {
+        // Every proper prefix of a valid stream must fail: a cut lands
+        // inside a metablock header, payload, or the final padding.
+        let data = b"brotli truncation sweep: the quick brown fox jumps over the lazy dog";
+        let compressed = crate::compress::brotli::encode::encode(data);
+        for cut in 1..compressed.len() {
+            assert!(
+                decode(&compressed[..cut]).is_err(),
+                "cut={cut} must not decode"
+            );
+        }
+    }
 }

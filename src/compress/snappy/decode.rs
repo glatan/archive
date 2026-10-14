@@ -412,4 +412,43 @@ mod tests {
         let input = [0x80, 0x80, 0x80, 0x80, 0x10]; // varint 2^32
         assert!(matches!(decode_raw(&input), Err(Error::InvalidData(_))));
     }
+
+    #[test]
+    fn test_decode_raw_literal_length_extension_boundaries() {
+        // format_description.txt: literal length codes 60-63 store
+        // (len-1) in 1/2/3/4 extra bytes. Exercise the 1- and 2-byte
+        // boundaries: len=60 via 1-byte extension, len=300 via 2-byte.
+        let mut raw = vec![60]; // varint preamble: 60
+        raw.push(60 << 2); // literal tag, len code 60 -> 1 extra byte
+        raw.push(59); // len - 1 = 59 -> len 60
+        raw.extend_from_slice(&[b'a'; 60]);
+        assert_eq!(decode_raw(&raw).unwrap(), vec![b'a'; 60]);
+
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&[0xAC, 0x02]); // varint 300
+        raw.push(61 << 2); // literal tag, len code 61 -> 2 extra bytes
+        raw.extend_from_slice(&299u16.to_le_bytes()); // len - 1 = 299
+        raw.extend_from_slice(&[b'b'; 300]);
+        assert_eq!(decode_raw(&raw).unwrap(), vec![b'b'; 300]);
+    }
+
+    #[test]
+    fn test_decode_framed_truncated_at_every_position() {
+        // A stream containing only the 10-byte stream identifier is a
+        // valid empty frame; every other proper prefix must fail —
+        // chunk headers require 4 bytes and payloads must be complete.
+        let data = b"snappy truncation sweep: five quacking zephyrs jolt my wax bed";
+        let compressed = crate::compress::snappy::encode::encode(data);
+        assert_eq!(&compressed[..10], b"\xff\x06\x00\x00sNaPpY");
+        for cut in 1..compressed.len() {
+            if cut == 10 {
+                assert!(decode(&compressed[..cut]).unwrap().is_empty());
+            } else {
+                assert!(
+                    decode(&compressed[..cut]).is_err(),
+                    "cut={cut} must not decode"
+                );
+            }
+        }
+    }
 }

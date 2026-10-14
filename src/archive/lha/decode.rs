@@ -1324,4 +1324,30 @@ mod tests {
         let e = decode_bounded(&a, 22).unwrap();
         assert_eq!(e.len(), 2);
     }
+
+    #[test]
+    fn truncated_prefix_invariant() {
+        // EOF is a legal archive end (terminator 0x00 optional),
+        // so cuts after a complete member yield a valid partial
+        // archive. Invariant: decode(prefix) is Err or a prefix of
+        // the full entry list.
+        let a = crate::archive::lha::encode::encode(&[
+            ("one.txt", b"first entry data"),
+            ("two.bin", &[1, 2, 3, 4, 5, 6]),
+        ])
+        .unwrap();
+        let full = decode(&a).unwrap();
+        for cut in 0..a.len() {
+            if let Ok(prefix) = decode(&a[..cut]) {
+                assert!(
+                    prefix.len() <= full.len()
+                        && full
+                            .iter()
+                            .zip(prefix.iter())
+                            .all(|(x, y)| x.name == y.name && x.data == y.data),
+                    "cut={cut}: entries must be a prefix of the full list"
+                );
+            }
+        }
+    }
 }

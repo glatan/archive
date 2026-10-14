@@ -641,4 +641,18 @@ mod tests {
         f2[20] ^= 0xFF; // breaks superblock checksum
         assert!(decode(&f2).is_err());
     }
+
+    #[test]
+    fn truncated_at_every_position() {
+        // The superblock `size` field must be ≤ the input length, so
+        // every proper prefix of a valid image fails.
+        let f = build(&[
+            ("a.txt", false, Some(b"romfs truncation sweep")),
+            ("dir", true, None),
+            ("dir/b.bin", false, Some(&[1u8, 2, 3])),
+        ]);
+        for cut in 1..f.len() {
+            assert!(decode(&f[..cut]).is_err(), "cut={cut} must not decode");
+        }
+    }
 }
