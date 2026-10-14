@@ -81,7 +81,7 @@
 |---|------|----------|-----------|----------------|
 | 29 | system `brotli` 生成ストリームのデコード (quality 0-11, text/binary/high-entropy) | RFC 7932 interop | ✅ | `test_brotli_decode_system_q0_uncompressed`, `test_brotli_decode_system_q3_compressed_run`, `test_brotli_decode_system_q5_repeated_pattern`, `test_brotli_decode_system_binary_payload`, `test_brotli_decode_system_quality_levels` (q0-11 全品質), `test_brotli_decode_system_signed_context_mode_regression`, `test_brotli_decode_system_utf8_context_table_regression` |
 | 30 | crate encode → system `brotli -d` 展開互換 | RFC 7932 interop | ✅ | `test_brotli_encode_system_decode`, `test_brotli_encode_empty_system_decode`, `test_brotli_encode_repeated_pattern_system_decode`, `test_brotli_encode_low_cardinality_system_decode`, `test_brotli_encode_lz77_system_decode` |
-| 31 | Truncated stream reject | RFC 7932 malformed | ✅ | `test_brotli_decode_rejects_truncated_stream` |
+| 31 | 途中切断ストリームの拒否 | RFC 7932 malformed | ✅ | `test_brotli_decode_rejects_truncated_stream`、`test_decode_truncated_at_every_position` (全切断位置で拒否) |
 
 ### エンコーダー拡張 (LZ77 + context modeling)
 

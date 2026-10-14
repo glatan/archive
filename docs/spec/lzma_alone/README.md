@@ -11,9 +11,9 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 1 | ヘッダーサイズ 13 バイト | lzma-file-format.txt: "The .lzma File Format" | ✅ | `test_encode_header_format` |
-| 2 | properties byte (offset 0): `(pb*5+lp)*9+lc`、0..=224 | lzma-file-format.txt §1.1.1 (properties byte) | ✅ | `test_decode_rejects_invalid_props_byte` |
+| 2 | properties byte (offset 0): `(pb*5+lp)*9+lc`、0..=224 | lzma-file-format.txt §1.1.1 (properties byte) | ✅ | `test_decode_rejects_invalid_props_byte` (225 拒否)、`test_decode_rejects_props_byte_224_unsupported_combo` (224 は lc+lp>4 で #17 拒否) |
 | 3 | 辞書サイズ (offset 1-4, uint32 LE) | lzma-file-format.txt §1.1.2 | ✅ | `test_encode_header_format` |
-| 4 | 辞書サイズ 0 の拒否 | lzma-file-format.txt §1.1.2 は「任意の 32bit 値」のみ規定 — 0 の拒否は XZ Utils 準拠の実装選択 (SDK 手続きは <4096 を 4096 に clamp するが本実装は 0 を reject、1..4095 は受理したうえで距離検査が実質制限する) | ✅ | `test_decode_rejects_zero_dict_size`, `test_encode_rejects_zero_dict_size` |
+| 4 | 辞書サイズ 0 の拒否 | lzma-file-format.txt §1.1.2 は「任意の 32bit 値」のみ規定 — 0 の拒否は XZ Utils 準拠の実装選択 (SDK 手続きは <4096 を 4096 に clamp するが本実装は 0 を reject、1..4095 は受理したうえで距離検査が実質制限する) | ✅ | `test_decode_rejects_zero_dict_size`、`test_encode_rejects_zero_dict_size`、`test_decode_accepts_minimum_dict_size` (dict=1 受理) |
 | 5 | 非圧縮サイズ (offset 5-12, uint64 LE) | lzma-file-format.txt §1.1.3 | ✅ | `test_encode_header_format` |
 | 6 | 非圧縮サイズ `0xFFFF_FFFF_FFFF_FFFF` = サイズ不明 | lzma-file-format.txt §1.1.3 | ✅ | `test_decode_unknown_size`, `test_lzma_alone_decode_system_compressed` (統合) |
 
@@ -37,7 +37,7 @@
 | 15 | ストリーム終端後の trailing data 拒否 (サイズ不明) | 同上 | ✅ | `test_decode_rejects_trailing_data_unknown_size` (slack ≤5B 許容、#14 と同一方針) |
 | 16 | ヘッダー宣言サイズと実デコードサイズの不一致拒否 | lzma-file-format.txt | ✅ | `test_decode_rejects_size_mismatch` |
 | 17 | `lc+lp > 4` の properties 拒否 (共有 LZMA コアと XZ Utils 同等の制限) | lzma-file-format.txt: properties | ✅ | `test_decode_rejects_unsupported_props_combo`。形式上有効な値だがサポート外として `InvalidData` |
-| 18 | `decode_bounded` は出力上限を `Error::OutputLimitExceeded` で強制 (既知・未知サイズの双方) | crate contract | ✅ | `decode_bounded` 実装・共通 bounded-decode 規約。完全 decode 後にサイズ判定する post-hoc 方式のためピークメモリは無制限 (`decode_bounded_exceeds_limit` 等) |
+| 18 | `decode_bounded` は出力上限を `Error::OutputLimitExceeded` で強制 (既知・未知サイズの双方) | crate contract | ✅ | `decode_bounded` 実装・共通 bounded-decode 規約。完全 decode 後にサイズ判定する post-hoc 方式のためピークメモリは無制限 (`test_decode_bounded_exceeds_limit`、`test_decode_bounded_within_limit`、`test_decode_bounded_zero_limit`) |
 
 ### エンコード
 

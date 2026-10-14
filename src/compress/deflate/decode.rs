@@ -1641,4 +1641,172 @@ mod tests {
             crate::error::Error::OutputLimitExceeded { .. }
         ));
     }
+
+    #[test]
+    fn test_dynamic_huffman_repeat16_spans_lit_dist_boundary() {
+        // RFC 1951 §3.2.7: code length repeat codes operate on the single
+        // HLIT+HDIST sequence, so a repeat may continue across the
+        // literal/length → distance boundary.
+        //
+        // HLIT=257, HDIST=2 → total 259 lengths. A repeat-16 starting at
+        // index 256 writes the last lit/len entry (symbol 256 = EOB) AND
+        // both distance entries in one repeat.
+        let mut w = TestBitWriter::new();
+        w.write_bits(1, 1); // BFINAL = 1
+        w.write_bits(0b10, 2); // BTYPE = 10 (dynamic Huffman)
+        w.write_bits(0, 5); // HLIT = 0 → 257 lit/len codes
+        w.write_bits(1, 5); // HDIST = 1 → 2 distance codes
+        w.write_bits(14, 4); // HCLEN = 14 → 18 code length codes
+
+        // CL code lengths (CODE_LENGTH_ORDER): CL1=2, CL2=2, CL16=3,
+        // CL17=3, CL18=3 → canonical codes CL1=00, CL2=01, CL16=100,
+        // CL17=101, CL18=110.
+        let cl_code_lengths: [u8; 18] = [3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2];
+        for &len in &cl_code_lengths {
+            w.write_bits(len as u32, 3);
+        }
+
+        // Lit/len + dist lengths (259 entries):
+        //   i=0..64    : 65 zeros    → CL18 extra 54
+        w.write_huffman(0b110, 3);
+        w.write_bits(54, 7);
+        //   i=65       : len 1 ('A') → CL1
+        w.write_huffman(0b00, 2);
+        //   i=66..254  : 189 zeros   → CL18(138) extra 127 + CL18(51) extra 40
+        w.write_huffman(0b110, 3);
+        w.write_bits(127, 7);
+        w.write_huffman(0b110, 3);
+        w.write_bits(40, 7);
+        //   i=255      : len 2       → CL2 (prev value for the repeat)
+        w.write_huffman(0b01, 2);
+        //   i=256..258 : repeat-16 prev(2) ×3 → spans into dist lengths
+        //   lit[256]=2 (EOB), dist[0]=2, dist[1]=2
+        w.write_huffman(0b100, 3);
+        w.write_bits(0, 2); // extra: 3 - 3 = 0
+
+        // Block data: 'A' (lit code 0) then EOB (lit code 11).
+        // Canonical lit codes: len1: sym65→'0'; len2: sym255→'10', sym256→'11'.
+        w.write_huffman(0b0, 1);
+        w.write_huffman(0b11, 2);
+
+        let result = decode(&w.finish()).unwrap();
+        assert_eq!(result, b"A");
+    }
+
+    #[test]
+    fn test_dynamic_huffman_hlit_max_286_accepted() {
+        // HLIT field = 29 → 286 lit/len codes, the maximum legal value.
+        // (287 is rejected by test_hlit_exceeds_max.)
+        let mut w = TestBitWriter::new();
+        w.write_bits(1, 1); // BFINAL = 1
+        w.write_bits(0b10, 2); // BTYPE = 10
+        w.write_bits(29, 5); // HLIT = 29 → 286 lit/len codes
+        w.write_bits(0, 5); // HDIST = 0 → 1 distance code
+        w.write_bits(14, 4); // HCLEN = 14 → 18 code length codes
+
+        let cl_code_lengths: [u8; 18] = [3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2];
+        for &len in &cl_code_lengths {
+            w.write_bits(len as u32, 3);
+        }
+
+        // 287 entries: lit[65]=1, lit[256]=2, dist[0]=0 (empty dist tree).
+        //   i=0..64    : 65 zeros  → CL18 extra 54
+        w.write_huffman(0b110, 3);
+        w.write_bits(54, 7);
+        //   i=65       : len 1
+        w.write_huffman(0b00, 2);
+        //   i=66..255  : 190 zeros → CL18(138) extra 127 + CL18(52) extra 41
+        w.write_huffman(0b110, 3);
+        w.write_bits(127, 7);
+        w.write_huffman(0b110, 3);
+        w.write_bits(41, 7);
+        //   i=256      : len 2 (EOB)
+        w.write_huffman(0b01, 2);
+        //   i=257..286 : 30 zeros → CL18 extra 19 (covers the dist entry too)
+        w.write_huffman(0b110, 3);
+        w.write_bits(19, 7);
+
+        // 'A' then EOB. Canonical lit codes: sym65→'0', sym256→'10'.
+        w.write_huffman(0b0, 1);
+        w.write_huffman(0b10, 2);
+
+        let result = decode(&w.finish()).unwrap();
+        assert_eq!(result, b"A");
+    }
+
+    #[test]
+    fn test_fixed_then_stored_block_alignment() {
+        // A stored block following a Huffman block must be re-aligned to
+        // a byte boundary: the Huffman block ends mid-byte, and the stored
+        // block's LEN/NLEN start at the next boundary.
+        let mut w = TestBitWriter::new();
+        // Block 1: BFINAL=0, fixed Huffman, emits 'H' then EOB (18 bits
+        // total → ends 2 bits into the last byte).
+        w.write_bits(0, 1); // BFINAL = 0
+        w.write_bits(0b01, 2); // BTYPE = 01
+        w.write_huffman(0b0111_1000, 8); // literal 'H' (0x30 + 72)
+        w.write_huffman(0b000_0000, 7); // EOB
+
+        // Block 2: BFINAL=1, stored. Block headers are bit-contiguous —
+        // only the LEN/NLEN fields must start byte-aligned.
+        w.write_bits(1, 1); // BFINAL = 1
+        w.write_bits(0b00, 2); // BTYPE = 00
+        w.write_bits(0, 3); // pad: LEN must start byte-aligned
+        w.write_bits(6, 16); // LEN = 6
+        w.write_bits(0xFFF9, 16); // NLEN = !6
+        for &b in b" World" {
+            w.write_bits(b as u32, 8);
+        }
+
+        let result = decode(&w.finish()).unwrap();
+        assert_eq!(result, b"H World");
+    }
+
+    #[test]
+    fn test_stored_block_zero_len() {
+        // LEN=0 stored block is legal and produces no output.
+        let mut data = Vec::new();
+        data.push(0b0000_0001); // BFINAL=1, BTYPE=00
+        data.extend_from_slice(&0u16.to_le_bytes()); // LEN = 0
+        data.extend_from_slice(&(!0u16).to_le_bytes()); // NLEN = 0xFFFF
+        assert_eq!(decode(&data).unwrap(), b"");
+    }
+
+    #[test]
+    fn test_truncated_at_every_position() {
+        // Every truncation point inside the actual DEFLATE stream must
+        // fail cleanly without panicking. (Bytes after the final block
+        // are trailing garbage and may be ignored.)
+        let data = b"truncation boundary check data";
+        for level in [
+            super::super::encode::Level::NoCompression,
+            super::super::encode::Level::Default,
+        ] {
+            let encoded = super::super::encode::encode(data, level);
+            // Measure the real stream length via byte_position().
+            let stream_len = {
+                let mut reader = BitReader::new(&encoded);
+                let mut out = Vec::new();
+                decode_stream(&mut reader, &mut out).unwrap();
+                reader.byte_position()
+            };
+            for cut in 0..stream_len {
+                // Truncated input must either fail or — via the lenient
+                // zero-padded final peek — decode to the identical data.
+                // Silent corruption to different output is never OK.
+                if let Ok(out) = decode(&encoded[..cut]) {
+                    assert_eq!(out, data, "cut={cut} decoded to wrong output");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_trailing_garbage_after_final_block_ignored() {
+        // Lenient behavior: bytes after the BFINAL block are ignored
+        // (container formats append checksums/trailers).
+        let mut encoded = super::super::encode::encode(b"data", super::super::encode::Level::Fast);
+        encoded.extend_from_slice(&[0xAA, 0xBB, 0xCC]);
+        assert_eq!(decode(&encoded).unwrap(), b"data");
+    }
 }

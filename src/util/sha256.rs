@@ -289,4 +289,48 @@ mod tests {
         hasher.update(b"56789");
         assert_eq!(hasher.finish(), sha256(b"123456789"));
     }
+
+    #[test]
+    fn test_sha256_two_block() {
+        // FIPS 180-4 example: the 56-byte message leaves no room for
+        // the length field in its own block, so padding requires a
+        // second block.
+        let msg = b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+        assert_eq!(msg.len(), 56);
+        assert_eq!(
+            sha256(msg),
+            [
+                0x24, 0x8D, 0x6A, 0x61, 0xD2, 0x06, 0x38, 0xB8, 0xE5, 0xC0, 0x26, 0x93, 0x0C, 0x3E,
+                0x60, 0x39, 0xA3, 0x3C, 0xE4, 0x59, 0x64, 0xFF, 0x21, 0x67, 0xF6, 0xEC, 0xED, 0xD4,
+                0x19, 0xDB, 0x06, 0xC1,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_sha256_million_a() {
+        // FIPS 180-4 example: one million 'a' characters.
+        let data = alloc::vec![b'a'; 1_000_000];
+        assert_eq!(
+            sha256(&data),
+            [
+                0xCD, 0xC7, 0x6E, 0x5C, 0x99, 0x14, 0xFB, 0x92, 0x81, 0xA1, 0xC7, 0xE2, 0x84, 0xD7,
+                0x3E, 0x67, 0xF1, 0x80, 0x9A, 0x48, 0xA4, 0x97, 0x20, 0x0E, 0x04, 0x6D, 0x39, 0xCC,
+                0xC7, 0x11, 0x2C, 0xD0,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_sha256_padding_boundary() {
+        // Exercise both padding paths around the 55/56-byte boundary:
+        // each length must still produce a stable, distinct digest.
+        let mut prev = [0u8; 32];
+        for len in [0usize, 55, 56, 57, 63, 64] {
+            let data = alloc::vec![0x61u8; len];
+            let digest = sha256(&data);
+            assert_ne!(digest, prev, "len {len}");
+            prev = digest;
+        }
+    }
 }

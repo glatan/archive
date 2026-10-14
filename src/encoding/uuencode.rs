@@ -389,4 +389,25 @@ mod tests {
         let cut = &doc[..doc.len() - 4]; // drop "end\n"
         assert!(matches!(decode(cut), Err(Error::UnexpectedEof)));
     }
+
+    #[test]
+    fn rejects_all_truncations() {
+        // The `end` terminator is mandatory, so every proper prefix
+        // fails — except the cut that only drops the final newline,
+        // which still leaves a complete `end` line.
+        let doc = encode("f", 0o644, b"hello uuencoded world");
+        let full = decode(&doc).unwrap();
+        for cut in 0..doc.len() {
+            if cut == doc.len() - 1 {
+                // last line "end" without its trailing newline
+                let e = decode(&doc[..cut]).unwrap();
+                assert_eq!(e.data, full.data);
+            } else {
+                assert!(
+                    decode(&doc[..cut]).is_err(),
+                    "cut={cut} unexpectedly decoded"
+                );
+            }
+        }
+    }
 }

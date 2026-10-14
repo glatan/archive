@@ -7,7 +7,7 @@
 | 1 | レコードは PK signature で識別 | §4.1.1, §4.2.1 | ✅ | 全 signature 定数で検証 |
 | 2 | データ整合性に CRC-32 を使用 | §4.1.5 | ✅ | `test_zip_decode_detects_checksum_mismatch` |
 | 3 | 全値は little-endian | §4.3.3 | ✅ | 全 read/write で LE |
-| 4 | EOCD が必ず 1 つ存在 | §4.3.1 | ✅ | `find_eocd()` |
+| 4 | EOCD が必ず 1 つ存在 | §4.3.1 | ✅ | `find_eocd()`、`test_decode_truncated_at_every_position` (全切断位置で拒否) |
 | 5 | 各ファイルに Local Header + 対応 CD Header | §4.3.2 | ✅ | Local/CD 整合性検証 |
 | 6 | Local Header / EOCD に圧縮適用不可 | §4.3.4 | ✅ | 構造的に圧縮なし |
 

@@ -36,7 +36,7 @@
 | 8 | `WARC-Record-ID` 必須 | §WARC-Record-ID | ✅ | `rejects_missing_mandatory_field` |
 | 9 | `WARC-Date` 必須 (W3C ISO 8601 プロファイル文字列として保持) | §WARC-Date | ✅ | `rejects_missing_mandatory_field` |
 | 10 | `Content-Length` 必須・非負整数。block はその octet 数 | §Content-Length | ✅ | `rejects_missing_mandatory_field` |
-| 11 | block が入力末尾を超える場合は reject | §record structure | ✅ | `rejects_truncated_block` |
+| 11 | ブロックが入力末尾を超える場合は拒否 | §record structure | ✅ | `rejects_truncated_block`、`truncated_prefix_invariant` (任意の切断位置でエラーまたは正当なレコード接頭辞) |
 | 12 | `WARC-Target-URI` / `Content-Type` は任意フィールドとして保持 | §named fields | ✅ | `parses_single_record` |
 
 ### ストリーム構造

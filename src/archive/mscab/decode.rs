@@ -860,10 +860,17 @@ mod tests {
 
     #[test]
     fn rejects_spanned_file() {
-        let mut b = CabBuilder::new();
-        b.folders.push((COMPRESS_NONE, vec![b"ab".to_vec()]));
-        b.files.push((1, 0, 0xfffe, "f".into()));
-        assert!(matches!(decode(&b.build()), Err(Error::Unsupported(_))));
+        // MS-CAB §2.3: iFolder 0xFFFD/0xFFFE/0xFFFF are cabinet-spanning
+        // markers; all three are Unsupported for single-cabinet decode.
+        for ifolder in [0xfffdusize, 0xfffe, 0xffff] {
+            let mut b = CabBuilder::new();
+            b.folders.push((COMPRESS_NONE, vec![b"ab".to_vec()]));
+            b.files.push((1, 0, ifolder, "f".into()));
+            assert!(
+                matches!(decode(&b.build()), Err(Error::Unsupported(_))),
+                "iFolder={ifolder:#06x} must be rejected"
+            );
+        }
     }
 
     #[test]

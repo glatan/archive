@@ -412,4 +412,34 @@ mod tests {
         let data = [0x00, 0, 0];
         assert!(RangeDecoder::new(&data).is_err());
     }
+
+    #[test]
+    fn test_decoder_direct_bits_stream_exhaustion() {
+        // Minimal 5-byte header stream with code = 0: the decoder can
+        // serve 8 direct bits before needing a normalization byte that
+        // does not exist.
+        let data = [0x00, 0x00, 0x00, 0x00, 0x00];
+        let mut dec = RangeDecoder::new(&data).unwrap();
+        assert_eq!(dec.decode_direct_bits(8).unwrap(), 0);
+
+        let mut dec = RangeDecoder::new(&data).unwrap();
+        assert!(matches!(
+            dec.decode_direct_bits(9),
+            Err(Error::UnexpectedEof)
+        ));
+    }
+
+    #[test]
+    fn test_decoder_position_and_finished() {
+        let data = [0x00, 0x00, 0x00, 0x00, 0x00, 0xAA];
+        let dec = RangeDecoder::new(&data).unwrap();
+        // The 5-byte header is consumed by new().
+        assert_eq!(dec.position(), 5);
+        // code == 0 means the stream is finished.
+        assert!(dec.is_finished());
+
+        let data2 = [0x00, 0x00, 0x00, 0x00, 0x01];
+        let dec2 = RangeDecoder::new(&data2).unwrap();
+        assert!(!dec2.is_finished());
+    }
 }

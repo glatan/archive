@@ -21,7 +21,7 @@
 | 7 | literal token (`head=0`, `len:u16LE`) と literal stream 消費 | upstream `rzip.samba.org` token stream | ✅ | `test_decode_roundtrip_chunk_streams`, `test_roundtrip_empty` |
 | 8 | match token (`head!=0`, `offset:u32LE`, `len:u16LE`) と offset 検証 | upstream `rzip.samba.org` token stream | ✅ | `test_decode_roundtrip_chunk_streams`, `test_rzip_match_offset_zero_rejected`, `test_rzip_roundtrip_level_matrix` |
 | 9 | chunk terminator (`head=0,len=0` + CRC32) と CRC 検証 | upstream `rzip.samba.org` token stream | ✅ | `test_decode_roundtrip_chunk_streams`, `test_decode_public_container`, `test_chunk_crc_mismatch_rejected` |
-| 10 | trailing data reject | upstream `rzip.samba.org` `.rz` container | ✅ | `test_trailing_garbage_rejected` |
+| 10 | 末尾残余データの拒否 | upstream `rzip.samba.org` `.rz` container | ✅ | `test_trailing_garbage_rejected`、`test_decode_truncated_at_every_position` (全切断位置で拒否) |
 | 11 | encode → decode roundtrip (empty / binary / level matrix) | crate-local bounded contract for upstream `.rz` emission | ✅ | `test_roundtrip_public_container`, `test_roundtrip_empty`, `test_rzip_roundtrip_binary_payload`, `test_rzip_roundtrip_level_matrix` |
 | 12 | system `rzip` 生成 archive の decode | upstream `rzip` interoperability | ✅ | `test_rzip_decode_system_archive` (統合) |
 | 13 | crate 出力の system `rzip -d` 相互運用 (level 0/6/9、raw/bzip2 backend stream) | upstream `rzip` interoperability | ✅ | `test_rzip_encode_system_decode_compat`, `test_rzip_encode_system_decode_binary_payload`, `test_rzip_encode_system_decode_multichunk_payload`, `test_rzip_encode_system_decode_level_edges`, `test_rzip_encode_system_decode_backend_matrix` (system decode は NONE/BZIP2 のみ — upstream rzip 2.1 は ctype 1/2 をサポートしないため gzip/lzo は crate roundtrip のみ検証) |

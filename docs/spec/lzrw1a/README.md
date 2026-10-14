@@ -11,13 +11,13 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 1 | 先頭 4 バイトは copy flag。先頭バイトが値を持ち残りは 0 | lzrw1-a.c: `FLAG_BYTES 4` | ✅ | `decode_copy_flag`、`lzrw1a_reference_vector_verbatim` (統合)。decoder は byte0 のみ判定し byte1-3 の非ゼロは参照と同様に受理 |
-| 2 | flag == 1 (FLAG_COPY) の場合、remainder はデータそのまま | lzrw1-a.c: `FLAG_COPY` | ✅ | `decode_copy_flag` + noise roundtrip |
+| 1 | 先頭 4 バイトは copy flag。先頭バイトが値を持ち残りは 0 | lzrw1-a.c: `FLAG_BYTES 4` | ✅ | `decode_copy_flag`、`decode_flag_remainder_bytes_ignored` (byte1-3 ≠0 受理)、`lzrw1a_reference_vector_verbatim` (統合)。decoder は byte0 のみ判定し byte1-3 の非ゼロは参照と同様に受理 |
+| 2 | flag == 1 (FLAG_COPY) の場合、remainder はデータそのまま | lzrw1-a.c: `FLAG_COPY` | ✅ | `decode_copy_flag`、`decode_verbatim_empty` (remainder 0B) + noise roundtrip |
 | 3 | flag == 0 (FLAG_COMPRESS) の場合、remainder は 0 個以上のグループ | lzrw1-a.c: `FLAG_COMPRESS` | ✅ | `lzrw1a_reference_vector_compressed` (統合) |
 | 4 | 各グループは 2 バイトの control + 最大 16 アイテム。最終グループは 1-16 アイテムでよい | lzrw1-a.c format 定義 | ✅ | `lzrw1a_reference_vector_compressed` (統合) |
 | 5 | control の bit i が item i に対応 (byte0 = items 0-7、byte1 = items 8-15、各 byte 内は bit0 が先頭アイテム)。0 = literal、1 = copy | lzrw1-a.c format 定義 | ✅ | `decode_control_bit_order` |
 | 6 | literal item は 1 バイト | lzrw1-a.c | ✅ | `decode_literal_group` |
-| 7 | copy item は 2 バイト C1 C2。len = `C1 & 0x0f` + 3 (3-18) | lzrw1-a.c: `C1[0..3]+3` | ✅ | `decode_copy_item` |
+| 7 | copy item は 2 バイト C1 C2。len = `C1 & 0x0f` + 3 (3-18) | lzrw1-a.c: `C1[0..3]+3` | ✅ | `decode_copy_item`、`decode_max_len_copy` (len=18) |
 | 8 | offset = `(C1 >> 4) * 256 + C2` (1-4095、0 は不使用)。POS-offset からのコピー | lzrw1-a.c: `C1[4..7]*256+C2` | ✅ | `lzrw1a_reference_vector_max_offset` (統合、offset 4095 / len 18 を含む) |
 | 9 | copy の重複コピー (len > offset) を許容 | lzrw1-a.c / LZ77 規約 | ✅ | `roundtrip_various` (`[0u8; 2000]`) |
 | 10 | 空入力は空出力に対応 | crate contract | ✅ | `empty_input` |

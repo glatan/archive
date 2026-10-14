@@ -1273,4 +1273,18 @@ mod tests {
         assert_eq!(get_stream(&f, "A").unwrap().unwrap().data, b"AAA");
         assert!(get_stream(&f, "B").unwrap().is_none());
     }
+
+    #[test]
+    fn truncated_at_every_position() {
+        // The header declares the FAT/directory layout up front, so no
+        // truncated input can satisfy the sector references.
+        let mut enc = crate::archive::mscfb::encode::CfbEncoder::new();
+        enc.add_stream("a.txt", b"mscfb truncation sweep payload");
+        enc.add_storage("dir");
+        enc.add_stream("dir/b.bin", &[9u8, 8, 7, 6, 5]);
+        let image = enc.finish().unwrap();
+        for cut in 1..image.len() {
+            assert!(decode(&image[..cut]).is_err(), "cut={cut} must not decode");
+        }
+    }
 }

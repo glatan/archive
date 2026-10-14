@@ -1331,4 +1331,18 @@ mod tests {
         let decoded = decode_bounded(&compressed, 0).unwrap();
         assert!(decoded.is_empty());
     }
+
+    #[test]
+    fn test_decode_truncated_at_every_position() {
+        // Every proper prefix of a single-member lzop stream must fail:
+        // a cut lands inside the header, a block, or the EOS marker.
+        let data = b"lzo truncation sweep: how vexingly quick daft zebras jump";
+        let compressed = super::super::encode::encode(data);
+        for cut in 1..compressed.len() {
+            assert!(
+                decode(&compressed[..cut]).is_err(),
+                "cut={cut} must not decode"
+            );
+        }
+    }
 }

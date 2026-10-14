@@ -9,7 +9,7 @@
 | 69 | Method 2-5: Reduced (factor 1-4) | §4.4.5, §5.2 | ✅ | decode + encode: `expand::{expand, reduce}`、`ZipCompression::Reduce(factor)` |
 | 70 | Method 6: Imploded | §4.4.5, §5.3 | ✅ | decode + encode: `implode::{implode, implode_encode}`、`ZipCompression::Implode` |
 | 71 | Method 8: Deflated | §4.4.5, §5.5 | ✅ | `test_decode_deflate_single_file` |
-| 72 | Method 9: Enhanced Deflating (Deflate64) | §4.4.5, §5.6 (+ Info-ZIP deflate64 de facto 挙動。距離コード 30/31・長さコード 285 の拡張ビット詳細は APPNOTE 未記載) | ✅ | decode + encode: `deflate64::{decode, encode}`、`ZipCompression::Deflate64` |
+| 72 | Method 9: Enhanced Deflating (Deflate64) | §4.4.5, §5.6 (+ Info-ZIP deflate64 de facto 挙動。距離コード 30/31・長さコード 285 の拡張ビット詳細は APPNOTE 未記載) | ✅ | decode + encode: `deflate64::{decode, encode}`、`ZipCompression::Deflate64`。境界: `test_deflate64_max_distance_65536`、`test_deflate64_max_match_length_65538`、`test_deflate64_distance_30_exceeds_output` |
 | 73 | Method 10: PKWARE DCL Implode | §4.4.5, §5.13 (空見出し) + blast.c de facto | ✅ | decode + literal-only encode 対応 (`dcl_implode::dcl_implode_decode`/`dcl_implode_encode`、固定木・lit=0 raw literal + EOS emit。外部 encoder 未参照)。`test_dcl_implode_literal_only`, `test_dcl_implode_back_reference`, `test_dcl_implode_roundtrip_with_known_vector`, `test_dcl_implode_encode_roundtrip`, `test_dcl_implode_encode_random_roundtrip`, `test_zip_method10_encode_roundtrip` |
 | 74 | Method 12: BZIP2 | §4.4.5, §5.7 | ✅ | decode + encode: `ZipCompression::Bzip2` (`bzip2` feature) |
 | 75 | Method 14: LZMA | §4.4.5, §5.8 | ✅ | decode + encode: `ZipCompression::Lzma` |
@@ -29,7 +29,7 @@
 | 128 | §5.2 Expanding (Methods 2-5) | §5.2 | ✅ | decode + encode: follower sets + DLE/LZ77 (hwzip 準拠 wire format に修正) + `reduce` encoder |
 | 129 | §5.3 Imploding (Method 6) | §5.3 | ✅ | decode + encode: RLE コードテーブル + 反転 canonical コード (hwzip 準拠 wire format に修正) + `implode_encode` |
 | 130 | §5.5 Deflating (Method 8) details | §5.5 | ✅ | 既存 DEFLATE module で対応 |
-| 131 | §5.6 Enhanced Deflating (Method 9 / Deflate64) | §5.6 (+ Info-ZIP deflate64 de facto 挙動) | ✅ | decode + encode: `deflate64` モジュール、`ZipCompression::Deflate64` |
+| 131 | §5.6 Enhanced Deflating (Method 9 / Deflate64) | §5.6 (+ Info-ZIP deflate64 de facto 挙動) | ✅ | decode + encode: `deflate64` モジュール、`ZipCompression::Deflate64`。境界: `test_deflate64_dynamic_hdist_32_code31_accepted` (HDIST=32・dist 31 受理)、`test_deflate64_hlit_exceeds_max`、`test_deflate64_dynamic_missing_eob` |
 | 132 | §5.7 BZIP2 (Method 12) | §5.7 | ✅ | decode + encode (`bzip2` feature) |
 | 133 | §5.8 LZMA (Method 14): LZMA Properties Header (4B) + stream | §5.8 | ✅ | decode + encode |
 | 134 | §5.10 PPMd (Method 98): 2B parameter + stream | §5.10 | ✅ | decode + encode |

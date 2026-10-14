@@ -396,4 +396,134 @@ mod tests {
         let decrypted = cipher.apply_ctr_zip_compatible(&encrypted);
         assert_eq!(decrypted, plaintext);
     }
+
+    #[test]
+    fn test_aes128_block_vector() {
+        // FIPS 197 example vector for AES-128.
+        let key = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F,
+        ];
+        let cipher = Aes128::new(&key);
+        let mut block = [
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD,
+            0xEE, 0xFF,
+        ];
+        cipher.encrypt_block(&mut block);
+        assert_eq!(
+            block,
+            [
+                0x69, 0xC4, 0xE0, 0xD8, 0x6A, 0x7B, 0x04, 0x30, 0xD8, 0xCD, 0xB7, 0x80, 0x70, 0xB4,
+                0xC5, 0x5A,
+            ]
+        );
+        cipher.decrypt_block(&mut block);
+        assert_eq!(
+            block,
+            [
+                0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD,
+                0xEE, 0xFF,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_aes192_block_vector() {
+        // FIPS 197 example vector for AES-192.
+        let key = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D,
+            0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        ];
+        let cipher = Aes192::new(&key);
+        let mut block = [
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD,
+            0xEE, 0xFF,
+        ];
+        cipher.encrypt_block(&mut block);
+        assert_eq!(
+            block,
+            [
+                0xDD, 0xA9, 0x7C, 0xA4, 0x86, 0x4C, 0xDF, 0xE0, 0x6E, 0xAF, 0x70, 0xA0, 0xEC, 0x0D,
+                0x71, 0x91,
+            ]
+        );
+        cipher.decrypt_block(&mut block);
+        assert_eq!(
+            block,
+            [
+                0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD,
+                0xEE, 0xFF,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_cbc_rejects_non_block_multiple() {
+        let key = [0x42; 32];
+        let iv = [0; BLOCK_SIZE];
+        let cipher = Aes256::new(&key);
+        for len in [1usize, 15, 17, 31] {
+            let ciphertext = alloc::vec![0u8; len];
+            assert!(
+                matches!(
+                    cipher.decrypt_cbc_truncated(&ciphertext, &iv, 0),
+                    Err(Error::InvalidData(_))
+                ),
+                "len {len} must be rejected"
+            );
+        }
+        // Exactly one block is accepted.
+        assert!(cipher.decrypt_cbc_truncated(&[0u8; 16], &iv, 0).is_ok());
+    }
+
+    #[test]
+    fn test_cbc_rejects_expected_len_beyond_ciphertext() {
+        let key = [0x42; 32];
+        let iv = [0; BLOCK_SIZE];
+        let cipher = Aes256::new(&key);
+        let ciphertext = [0u8; 32];
+        assert!(matches!(
+            cipher.decrypt_cbc_truncated(&ciphertext, &iv, 33),
+            Err(Error::SizeMismatch { .. })
+        ));
+        // Boundary: expected_len == ciphertext.len() is accepted.
+        assert!(cipher.decrypt_cbc_truncated(&ciphertext, &iv, 32).is_ok());
+    }
+
+    #[test]
+    fn test_cbc_empty_plaintext() {
+        let key = [0x42; 32];
+        let iv = [0; BLOCK_SIZE];
+        let cipher = Aes256::new(&key);
+        let encrypted = cipher.encrypt_cbc_zero_padded(b"", &iv);
+        assert!(encrypted.is_empty());
+        assert_eq!(
+            cipher.decrypt_cbc_truncated(&encrypted, &iv, 0).unwrap(),
+            Vec::<u8>::new()
+        );
+    }
+
+    #[test]
+    fn test_ctr_block_boundary() {
+        let key = [0x11; 32];
+        let cipher = Aes256::new(&key);
+        for len in [15usize, 16, 17, 31, 32, 33] {
+            let plaintext = alloc::vec![0xA5u8; len];
+            let encrypted = cipher.apply_ctr_zip_compatible(&plaintext);
+            // CTR is a stream cipher: ciphertext length == plaintext length.
+            assert_eq!(encrypted.len(), len);
+            assert_eq!(
+                cipher.apply_ctr_zip_compatible(&encrypted),
+                plaintext,
+                "len {len}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_ctr_empty() {
+        let key = [0x11; 32];
+        let cipher = Aes256::new(&key);
+        assert!(cipher.apply_ctr_zip_compatible(b"").is_empty());
+    }
 }

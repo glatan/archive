@@ -785,4 +785,28 @@ mod tests {
             crate::error::Error::OutputLimitExceeded { .. }
         ));
     }
+
+    #[test]
+    fn test_decode_trailing_garbage_ignored() {
+        // bzip2 reference behavior: after the stream trailer the decoder
+        // does not read further bytes; trailing garbage is ignored.
+        let data = b"trailing garbage boundary";
+        let mut compressed = crate::compress::bzip2::encode::encode(data);
+        compressed.extend_from_slice(b"\x00\xFFgarbage-after-stream");
+        assert_eq!(decode(&compressed).unwrap(), data);
+    }
+
+    #[test]
+    fn test_decode_truncated_at_every_position() {
+        // Every proper prefix of a single stream must fail: a cut lands
+        // inside the header, block payload, trailer magic, or stream CRC.
+        let data = b"bzip2 truncation sweep payload: abcabcabc";
+        let compressed = crate::compress::bzip2::encode::encode(data);
+        for cut in 1..compressed.len() {
+            assert!(
+                decode(&compressed[..cut]).is_err(),
+                "cut={cut} must not decode"
+            );
+        }
+    }
 }

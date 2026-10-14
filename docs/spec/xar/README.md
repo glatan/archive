@@ -22,7 +22,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 7 | TOC はヘッダ直後の zlib 圧縮 XML。`toc_length_compressed` バイトを伸張 | §The Header 末尾注記 | ✅ | `decode_real` |
+| 7 | TOC はヘッダ直後の zlib 圧縮 XML。`toc_length_compressed` バイトを伸張 | §The Header 末尾注記 | ✅ | `decode_real`、`test_decode_truncated_at_every_position` (全切断位置で拒否) |
 | 8 | 伸張結果は `toc_length_uncompressed` と一致必須 | 同上 | ✅ | `decode_real` |
 | 9 | TOC XML は UTF-8 | §The Table of Contents | ✅ | `decode_real` |
 | 10 | XML パーサ: 要素・属性・CDATA・コメント・PI・実体参照 (`&lt;` 等 + `&#NN;`) を受理。閉じタグ不一致・非整形式は reject | 同上 (well-formed XML 前提) | ✅ | `src/archive/xar/xml.rs` + 全 decode テスト経由 |

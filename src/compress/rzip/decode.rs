@@ -458,4 +458,19 @@ mod tests {
         let result = decode_bounded(b"", 1024);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_decode_truncated_at_every_position() {
+        // rzip rejects trailing garbage, so every proper prefix of a
+        // valid container must also fail (cut lands inside the header,
+        // stream0/stream1 data, or a CRC).
+        let data = b"rzip truncation sweep payload: sphinx of black quartz judge my vow";
+        let compressed = encode::encode(data);
+        for cut in 1..compressed.len() {
+            assert!(
+                decode(&compressed[..cut]).is_err(),
+                "cut={cut} must not decode"
+            );
+        }
+    }
 }

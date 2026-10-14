@@ -12,7 +12,7 @@
 | 1 | ストリームヘッダー `BZh[1-9]` (マジック + ブロックサイズ) | bzip2 1.0.x manual / `bzlib.h` stream format | ✅ | `test_invalid_magic`, `test_invalid_block_size`, `test_truncated_header` |
 | 2 | ブロックマジック `0x314159265359` (π の16進表現, 48bit) | bzip2 1.0.x manual / `bzlib.h` stream format | ✅ | `decode_single_stream()` で検証 (`decode_block` は magic 以降を parse) |
 | 3 | ストリームトレーラーマジック `0x177245385090` (√π の16進表現, 48bit) | bzip2 1.0.x manual / `bzlib.h` stream format | ✅ | `decode_single_stream()` で検証 |
-| 4 | ストリーム CRC (combined_crc = rotate_left(1) ^ block_crc) | bzip2 1.0.x manual / `bzlib.h` stream format | ✅ | `decode_single_stream()` でストアCRCと照合 |
+| 4 | ストリーム CRC (combined_crc = rotate_left(1) ^ block_crc) | bzip2 1.0.x manual / `bzlib.h` stream format | ✅ | `decode_single_stream()` でストアCRCと照合、`test_decode_truncated_at_every_position` (全切断位置で拒否) |
 | 5 | ブロック CRC-32 (big-endian, 非反射型 polynomial 0x04C11DB7) | bzip2 1.0.x manual / `bzlib.h` stream format | ✅ | `test_bz2_crc32_single_x`, `test_bz2_crc32_empty`, `test_bz2_crc32_incremental` |
 | 6 | CRC-32 初期値 0xFFFFFFFF / 最終 XOR 0xFFFFFFFF | bzip2 1.0.x manual / `bzlib.h` stream format | ✅ | `Bz2Crc32::new/finish` |
 | 7 | ブロック CRC は原データ (pre-RLE1) に対して計算 | bzip2 1.0.x manual / `bzlib.h` stream format | ✅ | `encode_block_inner()` / `decode_block()` で検証 |
@@ -128,7 +128,7 @@
 | 72 | 未使用の Huffman tree 定義は許容 (テーブル数は必要数より大きくてよい) | bzip2-format §2.2.3.2 | ✅ | selector が参照しない tree も parse 可能 |
 | 73 | 非最小の delta 列 (同じコード長を別の delta 列で表現) は受理 | bzip2-format §2.2.3.2.3 | ✅ | `parse_huffman_tables` は任意の delta 列を受理 |
 | 74 | NumSels が実際に必要な数より多い場合は許容 (枯渇のみエラー) | bzip2-format §2.2.3.2 | ✅ | selector 消費は使用分のみ、余剰は読み捨て |
-| 75 | 最終ストリーム後の trailing garbage は無視 | bzip2 reference behavior | ✅ | `decode` は trailer 以降を読まない (参照実装は警告、本実装は黙って無視) |
+| 75 | 最終ストリーム後の trailing garbage は無視 | bzip2 reference behavior | ✅ | `test_decode_trailing_garbage_ignored` (トレイラー以降を読まない) |
 | 76 | `BZ0` (bzip1 レガシー形式) | bzip2-format §2.2.2 | ❌ intentional scope | deprecated。`BZh0` は `test_invalid_block_size` で reject を検証 |
 | 77 | RUNA/RUNB ゼロラン長の u64 累積は saturate (wrap/panic しない) | crate エラー規約 (fuzz 耐性) | ✅ | `undo_mtf_rle2` の saturating 演算 + `test_undo_mtf_rle2_run_saturates_instead_of_overflowing`, `test_undo_mtf_rle2_saturated_run_with_nonempty_output` |
 

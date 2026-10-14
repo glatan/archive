@@ -1064,4 +1064,19 @@ mod tests {
             ));
         }
     }
+
+    #[test]
+    fn rejects_all_truncations() {
+        // PEA terminates with a stream tag then a volume tag, so no
+        // proper prefix of an archive is valid: every cut must fail,
+        // either at EOF or at tag verification.
+        let f = build(
+            &[("d", true, b""), ("d/f.bin", false, b"payload-data")],
+            PeaAlgo::Crc32,
+            0,
+        );
+        for cut in 0..f.len() {
+            assert!(decode(&f[..cut]).is_err(), "cut={cut} unexpectedly decoded");
+        }
+    }
 }

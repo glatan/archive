@@ -579,6 +579,20 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn test_truncated_at_every_position() {
+        // Every proper prefix of a valid lzip member must fail.
+        use super::super::encode;
+        let data = b"lzip truncation boundary payload";
+        let compressed = encode::encode(data);
+        for cut in 1..compressed.len() {
+            assert!(
+                decode(&compressed[..cut]).is_err(),
+                "cut={cut} must not decode"
+            );
+        }
+    }
+
     /// Lzip manual ch.9: trailing zero padding may be appended to a
     /// single-member file, even when the member is empty.
     #[test]

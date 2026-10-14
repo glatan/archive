@@ -647,4 +647,37 @@ mod tests {
             crate::error::Error::OutputLimitExceeded { .. }
         ));
     }
+
+    #[test]
+    fn test_trailing_garbage_after_member_rejected() {
+        // Strict RFC 1952 §2.2 interpretation: bytes after the last member
+        // are parsed as a new member, so garbage trailing data is rejected.
+        let mut encoded = encode::encode(b"data", Level::Fast);
+        encoded.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+        assert!(decode(&encoded).is_err());
+    }
+
+    #[test]
+    fn test_truncated_at_every_position() {
+        // Every proper prefix of a valid gzip stream must fail.
+        let data = b"gzip truncation boundary test payload";
+        let encoded = encode::encode(data, Level::Fast);
+        for cut in 1..encoded.len() {
+            assert!(
+                decode(&encoded[..cut]).is_err(),
+                "cut={cut} must not decode"
+            );
+        }
+    }
+
+    #[test]
+    fn test_multi_member_second_member_invalid() {
+        // A malformed second member must fail the whole decode even though
+        // the first member is intact.
+        let member1 = encode::encode(b"first", Level::Fast);
+        let mut combined = member1;
+        // Second "member" with valid magic but invalid method byte.
+        combined.extend_from_slice(&[0x1F, 0x8B, 0x07, 0x00, 0, 0, 0, 0, 0, 0]);
+        assert!(decode(&combined).is_err());
+    }
 }

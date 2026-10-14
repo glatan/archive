@@ -19,7 +19,7 @@
 | 7 | トレーラー: メンバーサイズ (8バイト LE) | lzip manual §5 File format | ✅ | `test_member_size_mismatch` |
 | 8 | マルチメンバーストリーム | lzip manual §5 File format | ✅ | `test_multi_member_roundtrip`, `test_lzip_multi_member` (統合) |
 | 9 | 空入力エラー | lzip manual §5 File format | ✅ | `test_empty_input` |
-| 10 | 切り詰めヘッダーエラー | lzip manual §5 File format | ✅ | `test_truncated_header` |
+| 10 | 切り詰めヘッダーエラー | lzip manual §5 File format | ✅ | `test_truncated_header`、`test_truncated_at_every_position` (全切断位置で拒否) |
 
 ### LZMA コーデック
 

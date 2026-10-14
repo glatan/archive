@@ -1226,4 +1226,29 @@ mod tests {
             vec!["C/bbb", "C/aaa", "C/ccc", "X/listing/titleordered/v0"]
         );
     }
+
+    #[test]
+    fn truncated_prefix_invariant() {
+        // Trailing truncation is tolerated (the archive checksum is
+        // only verified when the digest ends exactly at EOF, and
+        // unreferenced tail bytes are skipped). Invariant:
+        // decode(prefix) is Err or a prefix of the full entry list.
+        let mut enc = crate::archive::zim::encode::ZimEncoder::new();
+        enc.add_file("a.txt", b"zim truncation sweep payload");
+        enc.add_file("b.bin", &[3u8, 1, 4, 1, 5, 9]);
+        let data = enc.finish().unwrap();
+        let full = decode(&data).unwrap();
+        for cut in 0..data.len() {
+            if let Ok(prefix) = decode(&data[..cut]) {
+                assert!(
+                    prefix.len() <= full.len()
+                        && full
+                            .iter()
+                            .zip(prefix.iter())
+                            .all(|(a, b)| a.name() == b.name() && a.data() == b.data()),
+                    "cut={cut}: entries must be a prefix of the full list"
+                );
+            }
+        }
+    }
 }

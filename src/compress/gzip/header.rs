@@ -202,6 +202,29 @@ mod tests {
         assert_eq!(GzipHeader::parse(&data), Err(Error::UnexpectedEof));
     }
 
+    #[test]
+    fn test_parse_header_length_boundary() {
+        // Exactly 9 bytes is below the 10-byte minimum → UnexpectedEof;
+        // exactly 10 bytes with a valid minimal header must parse.
+        let mut nine = vec![0x1F, 0x8B, 0x08, 0x00, 0, 0, 0, 0, 0];
+        assert_eq!(GzipHeader::parse(&nine), Err(Error::UnexpectedEof));
+
+        nine.push(0xFF);
+        let header = GzipHeader::parse(&nine).unwrap();
+        assert_eq!(header.header_size, 10);
+        assert_eq!(header.os, 0xFF);
+    }
+
+    #[test]
+    fn test_xfl_arbitrary_values_accepted() {
+        // XFL is informational (RFC 1952 §2.3.1): any byte value parses.
+        for xfl in [0x00u8, 0x01, 0x03, 0x05, 0xFF] {
+            let data = [0x1F, 0x8B, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, xfl, 0xFF];
+            let header = GzipHeader::parse(&data).unwrap();
+            assert_eq!(header.xfl, xfl, "xfl={xfl:#04x}");
+        }
+    }
+
     // Phase 1: Error detection
 
     #[test]

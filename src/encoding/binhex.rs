@@ -541,6 +541,27 @@ mod tests {
     }
 
     #[test]
+    fn rejects_all_truncations() {
+        // The encoded body contains no ':', so the only terminators
+        // are the opener and the final colon: every cut before the
+        // final colon fails, while cuts that keep it (trailing
+        // whitespace may be dropped) succeed.
+        let doc = encode(&entry());
+        let term = doc.iter().rposition(|&b| b == b':').unwrap();
+        let full = decode(&doc).unwrap();
+        for cut in 0..doc.len() {
+            if cut <= term {
+                assert!(
+                    decode(&doc[..cut]).is_err(),
+                    "cut={cut} unexpectedly decoded"
+                );
+            } else {
+                assert_eq!(decode(&doc[..cut]).unwrap(), full, "cut={cut}");
+            }
+        }
+    }
+
+    #[test]
     fn prologue_variants() {
         let e = entry();
         let doc = encode(&e);

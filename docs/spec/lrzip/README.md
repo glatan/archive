@@ -27,7 +27,7 @@
 | 5 | LZMA props byte を妥当値としてパース | crate-local `.lrz` header layout | ✅ | `test_non_default_lzma_props_byte_supported`, `test_invalid_lzma_props_byte` |
 | 6 | encryption flag 非ゼロ拒否 | crate-local `.lrz` header layout | ✅ | `test_encrypted_rejected` |
 | 7 | 不正マジックエラー | crate-local `.lrz` header layout | ✅ | デコーダーで `InvalidData` 返却 |
-| 8 | ヘッダー短すぎエラー | crate-local `.lrz` header layout | ✅ | デコーダーで `UnexpectedEof` 返却 |
+| 8 | ヘッダー短すぎエラー | crate-local `.lrz` header layout | ✅ | デコーダーで `UnexpectedEof` 返却、`test_decode_truncated_at_every_position` (全切断位置で拒否) |
 
 ### rzip アルゴリズム
 

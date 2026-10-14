@@ -62,7 +62,7 @@ API/CLI での利用には形式の明示が必要 (`--format xpress` / `xpress-
 | 28 | 非圧縮チャンクは raw コピー | [MS-XCA] §2.5 | ✅ | `lznt1_stored_chunk` (統合) |
 | 29 | 圧縮チャンク: flag byte + 最大 8 要素 (LSB 順) | [MS-XCA] §2.5 | ✅ | `lznt1_compressed_chunk_literals` (統合) |
 | 30 | compressed word: 出力位置 U に応じ displacement 4..12bit (上位) + length-3 (下位 16-M bit) | [MS-XCA] §2.5 | ✅ | `displacement_bit_schedule`、`lznt1_compressed_chunk_match` (統合) |
-| 31 | displacement > 出力済みバイト数は拒否 | [MS-XCA] §2.5 | ✅ | decode 経路 (`lznt1: displacement before start`) |
+| 31 | displacement > 出力済みバイト数は拒否 | [MS-XCA] §2.5 | ✅ | `rejects_displacement_before_start` |
 | 32 | match コピーは 1 バイトずつ (重複コピー許容) | [MS-XCA] §2.5 | ✅ | `lznt1_compressed_chunk_match` (統合) |
 | 33 | header=0 は End_of_buffer。マーカー省略のバッファも末尾で正常終端 | [MS-XCA] §2.5 | ✅ | `end_of_buffer_marker`、decode 経路 |
 | 34 | 切り詰めヘッダ / チャンクの拒否 | [MS-XCA] §2.5 | ✅ | `rejects_truncated_chunk` |

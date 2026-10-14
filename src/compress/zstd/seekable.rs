@@ -436,6 +436,19 @@ mod tests {
     }
 
     #[test]
+    fn accepts_unused_bits() {
+        // format doc §Unused_Bits: descriptor bits 1-0 carry no meaning
+        // and must not affect parsing.
+        let data = sample();
+        let mut compressed = encode(&data, 4096);
+        let n = compressed.len();
+        compressed[n - 5] |= 0x03; // set both unused bits
+        let table = seek_table(&compressed).unwrap();
+        assert!(!table.entries.is_empty());
+        assert_eq!(decode(&compressed).unwrap(), data);
+    }
+
+    #[test]
     fn rejects_truncated_table() {
         let data = sample();
         let compressed = encode(&data, 4096);

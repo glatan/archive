@@ -26,7 +26,7 @@
 | 5 | ar_uid / ar_gid: 10進 ASCII (右スペースパディング) | IEEE Std 1003.1: ar member header fields | ✅ | `parse_decimal_field()` |
 | 6 | ar_mode: 8進 ASCII (右スペースパディング) | IEEE Std 1003.1: ar member header fields | ✅ | `parse_octal_field()` |
 | 7 | ar_size: 10進 ASCII (右スペースパディング) | IEEE Std 1003.1: ar member header fields | ✅ | `parse_decimal_field()` / `parse_decimal_str()` |
-| 8 | 奇数長エントリの `\n` パディング (2B アラインメント) | IEEE Std 1003.1: ar file alignment | ✅ | `test_decode_odd_sized_entry_padding` |
+| 8 | 奇数長エントリの `\n` パディング (2B アラインメント) | IEEE Std 1003.1: ar file alignment | ✅ | `test_decode_odd_sized_entry_padding`、`test_decode_truncated_prefix_invariant` (任意の切断位置でエラーまたは正当なエントリ接頭辞) |
 
 ### GNU 拡張
 

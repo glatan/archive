@@ -121,4 +121,41 @@ mod tests {
         let short = hmac(sha1, &sha1(&key), b"msg");
         assert_eq!(hmac(sha1, &key, b"msg"), short);
     }
+
+    #[test]
+    fn test_pbkdf2_sha1_4096_iterations() {
+        // RFC 6070 PBKDF2-HMAC-SHA1 vector: c = 4096
+        assert_eq!(
+            hex(&pbkdf2(sha1, b"password", b"salt", 4096, 20)),
+            "4b007901b765489abead49d926f721d065a429c1"
+        );
+    }
+
+    #[test]
+    fn test_pbkdf2_out_len_boundaries() {
+        // out_len = 0 yields an empty key.
+        assert!(pbkdf2(sha1, b"pw", b"salt", 1, 0).is_empty());
+        // Derived keys are prefix-stable across the block boundary:
+        // dk(20) is the first block, dk(21) appends one byte of block 2.
+        let dk20 = pbkdf2(sha1, b"pw", b"salt", 1, 20);
+        assert_eq!(pbkdf2(sha1, b"pw", b"salt", 1, 19), dk20[..19]);
+        let dk21 = pbkdf2(sha1, b"pw", b"salt", 1, 21);
+        assert_eq!(dk21[..20], dk20[..]);
+        // Exact two-block boundary.
+        let dk40 = pbkdf2(sha1, b"pw", b"salt", 1, 40);
+        let dk41 = pbkdf2(sha1, b"pw", b"salt", 1, 41);
+        assert_eq!(dk41[..40], dk40[..]);
+    }
+
+    #[test]
+    fn test_hmac_block_size_key_boundary() {
+        // Keys longer than the 64-byte block are hashed first; a key
+        // of exactly 64 bytes is used verbatim.
+        let key64 = [0xABu8; 64];
+        let key65 = [0xABu8; 65];
+        let msg = b"msg";
+        assert_eq!(hmac(sha1, &key65, msg), hmac(sha1, &sha1(&key65), msg));
+        // At exactly 64 bytes the key must NOT be pre-hashed.
+        assert_ne!(hmac(sha1, &key64, msg), hmac(sha1, &sha1(&key64), msg));
+    }
 }

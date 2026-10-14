@@ -202,4 +202,46 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn test_sha1_two_block() {
+        // FIPS 180-4 example: the 56-byte message leaves no room for
+        // the length field in its own block, so padding requires a
+        // second block.
+        let msg = b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+        assert_eq!(msg.len(), 56);
+        assert_eq!(
+            sha1(msg),
+            [
+                0x84, 0x98, 0x3E, 0x44, 0x1C, 0x3B, 0xD2, 0x6E, 0xBA, 0xAE, 0x4A, 0xA1, 0xF9, 0x51,
+                0x29, 0xE5, 0xE5, 0x46, 0x70, 0xF1,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_sha1_million_a() {
+        // FIPS 180-4 example: one million 'a' characters.
+        let data = alloc::vec![b'a'; 1_000_000];
+        assert_eq!(
+            sha1(&data),
+            [
+                0x34, 0xAA, 0x97, 0x3C, 0xD4, 0xC4, 0xDA, 0xA4, 0xF6, 0x1E, 0xEB, 0x2B, 0xDB, 0xAD,
+                0x27, 0x31, 0x65, 0x34, 0x01, 0x6F,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_sha1_padding_boundary() {
+        // Exercise both padding paths around the 55/56-byte boundary:
+        // each length must still produce a stable, distinct digest.
+        let mut prev = [0u8; 20];
+        for len in [0usize, 55, 56, 57, 63, 64] {
+            let data = alloc::vec![0x61u8; len];
+            let digest = sha1(&data);
+            assert_ne!(digest, prev, "len {len}");
+            prev = digest;
+        }
+    }
 }

@@ -291,6 +291,16 @@ mod tests {
     }
 
     #[test]
+    fn rejects_displacement_before_start() {
+        // MS-XCA §2.5: a match may not reference more bytes than have
+        // been produced. First element of the chunk is a compressed
+        // word (flag bit0=1); any displacement at u=0 is before start.
+        // Chunk: payload = flag(1B) + word(2B) = 3B -> size field = 5-3 = 2.
+        let input = [0x02, 0xB0, 0x01, 0x00, 0x00, 0x00, 0x00];
+        assert!(matches!(decode(&input), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
     fn rejects_truncated_chunk() {
         let enc = encode(b"hello world hello world hello world");
         let cut = enc.len() - 3;

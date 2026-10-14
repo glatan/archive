@@ -666,4 +666,18 @@ mod tests {
         let entries = decode(&make_xar_no_cksum(&stored, &toc)).unwrap();
         assert_eq!(entries[0].extended_attributes[0].data, b"attribute payload");
     }
+
+    #[test]
+    fn test_decode_truncated_at_every_position() {
+        // The header declares the compressed TOC size, and the heap
+        // checksum covers the tail: every proper prefix must fail.
+        let mut enc = crate::archive::xar::encode::XarEncoder::new();
+        enc.add_file("a.txt", b"xar truncation sweep payload");
+        enc.add_directory("dir");
+        enc.add_file("dir/b.bin", &[1u8, 2, 3]);
+        let image = enc.finish();
+        for cut in 1..image.len() {
+            assert!(decode(&image[..cut]).is_err(), "cut={cut} must not decode");
+        }
+    }
 }

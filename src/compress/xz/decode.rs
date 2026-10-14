@@ -1418,6 +1418,63 @@ mod tests {
     }
 
     #[test]
+    fn test_none_check_type_decode() {
+        fn encode_vli_local(output: &mut Vec<u8>, mut value: u64) {
+            loop {
+                let byte = (value & 0x7F) as u8;
+                value >>= 7;
+                if value == 0 {
+                    output.push(byte);
+                    break;
+                }
+                output.push(byte | 0x80);
+            }
+        }
+
+        // Check type 0x00 (none): the check field is empty. Convert a
+        // CRC-32 stream by dropping the 4-byte check and rebuilding the
+        // index/footer.
+        let payload = b"hello none";
+        let mut data = super::super::encode::encode(payload);
+
+        data[6] = 0x00;
+        data[7] = CHECK_NONE;
+        fix_stream_header_crc(&mut data);
+
+        let real_header_size = (data[12] as usize + 1) * 4;
+        let block_data_start = 12 + real_header_size;
+        let compressed_len = lzma2_consumed_bytes(&data[block_data_start..]).unwrap();
+        let padded_len = compressed_len.div_ceil(4) * 4;
+        let check_offset = block_data_start + padded_len;
+
+        // Drop the 4-byte CRC-32 check field entirely.
+        data.truncate(check_offset);
+
+        // Rebuild the index: unpadded size no longer includes a check.
+        let unpadded_size = (real_header_size + compressed_len) as u64;
+        let mut index_body = Vec::new();
+        index_body.push(0x00);
+        encode_vli_local(&mut index_body, 1);
+        encode_vli_local(&mut index_body, unpadded_size);
+        encode_vli_local(&mut index_body, payload.len() as u64);
+        index_body.resize(index_body.len().next_multiple_of(4), 0x00);
+        let index_crc = crc32::crc32(&index_body);
+        index_body.extend_from_slice(&index_crc.to_le_bytes());
+        data.extend_from_slice(&index_body);
+
+        // Rebuild the footer: backward size + stream flags + YZ.
+        let backward_size_raw = (index_body.len() / 4 - 1) as u32;
+        data.extend_from_slice(&[0u8; 4]); // footer CRC placeholder
+        data.extend_from_slice(&backward_size_raw.to_le_bytes());
+        data.extend_from_slice(&[0x00, CHECK_NONE]);
+        data.extend_from_slice(b"YZ");
+        fix_stream_footer_crc(&mut data);
+
+        let decoded = decode(&data).unwrap();
+        assert_eq!(decoded, payload);
+    }
+
+    #[test]
     fn test_crc64_check_type_decode() {
         fn encode_vli_local(output: &mut Vec<u8>, mut value: u64) {
             loop {

@@ -48,7 +48,7 @@
 |---|------|----------|-----------|----------------|
 | 13 | ファイルデータは iFolder の uoffFolderStart から開始し cbFile バイト | MS-CAB §2.3 | ✅ | `parses_stored_cabinet` |
 | 14 | cbFile がフォルダ末尾を超える場合、後続フォルダの非圧縮データへ継続 | MS-CAB §2.3 | ✅ | `file_spans_two_folders` |
-| 15 | iFolder の特殊値 (0xFFFD-0xFFFF: cabinet 横断) は Unsupported | MS-CAB §2.3 | ✅ | `rejects_spanned_file` |
+| 15 | iFolder の特殊値 (0xFFFD-0xFFFF: cabinet 横断) は Unsupported | MS-CAB §2.3 | ✅ | `rejects_spanned_file` (0xFFFD/0xFFFE/0xFFFF 全値) |
 | 16 | bounds 検査 (truncated header/data → エラー) | crate エラー規約 | ✅ | `rejects_truncated` |
 
 ### システム相互運用

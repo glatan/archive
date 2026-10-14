@@ -2780,4 +2780,18 @@ mod tests {
             crate::error::Error::OutputLimitExceeded { .. }
         ));
     }
+
+    #[test]
+    fn test_truncated_at_every_position() {
+        // RFC 8878 §3.1.1: every proper prefix of a valid frame must fail —
+        // a cut lands inside the frame header, a block, or the checksum.
+        let data = b"The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.";
+        let compressed = super::super::encode::encode(data);
+        for cut in 1..compressed.len() {
+            assert!(
+                decode(&compressed[..cut]).is_err(),
+                "cut={cut} must not decode"
+            );
+        }
+    }
 }

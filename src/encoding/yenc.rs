@@ -661,4 +661,36 @@ mod tests {
         let single = decode(&encode("plain.bin", &whole)).unwrap();
         assert!(join_parts(&[single]).is_err());
     }
+
+    #[test]
+    fn truncated_before_yend_rejected() {
+        // The `=yend` trailer is mandatory: every cut before the
+        // trailer line must fail.
+        let doc = encode("f.bin", b"yenc boundary test data");
+        let yend = doc.windows(5).rposition(|w| w == b"=yend").unwrap();
+        for cut in 0..yend {
+            assert!(
+                decode(&doc[..cut]).is_err(),
+                "cut={cut} unexpectedly decoded"
+            );
+        }
+    }
+
+    #[test]
+    fn truncated_yend_trailer_boundaries() {
+        // `crc32=` is optional: a cut that keeps `=yend size=N` but
+        // drops the crc32 parameter still validates by size alone.
+        let data = b"yenc boundary test data";
+        let doc = encode("f.bin", data);
+        let crc_pos = doc.windows(5).rposition(|w| w == b"crc32").unwrap();
+        // Drop " crc32=XXXXXXXX\r\n" — `size` remains complete.
+        let e = decode(&doc[..crc_pos - 1]).unwrap();
+        assert_eq!(e.data, data);
+        // Dropping only the trailing CRLF keeps a complete trailer.
+        let e = decode(&doc[..doc.len() - 2]).unwrap();
+        assert_eq!(e.data, data);
+        // A trailer line without `size=` is rejected.
+        let size_pos = doc.windows(4).rposition(|w| w == b"size").unwrap();
+        assert!(decode(&doc[..size_pos]).is_err());
+    }
 }

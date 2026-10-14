@@ -35,7 +35,7 @@
 | 10 | Stream identifier chunk: type 0xFF, payload `sNaPpY` (6 bytes) | [`framing_format.txt`](https://raw.githubusercontent.com/google/snappy/main/framing_format.txt): Stream identifier | ✅ | `test_decode_framed_uncompressed` |
 | 11 | Stream identifier must appear first | [`framing_format.txt`](https://raw.githubusercontent.com/google/snappy/main/framing_format.txt): Stream identifier | ✅ | `test_decode_framed_skippable_before_identifier_rejected` |
 | 12 | Duplicate stream identifier rejected | [`framing_format.txt`](https://raw.githubusercontent.com/google/snappy/main/framing_format.txt): Stream identifier | ✅ | `test_decode_framed_duplicate_identifier_rejected`。intentional: 仕様は ignore を推奨 (should) するが、strict validation として reject |
-| 13 | Chunk header: 1-byte type + 3-byte LE length | [`framing_format.txt`](https://raw.githubusercontent.com/google/snappy/main/framing_format.txt): Chunk format | ✅ | 全 framed テストで検証 |
+| 13 | Chunk header: 1-byte type + 3-byte LE length | [`framing_format.txt`](https://raw.githubusercontent.com/google/snappy/main/framing_format.txt): Chunk format | ✅ | 全 framed テストで検証、`test_decode_framed_truncated_at_every_position` (identifier のみは空フレームとして受理、それ以外の全切断位置で拒否) |
 | 14 | Compressed data chunk (type 0x00): masked CRC-32C (4B) + compressed payload | [`framing_format.txt`](https://raw.githubusercontent.com/google/snappy/main/framing_format.txt): Compressed data (0x00) | ✅ | `test_roundtrip_framed_large` |
 | 15 | Uncompressed data chunk (type 0x01): masked CRC-32C (4B) + raw payload | [`framing_format.txt`](https://raw.githubusercontent.com/google/snappy/main/framing_format.txt): Uncompressed data (0x01) | ✅ | `test_decode_framed_uncompressed` |
 | 16 | Skippable chunks (types 0x80-0xFE): identifier 後のみ許可 | [`framing_format.txt`](https://raw.githubusercontent.com/google/snappy/main/framing_format.txt): Reserved skippable chunks | ✅ | `test_decode_framed_skippable_chunk`, `test_decode_framed_skippable_before_identifier_rejected` |
@@ -60,7 +60,7 @@
 | # | 仕様要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|---------|---------|------|----------------|
 | 27 | Varint encoding: 7-bit chunks, MSB continuation bit (LEB128-style) | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt): Preamble | ✅ | encode/decode 実装 |
-| 28 | Literal 長 60-63 拡張: 60=1B(+1), 61=2B LE(+1), 62=3B LE(+1), 63=4B LE(+1) | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt): Literal tag | ✅ | decode_raw 実装 |
+| 28 | Literal 長 60-63 拡張: 60=1B(+1), 61=2B LE(+1), 62=3B LE(+1), 63=4B LE(+1) | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt): Literal tag | ✅ | `test_decode_raw_literal_length_extension_boundaries` |
 | 29 | Copy-1 length = (bits 2-4) + 4, range 4-11 | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt): Copy-1 | ✅ | encode/decode 実装 |
 | 30 | Copy-2 length = (bits 2-7) + 1, range 1-64 | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt): Copy-2 | ✅ | encode/decode 実装 |
 | 31 | Copy-4 length = (bits 2-7) + 1, range 1-64 | [`format_description.txt`](https://raw.githubusercontent.com/google/snappy/main/format_description.txt): Copy-4 | ✅ | encode/decode 実装 |

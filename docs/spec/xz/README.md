@@ -26,7 +26,7 @@
 | 4 | Stream Footer (magic "YZ", CRC-32, backward size) | xz-file-format.txt: Stream Footer | ✅ | `test_footer_magic_check` |
 | 5 | Stream Footer CRC-32 | xz-file-format.txt: Stream Footer | ✅ | decoder validation |
 | 6 | Stream Flags header/footer match | xz-file-format.txt: Stream Header / Stream Footer | ✅ | decoder validation |
-| 7 | Check type: None (0x00) | xz-file-format.txt: Stream Flags / Check types | ✅ | decoder support (`--check=none` の専用テストなし) |
+| 7 | Check type: None (0x00) | xz-file-format.txt: Stream Flags / Check types | ✅ | `test_none_check_type_decode` (check フィールドが空のストリームを再構成してデコード) |
 | 8 | Check type: CRC-32 (0x01) | xz-file-format.txt: Stream Flags / Check types | ✅ | `test_data_crc_check` |
 | 9 | Check type: CRC-64 (0x04) | xz-file-format.txt: Stream Flags / Check types | ✅ | `test_crc64_check_type_decode`, `test_crc64_check_type_mismatch` |
 | 10 | Check type: SHA-256 (0x0A) | xz-file-format.txt: Stream Flags / Check types | ✅ | `test_sha256_check_type_decode`, `test_sha256_check_type_mismatch` |

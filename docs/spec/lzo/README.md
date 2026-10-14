@@ -41,7 +41,7 @@
 | 17 | 256KB ブロック分割 | lzop source (`lzop.h`, `p_lzo.c`) | ✅ | `test_roundtrip_multi_block` |
 | 18 | Adler-32 データチェックサム検証 | lzop source (`lzop.h`, `p_lzo.c`) | ✅ | `test_block_adler32_mismatch`, `test_lzo_decode_detects_uncompressed_adler_mismatch` (統合) |
 | 19 | Adler-32 圧縮データチェックサム検証 (`F_ADLER32_C`) | lzop source (`lzop.h`, `p_lzo.c`) | ✅ | `test_adler32_compressed_verified` |
-| 20 | 終端マーカー (uncompressed_len=0) | lzop source (`lzop.h`, `p_lzo.c`) | ✅ | `test_empty_input` |
+| 20 | 終端マーカー (uncompressed_len=0) | lzop source (`lzop.h`, `p_lzo.c`) | ✅ | `test_empty_input`、`test_decode_truncated_at_every_position` (全切断位置で拒否) |
 | 21 | 不正マジックエラー | lzop source (`lzop.h`, `p_lzo.c`) | ✅ | `test_invalid_magic` |
 | 22 | 入力短すぎエラー | lzop source (`lzop.h`, `p_lzo.c`) | ✅ | `test_input_too_short` |
 | 23 | CRC-32 compressed data checksum verification | lzop source (`lzop.h`, `p_lzo.c`) | ✅ | `test_crc32_compressed_verified_direct` |

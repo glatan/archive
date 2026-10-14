@@ -37,7 +37,7 @@
 | 11 | zero 値文字 `` ` `` (0x60) と ` ` (0x20) の両方を受理 | de facto | ✅ | `decodes_space_zero_variant` |
 | 12 | length=0 の行 (`` ` `` または ` `) をデータ終端として受理、`end` への橋渡し | de facto (実 uuencode 出力) | ✅ | `roundtrip_empty`、python 生成文書 |
 | 13 | データ行 body が length 宣言より短い場合は `UnexpectedEof` | バリデーション | ✅ | `rejects_truncated_body` |
-| 14 | `end` 行なしの切り詰めは `UnexpectedEof` | バリデーション | ✅ | `rejects_missing_end` |
+| 14 | `end` 行なしの切り詰めは `UnexpectedEof` | バリデーション | ✅ | `rejects_missing_end`、`rejects_all_truncations` (末尾改行のみを除去した切断を除き全切断位置でエラー) |
 | 15 | 行長 > 45 octet 宣言の拒否 | POSIX STDOUT "maximum ... 45" | ✅ | `dec_char`/`decode` の count 検証 |
 | 16 | CRLF 行終端の許容 | 頑健性 (非 POSIX) | ✅ | `next_line` の `\r` strip |
 

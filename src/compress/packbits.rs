@@ -209,4 +209,23 @@ mod tests {
         let enc = encode(&data);
         assert!(enc.len() <= data.len() + data.len().div_ceil(127));
     }
+
+    #[test]
+    fn truncated_prefix_invariant() {
+        // Packets are self-delimiting, so a cut at a packet boundary
+        // yields a valid shorter output; every other cut must fail.
+        // Invariant: decode(prefix) is Err or a prefix of the full
+        // decoded output.
+        let data = b"aaabbbbbbbbxyzzzzzzzzzzzzzzzzzzzqrrrr";
+        let enc = encode(data);
+        let full = decode(&enc).unwrap();
+        for cut in 0..enc.len() {
+            if let Ok(prefix) = decode(&enc[..cut]) {
+                assert!(
+                    full.starts_with(&prefix),
+                    "cut={cut}: output must be a prefix"
+                );
+            }
+        }
+    }
 }

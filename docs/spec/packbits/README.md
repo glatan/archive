@@ -14,7 +14,7 @@
 | 1 | flag-counter `0..=127`: 続く N+1 バイトをリテラルとして複写 | TN1023 "Specifying the Flag-counter Byte"、TIFF6 §9 | ✅ | `literal_packet`、`decode_known_vector` |
 | 2 | flag-counter `129..=255` (signed `-127..=-1`): 続く 1 バイトを `257-N` (= `1-signed`) 回反復 | 同上 | ✅ | `repeat_packet`、`tn1023_worked_example` |
 | 3 | flag-counter `128` (`-128`) は no-op として読み飛ばす | TN1023 "Using PackBits" 警告 (UnpackBits は `$80` を skip)、TIFF6 §9 | ✅ | `nop_flag_ignored` |
-| 4 | リテラルパケットが入力末尾で途切れる場合は `UnexpectedEof` | バリデーション | ✅ | `truncated_rejected` |
+| 4 | リテラルパケットが入力末尾で途切れる場合は `UnexpectedEof` | バリデーション | ✅ | `truncated_rejected`、`truncated_prefix_invariant` (任意の切断位置でエラーまたは正当な出力接頭辞) |
 | 5 | 反復パケットが入力末尾で途切れる場合は `UnexpectedEof` | バリデーション | ✅ | `truncated_rejected` |
 | 6 | 入力末尾までパケット列を消費 (長さ引数を取らない streaming ではなく、全入力を decode する契約) | TN1023 "no way to know when you have reached the end" — コンテナ側が長さを持つ前提 | ✅ | 全 decode テスト |
 

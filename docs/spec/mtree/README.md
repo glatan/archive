@@ -29,7 +29,7 @@
 | 7 | 相対エントリで `type=dir` なら現在ディレクトリを push | Relative | ✅ | `relative_entries_descend_into_dirs` |
 | 8 | `..` は現在ディレクトリを pop、keyword は無視 | dot-dot | ✅ | `relative_entries_descend_into_dirs` |
 | 9 | `\ooo` 8進エスケープと `\\` を名前・値で decode | libarchive mtree escaping | ✅ | `octal_escapes_in_names` |
-| 10 | UTF-8 以外の入力は reject、空パス行は `InvalidData` | crate エラー規約 | ✅ | `rejects_non_utf8` |
+| 10 | UTF-8 以外の入力は拒否、空パス行は `InvalidData` | crate エラー規約 | ✅ | `rejects_non_utf8`、`truncated_at_line_boundaries_yields_prefix` (行境界での切断時は正当なエントリ接頭辞) |
 
 ### キーワード
 

@@ -143,6 +143,30 @@ mod tests {
     }
 
     #[test]
+    fn decode_flag_remainder_bytes_ignored() {
+        // Only flag byte 0 is evaluated; bytes 1-3 are ignored even when
+        // non-zero (matching the reference decoder).
+        let input = [1, 0xAA, 0xBB, 0xCC, b'h', b'i'];
+        assert_eq!(decode(&input).unwrap(), b"hi");
+    }
+
+    #[test]
+    fn decode_verbatim_empty() {
+        // FLAG_COPY with an empty remainder decodes to empty output.
+        let input = [1, 0, 0, 0];
+        assert_eq!(decode(&input).unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn decode_max_len_copy() {
+        // LZRW1-A length bias is 3, so len field 15 gives the maximum
+        // copy length of 18. Item 0 literal 'a', item 1 copy len 18
+        // offset 1 -> 19 bytes of 'a'. Control = 0x0002.
+        let input = [0, 0, 0, 0, 0x02, 0x00, b'a', 0x0f, 0x01];
+        assert_eq!(decode(&input).unwrap(), vec![b'a'; 19]);
+    }
+
+    #[test]
     fn decode_literal_group() {
         // control word 0x0000 + 3 literal bytes (partial group).
         let input = [0, 0, 0, 0, 0, 0, b'a', b'b', b'c'];

@@ -19,7 +19,7 @@
 | 6 | エンコード行長: 先頭行 `:`+63 文字 = 64、以降 64 文字。末尾 `:` は最終データ文字と同行 (最終行 2-65 文字) — 行がちょうど満杯でも `:` は単独行にしない | Lewis "the first line should be 64 characters long, including the colon" + "the last line must be between 2 and 65 characters" | ✅ | `encode_wraps_at_64_columns`, `encode_final_colon_on_last_line` |
 | 7 | 64/アルファベット以外の文字はエラー | Lewis "any character other than those 64 ... indicates an error" | ✅ | `rejects_invalid_chars` |
 | 8 | 末尾 `:` 直前のレガシー `!` 1 個を許容して読み飛ばす (途中の `!` はアルファベット index 0 のデータ文字)。`!`+`:` の終端は曖昧なので、まず legacy drop で parse、失敗すれば `!` をデータ文字として retry | Lewis "Some old programs produced an extra exclamation mark" | ✅ | `prologue_variants` (legacy `!`)、`encode_final_colon_on_last_line` (末尾 `!` データの roundtrip) |
-| 9 | 末尾 `:` なしの切り詰めは拒否 | バリデーション | ✅ | `rejects_crc_and_truncation` |
+| 9 | 末尾 `:` なしの切り詰めは拒否 | バリデーション | ✅ | `rejects_crc_and_truncation`、`rejects_all_truncations` (終端の `:` より前の全切断位置でエラー、`:` を保持する切断は受理) |
 | 21 | `--- end of part NN ---` セグメント分割 | Lewis "Parts" 節 / comp.binaries.mac 慣行 (RFC 1741 に marker 記述なし) | ✅ | `decode_parts(&[&[u8]])` が分割ドキュメントを連結 (part 終端 `--- end of part NN ---` と `---` resume marker を行境界でのみ認識し、HQX 本文との誤認を防ぐ)。`segmented_roundtrip`, `segmented_marker_boundaries`, `rejects_bad_segment_marker` |
 
 ## RLE 層

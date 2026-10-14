@@ -33,11 +33,11 @@
 |---|------|----------|-----------|----------------|
 | 7 | 空データ (seed=0) | xxHash reference algorithm / RFC 8878 checksum usage | ✅ | `test_xxhash64_empty` |
 | 8 | 1バイト入力 | xxHash reference algorithm / RFC 8878 checksum usage | ✅ | `test_xxhash64_1byte` |
-| 9 | 短い入力 (< 32バイト) | xxHash reference algorithm / RFC 8878 checksum usage | ✅ | `test_xxhash64_hello_world`, `test_xxhash64_medium` |
+| 9 | 短い入力 (< 32バイト) | xxHash reference algorithm / RFC 8878 checksum usage | ✅ | `test_xxhash64_hello_world`、`test_xxhash64_medium`、`test_xxhash64_tail_boundaries` (8/4/1 バイト内部境界) |
 | 10 | 長い入力 (≥ 32バイト) | xxHash reference algorithm / RFC 8878 checksum usage | ✅ | `test_xxhash64_long` |
 | 11 | 下位32ビット抽出 (zstdチェックサム用) | xxHash reference algorithm / RFC 8878 checksum usage | ✅ | `test_xxhash64_hello_world_checksum` |
 | 12 | seed ≠ 0 のテスト | xxHash reference algorithm / RFC 8878 checksum usage | ✅ | `test_xxhash64_seed_nonzero` |
-| 13 | 32バイト丁度 (ストライプ境界) | xxHash reference algorithm / RFC 8878 checksum usage | ✅ | `test_xxhash64_exactly_32_bytes` |
+| 13 | 32バイト丁度 (ストライプ境界) | xxHash reference algorithm / RFC 8878 checksum usage | ✅ | `test_xxhash64_exactly_32_bytes`、`test_xxhash64_stripe_boundary_streaming` (31/32/33、63/64/65) |
 
 ### BitReader
 
@@ -45,15 +45,15 @@
 |---|------|----------|-----------|----------------|
 | 14 | LSB-first ビット読み取り | crate internal helper for LSB-first formats | ✅ | `test_read_bits` |
 | 15 | バイト跨ぎ読み取り | crate internal helper for LSB-first formats | ✅ | `test_read_bits_crosses_byte_boundary_direct` |
-| 16 | peek + consume | crate internal helper for LSB-first formats | ✅ | `test_peek_and_consume` |
+| 16 | peek + consume | crate internal helper for LSB-first formats | ✅ | `test_peek_and_consume`、`test_peek_bits_at_empty_stream`、`test_consume_more_than_buffered` |
 | 17 | バイトアラインメント | crate internal helper for LSB-first formats | ✅ | `test_align_to_byte` |
-| 18 | EOF エラー | crate internal helper for LSB-first formats | ✅ | `test_unexpected_eof` |
+| 18 | EOF エラー | crate internal helper for LSB-first formats | ✅ | `test_unexpected_eof`、`test_read_bits_past_end` |
 | 19 | u16 LE 読み取り | crate internal helper for LSB-first formats | ✅ | `test_read_u16_le` |
 | 20 | read_bits(0) | crate internal helper for LSB-first formats | ✅ | `test_read_bits_zero` |
-| 21 | read_bytes | crate internal helper for LSB-first formats | ✅ | `test_read_bytes` |
+| 21 | read_bytes | crate internal helper for LSB-first formats | ✅ | `test_read_bytes`、`test_read_bytes_served_from_bit_buffer`、`test_read_bytes_put_back_past_buffered` |
 | 22 | remaining_bytes | crate internal helper for LSB-first formats | ✅ | `test_remaining_bytes` |
 | 23 | byte_position | crate internal helper for LSB-first formats | ✅ | `test_byte_position` |
-| 24 | remaining_data | crate internal helper for LSB-first formats | ✅ | `test_remaining_data` |
+| 24 | remaining_data | crate internal helper for LSB-first formats | ✅ | `test_remaining_data`、`test_remaining_data_unaligned` |
 | 25 | read_bytes EOF エラー | crate internal helper for LSB-first formats | ✅ | `test_read_bytes_eof` |
 | 26 | read_u16_le EOF エラー | crate internal helper for LSB-first formats | ✅ | `test_read_u16_le_eof` |
 | 27 | peek_bits EOF ゼロパディング | crate internal helper for LSB-first formats | ✅ | `test_peek_bits_zero_padded_at_eof` |
@@ -80,7 +80,7 @@
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
 | 35 | SHA-256 (FIPS 180-4) | FIPS 180-4 | ✅ | util::sha256 実装 |
-| 36 | Known vector: empty → e3b0c442... | FIPS 180-4 | ✅ | test_sha256_empty (もしあれば) |
+| 36 | Known vector: empty → e3b0c442... | FIPS 180-4 | ✅ | `test_sha256_empty`、`test_sha256_abc`、`test_sha256_two_block` (56B・パディング溢れ)、`test_sha256_million_a`、`test_sha256_incremental`、`test_sha256_padding_boundary` |
 
 ### CRC-32C
 
@@ -94,7 +94,7 @@
 |---|------|----------|------|----------------|
 | 38 | SHA-1 (FIPS 180-4) | FIPS 180-4 | ✅ | `util::sha1` 実装、ZIP AES PBKDF2 鍵導出で使用 |
 | 39 | Known vector: empty → da39a3ee... | FIPS 180-4 | ✅ | `test_sha1_empty` |
-| 40 | Known vector: "abc" → a9993e36... | FIPS 180-4 | ✅ | `test_sha1_abc` |
+| 40 | Known vector: "abc" → a9993e36... | FIPS 180-4 | ✅ | `test_sha1_abc`、`test_sha1_two_block` (56B・パディング溢れ)、`test_sha1_million_a`、`test_sha1_padding_boundary` |
 | 41 | Incremental update | FIPS 180-4 | ✅ | `test_sha1_incremental` |
 
 ### CRC-64/XZ
@@ -112,15 +112,15 @@
 |---|------|----------|------|----------------|
 | 46 | XXH32 (one-shot + streaming) | xxHash reference / LZ4 frame checksum | ✅ | `xxhash32()`, `XxHash32` |
 | 47 | Known vector: empty (seed=0) | xxHash reference | ✅ | `test_xxhash32_empty` |
-| 48 | Streaming matches one-shot | xxHash reference | ✅ | `test_xxhash32_streaming_matches_oneshot` |
+| 48 | Streaming matches one-shot | xxHash reference | ✅ | `test_xxhash32_streaming_matches_oneshot`、`test_xxhash32_streaming_vs_oneshot`、`test_xxhash32_stripe_boundary` (16B ストライプ境界) |
 
 ### AES-256
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|------|----------------|
-| 49 | AES-128 / AES-192 / AES-256 (FIPS 197) | FIPS 197 | ✅ | `util::aes256` 実装、7z/ZIP 暗号化で使用 |
-| 50 | AES-CTR mode (ZIP-compatible) | WinZip AES spec | ✅ | `apply_ctr_zip_compatible()` |
-| 51 | AES-CBC mode (7zAES) | 7z Methods.txt | ✅ | `decrypt_cbc_truncated()` / `encrypt_cbc_zero_padded()` |
+| 49 | AES-128 / AES-192 / AES-256 (FIPS 197) | FIPS 197 | ✅ | `util::aes256` 実装、7z/ZIP 暗号化で使用。`test_aes256_block_vector`、`test_aes128_block_vector`、`test_aes192_block_vector` (FIPS 197 vectors) |
+| 50 | AES-CTR mode (ZIP-compatible) | WinZip AES spec | ✅ | `apply_ctr_zip_compatible()`。`test_ctr_roundtrip`、`test_aes128_ctr_roundtrip`、`test_aes192_ctr_roundtrip`、`test_ctr_block_boundary` (15/16/17、31/32/33B)、`test_ctr_empty` |
+| 51 | AES-CBC mode (7zAES) | 7z Methods.txt | ✅ | `decrypt_cbc_truncated()` / `encrypt_cbc_zero_padded()`。`test_cbc_roundtrip_zero_padding`、`test_cbc_rejects_non_block_multiple` (非16倍数拒否)、`test_cbc_rejects_expected_len_beyond_ciphertext`、`test_cbc_empty_plaintext` |
 
 > 注: `util::aes256` は constant-time 実装ではない (逆 S-box がデータ依存の全探索、GF(2^8) ヘルパがデータ依存ループ)。用途はレガシーフォーマット相互運用 (WinZip AES, 7z AES, PEA AES ストリーム) に限定され、タイミングサイドチャネルが問題になる用途には使わないこと。同様に MD5/SHA-1 は暗号学的に弱い・破られているが、レガシー相互運用目的の実装である。
 
@@ -138,7 +138,7 @@
 |---|------|----------|------|----------------|
 | 55 | SHA-512 メッセージダイジェスト | FIPS 180-4 | ✅ | `util::sha512` (xar/rpm feature)。`test_sha512_empty`, `test_sha512_abc`, `test_sha512_two_block`, `test_sha512_million_a`, `test_sha512_padding_boundary` |
 | 56 | Whirlpool-512 メッセージダイジェスト | ISO/IEC 10118-3 / Whirlpool 仕様 (非特許宣言済み) | ✅ | `util::whirlpool` (pea/xar features)。C テーブルは S-box + 巡回行から const fn で生成。`test_whirlpool_empty`, `test_whirlpool_abc`, `test_whirlpool_incremental`, `test_whirlpool_padding_boundary` |
-| 57 | PBKDF2 (SHA-1 / Whirlpool) | RFC 2898 + PEA KDF ワイヤ仕様 | ✅ | `util::pbkdf2` (pea feature)。`test_pbkdf2_sha1_rfc6070`, `test_pbkdf2_whirlpool`, `test_pbkdf2_sha1_xkey_layout`, `test_hmac_sha1_rfc2202`, `test_hmac_long_key` |
+| 57 | PBKDF2 (SHA-1 / Whirlpool) | RFC 2898 + PEA KDF ワイヤ仕様 | ✅ | `util::pbkdf2` (pea feature)。`test_pbkdf2_sha1_rfc6070`、`test_pbkdf2_sha1_4096_iterations`、`test_pbkdf2_whirlpool`、`test_pbkdf2_sha1_xkey_layout`、`test_pbkdf2_out_len_boundaries` (0/19/20/21、40/41)、`test_hmac_sha1_rfc2202`、`test_hmac_long_key`、`test_hmac_block_size_key_boundary` (64/65B 鍵) |
 | 58 | AES-EAX 認証付き暗号 (OMAC1 + CTR) | EAX (Bellare-Rogaway-Wagner) + SP 800-38A/38B | ✅ | `util::eax` (pea feature)。`test_eax_paper_vectors`, `test_eax_gladman_vectors`, `test_eax_rejects_bad_tag` |
 
 ### その他ユーティリティ
@@ -147,9 +147,9 @@
 |---|------|----------|-----------|----------------|
 | 59 | CRC-16/ARC (poly 0x8005 reflected) | CRC-16/ARC 規約 | ✅ | `util::crc16` (lha/arc features)。`check_value` |
 | 60 | CRC-16/CCITT + AUG バリアント | CRC-16/CCITT 規約 | ✅ | `util::crc16ccitt` (macbinary/binhex features)。`check_value`, `augmented` |
-| 61 | 出力サイズ上限チェック (decompression bomb 防御) | crate internal | ✅ | `util::bounded::check_output_limit` (feature 非依存)。`within_limit`, `at_exact_limit`, `exceeds_limit`, `no_limit`, `zero_limit`, `zero_additional_at_limit`, `saturating_overflow` |
+| 61 | 出力サイズ上限チェック (decompression bomb 防御) | crate internal | ✅ | `util::bounded::check_output_limit` (feature 非依存)。`within_limit`、`at_exact_limit`、`exceeds_limit`、`no_limit`、`zero_limit`、`zero_additional_at_limit`、`saturating_overflow`、`zero_at_zero_limit` |
 | 62 | Base64 codec (RFC 4648) | RFC 4648 | ✅ | `util::base64` (uuencode feature、POSIX uuencode Base64 アルゴリズム用)。`test_rfc4648_vectors`, `test_roundtrip_binary`, `test_rejects_*` 系 |
-| 63 | Subbotin carry-less range coder (LZMA 系エントロピー符号の共有部品) | LZMA spec / de facto | ✅ | `util::range_coder` (lzip/lrzip/xz/sevenz features)。`test_range_coder_roundtrip_*`, `test_encoder_normalizes_after_bit_operations`, `test_decoder_*` |
+| 63 | Subbotin carry-less range coder (LZMA 系エントロピー符号の共有部品) | LZMA spec / de facto | ✅ | `util::range_coder` (lzip/lrzip/xz/sevenz features)。`test_range_coder_roundtrip_*`、`test_encoder_normalizes_after_bit_operations`、`test_decoder_*`、`test_decoder_direct_bits_stream_exhaustion` (正規化バイト枯渇 EOF 境界)、`test_decoder_position_and_finished` |
 
 ---
 

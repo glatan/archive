@@ -145,6 +145,68 @@ mod tests {
     }
 
     #[test]
+    fn decode_flag_remainder_bytes_ignored() {
+        // Only flag byte 0 is evaluated; bytes 1-3 are ignored even when
+        // non-zero (matching the reference decoder, which leaves them
+        // uninitialized in its output).
+        let input = [1, 0xAA, 0xBB, 0xCC, b'h', b'i'];
+        assert_eq!(decode(&input).unwrap(), b"hi");
+    }
+
+    #[test]
+    fn decode_verbatim_empty() {
+        // FLAG_COPY with an empty remainder decodes to empty output.
+        let input = [1, 0, 0, 0];
+        assert_eq!(decode(&input).unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn decode_trailing_orphan_byte() {
+        // After a complete 16-item group, a single dangling byte cannot
+        // start a new control word and is ignored (the reference decoder
+        // would read past the buffer; this implementation is lenient).
+        let mut input = vec![0u8, 0, 0, 0, 0x00, 0x00];
+        input.extend_from_slice(b"abcdefghijklmnop");
+        input.push(0xFF); // orphan byte, < 2 bytes for a control word
+        assert_eq!(decode(&input).unwrap(), b"abcdefghijklmnop");
+    }
+
+    #[test]
+    fn decode_group_boundary_16_items() {
+        // A group holds at most 16 items; item 17 must start a new group
+        // with a fresh control word.
+        let mut input = vec![0u8, 0, 0, 0];
+        input.extend_from_slice(&[0x00, 0x00]); // group 1: all literals
+        input.extend_from_slice(b"abcdefghijklmnop"); // 16 literals
+        input.extend_from_slice(&[0x00, 0x00]); // group 2
+        input.push(b'Z');
+        let mut expected = b"abcdefghijklmnop".to_vec();
+        expected.push(b'Z');
+        assert_eq!(decode(&input).unwrap(), expected);
+    }
+
+    #[test]
+    fn decode_max_offset_copy() {
+        // offset 4095 (12-bit field maximum) copies from output position 0.
+        let mut input = vec![0u8, 0, 0, 0];
+        // 255 full literal groups -> 4080 bytes; first byte 'A', rest 'z'.
+        for g in 0..255 {
+            input.extend_from_slice(&[0x00, 0x00]);
+            for i in 0..16 {
+                input.push(if g == 0 && i == 0 { b'A' } else { b'z' });
+            }
+        }
+        // Final group: 15 literals ('z') then a copy item (bit 15).
+        input.extend_from_slice(&[0x00, 0x80]); // control: bit 15 = copy
+        input.extend_from_slice(&[b'z'; 15]);
+        input.extend_from_slice(&[0xF0, 0xFF]); // len 1, offset 4095
+        let mut expected = vec![b'z'; 4096];
+        expected[0] = b'A';
+        expected[4095] = b'A';
+        assert_eq!(decode(&input).unwrap(), expected);
+    }
+
+    #[test]
     fn decode_literal_group() {
         // control word 0x0000 + 3 literal bytes (partial group).
         let input = [0, 0, 0, 0, 0, 0, b'a', b'b', b'c'];
