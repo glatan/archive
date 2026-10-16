@@ -5,6 +5,7 @@ FUZZ_IMAGE = archive-fuzz
 FUZZ_ALGORITHM ?= all
 FUZZ_DURATION ?= 60
 FUZZ_PATTERN ?= all
+FUZZ_JOBS ?= 1
 
 .PHONY: test
 test:
@@ -16,9 +17,15 @@ fuzz:
 		-v ./fuzz/failures:/workspace/fuzz/failures \
 		-v ./fuzz/corpus:/workspace/fuzz/corpus \
 		$(FUZZ_IMAGE) \
+		run \
 		--algorithm $(FUZZ_ALGORITHM) \
 		--duration $(FUZZ_DURATION) \
-		--pattern $(FUZZ_PATTERN)
+		--pattern $(FUZZ_PATTERN) \
+		--jobs $(FUZZ_JOBS)
+
+.PHONY: clean-fuzz
+clean-fuzz:
+	cargo run -q --profile fuzz -p archive-fuzz -- clean
 
 .PHONY: debug-shell
 debug-shell:

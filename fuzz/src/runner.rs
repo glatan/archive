@@ -50,6 +50,8 @@ pub struct RunConfig {
     pub output_dir: String,
     pub corpus_dir: String,
     pub fixtures_dir: String,
+    /// Per-algorithm cap on corpus entries; `0` means unlimited.
+    pub corpus_max_entries: usize,
 }
 
 struct RunState<'a> {
@@ -62,6 +64,14 @@ struct RunState<'a> {
     failure_buckets: Mutex<HashMap<String, u64>>,
     observations: Mutex<HashSet<String>>,
     corpus_pool: Mutex<Vec<Vec<u8>>>,
+    /// Per-algorithm on-disk corpus accounting for bounded saves. Per-algorithm
+    /// locks keep `--jobs > 1` harvests from serializing on one global mutex.
+    corpus_state: HashMap<Algorithm, Mutex<corpus::CorpusDirState>>,
+    /// Count of harvest pushes admitted into corpus_pool under the cap;
+    /// pool.len() cannot serve because load-adopted entries share the pool.
+    /// The bound is global across algorithms while the on-disk cap stays
+    /// per-algorithm.
+    harvested_corpus: Mutex<usize>,
 }
 
 struct TestOutcome {
@@ -140,6 +150,14 @@ pub fn run(config: &RunConfig) -> Stats {
         )
     });
     watchdog::init(&run_dir);
+    let stale = watchdog::count_stale_breadcrumbs(output_dir);
+    if stale > 0 {
+        eprintln!(
+            "[warn] found {stale} stale in-flight breadcrumbs under {} \
+             (a previous run or replay aborted mid-case; ignore if another run is active)",
+            output_dir.display()
+        );
+    }
     fixtures::init(Path::new(&config.fixtures_dir));
     install_panic_hook();
     report::write_run_manifest(
@@ -163,15 +181,37 @@ pub fn run(config: &RunConfig) -> Stats {
         .into_iter()
         .map(|case| case.data)
         .collect();
-    corpus_pool.extend(corpus::load_union_corpus(
+    // Loading prunes oversized corpus dirs down to the cap; the adopted file
+    // names it reports seed the in-memory accounting for bounded saves, so the
+    // state always reflects the post-prune directory.
+    let loaded = corpus::load_union_corpus(
         &corpus_root,
         &config.algorithms,
         config.min_size,
         config.max_size,
-    ));
+        config.corpus_max_entries,
+        config.seed,
+    );
+    corpus_pool.extend(loaded.pool);
+    let corpus_state = loaded
+        .dir_names
+        .into_iter()
+        .map(|(algo, names)| {
+            (
+                algo,
+                Mutex::new(corpus::CorpusDirState::new(names, algo, config.seed)),
+            )
+        })
+        .collect();
 
     eprintln!("[info] run directory: {}", run_dir.display());
     eprintln!("[info] corpus directory: {}", corpus_root.display());
+    if config.corpus_max_entries > 0 {
+        eprintln!(
+            "[info] corpus cap: {} entries per algorithm",
+            config.corpus_max_entries
+        );
+    }
     eprintln!("[info] execution mode: {}", mode_label(config.mode));
     eprintln!("[info] jobs: {}", config.jobs.max(1));
 
@@ -197,6 +237,8 @@ pub fn run(config: &RunConfig) -> Stats {
         failure_buckets: Mutex::new(HashMap::new()),
         observations: Mutex::new(HashSet::new()),
         corpus_pool: Mutex::new(corpus_pool),
+        corpus_state,
+        harvested_corpus: Mutex::new(0),
     };
 
     let mut iteration: u64 = 0;
@@ -868,12 +910,49 @@ fn harvest_corpus_entry(
     label: &str,
     data: &[u8],
 ) -> Result<(), String> {
-    if let Some(path) = corpus::save_corpus_entry(&state.corpus_root, algo, label, data)? {
-        state
-            .corpus_pool
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(data.to_vec());
+    let max_entries = state.config.corpus_max_entries;
+    let saved = match state.corpus_state.get(&algo) {
+        Some(algo_state) if max_entries > 0 => {
+            // Lock order is one-directional: corpus_state, then
+            // harvested_corpus / corpus_pool below. Nothing locks in reverse.
+            let mut dir_state = algo_state.lock().unwrap_or_else(|e| e.into_inner());
+            corpus::save_corpus_entry_bounded(
+                &state.corpus_root,
+                algo,
+                label,
+                data,
+                &mut dir_state,
+                max_entries,
+            )?
+        }
+        _ => corpus::save_corpus_entry(&state.corpus_root, algo, label, data)?,
+    };
+
+    if let Some(path) = saved {
+        // The cap bounds harvest pushes only; entries adopted at load are
+        // already bounded by the per-algorithm directory cap. Counting pushes
+        // rather than pool.len() keeps a large adopted corpus from starving
+        // new observations for the whole run.
+        if max_entries == 0 {
+            state
+                .corpus_pool
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(data.to_vec());
+        } else {
+            let mut harvested = state
+                .harvested_corpus
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if *harvested < max_entries {
+                state
+                    .corpus_pool
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(data.to_vec());
+                *harvested += 1;
+            }
+        }
         eprintln!("[corpus] saved {} -> {}", algo.name(), path.display());
     }
     Ok(())
@@ -1243,7 +1322,7 @@ fn field_positions(len: usize) -> Vec<usize> {
     positions
 }
 
-/// Deterministic seed for the corrupt pattern so `--replay` and the
+/// Deterministic seed for the corrupt pattern so `replay` and the
 /// minimizer re-derive identical mutations for a given input.
 fn corrupt_seed(data: &[u8]) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
@@ -1259,7 +1338,7 @@ fn corrupt_seed(data: &[u8]) -> u64 {
 /// Replay a single artifact or every `*.json` artifact in a directory.
 /// Returns `Err` when at least one recorded failure still reproduces.
 pub fn replay_path(path: &Path, fixtures_dir: &Path) -> Result<(), String> {
-    // `--replay foo.mut.bin` names a corrupt sidecar directly; resolve it
+    // `replay foo.mut.bin` names a corrupt sidecar directly; resolve it
     // to the companion artifact so the report metadata is loaded too.
     let resolved;
     let path = if path
@@ -1596,6 +1675,7 @@ mod tests {
             output_dir: tmp.display().to_string(),
             corpus_dir: tmp.join("corpus").display().to_string(),
             fixtures_dir: tmp.join("fixtures").display().to_string(),
+            corpus_max_entries: 0,
         };
         let available_tools = HashSet::new();
         let state = RunState {
@@ -1608,6 +1688,8 @@ mod tests {
             failure_buckets: Mutex::new(HashMap::new()),
             observations: Mutex::new(HashSet::new()),
             corpus_pool: Mutex::new(Vec::new()),
+            corpus_state: HashMap::new(),
+            harvested_corpus: Mutex::new(0),
         };
 
         let data = b"boom";

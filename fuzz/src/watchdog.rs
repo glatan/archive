@@ -55,6 +55,39 @@ pub fn init(run_dir: &Path) {
     }
 }
 
+/// Count leftover `inflight-*.json` breadcrumbs in `run-*` directories under
+/// `failures_root`. Breadcrumbs are removed when a case finishes, so leftovers
+/// mean a previous run (or replay) aborted mid-case. Only `.json` files are
+/// counted; each breadcrumb has a `.bin` sibling.
+pub fn count_stale_breadcrumbs(failures_root: &Path) -> usize {
+    let Ok(read_dir) = fs::read_dir(failures_root) else {
+        return 0;
+    };
+    read_dir
+        .filter_map(Result::ok)
+        .filter(|e| {
+            e.file_name()
+                .to_str()
+                .is_some_and(|n| n.starts_with("run-"))
+                && e.path().is_dir()
+        })
+        .map(|e| {
+            fs::read_dir(e.path())
+                .map(|inner| {
+                    inner
+                        .filter_map(Result::ok)
+                        .filter(|f| {
+                            f.file_name()
+                                .to_str()
+                                .is_some_and(|n| n.starts_with("inflight-") && n.ends_with(".json"))
+                        })
+                        .count()
+                })
+                .unwrap_or(0)
+        })
+        .sum()
+}
+
 /// Scale the hang budget with input size. The runtime oracle allows up to
 /// `input_size / 32` ms of work; the watchdog stays well above it so slow but
 /// legitimate decodes are never reported as hangs.
@@ -368,5 +401,30 @@ mod tests {
     fn hang_budget_is_bounded() {
         assert_eq!(hang_budget(0), HANG_TIMEOUT);
         assert!(hang_budget(usize::MAX) <= MAX_HANG_BUDGET);
+    }
+
+    #[test]
+    fn count_stale_breadcrumbs_counts_json_inside_run_dirs() {
+        let tmp = std::env::temp_dir().join(format!(
+            "archive-fuzz-stale-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let run = tmp.join("run-100");
+        fs::create_dir_all(&run).unwrap();
+        fs::write(run.join("inflight-0.json"), b"{}").unwrap();
+        fs::write(run.join("inflight-0.bin"), b"x").unwrap();
+        // Outside any run-* dir: not counted.
+        fs::write(tmp.join("inflight-top.json"), b"{}").unwrap();
+        // A non-run-* dir is not scanned.
+        let other = tmp.join("notes");
+        fs::create_dir_all(&other).unwrap();
+        fs::write(other.join("inflight-9.json"), b"{}").unwrap();
+
+        assert_eq!(count_stale_breadcrumbs(&tmp), 1);
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 }

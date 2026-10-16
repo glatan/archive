@@ -7,10 +7,10 @@
 ```sh
 # 全アルゴリズム、60 秒 (デフォルト)。`fuzz` profile は release 最適化に
 # debug-assertions / overflow-checks を有効化したもの
-cargo run --profile fuzz -p archive-fuzz
+cargo run --profile fuzz -p archive-fuzz -- run
 
 # gzip と bzip2 のみ、30 秒
-cargo run --profile fuzz -p archive-fuzz -- --algorithm gzip,bzip2 --duration 30
+cargo run --profile fuzz -p archive-fuzz -- run --algorithm gzip,bzip2 --duration 30
 ```
 
 ## テストパターン
@@ -24,13 +24,13 @@ cargo run --profile fuzz -p archive-fuzz -- --algorithm gzip,bzip2 --duration 30
 
 ```sh
 # self パターンのみ
-cargo run --profile fuzz -p archive-fuzz -- --pattern self
+cargo run --profile fuzz -p archive-fuzz -- run --pattern self
 
 # corrupt パターンのみ (decoder の malformed-input 耐性)
-cargo run --profile fuzz -p archive-fuzz -- --pattern corrupt
+cargo run --profile fuzz -p archive-fuzz -- run --pattern corrupt
 
 # original-decompress (外部ツールが必要)
-cargo run --profile fuzz -p archive-fuzz -- --pattern original-decompress
+cargo run --profile fuzz -p archive-fuzz -- run --pattern original-decompress
 ```
 
 外部ツールが見つからない場合、該当パターンを自動的にスキップする。
@@ -62,7 +62,7 @@ fixture が存在しない環境では fixture フェーズのみスキップす
 
 失敗した場合、失敗を起こした **変異後ストリームそのもの** が `.mut.bin` sidecar として保存され、
 `mut_file` / `mutation` (例: `fixture#19/truncate@226589`) が `.json` に記録される。
-`--replay` は `.mut.bin` があればそれを直接 decode して再現性を確認するため、
+`replay` は `.mut.bin` があればそれを直接 decode して再現性を確認するため、
 replay は fixture の有無や encode 経路に依存しない。
 
 ### レベルエイリアス
@@ -121,7 +121,7 @@ hwzip (zip method 1-6) などのツールは、テスト用 fixture の生成時
 `fuzz/corpus/` をシードとしてミューテーションを行い、新規入力を探索する。
 
 ```sh
-cargo run --release -p archive-fuzz -- \
+cargo run --profile fuzz -p archive-fuzz -- run \
   --algorithm gzip,zip,7z \
   --mode coverage-guided \
   --jobs 2 \
@@ -131,6 +131,26 @@ cargo run --release -p archive-fuzz -- \
 
 新規に観測された入力（novel observation）は `fuzz/corpus/<algorithm>/` に収集する。
 `make fuzz`（コンテナ実行）でも `fuzz/corpus/` をマウントするため、収集したコーパスはホスト側に保持される。
+`make fuzz` は `FUZZ_JOBS` でアルゴリズムの並列度を指定できる (既定 1)。
+
+### コーパスの上限
+
+`--corpus-max-entries N` で **アルゴリズムごとの** コーパス件数を制限する (既定 1024、
+`0` で無制限)。アルゴリズム間の偏りと単一ディレクトリの肥大化を防ぐためのものであり、
+全体件数の厳密な上限ではない (アルゴリズム数 × N まで増え得る)。
+
+- 起動時のコーパス読み込みで件数が上限を超えていた場合、決定的シードでランダムに
+  N 件を残して削除する (`--min-size` / `--max-size` の範囲内のエントリを優先し、
+  残りの枠は範囲外のエントリで埋めるため、サイズ指定の違いで必要以上には削除されない)。
+  これにより肥大化したコーパスは 1 回の実行で上限に収束する。
+  この prune は `--mode time` を含む全モードで起動時に実行される点に注意 (コーパスを
+  保持したい場合は `--corpus-max-entries 0` を指定する)。
+- 実行中に新規保存するとき上限に達していれば、ランダムに既存エントリを 1 件削除してから
+  書き込む。同一ファイル名 (ラベル + 内容ハッシュ) のエントリが既に存在する場合は
+  削除せず保存もしない (重複排除優先)。メモリ上の mutation pool への収穫入力の追加も
+  アルゴリズム全体で合計 N 件までとする。
+- サンプリングと victim 選択には実行シードとは別の専用 RNG を使うため、
+  `--seed` によるテストケース生成の再現性はコーパス管理の有無で変わらない。
 
 ## Special case matrix
 
@@ -164,6 +184,11 @@ probe 毎にリセットされるため、多数の高速 probe を走らせる�
 ネストした `enter` (minimizer 等) も in-memory 更新のみで、外側の breadcrumb を保つ。
 abort 時点で実行中だった外部ツールの子プロセスは孤児として残り得る点に注意。
 
+`run` は起動時に failures ディレクトリ配下の `run-*` に残った `inflight-*.json`
+breadcrumb を数え、見つかれば警告を出す (前回の run / replay がケース途中で
+abort された痕跡)。別の run が同じ failures ディレクトリで同時実行中の場合は
+その実行中 breadcrumb も拾うため false positive になり得る。
+
 ## Failure artifact
 
 各失敗ケースは最小化および重複排除の後、`.json` と `.bin` のペアとして保存する。
@@ -189,30 +214,60 @@ fuzz/failures/
 
 ```sh
 # failure をリプレイ (corrupt artifact は .mut.bin を直接 decode)
-cargo run --profile fuzz -p archive-fuzz -- --replay fuzz/failures/run-.../failure-....json
+cargo run --profile fuzz -p archive-fuzz -- replay fuzz/failures/run-.../failure-....json
 
 # .mut.bin を直接指定しても companion .json に解決される
-cargo run --profile fuzz -p archive-fuzz -- --replay fuzz/failures/run-.../failure-....mut.bin
+cargo run --profile fuzz -p archive-fuzz -- replay fuzz/failures/run-.../failure-....mut.bin
 
 # hang-*.json (watchdog artifact) もリプレイ可能: corrupt は記録バイトを
 # 直接 decode、他パターンは入力を再実行。まだハングするなら watchdog が abort する
-cargo run --profile fuzz -p archive-fuzz -- --replay fuzz/failures/run-.../hang-....json
+cargo run --profile fuzz -p archive-fuzz -- replay fuzz/failures/run-.../hang-....json
 
 # ディレクトリ指定で一括リプレイ (非 artifact の json はスキップ)
-cargo run --profile fuzz -p archive-fuzz -- --replay fuzz/failures/run-.../
+cargo run --profile fuzz -p archive-fuzz -- replay fuzz/failures/run-.../
 
 # fixture とテスト雛形をエクスポート
-cargo run --profile fuzz -p archive-fuzz -- --export-regression fuzz/failures/run-.../failure-....json
+cargo run --profile fuzz -p archive-fuzz -- export-regression fuzz/failures/run-.../failure-....json
 
 # tests/integration/generated/ へインポート (module index も更新)
-cargo run --profile fuzz -p archive-fuzz -- --import-regression fuzz/failures/run-.../failure-....json
+cargo run --profile fuzz -p archive-fuzz -- import-regression fuzz/failures/run-.../failure-....json
 ```
 
-`--export-regression` はフィクスチャとテスト雛形のみを出力する。
-`--import-regression` はそれに加えて `tests/integration/generated/` のモジュールインデックスも更新する。
+`export-regression` はフィクスチャとテスト雛形のみを出力する。
+`import-regression` はそれに加えて `tests/integration/generated/` のモジュールインデックスも更新する。
 外部ツールを要するパターンは `#[ignore]` 属性付きのプレースホルダーとして生成する。
 `corrupt` artifact は `.mut.bin` があれば実際の decoder 耐性テスト
 (「decode が panic せず終了すること」を検証) として生成される。
+
+## 成果物のクリーンアップ
+
+蓄積した failure artifact と corpus を削除するには `clean` サブコマンドを使う。
+`--failures-dir` / `--corpus-dir` で対象ディレクトリを変更でき、ディレクトリ自体と
+`.gitkeep` は残る (対象はいずれも gitignore 済みの生成物)。
+
+```sh
+cargo run --profile fuzz -p archive-fuzz -- clean
+
+# ホスト側では make ターゲット経由でも同じ
+make clean-fuzz
+```
+
+オプション:
+
+| フラグ | 説明 |
+|--------|------|
+| `--keep-latest N` | failures 内の `run-<epoch>` / `run-<epoch>-<n>` ディレクトリのうち新しい N 件を残す (epoch と衝突サフィックスで比較)。`run-*` 以外のエントリは対象に含めず常に削除する |
+| `--failures-only` | failures のみ削除 (corpus は触らない) |
+| `--corpus-only` | corpus のみ削除 (failures は触らない)。`--keep-latest` と `--failures-only` とは併用不可 |
+
+## 過去 run のサマリ表示
+
+`summary` サブコマンドは run ディレクトリ (またはその `summary.json`) を読み、
+集計を表示するだけの read-only コマンドである。
+
+```sh
+cargo run --profile fuzz -p archive-fuzz -- summary fuzz/failures/run-...
+```
 
 ## Known issues
 

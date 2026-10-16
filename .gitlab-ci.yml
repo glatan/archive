@@ -161,20 +161,21 @@ fuzz-smoke:
   script:
     - cargo test -p archive-fuzz
     - >-
-      cargo run -q -p archive-fuzz --
+      cargo run -q --profile fuzz -p archive-fuzz --
+      run
       --algorithm gzip,zip,7z,tar-pax,cpio,ar
       --pattern self
       --mode coverage-guided
       --jobs 2
       --duration 5
-      --output fuzz/failures
+      --failures-dir fuzz/failures
       --corpus-dir fuzz/corpus
     - |
       latest_run=$(find fuzz/failures -maxdepth 1 -type d -name 'run-*' | sort | tail -n 1)
       if [ -n "$latest_run" ]; then
         first_json=$(find "$latest_run" -maxdepth 1 -name '*.json' ! -name 'manifest.json' ! -name 'summary.json' ! -name 'matrix.json' | sort | head -n 1)
         if [ -n "$first_json" ]; then
-          cargo run -q -p archive-fuzz -- --replay "$first_json"
+          cargo run -q --profile fuzz -p archive-fuzz -- replay "$first_json"
         fi
       fi
   artifacts:
