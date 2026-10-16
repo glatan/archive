@@ -262,7 +262,7 @@
 このディレクトリのフィクスチャは、ファズテストで検出された不具合を再現するための最小化入力である。
 人間が判読可能なデータ構造は持たないが、特定の失敗パターンをリグレッションテストとして決定論的に固定・再現する役割を持つ。
 
-`fuzz/generated/` 以下は `archive-fuzz --import-regression` が自動生成する fixtures と、
+`fuzz/generated/` 以下は `archive-fuzz import-regression` が自動生成する fixtures と、
 `tests/integration/generated/` のテストから参照される。ファイル名は失敗シグネチャ由来のため
 個別の provenance は記さない。
 

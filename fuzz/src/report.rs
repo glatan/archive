@@ -394,7 +394,7 @@ pub fn write_run_manifest(run_dir: &Path, info: RunManifestInfo<'_>) -> Result<(
     write_json(run_dir.join("manifest.json"), &manifest)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct PatternSummary {
     pattern: String,
     count: u64,
@@ -403,7 +403,48 @@ struct PatternSummary {
     duplicates: u64,
 }
 
-#[derive(Serialize)]
+/// Print the saved `summary.json` of a past run (a run directory or the file
+/// itself) to stderr. Read-only; used by `archive-fuzz summary`.
+pub fn print_summary_file(path: &Path) -> Result<(), String> {
+    let file = if path.is_dir() {
+        path.join("summary.json")
+    } else {
+        path.to_path_buf()
+    };
+    let text =
+        fs::read_to_string(&file).map_err(|e| format!("read {} failed: {e}", file.display()))?;
+    let summary: RunSummary =
+        serde_json::from_str(&text).map_err(|e| format!("parse {} failed: {e}", file.display()))?;
+
+    eprintln!("=== Fuzz Test Summary ===");
+    eprintln!(
+        "Timestamp: {} | Duration: {}s | Total: {} (fail: {}, dup: {})",
+        summary.timestamp,
+        summary.duration_seconds,
+        summary.total,
+        summary.total_failures,
+        summary.total_duplicates
+    );
+    for p in &summary.patterns {
+        eprintln!(
+            "  {:25} {:>6}  (fail: {}, known: {}, dup: {})",
+            p.pattern, p.count, p.failures, p.known_issues, p.duplicates
+        );
+    }
+
+    if !summary.failure_buckets.is_empty() {
+        eprintln!();
+        eprintln!("Failure buckets:");
+        let mut buckets: Vec<_> = summary.failure_buckets.iter().collect();
+        buckets.sort_by(|a, b| b.1.cmp(a.1));
+        for (signature, count) in buckets.iter().take(10) {
+            eprintln!("  {count:>4}x {signature}");
+        }
+    }
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize)]
 struct RunSummary {
     timestamp: String,
     duration_seconds: u64,
@@ -422,9 +463,9 @@ pub fn write_run_summary(
 ) -> Result<(), String> {
     let patterns = [
         TestPattern::Self_,
-        TestPattern::Corrupt,
         TestPattern::OriginalCompress,
         TestPattern::OriginalDecompress,
+        TestPattern::Corrupt,
     ]
     .into_iter()
     .map(|pattern| PatternSummary {
@@ -749,6 +790,37 @@ mod tests {
         let loaded = load_failure(&json).unwrap();
         assert_eq!(loaded.report.algorithm, "gzip");
         assert_eq!(loaded.data, data);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn print_summary_file_reads_run_dir_and_file() {
+        use super::{Stats, print_summary_file, write_run_summary};
+        use std::collections::HashMap;
+
+        let tmp = std::env::temp_dir().join(format!(
+            "archive-fuzz-summary-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let run_dir = tmp.join("run-1");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let stats = Stats {
+            counts: HashMap::new(),
+            failures: HashMap::new(),
+            known_issues: HashMap::new(),
+            duplicates: HashMap::new(),
+        };
+        write_run_summary(&run_dir, 5, &stats, &HashMap::new()).unwrap();
+
+        assert!(print_summary_file(&run_dir).is_ok());
+        assert!(print_summary_file(&run_dir.join("summary.json")).is_ok());
+        assert!(print_summary_file(&tmp.join("missing")).is_err());
+        std::fs::write(tmp.join("bad.json"), b"not json").unwrap();
+        assert!(print_summary_file(&tmp.join("bad.json")).is_err());
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

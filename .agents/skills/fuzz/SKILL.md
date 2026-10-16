@@ -11,14 +11,14 @@ description: "圧縮ファズテスト実行 → リグレッションテスト�
 Podman でコンテナビルド・実行:
 ```sh
 make build-container.fuzz
-make fuzz FUZZ_ALGORITHM=<algo> FUZZ_DURATION=<seconds> [FUZZ_PATTERN=<pattern>]
+make fuzz FUZZ_ALGORITHM=<algo> FUZZ_DURATION=<seconds> [FUZZ_PATTERN=<pattern>] [FUZZ_JOBS=<n>]
 ```
 
 補足:
-- コンテナ実行前に `fuzz/failures/` の古い artifact を消すか、タイムスタンプで今回生成分だけを見る
+- コンテナ実行前に `fuzz/failures/` の古い artifact を消すか (成果物は `make clean-fuzz` で一括削除可能)、タイムスタンプで今回生成分だけを見る
 - container が重いときはローカル実行:
   ```sh
-  cargo run -p archive-fuzz -- --algorithm <algo> --duration <seconds>
+  cargo run --profile fuzz -p archive-fuzz -- run --algorithm <algo> --duration <seconds>
   ```
 
 ## Step 2: `@fuzz-analyzer` で分析

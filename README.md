@@ -123,10 +123,10 @@ archive test sample.bz2                  # 整合性検証
 roundtrip / 外部ツール相互運用 / regression 検出の fuzz ハーネス。
 
 ```sh
-cargo run --release -p archive-fuzz                                         # 全アルゴリズム 60 秒
-cargo run --release -p archive-fuzz -- --algorithm gzip,zip --duration 30   # 指定のみ
-cargo run --release -p archive-fuzz -- --mode coverage-guided --jobs 2      # corpus-guided
-cargo run --release -p archive-fuzz -- --replay fuzz/failures/run-.../f.json  # 再現
+cargo run --profile fuzz -p archive-fuzz -- run                                     # 全アルゴリズム 60 秒
+cargo run --profile fuzz -p archive-fuzz -- run --algorithm gzip,zip --duration 30 # 指定のみ
+cargo run --profile fuzz -p archive-fuzz -- run --mode coverage-guided --jobs 2    # corpus-guided
+cargo run --profile fuzz -p archive-fuzz -- replay fuzz/failures/run-.../f.json    # 再現
 ```
 
 4 種のテストパターン (`self` / `original-compress` / `original-decompress` / `corrupt`) + special case matrix + resource oracle。
