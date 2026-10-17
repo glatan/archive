@@ -1377,6 +1377,10 @@ pub fn decode_bounded_with(
                 .find(|e| e.kind == erofs::decode::ErofsKind::File)
                 .map_or(Vec::new(), |e| e.data))
         }
+        // Block `u_len` is the library cap, except `usize::MAX`, which the
+        // library rejects. A mutated `chunk_bytes` of 4..=8 can still declare
+        // a huge finite `u_len`, so the corrupt probe also applies `max_output`.
+        Algorithm::LrzipZpaq => lrzip::decode::decode_bounded(data, max_output),
         _ => decode_with(algo, data),
     }
 }

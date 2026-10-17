@@ -78,6 +78,7 @@
 | 40 | v0.6 data blocks: stream0 末端の empty literal (type 0, len 0) + CRC32 | magic.header.txt v0.6 Data blocks | ✅ | `decode_chunk_streams` で `legacy_crc32` 検証、`test_crc32_verified` |
 | 41 | magic bytes 6-13 の Source File Size は unknown 時 0 (upstream 記載) | magic.header.txt | ✅ | 実装済み — `total_size == 0` は unknown として size 検査を skip (decode / streaming reader 双方)。`test_zero_total_size_is_unknown` |
 | 42 | v0.7 節 (byte 14 streaming flag、byte 23 last-block、LRZC、CryptoDesc、minor=0x07) および v0.5x 以前の旧レイアウト (固定長 stream header、RCD0 なし) | magic.header.txt v0.7 / v0.5x | ❌ | intentional scope。対象を 0.6x に限定しているため、`minor != 6` は `Error::Unsupported` で拒否する (slice / reader 両 path。旧レイアウトを v0.6 として誤パースしないよう `minor < 6` も拒否) (`test_decode_rejects_minor_above_6`, `test_decode_rejects_minor_below_6`) |
+| 43 | ZPAQ ブロックの実効上限は `min(宣言 u_len, ceiling)`。`decode` / reader の ceiling は `usize::MAX`（追加天井なし）。`decode_bounded(max_output)` は `max_output` を ceiling にする。非空 payload で `u_len == 0` または `u_len == usize::MAX` は `InvalidData`（`zpaq::decode_bounded` はどちらも無制限）。`max_output == 0` の非空 ZPAQ ブロックは復号せず `OutputLimitExceeded` | crate contract / fuzz run-1792163723 | ✅ | `zpaq_block_rejects_unusable_declared_size`, `zpaq_ff_fill_is_bounded_by_declared_u_len`。PASS の正当ブロックは `decoded == u_len` で成功する (`test_roundtrip_zpaq`, `test_roundtrip_zpaq_backend`) |
 
 ---
 
@@ -85,7 +86,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 42 |
+| ✅ 実装+テスト済み  | 43 |
 | ⚠️ 部分実装  | 0 |
 | ❌ 未実装 | 1 (intentional scope) |
-| **合計** | **43** |
+| **合計** | **44** |

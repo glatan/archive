@@ -70,6 +70,14 @@ const CTYPE_ZPAQ: u8 = 8;
 /// assert_eq!(decompressed, data);
 /// ```
 pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_limited(input, usize::MAX)
+}
+
+/// Decode `input`, capping each ZPAQ block at `min(u_len, zpaq_ceiling)`.
+///
+/// `zpaq_ceiling == usize::MAX` adds no ceiling beyond the block's declared
+/// `u_len`. A ceiling of 0 rejects a non-empty ZPAQ block without decoding it.
+fn decode_limited(input: &[u8], zpaq_ceiling: usize) -> Result<Vec<u8>, Error> {
     if input.len() < 24 {
         return Err(Error::InvalidData("lrzip: input too short for header"));
     }
@@ -184,8 +192,14 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
                 chunk_data_end = chunk_data_end.max(bpos + block_c_len as usize);
 
                 // Decompress block based on ctype
-                let decompressed =
-                    decompress_block(block_data, block_ctype, dict_size, lzma_props, block_u_len)?;
+                let decompressed = decompress_block(
+                    block_data,
+                    block_ctype,
+                    dict_size,
+                    lzma_props,
+                    block_u_len,
+                    zpaq_ceiling,
+                )?;
                 stream_data[i].extend_from_slice(&decompressed);
 
                 block_offset =
@@ -317,6 +331,7 @@ fn decompress_block(
     dict_size: u32,
     lzma_props: LzmaProperties,
     u_len: u64,
+    zpaq_ceiling: usize,
 ) -> Result<Vec<u8>, Error> {
     if data.is_empty() {
         return Ok(Vec::new());
@@ -345,9 +360,29 @@ fn decompress_block(
             Ok(decoded)
         }
         CTYPE_GZIP => crate::compress::zlib::decode::decode(data),
-        CTYPE_ZPAQ => crate::compress::zpaq::decode::decode(data),
+        CTYPE_ZPAQ => {
+            let limit = zpaq_block_limit(u_len, zpaq_ceiling)?;
+            crate::compress::zpaq::decode::decode_bounded(data, limit)
+        }
         _ => Err(Error::Unsupported("lrzip: unsupported compression type")),
     }
+}
+
+/// Bound a ZPAQ block by its declared `u_len` and an optional ceiling.
+///
+/// `zpaq::decode_bounded` treats both 0 and `usize::MAX` as unlimited, so a
+/// non-empty block must not pass either value through. A ceiling of 0 means
+/// the caller allows no output and the block is rejected before decode.
+fn zpaq_block_limit(u_len: usize, ceiling: usize) -> Result<usize, Error> {
+    if u_len == 0 || u_len == usize::MAX {
+        return Err(Error::InvalidData(
+            "lrzip: zpaq block declares no usable output size",
+        ));
+    }
+    if ceiling == 0 {
+        return Err(Error::OutputLimitExceeded { limit: 0 });
+    }
+    Ok(u_len.min(ceiling))
 }
 
 /// Decode lrzip format data from a reader.
@@ -428,8 +463,15 @@ pub fn decode_to_writer<R: std::io::Read, W: std::io::Write>(
 
             let mut block_data = vec![0u8; block_c_len as usize];
             reader.read_exact(&mut block_data)?;
-            *slot = decompress_block(&block_data, block_ctype, dict_size, lzma_props, block_u_len)
-                .map_err(std::io::Error::from)?;
+            *slot = decompress_block(
+                &block_data,
+                block_ctype,
+                dict_size,
+                lzma_props,
+                block_u_len,
+                usize::MAX,
+            )
+            .map_err(std::io::Error::from)?;
         }
 
         if chunk_size == 0 && stream_data[0].len() == 4 && stream_data[1].is_empty() {
@@ -543,7 +585,10 @@ fn read_le_n_from_reader<R: std::io::Read>(reader: &mut R, n: usize) -> std::io:
 /// Returns `Error::OutputLimitExceeded` if the decompressed output
 /// would exceed `max_output` bytes.
 pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
-    let result = decode(input)?;
+    // The ceiling stops a ZPAQ block before it materializes `u_len` bytes.
+    // Other backends still decode fully; the length check below applies to
+    // every backend's final output.
+    let result = decode_limited(input, max_output)?;
     if result.len() > max_output {
         return Err(Error::OutputLimitExceeded { limit: max_output });
     }
@@ -623,10 +668,37 @@ mod tests {
                 0x7F,
                 4096,
                 LzmaProperties::from_props_byte(93).unwrap(),
-                16
+                16,
+                usize::MAX
             ),
             Err(Error::Unsupported(_))
         ));
+    }
+
+    #[test]
+    fn zpaq_block_rejects_unusable_declared_size() {
+        let props = LzmaProperties::from_props_byte(93).unwrap();
+        for u_len in [0u64, usize::MAX as u64] {
+            let err =
+                decompress_block(b"x", CTYPE_ZPAQ, 4096, props, u_len, usize::MAX).unwrap_err();
+            assert!(
+                matches!(err, Error::InvalidData(_)),
+                "u_len={u_len}: {err:?}"
+            );
+        }
+    }
+
+    /// Regression (fuzz run-1792163723): a 221,717-byte 0xFF run inside the
+    /// ZPAQ payload keeps the arithmetic decoder going while `u_len` is only
+    /// 930,910. The declared size must stop the decode.
+    #[test]
+    fn zpaq_ff_fill_is_bounded_by_declared_u_len() {
+        let data = include_bytes!("../../../tests/fixtures/fuzz/lrzip_zpaq_ff_fill_hang.lrz");
+        let err = decode(data).unwrap_err();
+        assert!(
+            matches!(err, Error::OutputLimitExceeded { limit: 930_910 }),
+            "{err:?}"
+        );
     }
 
     /// Regression (fuzz run-1791677246, lrzip-lzma original-compress):
@@ -637,7 +709,15 @@ mod tests {
     fn test_decompress_block_lzma_without_eos_marker() {
         let payload = [0u8; 64];
         let block = lzma::lzma_encode_with_props_no_eos(&payload, 4096, LzmaProperties::LZIP);
-        let decoded = decompress_block(&block, CTYPE_LZMA, 4096, LzmaProperties::LZIP, 64).unwrap();
+        let decoded = decompress_block(
+            &block,
+            CTYPE_LZMA,
+            4096,
+            LzmaProperties::LZIP,
+            64,
+            usize::MAX,
+        )
+        .unwrap();
         assert_eq!(decoded, payload);
     }
 
@@ -775,7 +855,8 @@ mod tests {
             let u_len = read_le_n_test(data, &mut bpos, cb);
             let _ = read_le_n_test(data, &mut bpos, cb);
             let block = &data[bpos..bpos + c_len];
-            streams[index] = decompress_block(block, ctype, dict_size, props, u_len).unwrap();
+            streams[index] =
+                decompress_block(block, ctype, dict_size, props, u_len, usize::MAX).unwrap();
         }
         (streams[0].clone(), streams[1].clone())
     }

@@ -111,7 +111,7 @@
 | [lzxd](lzxd/README.md) | [MS-PATCH] LZX DELTA (Microsoft Open Specifications) | 22 | 0 | 0 | 22 |
 | [cmpsc](cmpsc/README.md) | IBM z/Arch POP App.D / ESA/390 Data Compression + APPNOTE method 16 | 22 | 0 | 0 | 22 |
 | [rzip](rzip/README.md) | rzip `.rz` format (upstream 2.1) | 21 | 0 | 0 | 21 |
-| [lrzip](lrzip/README.md) | magic.header.txt + upstream de facto facts (crate-local subset) | 41 | 0 | 1 | 42 |
+| [lrzip](lrzip/README.md) | magic.header.txt + upstream de facto facts (crate-local subset) | 43 | 0 | 1 | 44 |
 | [packbits](packbits/README.md) | Apple TN1023 + TIFF 6.0 §9 | 12 | 0 | 3 | 15 |
 | [xz](xz/README.md) | xz-file-format.txt 1.2.1 | 62 | 0 | 0 | 62 |
 | [ZPAQ](zpaq/README.md) | ZPAQ Level 1/2 specification (zpaq206.pdf) | 55 | 0 | 4 | 59 |
@@ -165,10 +165,10 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 2440 |
+| ✅ 実装+テスト済み | 2442 |
 | ⚠️ 部分実装 | 2 |
 | ❌ 未実装 | 58 |
 | — 該当なし | 6 |
-| **合計** | **2506** |
+| **合計** | **2508** |
 
-**全体カバー率**: 2440 / 2500 = **97.6%** (❌ 行 (intentional exclusion・要修正候補を含む) および該当なし除外後: 2440 / 2442 = **99.9%**)
+**全体カバー率**: 2442 / 2502 = **97.6%** (❌ 行 (intentional exclusion・要修正候補を含む) および該当なし除外後: 2442 / 2444 = **99.9%**)

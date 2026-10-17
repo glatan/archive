@@ -1210,15 +1210,17 @@ const ZPAQ_CORRUPT_LIMIT: usize = 1 << 20;
 /// allowance). Most codecs keep the generic bound; modeled ZPAQ
 /// decoders are capped at [`ZPAQ_CORRUPT_LIMIT`] because their
 /// per-decoded-byte cost makes larger limits unreachable inside the
-/// watchdog hang budget. `lrzip-zpaq` is intentionally not listed: its
-/// `decode_bounded_with` path is an unbounded fallback, a separate
-/// known gap.
+/// watchdog hang budget. `lrzip-zpaq` shares the cap: its library decode
+/// honors a finite block `u_len` and rejects `usize::MAX`, but a corrupt
+/// `chunk_bytes` of 4..=8 can still declare a huge finite `u_len`. The
+/// harness ceiling is applied on top.
 fn corrupt_output_hard_cap(algo: Algorithm) -> usize {
     match algo {
         Algorithm::Zpaq
         | Algorithm::ZpaqLevel2
         | Algorithm::ZpaqLevel3
-        | Algorithm::ZpaqArchive => ZPAQ_CORRUPT_LIMIT,
+        | Algorithm::ZpaqArchive
+        | Algorithm::LrzipZpaq => ZPAQ_CORRUPT_LIMIT,
         _ => usize::MAX,
     }
 }
@@ -1772,11 +1774,12 @@ mod tests {
     /// algorithms keep the previous `len*256` clamped formula.
     #[test]
     fn corrupt_decoded_limit_caps_modeled_zpaq() {
-        const ZPAQ_ALGOS: [Algorithm; 4] = [
+        const ZPAQ_ALGOS: [Algorithm; 5] = [
             Algorithm::Zpaq,
             Algorithm::ZpaqLevel2,
             Algorithm::ZpaqLevel3,
             Algorithm::ZpaqArchive,
+            Algorithm::LrzipZpaq,
         ];
         for algo in ZPAQ_ALGOS {
             assert_eq!(corrupt_output_hard_cap(algo), ZPAQ_CORRUPT_LIMIT);
@@ -1784,13 +1787,8 @@ mod tests {
             // Small inputs keep the 64 KiB floor.
             assert_eq!(corrupt_decoded_limit(algo, 1), 64 << 10);
         }
-        // lrzip-zpaq stays outside the cap list (unbounded fallback,
-        // separate known gap); all other algorithms are unchanged.
-        assert_eq!(corrupt_output_hard_cap(Algorithm::LrzipZpaq), usize::MAX);
-        for algo in [Algorithm::Gzip, Algorithm::LrzipZpaq] {
-            assert_eq!(corrupt_decoded_limit(algo, 16 << 20), 64 << 20);
-            assert_eq!(corrupt_decoded_limit(algo, 1), 64 << 10);
-            assert_eq!(corrupt_decoded_limit(algo, 4096), 4096 * 256);
-        }
+        assert_eq!(corrupt_decoded_limit(Algorithm::Gzip, 16 << 20), 64 << 20);
+        assert_eq!(corrupt_decoded_limit(Algorithm::Gzip, 1), 64 << 10);
+        assert_eq!(corrupt_decoded_limit(Algorithm::Gzip, 4096), 4096 * 256);
     }
 }
