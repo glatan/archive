@@ -85,7 +85,7 @@
 | [zstd-seekable](zstd-seekable/README.md) | Zstandard Seekable Format v0.1.0 | 23 | 0 | 0 | 23 |
 | [bzip2](bzip2/README.md) | bzip2 1.0.x 参照実装 (de facto) | 76 | 0 | 1 | 77 |
 | [lzip](lzip/README.md) | lzip マニュアル | 45 | 0 | 0 | 45 |
-| [`.lzma`](lzma_alone/README.md) | lzma-file-format.txt (tukaani/xz doc) | 30 | 0 | 0 | 30 |
+| [`.lzma`](lzma_alone/README.md) | lzma-file-format.txt (tukaani/xz doc) | 31 | 0 | 0 | 31 |
 | [LZW](lzw/README.md) | ncompress `compress42.c` (de facto) | 26 | 0 | 0 | 26 |
 | [LZ4](lz4/README.md) | LZ4 Frame/Block Format | 60 | 0 | 0 | 60 |
 | [LZO](lzo/README.md) | kernel `Documentation/staging/lzo.rst` + lzop format | 45 | 0 | 0 | 45 |
@@ -140,10 +140,10 @@
 | [lha](lha/README.md) | lha header documentation + jLHA Notes + lzhformat.html + 奥村氏 ar002/lzss.c (PD) + lhasa (ISC) | 24 | 0 | 0 | 24 |
 | [arj](arj/README.md) | ARJ technical note (ARJ 2.x) + UNARJ/newtua_dos 参照実装 | 24 | 0 | 3 | 27 |
 | [arc](arc/README.md) | SEA ARC file format description + hyc/arc `Arcinfo` | 24 | 0 | 1 | 30 |
-| [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 38 | 0 | 0 | 38 |
+| [git-pack](git-pack/README.md) | gitformat-pack(5) (git v2.51.0) | 39 | 0 | 0 | 39 |
 | [xar](xar/README.md) | xarformat (mackyle/xar wiki) | 34 | 0 | 3 | 37 |
-| [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 154 | 0 | 5 | 160 |
-| [7z](sevenz/README.md) | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) | 121 | 0 | 0 | 121 |
+| [ZIP](zip/README.md) | APPNOTE.TXT 6.3.10 (PKWARE) | 155 | 0 | 5 | 161 |
+| [7z](sevenz/README.md) | 7zFormat.txt / Methods.txt (LZMA SDK 26.00) | 123 | 0 | 0 | 123 |
 
 ### エンコードフォーマット
 
@@ -165,10 +165,10 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み | 2442 |
+| ✅ 実装+テスト済み | 2447 |
 | ⚠️ 部分実装 | 2 |
 | ❌ 未実装 | 58 |
 | — 該当なし | 6 |
-| **合計** | **2508** |
+| **合計** | **2513** |
 
-**全体カバー率**: 2442 / 2502 = **97.6%** (❌ 行 (intentional exclusion・要修正候補を含む) および該当なし除外後: 2442 / 2444 = **99.9%**)
+**全体カバー率**: 2447 / 2507 = **97.6%** (❌ 行 (intentional exclusion・要修正候補を含む) および該当なし除外後: 2447 / 2449 = **99.9%**)

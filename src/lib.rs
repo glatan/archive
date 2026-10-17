@@ -123,9 +123,17 @@
 //!
 //! # Decompression bomb protection
 //!
-//! Every compression format provides a `decode_bounded` function that
-//! enforces a maximum output size.  The [`traits::Decode`] trait exposes
-//! this via the `max_output` parameter:
+//! Codecs expose `decode_bounded`, and [`traits::Decode`] takes
+//! `max_output`. Several of those checks run only after the codec has
+//! produced the full output, so peak memory can exceed `max_output`.
+//! `lzma_alone`, `xz`, and `rzip` document that post-hoc check. A header
+//! field that is itself the allocation or loop bound is rejected above
+//! 1 GiB for PPMd output, ZIP methods 2–6, 14, 16, and 98, 7z PPMd, LZMA,
+//! and BCJ2, git-pack delta results, and the shared LZMA decoder when an
+//! expected size is supplied. Unknown-size LZMA, 7z methods that size the
+//! buffer from the packed input, and non-LZMA lrzip blocks are outside
+//! that ceiling. PPMd decode also refuses a model larger than 256 MiB.
+//! `decode` without `max_output` stays unlimited except for those fields.
 //!
 //! ```
 //! # #[cfg(feature = "bzip2")] {

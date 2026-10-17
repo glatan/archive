@@ -801,6 +801,10 @@ fn parse_central_directory_record(
     })
 }
 
+fn declared_output_len(size: u64) -> Result<usize, Error> {
+    crate::util::bounded::declared_output_len(size)
+}
+
 fn extract_entry(
     input: &[u8],
     record: &CentralDirectoryRecord,
@@ -943,27 +947,27 @@ fn extract_entry(
         2 => super::expand::expand(
             &effective_compressed,
             1,
-            effective_uncompressed_size as usize,
+            declared_output_len(effective_uncompressed_size)?,
         )?,
         3 => super::expand::expand(
             &effective_compressed,
             2,
-            effective_uncompressed_size as usize,
+            declared_output_len(effective_uncompressed_size)?,
         )?,
         4 => super::expand::expand(
             &effective_compressed,
             3,
-            effective_uncompressed_size as usize,
+            declared_output_len(effective_uncompressed_size)?,
         )?,
         5 => super::expand::expand(
             &effective_compressed,
             4,
-            effective_uncompressed_size as usize,
+            declared_output_len(effective_uncompressed_size)?,
         )?,
         6 => super::implode::implode(
             &effective_compressed,
             record.flags,
-            effective_uncompressed_size as usize,
+            declared_output_len(effective_uncompressed_size)?,
         )?,
         10 => super::dcl_implode::dcl_implode_decode(&effective_compressed)?,
         8 => deflate::decode::decode(&effective_compressed)?,
@@ -1014,7 +1018,7 @@ fn extract_entry(
                     lzma_data,
                     dict_size,
                     lzma_props,
-                    effective_uncompressed_size as usize,
+                    declared_output_len(effective_uncompressed_size)?,
                 )
                 .map(|(v, _)| v)?
             }
@@ -1055,7 +1059,11 @@ fn extract_entry(
                 .ok_or(Error::InvalidData("zip: PPMd mem_size overflow"))?;
             let ppmd_data = &effective_compressed[2..];
             let props = crate::compress::ppmd::Ppmd7Properties::new(order, mem_size)?;
-            crate::compress::ppmd::decode(ppmd_data, props, effective_uncompressed_size as usize)?
+            crate::compress::ppmd::decode(
+                ppmd_data,
+                props,
+                declared_output_len(effective_uncompressed_size)?,
+            )?
         }
         #[cfg(not(feature = "sevenz"))]
         98 => {
@@ -1066,7 +1074,7 @@ fn extract_entry(
         #[cfg(feature = "cmpsc")]
         16 => crate::compress::cmpsc::decode(
             &effective_compressed,
-            effective_uncompressed_size as usize,
+            declared_output_len(effective_uncompressed_size)?,
         )?,
         #[cfg(not(feature = "cmpsc"))]
         16 => {
@@ -2297,6 +2305,167 @@ mod tests {
         );
         archive.extend_from_slice(&0u16.to_le_bytes());
         archive
+    }
+
+    fn zip64_with_uncompressed(method: u16, compressed: &[u8], uncompressed: u64) -> Vec<u8> {
+        let name = b"a.txt";
+        let mut local_extra = Vec::new();
+        local_extra.extend_from_slice(&0x0001u16.to_le_bytes());
+        local_extra.extend_from_slice(&16u16.to_le_bytes());
+        local_extra.extend_from_slice(&uncompressed.to_le_bytes());
+        local_extra.extend_from_slice(&(compressed.len() as u64).to_le_bytes());
+
+        let mut local = Vec::new();
+        local.extend_from_slice(&LOCAL_FILE_HEADER_SIGNATURE.to_le_bytes());
+        local.extend_from_slice(&45u16.to_le_bytes());
+        local.extend_from_slice(&0u16.to_le_bytes());
+        local.extend_from_slice(&method.to_le_bytes());
+        local.extend_from_slice(&0u16.to_le_bytes());
+        local.extend_from_slice(&0u16.to_le_bytes());
+        local.extend_from_slice(&0u32.to_le_bytes());
+        local.extend_from_slice(&u32::MAX.to_le_bytes());
+        local.extend_from_slice(&u32::MAX.to_le_bytes());
+        local.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        local.extend_from_slice(&(local_extra.len() as u16).to_le_bytes());
+        local.extend_from_slice(name);
+        local.extend_from_slice(&local_extra);
+        local.extend_from_slice(compressed);
+
+        let central_offset = local.len();
+        let mut cd_extra = Vec::new();
+        cd_extra.extend_from_slice(&0x0001u16.to_le_bytes());
+        cd_extra.extend_from_slice(&24u16.to_le_bytes());
+        cd_extra.extend_from_slice(&uncompressed.to_le_bytes());
+        cd_extra.extend_from_slice(&(compressed.len() as u64).to_le_bytes());
+        cd_extra.extend_from_slice(&0u64.to_le_bytes());
+
+        let mut cd = Vec::new();
+        cd.extend_from_slice(&CENTRAL_DIRECTORY_HEADER_SIGNATURE.to_le_bytes());
+        cd.extend_from_slice(&45u16.to_le_bytes());
+        cd.extend_from_slice(&45u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&method.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u32.to_le_bytes());
+        cd.extend_from_slice(&u32::MAX.to_le_bytes());
+        cd.extend_from_slice(&u32::MAX.to_le_bytes());
+        cd.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        cd.extend_from_slice(&(cd_extra.len() as u16).to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u32.to_le_bytes());
+        cd.extend_from_slice(&u32::MAX.to_le_bytes());
+        cd.extend_from_slice(name);
+        cd.extend_from_slice(&cd_extra);
+
+        let mut archive = local;
+        archive.extend_from_slice(&cd);
+        let zip64_eocd_offset = archive.len();
+        archive.extend_from_slice(&ZIP64_EOCD_SIGNATURE.to_le_bytes());
+        archive.extend_from_slice(&44u64.to_le_bytes());
+        archive.extend_from_slice(&45u16.to_le_bytes());
+        archive.extend_from_slice(&45u16.to_le_bytes());
+        archive.extend_from_slice(&0u32.to_le_bytes());
+        archive.extend_from_slice(&0u32.to_le_bytes());
+        archive.extend_from_slice(&1u64.to_le_bytes());
+        archive.extend_from_slice(&1u64.to_le_bytes());
+        archive.extend_from_slice(&(cd.len() as u64).to_le_bytes());
+        archive.extend_from_slice(&(central_offset as u64).to_le_bytes());
+        archive.extend_from_slice(&ZIP64_EOCD_LOCATOR_SIGNATURE.to_le_bytes());
+        archive.extend_from_slice(&0u32.to_le_bytes());
+        archive.extend_from_slice(&(zip64_eocd_offset as u64).to_le_bytes());
+        archive.extend_from_slice(&1u32.to_le_bytes());
+        archive.extend_from_slice(&EOCD_SIGNATURE.to_le_bytes());
+        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive.extend_from_slice(&u16::MAX.to_le_bytes());
+        archive.extend_from_slice(&u16::MAX.to_le_bytes());
+        archive.extend_from_slice(&u32::MAX.to_le_bytes());
+        archive.extend_from_slice(&u32::MAX.to_le_bytes());
+        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive
+    }
+
+    #[test]
+    fn test_declared_uncompressed_size_above_limit_is_rejected() {
+        let mut cases = vec![
+            (2u16, Vec::new()),
+            (3, Vec::new()),
+            (4, Vec::new()),
+            (5, Vec::new()),
+            (6, Vec::new()),
+        ];
+        #[cfg(any(feature = "lzip", feature = "xz", feature = "sevenz"))]
+        cases.push((14, vec![0, 0, 5, 0, 0x5D, 0, 0, 0, 1]));
+        #[cfg(feature = "cmpsc")]
+        cases.push((16, Vec::new()));
+        #[cfg(feature = "sevenz")]
+        cases.push((98, vec![6, 20]));
+        for (method, compressed) in cases {
+            let archive = zip64_with_uncompressed(method, &compressed, 1 << 40);
+            assert!(
+                matches!(decode(&archive), Err(Error::OutputLimitExceeded { .. })),
+                "method {method}"
+            );
+        }
+    }
+
+    #[cfg(feature = "sevenz")]
+    #[test]
+    fn test_ppmd_method_rejects_mem_order_above_decode_limit() {
+        let name = b"a.txt";
+        let compressed = [0x06, 0x1D];
+        let crc = crc32::crc32(&[]);
+        let mut local = Vec::new();
+        local.extend_from_slice(&LOCAL_FILE_HEADER_SIGNATURE.to_le_bytes());
+        local.extend_from_slice(&20u16.to_le_bytes());
+        local.extend_from_slice(&0u16.to_le_bytes());
+        local.extend_from_slice(&98u16.to_le_bytes());
+        local.extend_from_slice(&0u16.to_le_bytes());
+        local.extend_from_slice(&0u16.to_le_bytes());
+        local.extend_from_slice(&crc.to_le_bytes());
+        local.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+        local.extend_from_slice(&0u32.to_le_bytes());
+        local.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        local.extend_from_slice(&0u16.to_le_bytes());
+        local.extend_from_slice(name);
+        local.extend_from_slice(&compressed);
+        let central_offset = local.len() as u32;
+        let mut cd = Vec::new();
+        cd.extend_from_slice(&CENTRAL_DIRECTORY_HEADER_SIGNATURE.to_le_bytes());
+        cd.extend_from_slice(&20u16.to_le_bytes());
+        cd.extend_from_slice(&20u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&98u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&crc.to_le_bytes());
+        cd.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+        cd.extend_from_slice(&0u32.to_le_bytes());
+        cd.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u16.to_le_bytes());
+        cd.extend_from_slice(&0u32.to_le_bytes());
+        cd.extend_from_slice(&0u32.to_le_bytes());
+        cd.extend_from_slice(name);
+        let mut archive = local;
+        archive.extend_from_slice(&cd);
+        archive.extend_from_slice(&EOCD_SIGNATURE.to_le_bytes());
+        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive.extend_from_slice(&0u16.to_le_bytes());
+        archive.extend_from_slice(&1u16.to_le_bytes());
+        archive.extend_from_slice(&1u16.to_le_bytes());
+        archive.extend_from_slice(&(cd.len() as u32).to_le_bytes());
+        archive.extend_from_slice(&central_offset.to_le_bytes());
+        archive.extend_from_slice(&0u16.to_le_bytes());
+        assert_eq!(
+            decode(&archive).unwrap_err(),
+            Error::Unsupported("ppmd: memory size exceeds decode limit")
+        );
     }
 
     #[test]

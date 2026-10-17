@@ -1,5 +1,6 @@
 use std::collections::BTreeSet;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 use ::archive::archive as archive_formats;
@@ -228,11 +229,16 @@ pub fn extract_input(
                 requested.finish()
             }
             Err(_) => {
-                ensure_no_selected_paths(selected_paths, format)?;
                 let payload = compress_formats::zpaq::decode::decode(input)
                     .map_err(|error| CliError::from_archive_error(error, password_provided))?;
-                let output_path = derived_single_output_path(input_path, &base_dir);
-                write_file(&output_path, &payload, overwrite)
+                extract_single_payload(
+                    input_path,
+                    &base_dir,
+                    format,
+                    selected_paths,
+                    overwrite,
+                    payload,
+                )
             }
         },
         Format::Zip => {
@@ -645,10 +651,12 @@ fn extract_tar_entries(
         if !requested.matches(&entry.header.name) {
             continue;
         }
-        let path = resolved_archive_path(base_dir, &entry.header.name)?;
         match entry.header.file_type {
-            TarFileType::Regular => write_file(&path, &entry.data, overwrite)?,
-            TarFileType::Directory => fs::create_dir_all(&path)?,
+            TarFileType::Regular => {
+                let path = resolved_archive_path(base_dir, &entry.header.name)?;
+                write_file(&path, &entry.data, overwrite)?;
+            }
+            TarFileType::Directory => create_archive_dir(base_dir, &entry.header.name)?,
             TarFileType::SymLink => {
                 return Err(CliError::Unsupported(format!(
                     "tar: symlink extraction is not implemented yet ({})",
@@ -684,15 +692,15 @@ fn extract_cpio_entries(
         if !requested.matches(&entry.name) {
             continue;
         }
-        let path = resolved_archive_path(base_dir, &entry.name)?;
         if entry.header.is_directory() {
-            fs::create_dir_all(&path)?;
+            create_archive_dir(base_dir, &entry.name)?;
         } else if entry.header.is_symlink() {
             return Err(CliError::Unsupported(format!(
                 "cpio: symlink extraction is not implemented yet ({})",
                 entry.name
             )));
         } else {
+            let path = resolved_archive_path(base_dir, &entry.name)?;
             write_file(&path, &entry.data, overwrite)?;
         }
         requested.mark_matched(&entry.name);
@@ -710,21 +718,67 @@ fn extract_single_payload(
 ) -> Result<(), CliError> {
     ensure_no_selected_paths(selected_paths, format)?;
     let output_path = derived_single_output_path(input_path, base_dir);
-    write_file(&output_path, &payload, overwrite)
+    let relative = output_path.file_name().ok_or_else(|| {
+        CliError::Detect(format!(
+            "could not derive output name for {}",
+            input_path.display()
+        ))
+    })?;
+    let path = confine(base_dir, Path::new(relative), false)?;
+    write_file(&path, &payload, overwrite)
 }
 
 fn write_file(path: &Path, data: &[u8], overwrite: bool) -> Result<(), CliError> {
-    if path.exists() && !overwrite {
-        return Err(CliError::Detect(format!(
-            "refusing to overwrite existing path {}; pass --overwrite to replace it",
-            path.display()
-        )));
-    }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(path, data)?;
+    let mut file = open_regular_file(path, overwrite)?;
+    file.write_all(data)?;
     Ok(())
+}
+
+fn open_regular_file(path: &Path, overwrite: bool) -> Result<fs::File, CliError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() {
+                return Err(CliError::Detect(format!(
+                    "refusing to extract through symlink: {}",
+                    path.display()
+                )));
+            }
+            if !metadata.is_file() {
+                return Err(CliError::Detect(format!(
+                    "refusing to extract file over non-file: {}",
+                    path.display()
+                )));
+            }
+            if !overwrite {
+                return Err(CliError::Detect(format!(
+                    "refusing to overwrite existing path {}; pass --overwrite to replace it",
+                    path.display()
+                )));
+            }
+            open_nofollow(path, true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => open_nofollow(path, false),
+        Err(error) => Err(CliError::Io(error)),
+    }
+}
+
+fn open_nofollow(path: &Path, truncate: bool) -> Result<fs::File, CliError> {
+    let mut options = OpenOptions::new();
+    options.write(true).create(true);
+    if truncate {
+        options.truncate(true);
+    } else {
+        options.create_new(true);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Linux O_NOFOLLOW. The symlink walk above is what rejects an
+        // existing link; this flag closes the replace-with-symlink race
+        // on the final component.
+        options.custom_flags(0o400000);
+    }
+    options.open(path).map_err(CliError::Io)
 }
 
 fn resolve_base_dir(out_dir: Option<&Path>) -> Result<PathBuf, CliError> {
@@ -737,7 +791,56 @@ fn resolve_base_dir(out_dir: Option<&Path>) -> Result<PathBuf, CliError> {
 
 fn resolved_archive_path(base_dir: &Path, archive_path: &str) -> Result<PathBuf, CliError> {
     let relative = sanitize_relative_path(archive_path)?;
-    Ok(base_dir.join(relative))
+    confine(base_dir, &relative, false)
+}
+
+fn create_archive_dir(base_dir: &Path, archive_path: &str) -> Result<(), CliError> {
+    let relative = sanitize_relative_path(archive_path)?;
+    confine(base_dir, &relative, true)?;
+    Ok(())
+}
+
+/// Walk `relative` under the canonical `base_dir`. Existing symlinks are
+/// refused. Missing directories are created with `create_dir`, which does
+/// not follow a symlink in the component being created.
+fn confine(base_dir: &Path, relative: &Path, as_dir: bool) -> Result<PathBuf, CliError> {
+    let mut current = fs::canonicalize(base_dir)?;
+    let parts: Vec<_> = relative.components().collect();
+    for (index, part) in parts.iter().enumerate() {
+        let last = index + 1 == parts.len();
+        let next = current.join(part);
+        match fs::symlink_metadata(&next) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Err(CliError::Detect(format!(
+                        "refusing to extract through symlink: {}",
+                        next.display()
+                    )));
+                }
+                let want_dir = !last || as_dir;
+                if want_dir && !metadata.is_dir() {
+                    return Err(CliError::Detect(format!(
+                        "refusing to extract through non-directory: {}",
+                        next.display()
+                    )));
+                }
+                if last && !as_dir && metadata.is_dir() {
+                    return Err(CliError::Detect(format!(
+                        "refusing to extract file over directory: {}",
+                        next.display()
+                    )));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if !last || as_dir {
+                    fs::create_dir(&next)?;
+                }
+            }
+            Err(error) => return Err(CliError::Io(error)),
+        }
+        current = next;
+    }
+    Ok(current)
 }
 
 fn sanitize_relative_path(path: &str) -> Result<PathBuf, CliError> {
@@ -849,5 +952,101 @@ mod tests {
             derived_single_output_path(Path::new("sample.tar.gz"), Path::new("out")),
             Path::new("out/sample.tar")
         );
+    }
+
+    fn scratch_dir() -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "archive-extract-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn extract_refuses_preexisting_directory_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = scratch_dir();
+        let outside = root.join("outside");
+        let dest = root.join("dest");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::create_dir(&dest).unwrap();
+        symlink(&outside, dest.join("link")).unwrap();
+
+        let file_err = super::resolved_archive_path(&dest, "link/file").unwrap_err();
+        assert!(file_err.to_string().contains("symlink"));
+        assert!(!outside.join("file").exists());
+
+        let dir_err = super::create_archive_dir(&dest, "link/nested").unwrap_err();
+        assert!(dir_err.to_string().contains("symlink"));
+        assert!(!outside.join("nested").exists());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn single_payload_refuses_symlink_at_derived_name() {
+        use std::os::unix::fs::symlink;
+
+        let root = scratch_dir();
+        let outside = root.join("outside");
+        let dest = root.join("dest");
+        std::fs::write(&outside, b"secret").unwrap();
+        std::fs::create_dir(&dest).unwrap();
+        symlink(&outside, dest.join("sample")).unwrap();
+
+        let err = super::extract_single_payload(
+            Path::new("sample.zpaq"),
+            &dest,
+            crate::detect::Format::Zpaq,
+            &[],
+            true,
+            b"pwn".to_vec(),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("symlink"));
+        assert_eq!(std::fs::read(&outside).unwrap(), b"secret");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn extract_refuses_to_overwrite_file_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = scratch_dir();
+        let outside = root.join("outside-file");
+        let dest = root.join("dest");
+        std::fs::write(&outside, b"secret").unwrap();
+        std::fs::create_dir(&dest).unwrap();
+        symlink(&outside, dest.join("link")).unwrap();
+
+        let path = dest.join("link");
+        let err = super::write_file(&path, b"pwn", true).unwrap_err();
+        assert!(err.to_string().contains("symlink"));
+        assert_eq!(std::fs::read(&outside).unwrap(), b"secret");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn extract_writes_nested_file_under_destination() {
+        let root = scratch_dir();
+        let dest = root.join("dest");
+        std::fs::create_dir(&dest).unwrap();
+        let path = super::resolved_archive_path(&dest, "dir/sub/file.txt").unwrap();
+        super::write_file(&path, b"ok", false).unwrap();
+        assert_eq!(std::fs::read(dest.join("dir/sub/file.txt")).unwrap(), b"ok");
+        super::create_archive_dir(&dest, "dir/empty").unwrap();
+        assert!(dest.join("dir/empty").is_dir());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -60,7 +60,7 @@ archive extract sample.rpm                              # cpio payload の内容
 archive extract image.sqfs                              # squashfs 内の regular file を展開
 ```
 
-`.deb` は `data.tar` の内容を展開する。生の member (`debian-binary` / `control.tar.*`) は `--format ar` で展開する。
+`.deb` は `data.tar` の内容を展開する。生の member (`debian-binary` / `control.tar.*`) は `--format ar` で展開する。出力先に既にあるシンボリックリンクは、ディレクトリの途中でも最終成分でも拒否する。`--overwrite` は通常ファイルだけを切り詰める。
 
 ### `archive pack <format> <input...> -o <output>`
 

@@ -50,6 +50,11 @@ const TREE_WINDOW: usize = 32 * 1024;
 /// Returns [`Error::InvalidData`] if the bitstream or the code tables are
 /// malformed, or the stream ends before `expected_size` bytes are produced.
 pub(super) fn implode(input: &[u8], flags: u16, expected_size: usize) -> Result<Vec<u8>, Error> {
+    if expected_size > crate::util::bounded::DECLARED_OUTPUT_LIMIT {
+        return Err(Error::OutputLimitExceeded {
+            limit: crate::util::bounded::DECLARED_OUTPUT_LIMIT,
+        });
+    }
     let large_wnd = (flags & 0x0002) != 0;
     let lit_tree = (flags & 0x0004) != 0;
     let dist_bits = if large_wnd { 7u32 } else { 6u32 };

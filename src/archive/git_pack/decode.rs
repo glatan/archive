@@ -420,7 +420,8 @@ pub fn apply_delta(base: &[u8], delta: &[u8]) -> Result<Vec<u8>, Error> {
         return Err(invalid("git-pack: delta base size mismatch"));
     }
     let (dst_size, mut pos) = read_size(delta, pos)?;
-    let mut out = Vec::with_capacity(dst_size.min(1 << 28) as usize);
+    let dst_len = crate::util::bounded::declared_output_len(dst_size)?;
+    let mut out = Vec::with_capacity(dst_len.min(1 << 28));
     while pos < delta.len() {
         let cmd = delta[pos];
         pos += 1;
@@ -464,11 +465,11 @@ pub fn apply_delta(base: &[u8], delta: &[u8]) -> Result<Vec<u8>, Error> {
         } else {
             return Err(invalid("git-pack: reserved delta instruction"));
         }
-        if out.len() > dst_size as usize {
+        if out.len() > dst_len {
             return Err(invalid("git-pack: delta output overflow"));
         }
     }
-    if out.len() != dst_size as usize {
+    if out.len() != dst_len {
         return Err(invalid("git-pack: delta result size mismatch"));
     }
     Ok(out)
@@ -652,6 +653,13 @@ pub fn decode_idx_v1(input: &[u8]) -> Result<Vec<IdxEntry>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apply_delta_rejects_declared_output_above_limit() {
+        let delta = [0x00, 0x81, 0x80, 0x80, 0x80, 0x04];
+        let err = apply_delta(b"", &delta).unwrap_err();
+        assert!(matches!(err, Error::OutputLimitExceeded { .. }));
+    }
     use crate::compress::zlib;
     use crate::traits::ArchiveEntry;
 

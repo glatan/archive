@@ -46,6 +46,7 @@
 | 17 | insert 命令 (MSB=0、非ゼロ): 次 n バイトをそのまま出力 | 同上 | ✅ | `apply_delta_copy_insert` |
 | 18 | 命令 0 (reserved) は reject | 同上 ("reserved") | ✅ | `apply_delta_errors` |
 | 19 | copy が base 範囲外 / insert が delta 残量超過 / 結果が `size_of_result` 不一致は reject | 同上 + crate 防御 | ✅ | `apply_delta_errors` |
+| 38 | `size_of_result` が 1 GiB を超えると copy ループの前に `OutputLimitExceeded` | crate 防御 | ✅ | `apply_delta_rejects_declared_output_above_limit` |
 | 20 | delta チェーンは base 先解決で再帰適用 (OFS/REF 混在可)。深さ上限 64 (git 既定深さ 50 に十分な余裕) で過剰チェーンを防御。delta cycle は `resolving` フラグで検出 | "deltified representation" 節 + crate 防御 | ✅ | `delta_chain_depth` (2 段), 深さ上限はコード上の上限 |
 
 ## pack チェックサム / idx

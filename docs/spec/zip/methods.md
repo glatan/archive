@@ -34,5 +34,6 @@
 | 133 | §5.8 LZMA (Method 14): LZMA Properties Header (4B) + stream | §5.8 | ✅ | decode + encode |
 | 134 | §5.10 PPMd (Method 98): 2B parameter + stream | §5.10 | ✅ | decode + encode |
 | 135 | §5.17 IBM z/OS CMPSC (Method 16) | §5.17 | ✅ | `cmpsc` feature 有効時は `compress::cmpsc` で basic method を decode/encode (encode は alphabet-only 非圧縮 emit、`test_zip_method16_encode_roundtrip`) (`test_decode_cmpsc_method16_roundtrip` / `test_decode_cmpsc_method16_corrupt_rejected`)。feature 無効時は `Unsupported`。entropy-encoding 拡張と flag 0x40 deflate 圧縮辞書は codec 側で拒否 (intentional scope) |
+| 161 | method 2-6 / 14 / 16 / 98 の宣言非圧縮サイズが 1 GiB を超えると展開前に `OutputLimitExceeded`。method 98 の `mem_order` が 256 MiB を超えるモデルを作るときは `Unsupported` | crate 防御 | ✅ | `test_declared_uncompressed_size_above_limit_is_rejected` (method 2-6 / 14 / 16 / 98), `test_ppmd_method_rejects_mem_order_above_decode_limit` |
 
 ---

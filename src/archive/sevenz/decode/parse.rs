@@ -1,5 +1,7 @@
 //! Internal 7z header parsing: structures, cursor, and all `parse_*` functions.
 
+use core::mem::size_of;
+
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -130,6 +132,62 @@ impl<'a> Cursor<'a> {
     pub(super) const fn consume_remaining(&mut self) {
         self.pos = self.data.len();
     }
+
+    const fn remaining(&self) -> usize {
+        self.data.len().saturating_sub(self.pos)
+    }
+
+    fn bounded_count(&self, count: u64, bytes_per_item: usize) -> Result<usize, Error> {
+        bounded_count(count, self.remaining(), bytes_per_item)
+    }
+}
+
+/// Metadata tables may allocate at most 64 bytes per unread input byte.
+const METADATA_FACTOR: usize = 64;
+
+fn count_limit_error() -> Error {
+    Error::InvalidData("7z: count exceeds decode limit")
+}
+
+/// Accept `count` only when `count * bytes_per_item` fits and stays within
+/// `remaining * METADATA_FACTOR`. Overflow on either side is a rejection.
+fn bounded_count(count: u64, remaining: usize, bytes_per_item: usize) -> Result<usize, Error> {
+    if bytes_per_item == 0 {
+        return Err(count_limit_error());
+    }
+    let count = usize::try_from(count).map_err(|_| count_limit_error())?;
+    let alloc = count
+        .checked_mul(bytes_per_item)
+        .ok_or_else(count_limit_error)?;
+    let budget = remaining
+        .checked_mul(METADATA_FACTOR)
+        .ok_or_else(count_limit_error)?;
+    if alloc > budget {
+        return Err(count_limit_error());
+    }
+    Ok(count)
+}
+
+fn read_len(cursor: &mut Cursor<'_>) -> Result<usize, Error> {
+    let len = cursor.read_uint64()?;
+    usize::try_from(len).map_err(|_| Error::InvalidData("7z: length exceeds decode limit"))
+}
+
+fn files_info_bytes_per_item() -> usize {
+    size_of::<String>()
+        + size_of::<Option<u32>>()
+        + size_of::<Option<u64>>() * 3
+        + size_of::<bool>()
+}
+
+/// Bytes reserved per coder stream for the graph slots, the decoded output
+/// slot, and the bool scratch vectors (`produced_outputs` while scheduling
+/// and while validating, and the final-output bound vector).
+fn stream_slot_bytes() -> usize {
+    size_of::<Option<usize>>()
+        + size_of::<Vec<u64>>()
+        + size_of::<Option<Vec<u8>>>()
+        + size_of::<bool>() * 3
 }
 
 pub(super) fn parse_header(cursor: &mut Cursor<'_>) -> Result<ArchiveMetadata, Error> {
@@ -166,7 +224,7 @@ fn skip_archive_properties(cursor: &mut Cursor<'_>) -> Result<(), Error> {
         if property == NID_END {
             return Ok(());
         }
-        let size = cursor.read_uint64()? as usize;
+        let size = read_len(cursor)?;
         cursor.read_bytes(size)?;
     }
 }
@@ -219,7 +277,9 @@ pub(super) fn parse_streams_info(cursor: &mut Cursor<'_>) -> Result<StreamsInfo,
 
 fn parse_pack_info(cursor: &mut Cursor<'_>, streams: &mut StreamsInfo) -> Result<(), Error> {
     streams.pack_pos = cursor.read_uint64()?;
-    let num_pack_streams = cursor.read_uint64()? as usize;
+    let num_pack_raw = cursor.read_uint64()?;
+    let num_pack_streams =
+        cursor.bounded_count(num_pack_raw, size_of::<u64>() + size_of::<Option<u32>>())?;
 
     let mut pack_sizes = None;
     let mut pack_crcs = None;
@@ -254,12 +314,13 @@ pub(super) fn parse_unpack_info(
     if cursor.read_byte()? != super::NID_FOLDER {
         return Err(Error::InvalidData("7z: expected folder list"));
     }
-    let num_folders = cursor.read_uint64()? as usize;
+    let num_folders_raw = cursor.read_uint64()?;
     if cursor.read_byte()? != 0 {
         return Err(Error::Unsupported(
             "7z: external folder lists are not supported",
         ));
     }
+    let num_folders = cursor.bounded_count(num_folders_raw, size_of::<Folder>())?;
 
     let mut folders = Vec::with_capacity(num_folders);
     for _ in 0..num_folders {
@@ -270,7 +331,7 @@ pub(super) fn parse_unpack_info(
         return Err(Error::InvalidData("7z: missing folder unpack sizes"));
     }
     for folder in &mut folders {
-        let outputs = folder.total_out_streams()? as usize;
+        let outputs = cursor.bounded_count(folder.total_out_streams()?, size_of::<u64>())?;
         folder.unpack_sizes = Vec::with_capacity(outputs);
         for _ in 0..outputs {
             folder.unpack_sizes.push(cursor.read_uint64()?);
@@ -297,7 +358,8 @@ pub(super) fn parse_unpack_info(
 }
 
 fn parse_folder(cursor: &mut Cursor<'_>) -> Result<Folder, Error> {
-    let num_coders = cursor.read_uint64()? as usize;
+    let num_coders_raw = cursor.read_uint64()?;
+    let num_coders = cursor.bounded_count(num_coders_raw, size_of::<Coder>())?;
     let mut coders = Vec::with_capacity(num_coders);
     let mut total_in = 0u64;
     let mut total_out = 0u64;
@@ -316,10 +378,20 @@ fn parse_folder(cursor: &mut Cursor<'_>) -> Result<Folder, Error> {
         let method_id = cursor.read_bytes(method_len)?.to_vec();
         let is_complex = flags & 0x10 != 0;
         let has_properties = flags & 0x20 != 0;
-        let num_in_streams = if is_complex { cursor.read_uint64()? } else { 1 };
-        let num_out_streams = if is_complex { cursor.read_uint64()? } else { 1 };
+        let num_in_streams = if is_complex {
+            let raw = cursor.read_uint64()?;
+            cursor.bounded_count(raw, stream_slot_bytes())? as u64
+        } else {
+            1
+        };
+        let num_out_streams = if is_complex {
+            let raw = cursor.read_uint64()?;
+            cursor.bounded_count(raw, stream_slot_bytes())? as u64
+        } else {
+            1
+        };
         let properties = if has_properties {
-            let len = cursor.read_uint64()? as usize;
+            let len = read_len(cursor)?;
             cursor.read_bytes(len)?.to_vec()
         } else {
             Vec::new()
@@ -332,17 +404,23 @@ fn parse_folder(cursor: &mut Cursor<'_>) -> Result<Folder, Error> {
             input_index: total_in,
             output_index: total_out,
         });
-        total_in += num_in_streams;
-        total_out += num_out_streams;
+        total_in = total_in
+            .checked_add(num_in_streams)
+            .ok_or(Error::InvalidData("7z: input stream count overflow"))?;
+        total_out = total_out
+            .checked_add(num_out_streams)
+            .ok_or(Error::InvalidData("7z: output stream count overflow"))?;
+        cursor.bounded_count(total_in, stream_slot_bytes())?;
+        cursor.bounded_count(total_out, stream_slot_bytes())?;
     }
 
     if total_out == 0 {
         return Err(Error::InvalidData("7z: folder has no output streams"));
     }
-    let num_bind_pairs = total_out
+    let num_bind_pairs_raw = total_out
         .checked_sub(1)
-        .ok_or(Error::InvalidData("7z: invalid bind pair count"))?
-        as usize;
+        .ok_or(Error::InvalidData("7z: invalid bind pair count"))?;
+    let num_bind_pairs = cursor.bounded_count(num_bind_pairs_raw, size_of::<BindPair>())?;
     let mut bind_pairs = Vec::with_capacity(num_bind_pairs);
     for _ in 0..num_bind_pairs {
         bind_pairs.push(BindPair {
@@ -351,14 +429,16 @@ fn parse_folder(cursor: &mut Cursor<'_>) -> Result<Folder, Error> {
         });
     }
 
-    let num_packed_streams = total_in
+    let num_packed_streams_raw = total_in
         .checked_sub(num_bind_pairs as u64)
-        .ok_or(Error::InvalidData("7z: invalid packed stream count"))?
-        as usize;
+        .ok_or(Error::InvalidData("7z: invalid packed stream count"))?;
+    let num_packed_streams = cursor.bounded_count(num_packed_streams_raw, size_of::<u64>())?;
     let packed_streams = if num_packed_streams == 1 {
-        let mut bound_inputs = vec![false; total_in as usize];
+        let total_in_len = cursor.bounded_count(total_in, size_of::<bool>())?;
+        let mut bound_inputs = vec![false; total_in_len];
         for bind_pair in &bind_pairs {
-            let index = bind_pair.in_index as usize;
+            let index = usize::try_from(bind_pair.in_index)
+                .map_err(|_| Error::InvalidData("7z: bind pair input out of range"))?;
             if index >= bound_inputs.len() {
                 return Err(Error::InvalidData("7z: bind pair input out of range"));
             }
@@ -398,7 +478,8 @@ fn parse_substreams_info(cursor: &mut Cursor<'_>, streams: &mut StreamsInfo) -> 
             NID_END => break,
             NID_NUM_UNPACK_STREAM => {
                 for count in &mut counts {
-                    *count = cursor.read_uint64()? as usize;
+                    let raw = cursor.read_uint64()?;
+                    *count = cursor.bounded_count(raw, size_of::<Substream>())?;
                 }
             }
             NID_SIZE => {
@@ -493,6 +574,7 @@ pub(super) fn parse_digests(
     let defined = if all_defined == 0 {
         read_bitset(cursor, count)?
     } else {
+        cursor.bounded_count(count as u64, size_of::<bool>() + size_of::<Option<u32>>())?;
         vec![true; count]
     };
 
@@ -508,7 +590,8 @@ pub(super) fn parse_digests(
 }
 
 pub(super) fn parse_files_info(cursor: &mut Cursor<'_>) -> Result<Vec<FileEntry>, Error> {
-    let num_files = cursor.read_uint64()? as usize;
+    let num_files_raw = cursor.read_uint64()?;
+    let num_files = cursor.bounded_count(num_files_raw, files_info_bytes_per_item())?;
     let mut names = vec![String::new(); num_files];
     let mut attributes = vec![None; num_files];
     let mut ctimes = vec![None; num_files];
@@ -522,7 +605,7 @@ pub(super) fn parse_files_info(cursor: &mut Cursor<'_>) -> Result<Vec<FileEntry>
         if property == NID_END {
             break;
         }
-        let size = cursor.read_uint64()? as usize;
+        let size = read_len(cursor)?;
         let data = cursor.read_bytes(size)?;
         let mut prop_cursor = Cursor::new(data);
         match property {
@@ -655,6 +738,13 @@ fn parse_filetime_property(
 }
 
 pub(super) fn read_bitset(cursor: &mut Cursor<'_>, count: usize) -> Result<Vec<bool>, Error> {
+    let budget = cursor
+        .remaining()
+        .checked_mul(8)
+        .ok_or_else(count_limit_error)?;
+    if count > budget {
+        return Err(count_limit_error());
+    }
     let bytes = count.div_ceil(8);
     let data = cursor.read_bytes(bytes)?;
     let mut result = Vec::with_capacity(count);
