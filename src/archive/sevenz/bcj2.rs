@@ -224,6 +224,11 @@ pub(super) fn decode(
     rc: &[u8],
     expected_size: usize,
 ) -> Result<Vec<u8>, Error> {
+    if expected_size > crate::util::bounded::DECLARED_OUTPUT_LIMIT {
+        return Err(Error::OutputLimitExceeded {
+            limit: crate::util::bounded::DECLARED_OUTPUT_LIMIT,
+        });
+    }
     let mut rc = RangeDecoder::new(rc)?;
     let mut probs = [((BIT_MODEL_TOTAL >> 1) as u16); 258];
     let mut out = Vec::with_capacity(expected_size.min(1 << 24));

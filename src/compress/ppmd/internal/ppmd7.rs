@@ -1127,6 +1127,9 @@ impl<'a> PPMd7<RangeDecoder<'a>> {
         order: u32,
         mem_size: u32,
     ) -> Result<PPMd7<RangeDecoder<'a>>, Error> {
+        if mem_size > super::super::PPMD_DECODE_MEM_LIMIT {
+            return Err(Error::Unsupported("ppmd: memory size exceeds decode limit"));
+        }
         let range_decoder = RangeDecoder::new(input)?;
         Self::construct(range_decoder, order, mem_size)
     }

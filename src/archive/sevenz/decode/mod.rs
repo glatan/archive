@@ -145,8 +145,10 @@ fn decode_impl(input: &[u8], password: Option<&[u8]>) -> Result<Vec<SevenZEntry>
         });
     }
 
-    let next_header_offset = read_u64_le(&input[12..20])? as usize;
-    let next_header_size = read_u64_le(&input[20..28])? as usize;
+    let next_header_offset = usize::try_from(read_u64_le(&input[12..20])?)
+        .map_err(|_| Error::InvalidData("7z: next header offset overflow"))?;
+    let next_header_size = usize::try_from(read_u64_le(&input[20..28])?)
+        .map_err(|_| Error::InvalidData("7z: next header size overflow"))?;
     let next_header_crc = read_u32_le(&input[28..32])?;
 
     let next_header_start = SIGNATURE_HEADER_SIZE
@@ -244,8 +246,10 @@ fn decode_entries(
             let file = files
                 .next()
                 .ok_or(Error::InvalidData("7z: file/substream count mismatch"))?;
+            let unpack_len = usize::try_from(substream.unpack_size)
+                .map_err(|_| Error::InvalidData("7z: substream size overflow"))?;
             let end = pos
-                .checked_add(substream.unpack_size as usize)
+                .checked_add(unpack_len)
                 .ok_or(Error::InvalidData("7z: substream size overflow"))?;
             if end > unpacked.len() {
                 return Err(Error::UnexpectedEof);
@@ -338,17 +342,24 @@ fn pack_stream_slices<'a>(
                 .iter()
                 .take(pack_stream_index)
                 .try_fold(0usize, |acc, &size| {
-                    acc.checked_add(size as usize)
+                    let size = usize::try_from(size)
+                        .map_err(|_| Error::InvalidData("7z: pack offset overflow"))?;
+                    acc.checked_add(size)
                         .ok_or(Error::InvalidData("7z: pack offset overflow"))
                 })?;
+        let pack_pos = usize::try_from(streams.pack_pos)
+            .map_err(|_| Error::InvalidData("7z: pack position overflow"))?;
         let pack_start = SIGNATURE_HEADER_SIZE
-            .checked_add(streams.pack_pos as usize)
+            .checked_add(pack_pos)
             .and_then(|base| base.checked_add(pack_offset))
             .ok_or(Error::InvalidData("7z: pack position overflow"))?;
-        let pack_size = *streams
-            .pack_sizes
-            .get(pack_stream_index)
-            .ok_or(Error::InvalidData("7z: missing pack size"))? as usize;
+        let pack_size = usize::try_from(
+            *streams
+                .pack_sizes
+                .get(pack_stream_index)
+                .ok_or(Error::InvalidData("7z: missing pack size"))?,
+        )
+        .map_err(|_| Error::InvalidData("7z: pack size overflow"))?;
         let pack_end = pack_start
             .checked_add(pack_size)
             .ok_or(Error::InvalidData("7z: pack size overflow"))?;
@@ -380,8 +391,8 @@ mod tests {
     use super::codecs::decode_7z_aes;
     use super::graph::{InputSource, normalize_folder_graph};
     use super::parse::{
-        BindPair, Coder, Cursor, Folder, StreamsInfo, parse_attributes_property, parse_files_info,
-        parse_names_property, parse_unpack_info,
+        BindPair, Coder, Cursor, Folder, StreamsInfo, parse_attributes_property, parse_digests,
+        parse_files_info, parse_header, parse_names_property, parse_unpack_info,
     };
 
     fn copy_coder(input_index: u64, output_index: u64) -> Coder {
@@ -494,6 +505,50 @@ mod tests {
                 "7z: external folder lists are not supported"
             ))
         );
+    }
+
+    fn wrap_plain_header(header: &[u8]) -> Vec<u8> {
+        let next_header_crc = crc32::crc32(header);
+        let mut start_header = Vec::new();
+        start_header.extend_from_slice(&0u64.to_le_bytes());
+        start_header.extend_from_slice(&(header.len() as u64).to_le_bytes());
+        start_header.extend_from_slice(&next_header_crc.to_le_bytes());
+        let mut archive = Vec::new();
+        archive.extend_from_slice(&SIGNATURE);
+        archive.extend_from_slice(&[0, 4]);
+        archive.extend_from_slice(&crc32::crc32(&start_header).to_le_bytes());
+        archive.extend_from_slice(&start_header);
+        archive.extend_from_slice(header);
+        archive
+    }
+
+    #[test]
+    fn test_parse_header_accepts_one_nameless_file() {
+        let header = [NID_HEADER, NID_FILES_INFO, 0x01, NID_END, NID_END];
+        let mut cursor = Cursor::new(&header);
+        assert_eq!(cursor.read_byte().unwrap(), NID_HEADER);
+        let metadata = parse_header(&mut cursor).unwrap();
+        assert_eq!(metadata.files.len(), 1);
+        assert!(metadata.files[0].name.is_empty());
+    }
+
+    #[test]
+    fn test_parse_digests_accepts_empty_bitset_of_eight() {
+        let bytes = [0x00, 0x00];
+        let mut cursor = Cursor::new(&bytes);
+        assert_eq!(parse_digests(&mut cursor, 8).unwrap(), vec![None; 8]);
+    }
+
+    #[test]
+    fn test_decode_rejects_files_count_that_truncates_on_32bit() {
+        let mut header = Vec::new();
+        header.push(NID_HEADER);
+        header.push(NID_FILES_INFO);
+        encode_uint64_local(&mut header, 0x1_0000_0001);
+        header.push(NID_END);
+        header.push(NID_END);
+        let err = decode(&wrap_plain_header(&header)).unwrap_err();
+        assert_eq!(err, Error::InvalidData("7z: count exceeds decode limit"));
     }
 
     #[test]
@@ -1191,6 +1246,57 @@ mod tests {
             decode_coder(&coder, &[packed], &[payload.len()], None).unwrap(),
             vec![payload.to_vec()]
         );
+    }
+
+    #[test]
+    fn test_decode_ppmd_coder_rejects_declared_output_above_limit() {
+        use super::codecs::decode_coder;
+        let coder = Coder {
+            method_id: METHOD_PPMD.to_vec(),
+            properties: vec![6, 0x00, 0x00, 0x00, 0x20],
+            num_in_streams: 1,
+            num_out_streams: 1,
+            input_index: 0,
+            output_index: 0,
+        };
+        let err = decode_coder(&coder, &[Vec::new()], &[1 << 31], None).unwrap_err();
+        assert!(matches!(err, Error::OutputLimitExceeded { .. }));
+    }
+
+    #[test]
+    fn test_decode_lzma_coder_rejects_declared_output_above_limit() {
+        use super::codecs::decode_coder;
+        let coder = Coder {
+            method_id: METHOD_LZMA.to_vec(),
+            properties: vec![0x5D, 0, 0, 0, 1],
+            num_in_streams: 1,
+            num_out_streams: 1,
+            input_index: 0,
+            output_index: 0,
+        };
+        let err = decode_coder(&coder, &[Vec::new()], &[1 << 31], None).unwrap_err();
+        assert!(matches!(err, Error::OutputLimitExceeded { .. }));
+    }
+
+    #[test]
+    fn test_decode_bcj2_coder_rejects_declared_output_above_limit() {
+        use super::codecs::decode_coder;
+        let coder = Coder {
+            method_id: METHOD_BCJ2_X86.to_vec(),
+            properties: Vec::new(),
+            num_in_streams: 4,
+            num_out_streams: 1,
+            input_index: 0,
+            output_index: 0,
+        };
+        let err = decode_coder(
+            &coder,
+            &[Vec::new(), Vec::new(), Vec::new(), Vec::new()],
+            &[1 << 31],
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::OutputLimitExceeded { .. }));
     }
 
     #[test]

@@ -60,6 +60,7 @@
 | 28 | EOS マーカの厳格化: dist=0xFFFFFFFF かつ len=2 (MATCH_MIN_LEN) のみ受理 | lzma-specification.txt は距離のみで EOS 判定 (長さ不問) — 本実装は strict 側 | ✅ | `test_lzma_invalid_eos_marker_wrong_length` (共有 lzma コア) |
 | 29 | rep 距離 `0 <= dis < dict_size` かつ `dis == position` の仮想ゼロバイト受理 (共有 LZMA コア) | lzma-specification.txt / LZMA SDK semantics | ✅ | `lzma_decode_impl` で `rep0 > output.len()` または `rep0 >= dict_size` を reject。実エンコーダは生成しないため直接テストなし |
 | 30 | range decoder 初期化: 先頭バイト 0x00 + code < range (0xFFFFFFFF 拒否) | lzma-specification.txt | ✅ | `test_decoder_bad_first_byte`, `test_decoder_initial_code_max_rejected` (共有 range coder) |
+| 31 | 共有 LZMA デコーダは、宣言展開長が 1 GiB を超えると展開ループの前に `OutputLimitExceeded` を返す。サイズ不明の経路は対象外 | crate 防御 | ✅ | `test_decode_with_size_rejects_declared_output_above_limit`。`.lzma` の `decode_bounded` 自体は行 18 の事後チェックのまま |
 
 ---
 
@@ -67,8 +68,8 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 30 |
-| **合計** | **30** |
+| ✅ 実装+テスト済み  | 31 |
+| **合計** | **31** |
 
 ---
 

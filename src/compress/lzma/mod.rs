@@ -471,6 +471,13 @@ fn lzma_decode_impl(
     if !props.is_valid() {
         return Err(Error::InvalidData("lzma: invalid properties"));
     }
+    if let Some(limit) = expected_size
+        && limit > crate::util::bounded::DECLARED_OUTPUT_LIMIT
+    {
+        return Err(Error::OutputLimitExceeded {
+            limit: crate::util::bounded::DECLARED_OUTPUT_LIMIT,
+        });
+    }
 
     let mut rc = RangeDecoder::new(data)?;
     let model = &mut decoder_state.model;
@@ -954,6 +961,13 @@ fn find_match(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_decode_with_size_rejects_declared_output_above_limit() {
+        let err = lzma_decode_with_props_and_size(&[], 4096, LzmaProperties::LZIP, (1 << 30) + 1)
+            .unwrap_err();
+        assert!(matches!(err, Error::OutputLimitExceeded { .. }));
+    }
 
     #[test]
     fn test_lzip_properties_constant() {

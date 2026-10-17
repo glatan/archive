@@ -76,6 +76,11 @@ pub(super) fn expand(input: &[u8], factor: u8, expected_size: usize) -> Result<V
     if !(1..=4).contains(&factor) {
         return Err(Error::InvalidData("zip expand: factor must be 1-4"));
     }
+    if expected_size > crate::util::bounded::DECLARED_OUTPUT_LIMIT {
+        return Err(Error::OutputLimitExceeded {
+            limit: crate::util::bounded::DECLARED_OUTPUT_LIMIT,
+        });
+    }
 
     let mut reader = BitReader::new(input);
 

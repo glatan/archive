@@ -167,8 +167,11 @@ fn decode_folder_coder(
             .get(output_start..output_end)
             .ok_or(Error::InvalidData("7z: missing coder unpack size"))?
             .iter()
-            .map(|&size| size as usize)
-            .collect::<Vec<_>>();
+            .map(|&size| {
+                usize::try_from(size)
+                    .map_err(|_| Error::InvalidData("7z: unpack size exceeds address space"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let decoded_outputs = decode_coder(coder, &inputs, &expected_sizes, password)?;
         if decoded_outputs.len() != expected_sizes.len() {
             return Err(Error::InvalidData(
@@ -188,6 +191,15 @@ fn decode_folder_coder(
     result
 }
 
+fn declared_decode_len(size: usize) -> Result<usize, Error> {
+    if size > crate::util::bounded::DECLARED_OUTPUT_LIMIT {
+        return Err(Error::OutputLimitExceeded {
+            limit: crate::util::bounded::DECLARED_OUTPUT_LIMIT,
+        });
+    }
+    Ok(size)
+}
+
 pub(super) fn decode_coder(
     coder: &Coder,
     inputs: &[Vec<u8>],
@@ -204,16 +216,17 @@ pub(super) fn decode_coder(
                 "7z: non-BCJ2 multi-input coder methods are not supported",
             ));
         }
+        let expected_size = declared_decode_len(expected_sizes[0])?;
         let output = bcj2::decode(
             &inputs[0],
             &inputs[1],
             &inputs[2],
             &inputs[3],
-            expected_sizes[0],
+            expected_size,
         )?;
-        if output.len() != expected_sizes[0] {
+        if output.len() != expected_size {
             return Err(Error::SizeMismatch {
-                expected: expected_sizes[0] as u32,
+                expected: expected_size as u32,
                 actual: output.len() as u32,
             });
         }
@@ -256,7 +269,13 @@ pub(super) fn decode_coder(
             ));
         }
         let (props, dict_size) = decode_lzma_props(&coder.properties)?;
-        lzma_decode_with_props_and_size(&inputs[0], dict_size, props, expected_size)?.0
+        lzma_decode_with_props_and_size(
+            &inputs[0],
+            dict_size,
+            props,
+            declared_decode_len(expected_size)?,
+        )?
+        .0
     } else if coder.method_id == METHOD_PPMD {
         if inputs.len() != 1 {
             return Err(Error::Unsupported(
@@ -264,7 +283,7 @@ pub(super) fn decode_coder(
             ));
         }
         let props = ppmd::Ppmd7Properties::from_sevenz_properties(&coder.properties)?;
-        ppmd::decode(&inputs[0], props, expected_size)?
+        ppmd::decode(&inputs[0], props, declared_decode_len(expected_size)?)?
     } else if coder.method_id == METHOD_BCJ_X86 {
         if inputs.len() != 1 {
             return Err(Error::Unsupported(

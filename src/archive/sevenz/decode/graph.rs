@@ -25,8 +25,10 @@ pub(super) struct NormalizedFolderGraph {
 }
 
 pub(super) fn normalize_folder_graph(folder: &Folder) -> Result<NormalizedFolderGraph, Error> {
-    let total_inputs = folder.total_in_streams()? as usize;
-    let total_outputs = folder.total_out_streams()? as usize;
+    let total_inputs = usize::try_from(folder.total_in_streams()?)
+        .map_err(|_| Error::InvalidData("7z: count exceeds decode limit"))?;
+    let total_outputs = usize::try_from(folder.total_out_streams()?)
+        .map_err(|_| Error::InvalidData("7z: count exceeds decode limit"))?;
     let mut input_sources = vec![None; total_inputs];
     let mut output_owners = vec![None; total_outputs];
     let mut output_consumers = vec![Vec::new(); total_outputs];
@@ -48,22 +50,26 @@ pub(super) fn normalize_folder_graph(folder: &Folder) -> Result<NormalizedFolder
     }
 
     for bind_pair in &folder.bind_pairs {
-        let input_index = bind_pair.in_index as usize;
+        let input_index = usize::try_from(bind_pair.in_index)
+            .map_err(|_| Error::InvalidData("7z: bind pair input out of range"))?;
+        let output_index = usize::try_from(bind_pair.out_index)
+            .map_err(|_| Error::InvalidData("7z: bind pair output out of range"))?;
         if input_index >= total_inputs {
             return Err(Error::InvalidData("7z: bind pair input out of range"));
         }
-        if bind_pair.out_index as usize >= total_outputs {
+        if output_index >= total_outputs {
             return Err(Error::InvalidData("7z: bind pair output out of range"));
         }
         if input_sources[input_index].is_some() {
             return Err(Error::InvalidData("7z: duplicate folder input binding"));
         }
         input_sources[input_index] = Some(InputSource::Output(bind_pair.out_index));
-        output_consumers[bind_pair.out_index as usize].push(bind_pair.in_index);
+        output_consumers[output_index].push(bind_pair.in_index);
     }
 
     for (packed_slot, &packed_index) in folder.packed_streams.iter().enumerate() {
-        let input_index = packed_index as usize;
+        let input_index = usize::try_from(packed_index)
+            .map_err(|_| Error::InvalidData("7z: packed stream index out of range"))?;
         if input_index >= total_inputs {
             return Err(Error::InvalidData("7z: packed stream index out of range"));
         }
@@ -189,10 +195,12 @@ pub(super) fn is_encryption_method(method_id: &[u8]) -> bool {
 }
 
 pub(super) fn find_final_output_indices(folder: &Folder) -> Result<Vec<u64>, Error> {
-    let total_outputs = folder.total_out_streams()? as usize;
+    let total_outputs = usize::try_from(folder.total_out_streams()?)
+        .map_err(|_| Error::InvalidData("7z: count exceeds decode limit"))?;
     let mut bound = vec![false; total_outputs];
     for bind_pair in &folder.bind_pairs {
-        let index = bind_pair.out_index as usize;
+        let index = usize::try_from(bind_pair.out_index)
+            .map_err(|_| Error::InvalidData("7z: bind pair output out of range"))?;
         if index >= bound.len() {
             return Err(Error::InvalidData("7z: bind pair output out of range"));
         }

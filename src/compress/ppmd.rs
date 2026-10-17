@@ -4,6 +4,8 @@
 //! from 7-Zip's public-domain PPMd implementation (`Ppmd.h`, `Ppmd7.c`,
 //! `Ppmd7Dec.c`, `Ppmd7Enc.c`), and adapted to this crate's
 //! `no_std + alloc` style. See `THIRD_PARTY_NOTICES` section 3.
+//! Decode refuses a model larger than 256 MiB. Encode still accepts the
+//! format maximum (`u32::MAX - 36`).
 
 use alloc::vec::Vec;
 
@@ -15,6 +17,8 @@ pub(crate) const PPMD7_MIN_ORDER: u32 = 2;
 pub(crate) const PPMD7_MAX_ORDER: u32 = 64;
 pub(crate) const PPMD7_MIN_MEM_SIZE: u32 = 2048;
 pub(crate) const PPMD7_MAX_MEM_SIZE: u32 = u32::MAX - 36;
+/// Decode refuses a model larger than 256 MiB. Encode keeps the format maximum.
+pub(crate) const PPMD_DECODE_MEM_LIMIT: u32 = 1 << 28;
 pub(crate) const SYM_END: i32 = -1;
 pub(crate) const SYM_ERROR: i32 = -2;
 
@@ -56,6 +60,11 @@ pub(crate) fn decode(
     properties: Ppmd7Properties,
     unpacked_size: usize,
 ) -> Result<Vec<u8>, Error> {
+    if unpacked_size > crate::util::bounded::DECLARED_OUTPUT_LIMIT {
+        return Err(Error::OutputLimitExceeded {
+            limit: crate::util::bounded::DECLARED_OUTPUT_LIMIT,
+        });
+    }
     let mut ppmd =
         internal::ppmd7::PPMd7::new_decoder(input, properties.order as u32, properties.mem_size)?;
     let mut output = Vec::with_capacity(unpacked_size);
@@ -106,6 +115,18 @@ mod tests {
             Ppmd7Properties::from_sevenz_properties(&[6, 0, 0, 0]),
             Err(Error::InvalidData("7z: PPMd properties must be 5 bytes"))
         );
+    }
+
+    #[test]
+    fn test_decode_rejects_model_above_256_mib() {
+        for mem_size in [1 << 29, u32::MAX - 36] {
+            let props = Ppmd7Properties::new(6, mem_size).unwrap();
+            let err = decode(&[], props, 1).unwrap_err();
+            assert_eq!(
+                err,
+                Error::Unsupported("ppmd: memory size exceeds decode limit")
+            );
+        }
     }
 
     #[test]

@@ -152,7 +152,7 @@
 | 53 | Copy (0x00): passthrough, 1-in/1-out | Methods.txt: Copy | ✅ | `test_encode_copy_method_roundtrip` |
 | 54 | LZMA (0x03 0x01 0x01): 5B props (lc/lp/pb + dict_size LE), decode with external unpack size | Methods.txt: LZMA | ✅ | `test_decode_raw_lzma_archive` |
 | 55 | LZMA2 (0x21): 1B props (dict exponent 0-40), encode/decode | Methods.txt: LZMA2 | ✅ | self roundtrip + system fixture |
-| 56 | PPMdH (0x03 0x04 0x01): 2B props (order + mem_size LE), encode/decode | Methods.txt: PPMd | ✅ | `test_decode_roundtrip_with_ppmd_method`, `test_encode_ppmd_method_roundtrip`, system interop |
+| 56 | PPMdH (0x03 0x04 0x01): 5B props (order + mem_size LE), encode/decode | Methods.txt: PPMd | ✅ | `test_decode_roundtrip_with_ppmd_method`, `test_encode_ppmd_method_roundtrip`, system interop。ZIP method 98 の 2B order/mem_order ヘッダとは別 |
 | 57 | x86 BCJ (`03 03 01 03`): encode/decode, 1-in/1-out filter | Methods.txt: BCJ (long-form ID; short-form `04` は未受理) | ✅ | `test_decode_roundtrip_with_bcj_filter`, `test_sevenz_x86_bcj_filter_system_extract_compat` |
 | 58 | Delta (0x03): 1B props (distance-1, range 1-256), encode/decode | Methods.txt: Delta | ✅ | `test_decode_roundtrip_with_delta_filter`, `test_encode_delta_distance_256_roundtrip` |
 | 59 | BCJ2 (0x03 0x03 0x01 0x1B): 4-input/1-output, decode-only | Methods.txt: BCJ2 | ✅ | `test_decode_bcj2_type0_copy_archive`, `test_decode_bcj2_with_lzma_main_chain_archive` |
@@ -259,6 +259,8 @@
 | 113 | crate encode (two-folder + encrypted/encoded-header/PPMd/BCJ/Delta combinations) → system `7z` extract | system interop | ✅ | tests/integration/sevenz.rs の two-folder system テスト 16 件 (multi-folder 込みで 17) |
 | 114 | system `7z` encode (Deflate / Deflate64 / BZip2) → crate decode | system interop | ✅ | `test_sevenz_deflate_method_system_decode_compat`, `test_sevenz_deflate64_method_system_decode_compat`, `test_sevenz_bzip2_method_system_decode_compat` |
 | 115 | crate encode (Deflate / Deflate64 / BZip2) → system `7z` extract | system interop | ✅ | `test_sevenz_deflate_method_system_extract_compat`, `test_sevenz_deflate64_method_system_extract_compat`, `test_sevenz_bzip2_method_system_extract_compat` |
+| 116 | ヘッダの個数は、残バイト数の 64 倍を上限に割り当て前へ拒否する。`usize` へ切り捨てた下位ビットが小さい個数でも拒否する | crate 防御 | ✅ | `test_decode_rejects_files_count_that_truncates_on_32bit`, `test_parse_header_accepts_one_nameless_file`, `test_parse_digests_accepts_empty_bitset_of_eight` |
+| 117 | PPMd / LZMA / BCJ2 の宣言展開長が 1 GiB を超えると割り当て前に `OutputLimitExceeded`。PPMd のモデルが 256 MiB を超えると `Unsupported` | crate 防御 | ✅ | `test_decode_ppmd_coder_rejects_declared_output_above_limit`, `test_decode_lzma_coder_rejects_declared_output_above_limit`, `test_decode_bcj2_coder_rejects_declared_output_above_limit`, `test_decode_rejects_model_above_256_mib` |
 
 ---
 
@@ -266,8 +268,8 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 121 |
+| ✅ 実装+テスト済み  | 123 |
 | ⚠️ 部分実装  | 0 |
-| **合計** | **121** |
+| **合計** | **123** |
 
-**カバー率**: 121 / 121 = **100%** (仕様全体)
+**カバー率**: 123 / 123 = **100%** (仕様全体)
