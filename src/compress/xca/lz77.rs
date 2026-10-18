@@ -131,11 +131,8 @@ fn decode_internal(
             if out.len() + len > max_output {
                 return Err(Error::OutputLimitExceeded { limit: max_output });
             }
-            let start = out.len() - offset;
-            for i in 0..len {
-                let b = out[start + i];
-                out.push(b);
-            }
+            crate::compress::match_ops::copy_match(&mut out, offset, len)
+                .map_err(|_| Error::InvalidData("xpress: match offset before start"))?;
         }
         if out.len() > max_output {
             return Err(Error::OutputLimitExceeded { limit: max_output });
@@ -288,10 +285,12 @@ impl MatchTable {
         if pos - c > max_offset || data[c..c + 3] != data[pos..pos + 3] {
             return None;
         }
-        let mut len = MIN_MATCH;
-        while pos + len < data.len() && data[c + len] == data[pos + len] {
-            len += 1;
-        }
+        let len = MIN_MATCH
+            + crate::compress::match_ops::match_len(
+                &data[c + MIN_MATCH..],
+                &data[pos + MIN_MATCH..],
+                data.len() - (pos + MIN_MATCH),
+            );
         Some((pos - c, len))
     }
 }

@@ -9,6 +9,8 @@
 
 use alloc::vec::Vec;
 
+mod pattern;
+
 const MASK_TO_BIT_NUMBER: [u32; 5] = [0, 1, 2, 2, 3];
 
 #[inline]
@@ -70,6 +72,10 @@ impl X86Filter {
     }
 
     fn code(&mut self, buffer: &mut [u8], is_encoder: bool) -> usize {
+        self.code_from(buffer, is_encoder, false)
+    }
+
+    fn code_from(&mut self, buffer: &mut [u8], is_encoder: bool, scalar_scan: bool) -> usize {
         if buffer.len() < 5 {
             self.pos = self.pos.wrapping_add(buffer.len() as u32);
             return 0;
@@ -87,73 +93,95 @@ impl X86Filter {
         let mut buffer_pos = 0usize;
 
         while buffer_pos <= limit {
-            let mut b = buffer[buffer_pos];
-            if b != 0xE8 && b != 0xE9 {
-                buffer_pos += 1;
-                continue;
-            }
-
-            let offset = now_pos
-                .wrapping_add(buffer_pos as u32)
-                .wrapping_sub(prev_pos);
-            prev_pos = now_pos.wrapping_add(buffer_pos as u32);
-
-            if offset > 5 {
-                prev_mask = 0;
+            let found = if scalar_scan {
+                crate::compress::scan::find_byte_scalar(buffer, buffer_pos, limit, 0xE8, Some(0xE9))
             } else {
-                for _ in 0..offset {
-                    prev_mask &= 0x77;
-                    prev_mask <<= 1;
-                }
-            }
-
-            b = buffer[buffer_pos + 4];
-
-            if test_86_ms_byte(b) && (prev_mask >> 1) <= 4 && (prev_mask >> 1) != 3 {
-                let mut src = ((b as u32) << 24)
-                    | ((buffer[buffer_pos + 3] as u32) << 16)
-                    | ((buffer[buffer_pos + 2] as u32) << 8)
-                    | (buffer[buffer_pos + 1] as u32);
-
-                let dest = loop {
-                    let dest = if is_encoder {
-                        src.wrapping_add(now_pos.wrapping_add(buffer_pos as u32).wrapping_add(5))
-                    } else {
-                        src.wrapping_sub(now_pos.wrapping_add(buffer_pos as u32).wrapping_add(5))
-                    };
-
-                    if prev_mask == 0 {
-                        break dest;
-                    }
-
-                    let i = MASK_TO_BIT_NUMBER[(prev_mask >> 1) as usize];
-                    b = (dest >> (24 - i * 8)) as u8;
-                    if !test_86_ms_byte(b) {
-                        break dest;
-                    }
-
-                    src = dest ^ ((1u32 << (32 - i * 8)) - 1);
-                };
-
-                buffer[buffer_pos + 4] = !((((dest >> 24) & 1) as u8).wrapping_sub(1));
-                buffer[buffer_pos + 3] = (dest >> 16) as u8;
-                buffer[buffer_pos + 2] = (dest >> 8) as u8;
-                buffer[buffer_pos + 1] = dest as u8;
-                buffer_pos += 5;
-                prev_mask = 0;
-            } else {
-                buffer_pos += 1;
-                prev_mask |= 1;
-                if test_86_ms_byte(b) {
-                    prev_mask |= 0x10;
-                }
-            }
+                crate::compress::scan::find_byte(buffer, buffer_pos, limit, 0xE8, Some(0xE9))
+            };
+            let Some(at) = found else {
+                buffer_pos = limit + 1;
+                break;
+            };
+            buffer_pos = at;
+            buffer_pos += apply_x86(
+                buffer,
+                buffer_pos,
+                now_pos,
+                &mut prev_mask,
+                &mut prev_pos,
+                is_encoder,
+            );
         }
 
         self.prev_mask = prev_mask;
         self.prev_pos = prev_pos;
         self.pos = self.pos.wrapping_add(buffer_pos as u32);
         buffer_pos
+    }
+}
+
+fn apply_x86(
+    buffer: &mut [u8],
+    buffer_pos: usize,
+    now_pos: u32,
+    prev_mask: &mut u32,
+    prev_pos: &mut u32,
+    is_encoder: bool,
+) -> usize {
+    let offset = now_pos
+        .wrapping_add(buffer_pos as u32)
+        .wrapping_sub(*prev_pos);
+    *prev_pos = now_pos.wrapping_add(buffer_pos as u32);
+
+    if offset > 5 {
+        *prev_mask = 0;
+    } else {
+        for _ in 0..offset {
+            *prev_mask &= 0x77;
+            *prev_mask <<= 1;
+        }
+    }
+
+    let mut b = buffer[buffer_pos + 4];
+
+    if test_86_ms_byte(b) && (*prev_mask >> 1) <= 4 && (*prev_mask >> 1) != 3 {
+        let mut src = ((b as u32) << 24)
+            | ((buffer[buffer_pos + 3] as u32) << 16)
+            | ((buffer[buffer_pos + 2] as u32) << 8)
+            | (buffer[buffer_pos + 1] as u32);
+
+        let dest = loop {
+            let dest = if is_encoder {
+                src.wrapping_add(now_pos.wrapping_add(buffer_pos as u32).wrapping_add(5))
+            } else {
+                src.wrapping_sub(now_pos.wrapping_add(buffer_pos as u32).wrapping_add(5))
+            };
+
+            if *prev_mask == 0 {
+                break dest;
+            }
+
+            let i = MASK_TO_BIT_NUMBER[(*prev_mask >> 1) as usize];
+            b = (dest >> (24 - i * 8)) as u8;
+            if !test_86_ms_byte(b) {
+                break dest;
+            }
+
+            src = dest ^ ((1u32 << (32 - i * 8)) - 1);
+        };
+
+        buffer[buffer_pos + 4] = !((((dest >> 24) & 1) as u8).wrapping_sub(1));
+        buffer[buffer_pos + 3] = (dest >> 16) as u8;
+        buffer[buffer_pos + 2] = (dest >> 8) as u8;
+        buffer[buffer_pos + 1] = dest as u8;
+        *prev_mask = 0;
+        5
+    } else {
+        *prev_mask |= 1;
+        if test_86_ms_byte(b) {
+            *prev_mask |= 0x10;
+        }
+        1
     }
 }
 
@@ -196,32 +224,68 @@ impl PowerPcFilter {
     fn code(&mut self, buffer: &mut [u8], is_encoder: bool) -> usize {
         let size = buffer.len() & !3;
         let now_pos = self.pos;
-
         let mut i = 0usize;
+        while i + 16 <= size {
+            let hits = ppc_group_hits(&buffer[i..i + 16]);
+            let mut k = 0;
+            while k < 4 {
+                if hits & (1 << k) != 0 {
+                    let at = i + k * 4;
+                    ppc_apply(
+                        &mut buffer[at..at + 4],
+                        now_pos.wrapping_add(at as u32),
+                        is_encoder,
+                    );
+                }
+                k += 1;
+            }
+            i += 16;
+        }
         while i < size {
-            if (buffer[i] >> 2) == 0x12 && (buffer[i + 3] & 0x03) == 0x01 {
-                let src = (((buffer[i] as u32) & 0x03) << 24)
-                    | ((buffer[i + 1] as u32) << 16)
-                    | ((buffer[i + 2] as u32) << 8)
-                    | ((buffer[i + 3] as u32) & !0x03);
-
-                let dest = if is_encoder {
-                    now_pos.wrapping_add(i as u32).wrapping_add(src)
-                } else {
-                    src.wrapping_sub(now_pos.wrapping_add(i as u32))
-                };
-
-                buffer[i] = 0x48 | ((dest >> 24) & 0x03) as u8;
-                buffer[i + 1] = (dest >> 16) as u8;
-                buffer[i + 2] = (dest >> 8) as u8;
-                buffer[i + 3] = (buffer[i + 3] & 0x03) | dest as u8;
+            if ppc_match(&buffer[i..]) {
+                ppc_apply(
+                    &mut buffer[i..i + 4],
+                    now_pos.wrapping_add(i as u32),
+                    is_encoder,
+                );
             }
             i += 4;
         }
-
         self.pos = self.pos.wrapping_add(i as u32);
         i
     }
+}
+
+fn ppc_match(buf: &[u8]) -> bool {
+    (buf[0] >> 2) == 0x12 && (buf[3] & 0x03) == 0x01
+}
+
+fn ppc_apply(buf: &mut [u8], now_pos: u32, is_encoder: bool) {
+    let src = (((buf[0] as u32) & 0x03) << 24)
+        | ((buf[1] as u32) << 16)
+        | ((buf[2] as u32) << 8)
+        | ((buf[3] as u32) & !0x03);
+    let dest = if is_encoder {
+        now_pos.wrapping_add(src)
+    } else {
+        src.wrapping_sub(now_pos)
+    };
+    buf[0] = 0x48 | ((dest >> 24) & 0x03) as u8;
+    buf[1] = (dest >> 16) as u8;
+    buf[2] = (dest >> 8) as u8;
+    buf[3] = (buf[3] & 0x03) | dest as u8;
+}
+
+fn ppc_group_hits(chunk: &[u8]) -> u32 {
+    const MASK: [u8; 16] = [
+        0xFC, 0x00, 0x00, 0x03, 0xFC, 0x00, 0x00, 0x03, 0xFC, 0x00, 0x00, 0x03, 0xFC, 0x00, 0x00,
+        0x03,
+    ];
+    const EXPECT: [u8; 16] = [
+        0x48, 0x00, 0x00, 0x01, 0x48, 0x00, 0x00, 0x01, 0x48, 0x00, 0x00, 0x01, 0x48, 0x00, 0x00,
+        0x01,
+    ];
+    pattern::groups_of_four(pattern::pattern_bits(chunk, &MASK, &EXPECT))
 }
 
 /// Encode PowerPC machine code using the BCJ filter.
@@ -362,40 +426,76 @@ impl SparcFilter {
     fn code(&mut self, buffer: &mut [u8], is_encoder: bool) -> usize {
         let size = buffer.len() & !3;
         let now_pos = self.pos;
-
         let mut i = 0usize;
+        while i + 16 <= size {
+            let hits = sparc_group_hits(&buffer[i..i + 16]);
+            let mut k = 0;
+            while k < 4 {
+                if hits & (1 << k) != 0 {
+                    let at = i + k * 4;
+                    sparc_apply(
+                        &mut buffer[at..at + 4],
+                        now_pos.wrapping_add(at as u32),
+                        is_encoder,
+                    );
+                }
+                k += 1;
+            }
+            i += 16;
+        }
         while i < size {
-            if (buffer[i] == 0x40 && (buffer[i + 1] & 0xC0) == 0x00)
-                || (buffer[i] == 0x7F && (buffer[i + 1] & 0xC0) == 0xC0)
-            {
-                let mut src = ((buffer[i] as u32) << 24)
-                    | ((buffer[i + 1] as u32) << 16)
-                    | ((buffer[i + 2] as u32) << 8)
-                    | (buffer[i + 3] as u32);
-                src <<= 2;
-
-                let mut dest = if is_encoder {
-                    now_pos.wrapping_add(i as u32).wrapping_add(src)
-                } else {
-                    src.wrapping_sub(now_pos.wrapping_add(i as u32))
-                };
-
-                dest >>= 2;
-                dest = (((0u32.wrapping_sub((dest >> 22) & 1)) << 22) & 0x3FFF_FFFF)
-                    | (dest & 0x003F_FFFF)
-                    | 0x4000_0000;
-
-                buffer[i] = (dest >> 24) as u8;
-                buffer[i + 1] = (dest >> 16) as u8;
-                buffer[i + 2] = (dest >> 8) as u8;
-                buffer[i + 3] = dest as u8;
+            if sparc_match(&buffer[i..]) {
+                sparc_apply(
+                    &mut buffer[i..i + 4],
+                    now_pos.wrapping_add(i as u32),
+                    is_encoder,
+                );
             }
             i += 4;
         }
-
         self.pos = self.pos.wrapping_add(i as u32);
         i
     }
+}
+
+fn sparc_match(buf: &[u8]) -> bool {
+    (buf[0] == 0x40 && (buf[1] & 0xC0) == 0x00) || (buf[0] == 0x7F && (buf[1] & 0xC0) == 0xC0)
+}
+
+fn sparc_apply(buf: &mut [u8], now_pos: u32, is_encoder: bool) {
+    let mut src =
+        ((buf[0] as u32) << 24) | ((buf[1] as u32) << 16) | ((buf[2] as u32) << 8) | buf[3] as u32;
+    src <<= 2;
+    let mut dest = if is_encoder {
+        now_pos.wrapping_add(src)
+    } else {
+        src.wrapping_sub(now_pos)
+    };
+    dest >>= 2;
+    dest = (((0u32.wrapping_sub((dest >> 22) & 1)) << 22) & 0x3FFF_FFFF)
+        | (dest & 0x003F_FFFF)
+        | 0x4000_0000;
+    buf[0] = (dest >> 24) as u8;
+    buf[1] = (dest >> 16) as u8;
+    buf[2] = (dest >> 8) as u8;
+    buf[3] = dest as u8;
+}
+
+fn sparc_group_hits(chunk: &[u8]) -> u32 {
+    const MASK: [u8; 16] = [
+        0xFF, 0xC0, 0x00, 0x00, 0xFF, 0xC0, 0x00, 0x00, 0xFF, 0xC0, 0x00, 0x00, 0xFF, 0xC0, 0x00,
+        0x00,
+    ];
+    const CALL: [u8; 16] = [
+        0x40, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00,
+        0x00,
+    ];
+    const JUMP: [u8; 16] = [
+        0x7F, 0xC0, 0x00, 0x00, 0x7F, 0xC0, 0x00, 0x00, 0x7F, 0xC0, 0x00, 0x00, 0x7F, 0xC0, 0x00,
+        0x00,
+    ];
+    pattern::groups_of_four(pattern::pattern_bits(chunk, &MASK, &CALL))
+        | pattern::groups_of_four(pattern::pattern_bits(chunk, &MASK, &JUMP))
 }
 
 /// Encode SPARC machine code using the BCJ filter.
@@ -438,33 +538,42 @@ impl ArmFilter {
         let size = buffer.len() & !3;
         let now_pos = self.pos;
 
-        let mut i = 0usize;
-        while i < size {
-            if buffer[i + 3] == 0xEB {
-                let mut src = ((buffer[i + 2] as u32) << 16)
-                    | ((buffer[i + 1] as u32) << 8)
-                    | buffer[i] as u32;
-                src <<= 2;
-
-                let mut dest = if is_encoder {
-                    now_pos
-                        .wrapping_add(i as u32)
-                        .wrapping_add(8)
-                        .wrapping_add(src)
-                } else {
-                    src.wrapping_sub(now_pos.wrapping_add(i as u32).wrapping_add(8))
-                };
-
-                dest >>= 2;
-                buffer[i + 2] = (dest >> 16) as u8;
-                buffer[i + 1] = (dest >> 8) as u8;
-                buffer[i] = dest as u8;
+        // Branch bytes sit at index 3 of each aligned instruction. The
+        // shared scanner finds `0xEB`; only those aligned hits are rewritten.
+        let mut probe = 3usize;
+        while probe < size {
+            let Some(at) = crate::compress::scan::find_byte(buffer, probe, size - 1, 0xEB, None)
+            else {
+                break;
+            };
+            if at % 4 != 3 {
+                let rem = at % 4;
+                probe = at + (3 - rem);
+                continue;
             }
-            i += 4;
+            let i = at - 3;
+            let mut src =
+                ((buffer[i + 2] as u32) << 16) | ((buffer[i + 1] as u32) << 8) | buffer[i] as u32;
+            src <<= 2;
+
+            let mut dest = if is_encoder {
+                now_pos
+                    .wrapping_add(i as u32)
+                    .wrapping_add(8)
+                    .wrapping_add(src)
+            } else {
+                src.wrapping_sub(now_pos.wrapping_add(i as u32).wrapping_add(8))
+            };
+
+            dest >>= 2;
+            buffer[i + 2] = (dest >> 16) as u8;
+            buffer[i + 1] = (dest >> 8) as u8;
+            buffer[i] = dest as u8;
+            probe = at + 4;
         }
 
-        self.pos = self.pos.wrapping_add(i as u32);
-        i
+        self.pos = self.pos.wrapping_add(size as u32);
+        size
     }
 }
 
@@ -514,30 +623,32 @@ impl ArmThumbFilter {
         let mut i = 0usize;
 
         while i <= size {
-            if (buffer[i + 1] & 0xF8) == 0xF0 && (buffer[i + 3] & 0xF8) == 0xF8 {
-                let mut src = (((buffer[i + 1] as u32) & 0x07) << 19)
-                    | ((buffer[i] as u32) << 11)
-                    | (((buffer[i + 3] as u32) & 0x07) << 8)
-                    | (buffer[i + 2] as u32);
-                src <<= 1;
+            let Some(at) = thumb_next(buffer, i, size) else {
+                i = even_finish(i, size);
+                break;
+            };
+            i = at;
+            let mut src = (((buffer[i + 1] as u32) & 0x07) << 19)
+                | ((buffer[i] as u32) << 11)
+                | (((buffer[i + 3] as u32) & 0x07) << 8)
+                | (buffer[i + 2] as u32);
+            src <<= 1;
 
-                let mut dest = if is_encoder {
-                    now_pos
-                        .wrapping_add(i as u32)
-                        .wrapping_add(4)
-                        .wrapping_add(src)
-                } else {
-                    src.wrapping_sub(now_pos.wrapping_add(i as u32).wrapping_add(4))
-                };
+            let mut dest = if is_encoder {
+                now_pos
+                    .wrapping_add(i as u32)
+                    .wrapping_add(4)
+                    .wrapping_add(src)
+            } else {
+                src.wrapping_sub(now_pos.wrapping_add(i as u32).wrapping_add(4))
+            };
 
-                dest >>= 1;
-                buffer[i + 1] = 0xF0 | ((dest >> 19) & 0x07) as u8;
-                buffer[i] = (dest >> 11) as u8;
-                buffer[i + 3] = 0xF8 | ((dest >> 8) & 0x07) as u8;
-                buffer[i + 2] = dest as u8;
-                i += 2;
-            }
-            i += 2;
+            dest >>= 1;
+            buffer[i + 1] = 0xF0 | ((dest >> 19) & 0x07) as u8;
+            buffer[i] = (dest >> 11) as u8;
+            buffer[i + 3] = 0xF8 | ((dest >> 8) & 0x07) as u8;
+            buffer[i + 2] = dest as u8;
+            i += 4;
         }
 
         self.pos = self.pos.wrapping_add(i as u32);
@@ -588,45 +699,84 @@ impl Arm64Filter {
         let now_pos = self.pos;
 
         let mut i = 0usize;
-        while i < size {
-            let mut pc = now_pos.wrapping_add(i as u32);
-            let mut instr = read32le(&buffer[i..]);
-
-            if (instr >> 26) == 0x25 {
-                let src = instr;
-                instr = 0x9400_0000;
-                pc >>= 2;
-                if !is_encoder {
-                    pc = 0u32.wrapping_sub(pc);
+        while i + 16 <= size {
+            let hits = arm64_group_hits(&buffer[i..i + 16]);
+            let mut k = 0;
+            while k < 4 {
+                if hits & (1 << k) != 0 {
+                    let at = i + k * 4;
+                    arm64_apply(
+                        &mut buffer[at..at + 4],
+                        now_pos.wrapping_add(at as u32),
+                        is_encoder,
+                    );
                 }
-                instr |= src.wrapping_add(pc) & 0x03FF_FFFF;
-                write32le(&mut buffer[i..], instr);
-            } else if (instr & 0x9F00_0000) == 0x9000_0000 {
-                let src = ((instr >> 29) & 3) | ((instr >> 3) & 0x001F_FFFC);
-                if ((src + 0x0002_0000) & 0x001C_0000) != 0 {
-                    i += 4;
-                    continue;
-                }
-
-                instr &= 0x9000_001F;
-                pc >>= 12;
-                if !is_encoder {
-                    pc = 0u32.wrapping_sub(pc);
-                }
-
-                let dest = src.wrapping_add(pc);
-                instr |= (dest & 3) << 29;
-                instr |= (dest & 0x0003_FFFC) << 3;
-                instr |= (0u32.wrapping_sub(dest & 0x0002_0000)) & 0x00E0_0000;
-                write32le(&mut buffer[i..], instr);
+                k += 1;
             }
-
+            i += 16;
+        }
+        while i < size {
+            arm64_apply(
+                &mut buffer[i..i + 4],
+                now_pos.wrapping_add(i as u32),
+                is_encoder,
+            );
             i += 4;
         }
 
         self.pos = self.pos.wrapping_add(i as u32);
         i
     }
+}
+
+fn arm64_apply(buf: &mut [u8], mut pc: u32, is_encoder: bool) {
+    let mut instr = read32le(buf);
+    if (instr >> 26) == 0x25 {
+        let src = instr;
+        instr = 0x9400_0000;
+        pc >>= 2;
+        if !is_encoder {
+            pc = 0u32.wrapping_sub(pc);
+        }
+        instr |= src.wrapping_add(pc) & 0x03FF_FFFF;
+        write32le(buf, instr);
+    } else if (instr & 0x9F00_0000) == 0x9000_0000 {
+        let src = ((instr >> 29) & 3) | ((instr >> 3) & 0x001F_FFFC);
+        if ((src + 0x0002_0000) & 0x001C_0000) != 0 {
+            return;
+        }
+        instr &= 0x9000_001F;
+        pc >>= 12;
+        if !is_encoder {
+            pc = 0u32.wrapping_sub(pc);
+        }
+        let dest = src.wrapping_add(pc);
+        instr |= (dest & 3) << 29;
+        instr |= (dest & 0x0003_FFFC) << 3;
+        instr |= (0u32.wrapping_sub(dest & 0x0002_0000)) & 0x00E0_0000;
+        write32le(buf, instr);
+    }
+}
+
+fn arm64_group_hits(chunk: &[u8]) -> u32 {
+    const BL_MASK: [u8; 16] = [
+        0x00, 0x00, 0x00, 0xFC, 0x00, 0x00, 0x00, 0xFC, 0x00, 0x00, 0x00, 0xFC, 0x00, 0x00, 0x00,
+        0xFC,
+    ];
+    const BL: [u8; 16] = [
+        0x00, 0x00, 0x00, 0x94, 0x00, 0x00, 0x00, 0x94, 0x00, 0x00, 0x00, 0x94, 0x00, 0x00, 0x00,
+        0x94,
+    ];
+    const ADRP_MASK: [u8; 16] = [
+        0x00, 0x00, 0x00, 0x9F, 0x00, 0x00, 0x00, 0x9F, 0x00, 0x00, 0x00, 0x9F, 0x00, 0x00, 0x00,
+        0x9F,
+    ];
+    const ADRP: [u8; 16] = [
+        0x00, 0x00, 0x00, 0x90, 0x00, 0x00, 0x00, 0x90, 0x00, 0x00, 0x00, 0x90, 0x00, 0x00, 0x00,
+        0x90,
+    ];
+    pattern::groups_of_four(pattern::pattern_bits(chunk, &BL_MASK, &BL))
+        | pattern::groups_of_four(pattern::pattern_bits(chunk, &ADRP_MASK, &ADRP))
 }
 
 /// Encode ARM64 machine code using the BCJ filter.
@@ -677,6 +827,13 @@ impl RiscVFilter {
         let mut i = 0usize;
 
         while i <= size {
+            if !riscv_candidate(buffer[i]) {
+                let Some(at) = riscv_next(buffer, i, size) else {
+                    i = even_finish(i, size);
+                    break;
+                };
+                i = at;
+            }
             let mut inst = buffer[i] as u32;
 
             if inst == 0xEF {
@@ -759,6 +916,13 @@ impl RiscVFilter {
         let mut i = 0usize;
 
         while i <= size {
+            if !riscv_candidate(buffer[i]) {
+                let Some(at) = riscv_next(buffer, i, size) else {
+                    i = even_finish(i, size);
+                    break;
+                };
+                i = at;
+            }
             let mut inst = buffer[i] as u32;
 
             if inst == 0xEF {
@@ -842,6 +1006,95 @@ pub fn riscv_decode(input: &[u8], start_offset: u32) -> Vec<u8> {
 const fn test_86_ms_byte(byte: u8) -> bool {
     byte == 0 || byte == 0xFF
 }
+fn even_finish(i: usize, size: usize) -> usize {
+    if i > size {
+        i
+    } else {
+        i + ((size - i) / 2 + 1) * 2
+    }
+}
+
+fn thumb_match(buf: &[u8]) -> bool {
+    (buf[1] & 0xF8) == 0xF0 && (buf[3] & 0xF8) == 0xF8
+}
+
+fn thumb_pair_hits(chunk: &[u8]) -> u32 {
+    let mask = [0xF8u8; 16];
+    let f0 = [0xF0u8; 16];
+    let f8 = [0xF8u8; 16];
+    let high = pattern::pattern_bits(chunk, &mask, &f0);
+    let low = pattern::pattern_bits(chunk, &mask, &f8);
+    let mut hits = 0u32;
+    let mut k = 0;
+    while k <= 12 {
+        if ((high >> (k + 1)) & 1) == 1 && ((low >> (k + 3)) & 1) == 1 {
+            hits |= 1 << k;
+        }
+        k += 2;
+    }
+    hits
+}
+
+fn thumb_next(buffer: &[u8], i: usize, size: usize) -> Option<usize> {
+    let mut j = i;
+    while j <= size {
+        if j + 16 <= buffer.len() && j + 12 <= size {
+            let hits = thumb_pair_hits(&buffer[j..j + 16]);
+            if hits != 0 {
+                let rel = hits.trailing_zeros() as usize;
+                if j + rel <= size {
+                    return Some(j + rel);
+                }
+            } else {
+                j += 14;
+                continue;
+            }
+        }
+        if thumb_match(&buffer[j..]) {
+            return Some(j);
+        }
+        j += 2;
+    }
+    None
+}
+
+fn riscv_candidate(byte: u8) -> bool {
+    byte == 0xEF || (byte & 0x7F) == 0x17
+}
+
+fn riscv_hits(chunk: &[u8]) -> u32 {
+    let ones = [0xFFu8; 16];
+    let ef = [0xEFu8; 16];
+    let op17 = [0x17u8; 16];
+    let op97 = [0x97u8; 16];
+    (pattern::pattern_bits(chunk, &ones, &ef)
+        | pattern::pattern_bits(chunk, &ones, &op17)
+        | pattern::pattern_bits(chunk, &ones, &op97))
+        & 0x5555
+}
+
+fn riscv_next(buffer: &[u8], i: usize, size: usize) -> Option<usize> {
+    let mut j = i;
+    while j <= size {
+        if j + 16 <= buffer.len() && j + 14 <= size {
+            let hits = riscv_hits(&buffer[j..j + 16]);
+            if hits != 0 {
+                let rel = hits.trailing_zeros() as usize;
+                if j + rel <= size {
+                    return Some(j + rel);
+                }
+            } else {
+                j += 16;
+                continue;
+            }
+        }
+        if riscv_candidate(buffer[j]) {
+            return Some(j);
+        }
+        j += 2;
+    }
+    None
+}
 
 #[cfg(test)]
 mod tests {
@@ -872,6 +1125,35 @@ mod tests {
         let processed = X86Filter::new(0).encode_in_place(&mut input);
         assert_eq!(processed, 21);
         assert_eq!(&input[21..], &[0x22, 0x33, 0x44, 0x90]);
+    }
+
+    #[test]
+    fn test_x86_scan_matches_scalar_bytes() {
+        let mut samples: Vec<Vec<u8>> = vec![
+            vec![0u8; 64],
+            vec![0xE8; 80],
+            vec![0xE9; 48],
+            (0..200u32).map(|i| i as u8).collect(),
+        ];
+        let mut dense = vec![0x90u8; 120];
+        for i in (0..120).step_by(3) {
+            dense[i] = if i % 2 == 0 { 0xE8 } else { 0xE9 };
+        }
+        samples.push(dense);
+        for sample in samples {
+            for offset in [0u32, 1, 5, 13] {
+                let mut scalar_filter = X86Filter::new(offset);
+                let mut vector_filter = X86Filter::new(offset);
+                let mut scalar = sample.clone();
+                let mut vector = sample.clone();
+                let n_scalar = scalar_filter.code_from(&mut scalar, true, true);
+                let n_vector = vector_filter.encode_in_place(&mut vector);
+                assert_eq!(n_scalar, n_vector, "offset {offset}");
+                assert_eq!(scalar, vector, "offset {offset}");
+                assert_eq!(scalar_filter, vector_filter);
+                assert_eq!(x86_decode(&vector, offset), sample);
+            }
+        }
     }
 
     #[test]
@@ -946,6 +1228,156 @@ mod tests {
         assert_eq!(first, 16);
         assert_eq!(second, 16);
         assert_eq!(streaming, one_shot);
+    }
+
+    #[test]
+    fn test_aligned_group_matches_stride() {
+        let patterns = [
+            vec![0u8; 80],
+            (0..200u32).map(|i| (i % 251) as u8).collect::<Vec<_>>(),
+            [0x48u8, 0, 0, 1].repeat(20),
+            [0x40u8, 0, 0, 0].repeat(20),
+            [0x7Fu8, 0xC0, 0, 0].repeat(16),
+            {
+                let mut arm64 = vec![0u8; 64];
+                for i in (0..64).step_by(8) {
+                    arm64[i + 3] = 0x94;
+                    arm64[i + 7] = 0x90;
+                }
+                arm64
+            },
+            [0xF0u8, 0xF0, 0x00, 0xF8].repeat(20),
+        ];
+        for input in patterns {
+            let mut ppc_stride = input.clone();
+            let size = ppc_stride.len() & !3;
+            let mut i = 0;
+            while i < size {
+                if ppc_match(&ppc_stride[i..]) {
+                    ppc_apply(&mut ppc_stride[i..i + 4], i as u32, true);
+                }
+                i += 4;
+            }
+            assert_eq!(powerpc_encode(&input, 0), ppc_stride);
+
+            let mut sparc_stride = input.clone();
+            i = 0;
+            while i < size {
+                if sparc_match(&sparc_stride[i..]) {
+                    sparc_apply(&mut sparc_stride[i..i + 4], i as u32, true);
+                }
+                i += 4;
+            }
+            assert_eq!(sparc_encode(&input, 0), sparc_stride);
+
+            let mut arm64_stride = input.clone();
+            i = 0;
+            while i < size {
+                arm64_apply(&mut arm64_stride[i..i + 4], i as u32, true);
+                i += 4;
+            }
+            assert_eq!(arm64_encode(&input, 0), arm64_stride);
+        }
+
+        let thumb_input = [0x11u8, 0xF0, 0x22, 0xF8].repeat(30);
+        let encoded = armthumb_encode(&thumb_input, 4);
+        let mut stride = thumb_input.clone();
+        let size = stride.len() - 4;
+        let mut i = 0usize;
+        while i <= size {
+            if thumb_match(&stride[i..]) {
+                let mut src = (((stride[i + 1] as u32) & 0x07) << 19)
+                    | ((stride[i] as u32) << 11)
+                    | (((stride[i + 3] as u32) & 0x07) << 8)
+                    | (stride[i + 2] as u32);
+                src <<= 1;
+                let mut dest = 4u32
+                    .wrapping_add(i as u32)
+                    .wrapping_add(4)
+                    .wrapping_add(src);
+                dest >>= 1;
+                stride[i + 1] = 0xF0 | ((dest >> 19) & 0x07) as u8;
+                stride[i] = (dest >> 11) as u8;
+                stride[i + 3] = 0xF8 | ((dest >> 8) & 0x07) as u8;
+                stride[i + 2] = dest as u8;
+                i += 2;
+            }
+            i += 2;
+        }
+        assert_eq!(encoded, stride);
+
+        let mut quiet = vec![0u8; 40];
+        assert_eq!(RiscVFilter::new(0).encode_in_place(&mut quiet), 34);
+        let mut thumb_quiet = vec![0u8; 20];
+        assert_eq!(ArmThumbFilter::new(0).encode_in_place(&mut thumb_quiet), 18);
+        let riscv = {
+            let mut data = vec![0u8; 64];
+            data[0] = 0xEF;
+            data[8] = 0x17;
+            data[20] = 0x97;
+            data
+        };
+        let size = riscv.len() - 8;
+        let mut seen = Vec::new();
+        let mut j = 0usize;
+        while j <= size {
+            match riscv_next(&riscv, j, size) {
+                Some(at) => {
+                    seen.push(at);
+                    j = at + 2;
+                }
+                None => break,
+            }
+        }
+        let mut expect = Vec::new();
+        j = 0;
+        while j <= size {
+            if riscv_candidate(riscv[j]) {
+                expect.push(j);
+            }
+            j += 2;
+        }
+        assert_eq!(seen, expect);
+    }
+
+    #[test]
+    fn test_arm_scan_matches_stride_loop() {
+        fn scalar(input: &[u8], start: u32) -> Vec<u8> {
+            let mut buffer = input.to_vec();
+            let size = buffer.len() & !3;
+            let mut i = 0usize;
+            while i < size {
+                if buffer[i + 3] == 0xEB {
+                    let mut src = ((buffer[i + 2] as u32) << 16)
+                        | ((buffer[i + 1] as u32) << 8)
+                        | buffer[i] as u32;
+                    src <<= 2;
+                    let mut dest = start
+                        .wrapping_add(i as u32)
+                        .wrapping_add(8)
+                        .wrapping_add(src);
+                    dest >>= 2;
+                    buffer[i + 2] = (dest >> 16) as u8;
+                    buffer[i + 1] = (dest >> 8) as u8;
+                    buffer[i] = dest as u8;
+                }
+                i += 4;
+            }
+            buffer
+        }
+
+        let mut samples = vec![vec![0u8; 64], vec![0xEB; 80]];
+        let mut mixed = (0..200u32).map(|i| i as u8).collect::<Vec<_>>();
+        for i in (3..mixed.len()).step_by(4) {
+            mixed[i] = 0xEB;
+        }
+        mixed[1] = 0xEB;
+        mixed[2] = 0xEB;
+        samples.push(mixed);
+        for sample in samples {
+            assert_eq!(arm_encode(&sample, 0), scalar(&sample, 0));
+            assert_eq!(arm_encode(&sample, 8), scalar(&sample, 8));
+        }
     }
 
     #[test]

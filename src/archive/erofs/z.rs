@@ -191,12 +191,11 @@ fn lz4_decode_partial(src: &[u8], out_len: usize) -> Result<Vec<u8>, Error> {
                 }
             }
         }
+        // Stop at the requested length. The shared copy writes every
+        // byte it is given; the partial success stays here.
         let take = (mlen + 4).min(out_len - dst.len());
-        let start = dst.len() - off;
-        for i in 0..take {
-            let b = dst[start + i];
-            dst.push(b);
-        }
+        crate::compress::match_ops::copy_match(&mut dst, off, take)
+            .map_err(|_| Error::InvalidData("erofs lz4 bad match offset"))?;
     }
     if dst.len() != out_len {
         return Err(Error::InvalidData("erofs lz4 truncated stream"));
@@ -1112,5 +1111,45 @@ pub(crate) fn read_compressed(
             read_indexed(img, &zm, ino.size, tail)
         }
         _ => Err(Error::Unsupported("erofs compressed inode (z_erofs)")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lz4_decode_partial;
+    use crate::compress::lz4::decode::decode_block;
+    use crate::error::Error;
+
+    /// Five literals. erofs keeps the prefix that fits; block LZ4 refuses
+    /// the whole literal run before writing.
+    #[test]
+    fn lz4_partial_keeps_literal_prefix_block_lz4_rejects() {
+        let src = [0x50, b'a', b'b', b'c', b'd', b'e'];
+        assert_eq!(lz4_decode_partial(&src, 3).unwrap(), b"abc");
+        assert!(matches!(
+            decode_block(&src, 3),
+            Err(Error::OutputLimitExceeded { limit: 3 })
+        ));
+    }
+
+    /// A match longer than the remaining budget is truncated by erofs and
+    /// rejected by block LZ4. Offset 1 repeats the last byte.
+    #[test]
+    fn lz4_partial_truncates_match_block_lz4_rejects() {
+        let src = [0x22, b'a', b'b', 0x01, 0x00];
+        assert_eq!(lz4_decode_partial(&src, 4).unwrap(), b"abbb");
+        assert!(matches!(
+            decode_block(&src, 4),
+            Err(Error::OutputLimitExceeded { limit: 4 })
+        ));
+        assert_eq!(lz4_decode_partial(&src, 8).unwrap(), b"abbbbbbb");
+    }
+
+    /// Offset 2 overlaps the copy. The full request is `abababab`.
+    #[test]
+    fn lz4_partial_overlap_match_writes_full_length() {
+        let src = [0x22, b'a', b'b', 0x02, 0x00];
+        assert_eq!(lz4_decode_partial(&src, 8).unwrap(), b"abababab");
+        assert_eq!(decode_block(&src, 8).unwrap(), b"abababab");
     }
 }

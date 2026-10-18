@@ -522,12 +522,8 @@ fn copy_match(dst: &mut Vec<u8>, offset: usize, length: usize) -> Result<(), Err
     if offset == 0 || offset > dst.len() {
         return Err(Error::InvalidData("lzo: match offset out of range"));
     }
-    let start = dst.len() - offset;
-    for i in 0..length {
-        let b = dst[start + i];
-        dst.push(b);
-    }
-    Ok(())
+    crate::compress::match_ops::copy_match(dst, offset, length)
+        .map_err(|_| Error::InvalidData("lzo: match offset out of range"))
 }
 
 fn read_byte(data: &[u8], pos: &mut usize) -> Result<u8, Error> {
@@ -578,6 +574,23 @@ pub fn decode_reader<R: std::io::Read>(mut reader: R) -> std::io::Result<Vec<u8>
     let mut buf = Vec::new();
     reader.read_to_end(&mut buf)?;
     decode(&buf).map_err(Into::into)
+}
+
+/// Append the decompressed bytes of `input` to `output`.
+///
+/// `max_output` limits how many bytes are appended. An empty `output`
+/// takes the decoder buffer by move. A non-empty `output` is extended.
+pub fn decode_into(
+    input: &[u8],
+    output: &mut Vec<u8>,
+    max_output: Option<usize>,
+) -> Result<(), Error> {
+    let produced = match max_output {
+        Some(limit) => decode_bounded(input, limit)?,
+        None => decode(input)?,
+    };
+    crate::compress::move_into(output, produced);
+    Ok(())
 }
 
 /// Decode lzop format data with a maximum output size limit.

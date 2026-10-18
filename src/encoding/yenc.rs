@@ -37,28 +37,112 @@ pub struct YEncEntry {
 }
 
 fn push_encoded(out: &mut Vec<u8>, data: &[u8]) {
+    push_encoded_rotated(out, data, false);
+}
+
+fn push_encoded_scalar(out: &mut Vec<u8>, data: &[u8]) {
+    push_encoded_rotated(out, data, true);
+}
+
+fn push_encoded_rotated(out: &mut Vec<u8>, data: &[u8], scalar: bool) {
     let mut col = 0usize;
-    for &b in data {
-        let c = b.wrapping_add(42);
-        let last_col = col + 1 >= LINE_LEN;
-        let escape = matches!(c, 0 | 10 | 13 | b'=')
-            || (col == 0 && matches!(c, b' ' | b'\t' | b'.'))
-            || (last_col && matches!(c, b' ' | b'\t'));
-        if escape {
-            out.push(b'=');
-            out.push(c.wrapping_add(64));
-            col += 2;
+    let mut off = 0usize;
+    while off < data.len() {
+        let n = (data.len() - off).min(32);
+        let mut rotated = [0u8; 32];
+        if scalar {
+            rotate_scalar(&data[off..off + n], &mut rotated[..n]);
         } else {
-            out.push(c);
-            col += 1;
+            rotate_chunk(&data[off..off + n], &mut rotated[..n]);
         }
-        if col >= LINE_LEN {
-            out.extend_from_slice(b"\r\n");
-            col = 0;
+        for &c in &rotated[..n] {
+            let last_col = col + 1 >= LINE_LEN;
+            let escape = matches!(c, 0 | 10 | 13 | b'=')
+                || (col == 0 && matches!(c, b' ' | b'\t' | b'.'))
+                || (last_col && matches!(c, b' ' | b'\t'));
+            if escape {
+                out.push(b'=');
+                out.push(c.wrapping_add(64));
+                col += 2;
+            } else {
+                out.push(c);
+                col += 1;
+            }
+            if col >= LINE_LEN {
+                out.extend_from_slice(b"\r\n");
+                col = 0;
+            }
         }
+        off += n;
     }
     if col > 0 {
         out.extend_from_slice(b"\r\n");
+    }
+}
+
+fn rotate_scalar(src: &[u8], dst: &mut [u8]) {
+    for (s, d) in src.iter().zip(dst.iter_mut()) {
+        *d = s.wrapping_add(42);
+    }
+}
+
+fn rotate_chunk(src: &[u8], dst: &mut [u8]) {
+    let mut i = 0;
+    #[cfg(all(feature = "std", target_arch = "x86_64"))]
+    if std::is_x86_feature_detected!("avx2") {
+        while i + 32 <= src.len() {
+            unsafe { rotate32_avx2(&src[i..i + 32], &mut dst[i..i + 32]) };
+            i += 32;
+        }
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        while i + 16 <= src.len() {
+            unsafe { rotate16_sse2(&src[i..i + 16], &mut dst[i..i + 16]) };
+            i += 16;
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        while i + 16 <= src.len() {
+            unsafe { rotate16_neon(&src[i..i + 16], &mut dst[i..i + 16]) };
+            i += 16;
+        }
+    }
+    rotate_scalar(&src[i..], &mut dst[i..]);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+fn rotate16_sse2(src: &[u8], dst: &mut [u8]) {
+    use core::arch::x86_64::{_mm_add_epi8, _mm_loadu_si128, _mm_set1_epi8, _mm_storeu_si128};
+    unsafe {
+        let v = _mm_loadu_si128(src.as_ptr().cast());
+        let r = _mm_add_epi8(v, _mm_set1_epi8(42));
+        _mm_storeu_si128(dst.as_mut_ptr().cast(), r);
+    }
+}
+
+#[cfg(all(feature = "std", target_arch = "x86_64"))]
+#[target_feature(enable = "avx2")]
+fn rotate32_avx2(src: &[u8], dst: &mut [u8]) {
+    use core::arch::x86_64::{
+        _mm256_add_epi8, _mm256_loadu_si256, _mm256_set1_epi8, _mm256_storeu_si256,
+    };
+    unsafe {
+        let v = _mm256_loadu_si256(src.as_ptr().cast());
+        let r = _mm256_add_epi8(v, _mm256_set1_epi8(42));
+        _mm256_storeu_si256(dst.as_mut_ptr().cast(), r);
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+fn rotate16_neon(src: &[u8], dst: &mut [u8]) {
+    use core::arch::aarch64::{vaddq_u8, vdupq_n_u8, vld1q_u8, vst1q_u8};
+    unsafe {
+        let v = vld1q_u8(src.as_ptr());
+        vst1q_u8(dst.as_mut_ptr(), vaddq_u8(v, vdupq_n_u8(42)));
     }
 }
 
@@ -72,6 +156,15 @@ fn push_encoded(out: &mut Vec<u8>, data: &[u8]) {
 ///
 /// Panics if `name` is empty or contains `\r` or `\n`.
 pub fn encode(name: &str, data: &[u8]) -> Vec<u8> {
+    encode_inner(name, data, false)
+}
+
+#[cfg(test)]
+fn encode_scalar(name: &str, data: &[u8]) -> Vec<u8> {
+    encode_inner(name, data, true)
+}
+
+fn encode_inner(name: &str, data: &[u8], scalar: bool) -> Vec<u8> {
     assert!(
         !name.is_empty() && !name.contains(['\r', '\n']),
         "yenc: bad name"
@@ -84,7 +177,11 @@ pub fn encode(name: &str, data: &[u8]) -> Vec<u8> {
         )
         .as_bytes(),
     );
-    push_encoded(&mut out, data);
+    if scalar {
+        push_encoded_scalar(&mut out, data);
+    } else {
+        push_encoded(&mut out, data);
+    }
     out.extend_from_slice(
         alloc::format!("=yend size={} crc32={:08x}\r\n", data.len(), crc32(data)).as_bytes(),
     );
@@ -400,6 +497,29 @@ pub fn join_parts(parts: &[YEncEntry]) -> Result<YEncEntry, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vector_matches_scalar_lengths_and_escapes() {
+        let mut samples: Vec<Vec<u8>> = (0..=8).map(|n| vec![0x41; n]).collect();
+        samples.push(vec![0x00, 0x0a, 0x0d, b'=', b'.', b' ', b'\t', 0xff]);
+        samples.push(vec![0; 128]);
+        samples.push(vec![1; 129]);
+        samples.push({
+            let mut v = vec![0x20; 200];
+            v[0] = b'.';
+            v[127] = 0;
+            v[128] = b'\n';
+            v
+        });
+        for data in samples {
+            assert_eq!(
+                encode("n.bin", &data),
+                encode_scalar("n.bin", &data),
+                "len {}",
+                data.len()
+            );
+        }
+    }
 
     #[test]
     fn roundtrip() {

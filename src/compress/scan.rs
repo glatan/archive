@@ -1,0 +1,253 @@
+//! Byte scan shared by BCJ and LZX.
+//!
+//! `find_byte` returns the first index whose byte is one of the needles.
+//! x86_64 scans 16 bytes at a time, or 32 when AVX2 is enabled. aarch64
+//! scans 16 bytes with NEON. The index matches [`find_byte_scalar`].
+
+/// First index in `from..=last` whose byte is `first` or `second`.
+///
+/// x86_64 scans 16 bytes at a time (32 when AVX2 is enabled) and then
+/// runs the scalar tail. The returned index is the same as
+/// [`find_byte_scalar`].
+pub(crate) fn find_byte(
+    data: &[u8],
+    from: usize,
+    last: usize,
+    first: u8,
+    second: Option<u8>,
+) -> Option<usize> {
+    if from > last || data.is_empty() {
+        return None;
+    }
+    let last = last.min(data.len() - 1);
+    if from > last {
+        return None;
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        unsafe { find_byte_x86(data, from, last, first, second) }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        if let Some(hit) = unsafe { find_byte_neon(data, from, last, first, second) } {
+            return Some(hit);
+        }
+        let consumed = from + ((data.len() - from) / 16) * 16;
+        let tail = consumed.min(last.saturating_add(1));
+        find_byte_scalar(data, tail.max(from), last, first, second)
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        find_byte_scalar(data, from, last, first, second)
+    }
+}
+
+pub(crate) fn find_byte_scalar(
+    data: &[u8],
+    from: usize,
+    last: usize,
+    first: u8,
+    second: Option<u8>,
+) -> Option<usize> {
+    if from > last || data.is_empty() {
+        return None;
+    }
+    let last = last.min(data.len() - 1);
+    let mut i = from;
+    while i <= last {
+        let b = data[i];
+        if b == first || second == Some(b) {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+#[cfg(target_arch = "x86_64")]
+unsafe fn find_byte_x86(
+    data: &[u8],
+    from: usize,
+    last: usize,
+    first: u8,
+    second: Option<u8>,
+) -> Option<usize> {
+    #[cfg(feature = "std")]
+    if std::is_x86_feature_detected!("avx2") {
+        if let Some(hit) = unsafe { find_byte_avx2(data, from, last, first, second) } {
+            return Some(hit);
+        }
+        // `find_byte_avx2` consumes every aligned 32-byte group that fits
+        // and returns None when the hit, if any, is in the tail.
+        let consumed = from + ((data.len() - from) / 32) * 32;
+        let tail = consumed.min(last.saturating_add(1));
+        return find_byte_scalar(data, tail.max(from), last, first, second);
+    }
+    if let Some(hit) = unsafe { find_byte_sse2(data, from, last, first, second) } {
+        return Some(hit);
+    }
+    let consumed = from + ((data.len() - from) / 16) * 16;
+    let tail = consumed.min(last.saturating_add(1));
+    find_byte_scalar(data, tail.max(from), last, first, second)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn find_byte_sse2(
+    data: &[u8],
+    from: usize,
+    last: usize,
+    first: u8,
+    second: Option<u8>,
+) -> Option<usize> {
+    use core::arch::x86_64::{
+        __m128i, _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_or_si128, _mm_set1_epi8,
+    };
+
+    let needle_a = _mm_set1_epi8(first as i8);
+    let needle_b = _mm_set1_epi8(second.unwrap_or(first) as i8);
+    let mut i = from;
+    while i + 16 <= data.len() {
+        let v = unsafe { _mm_loadu_si128(data.as_ptr().add(i).cast::<__m128i>()) };
+        let mut cmp = _mm_cmpeq_epi8(v, needle_a);
+        if second.is_some() {
+            cmp = _mm_or_si128(cmp, _mm_cmpeq_epi8(v, needle_b));
+        }
+        let mask = _mm_movemask_epi8(cmp) as u32;
+        if mask != 0 {
+            let bit = mask.trailing_zeros() as usize;
+            if i + bit <= last {
+                return Some(i + bit);
+            }
+            return None;
+        }
+        if i + 15 > last {
+            return None;
+        }
+        i += 16;
+    }
+    None
+}
+
+#[cfg(all(feature = "std", target_arch = "x86_64"))]
+#[target_feature(enable = "avx2,sse2")]
+unsafe fn find_byte_avx2(
+    data: &[u8],
+    from: usize,
+    last: usize,
+    first: u8,
+    second: Option<u8>,
+) -> Option<usize> {
+    use core::arch::x86_64::{
+        __m256i, _mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8, _mm256_or_si256,
+        _mm256_set1_epi8,
+    };
+
+    let needle_a = _mm256_set1_epi8(first as i8);
+    let needle_b = _mm256_set1_epi8(second.unwrap_or(first) as i8);
+    let mut i = from;
+    while i + 32 <= data.len() {
+        let v = unsafe { _mm256_loadu_si256(data.as_ptr().add(i).cast::<__m256i>()) };
+        let mut cmp = _mm256_cmpeq_epi8(v, needle_a);
+        if second.is_some() {
+            cmp = _mm256_or_si256(cmp, _mm256_cmpeq_epi8(v, needle_b));
+        }
+        let mask = _mm256_movemask_epi8(cmp) as u32;
+        if mask != 0 {
+            let bit = mask.trailing_zeros() as usize;
+            if i + bit <= last {
+                return Some(i + bit);
+            }
+            return None;
+        }
+        if i + 31 > last {
+            return None;
+        }
+        i += 32;
+    }
+    None
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn find_byte_neon(
+    data: &[u8],
+    from: usize,
+    last: usize,
+    first: u8,
+    second: Option<u8>,
+) -> Option<usize> {
+    use core::arch::aarch64::{vceqq_u8, vdupq_n_u8, vld1q_u8, vorrq_u8};
+
+    let needle_a = vdupq_n_u8(first);
+    let needle_b = vdupq_n_u8(second.unwrap_or(first));
+    let mut i = from;
+    while i + 16 <= data.len() {
+        let v = unsafe { vld1q_u8(data.as_ptr().add(i)) };
+        let mut cmp = vceqq_u8(v, needle_a);
+        if second.is_some() {
+            cmp = vorrq_u8(cmp, vceqq_u8(v, needle_b));
+        }
+        let mask = unsafe { neon_movemask(cmp) };
+        if mask != 0 {
+            let bit = mask.trailing_zeros() as usize;
+            if i + bit <= last {
+                return Some(i + bit);
+            }
+            return None;
+        }
+        if i + 15 > last {
+            return None;
+        }
+        i += 16;
+    }
+    None
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+pub(crate) unsafe fn neon_movemask(cmp: core::arch::aarch64::uint8x16_t) -> u32 {
+    use core::arch::aarch64::{vaddv_u8, vandq_u8, vget_high_u8, vget_low_u8, vld1q_u8};
+
+    // Compare lanes are 0x00 or 0xFF. Keep one distinct bit per lane.
+    const BITS: [u8; 16] = [1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128];
+    let bits = unsafe { vandq_u8(cmp, vld1q_u8(BITS.as_ptr())) };
+    let lo = vaddv_u8(vget_low_u8(bits));
+    let hi = vaddv_u8(vget_high_u8(bits));
+    (u32::from(hi) << 8) | u32::from(lo)
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+    use alloc::vec::Vec;
+
+    use super::*;
+
+    #[test]
+    fn test_find_byte_matches_scalar_scan() {
+        let data: Vec<u8> = (0..300u32)
+            .map(|i| match i % 17 {
+                0 => 0xE8,
+                1 => 0xE9,
+                _ => (i % 251) as u8,
+            })
+            .collect();
+        for from in [0usize, 1, 15, 16, 17, 31, 32, 33, 100] {
+            for last in [from, from + 5, from + 40, data.len() - 1] {
+                let last = last.min(data.len() - 1);
+                assert_eq!(
+                    find_byte(&data, from, last, 0xE8, Some(0xE9)),
+                    find_byte_scalar(&data, from, last, 0xE8, Some(0xE9)),
+                    "from {from} last {last}"
+                );
+                assert_eq!(
+                    find_byte(&data, from, last, 0xE8, None),
+                    find_byte_scalar(&data, from, last, 0xE8, None)
+                );
+            }
+        }
+        let empty = vec![0u8; 80];
+        assert_eq!(find_byte(&empty, 0, 70, 0xE8, Some(0xE9)), None);
+    }
+}

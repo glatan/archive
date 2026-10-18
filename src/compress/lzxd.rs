@@ -284,6 +284,52 @@ mod tests {
     }
 
     #[test]
+    fn e8_reverse_matches_scalar_scan() {
+        fn scalar(chunk: &mut [u8], chunk_offset: i64, e8_file_size: i64) {
+            let n = chunk.len();
+            let mut i = 0usize;
+            while i + 10 < n {
+                if chunk[i] == 0xe8 {
+                    let cur = chunk_offset + i as i64;
+                    let value = i32::from_le_bytes([
+                        chunk[i + 1],
+                        chunk[i + 2],
+                        chunk[i + 3],
+                        chunk[i + 4],
+                    ]) as i64;
+                    if value >= -cur && value < e8_file_size {
+                        let displacement = if value >= 0 {
+                            value - cur
+                        } else {
+                            value + e8_file_size
+                        };
+                        let d = displacement as u32;
+                        chunk[i + 1] = (d & 0xff) as u8;
+                        chunk[i + 2] = ((d >> 8) & 0xff) as u8;
+                        chunk[i + 3] = ((d >> 16) & 0xff) as u8;
+                        chunk[i + 4] = ((d >> 24) & 0xff) as u8;
+                    }
+                    i += 4;
+                }
+                i += 1;
+            }
+        }
+
+        let patterns = [
+            vec![0u8; 64],
+            vec![0xe8; 80],
+            (0..200u32).map(|i| (i % 251) as u8).collect::<Vec<_>>(),
+        ];
+        for pattern in patterns {
+            let mut a = pattern.clone();
+            let mut b = pattern;
+            scalar(&mut a, 20, 10_000);
+            e8_reverse(&mut b, 20, 10_000);
+            assert_eq!(a, b);
+        }
+    }
+
+    #[test]
     fn huffman_accepts_incomplete_tree() {
         // Under-subscribed lens leave unassigned code space but are legal:
         // the libmspack-validated vectors exercise real incomplete trees.

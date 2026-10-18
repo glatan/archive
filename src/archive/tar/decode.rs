@@ -62,6 +62,19 @@ impl crate::traits::ArchiveEntry for TarEntry {
 /// [`Error::InvalidData`] for checksum mismatches or corrupt headers.
 pub fn decode(input: &[u8]) -> Result<Vec<TarEntry>, Error> {
     let mut entries = Vec::new();
+    for_each_entry(input, |entry| {
+        entries.push(entry);
+        Ok(())
+    })?;
+    Ok(entries)
+}
+
+/// Visit each tar entry. The entry is dropped when `visit` returns,
+/// before the next header is read.
+pub fn for_each_entry<F>(input: &[u8], mut visit: F) -> Result<(), Error>
+where
+    F: FnMut(TarEntry) -> Result<(), Error>,
+{
     let mut pos = 0;
     let mut zero_block_count = 0;
     // State for GNU/PAX extensions that apply to the next entry
@@ -209,12 +222,12 @@ pub fn decode(input: &[u8]) -> Result<Vec<TarEntry>, Error> {
                     apply_sparse_pax_attributes(&mut header, &merged_attrs);
                 }
 
-                entries.push(TarEntry { header, data });
+                visit(TarEntry { header, data })?;
             }
         }
     }
 
-    Ok(entries)
+    Ok(())
 }
 
 /// Resolve PAX attribute lists per POSIX.1-2008: an extended-header
@@ -496,6 +509,22 @@ pub fn decode_reader<R: std::io::Read>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn for_each_entry_stops_when_visit_fails() {
+        use super::*;
+        let mut enc = crate::archive::tar::encode::TarEncoder::new();
+        enc.add_file("a.txt", b"aaa");
+        enc.add_file("b.txt", b"bbb");
+        let archive = enc.finish();
+        let mut seen = Vec::new();
+        let err = for_each_entry(&archive, |entry| {
+            seen.push(entry.header.name.clone());
+            Err(Error::InvalidData("stop"))
+        });
+        assert!(err.is_err());
+        assert_eq!(seen, ["a.txt"]);
+    }
+
     use super::*;
 
     /// Regression (fuzz run-1791310276): a pax record whose declared

@@ -56,11 +56,8 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
     let mut literal_start = 0usize;
     let mut i = 0usize;
     while i < data.len() {
-        let run = 1 + data[i + 1..]
-            .iter()
-            .take(127)
-            .take_while(|&&b| b == data[i])
-            .count();
+        let repeated = [data[i]; 127];
+        let run = 1 + crate::compress::match_ops::match_len(&data[i + 1..], &repeated, 127);
         if run >= 3 {
             // Flush pending literals.
             flush_literal(&mut out, &data[literal_start..i]);

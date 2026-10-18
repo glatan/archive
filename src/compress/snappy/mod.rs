@@ -19,19 +19,27 @@ use crate::traits::{Decode, Encode};
 pub struct SnappyCodec;
 
 impl Decode for SnappyCodec {
-    fn decode(&self, input: &[u8], max_output: Option<usize>) -> Result<Vec<u8>, Error> {
-        match max_output {
-            Some(limit) => decode::decode_bounded(input, limit),
-            None => decode::decode(input),
-        }
+    fn decode_into(
+        &self,
+        input: &[u8],
+        output: &mut Vec<u8>,
+        max_output: Option<usize>,
+    ) -> Result<(), Error> {
+        decode::decode_into(input, output, max_output)
     }
 }
 
 impl Encode for SnappyCodec {
     type Options = ();
 
-    fn encode(&self, input: &[u8], _options: &Self::Options) -> Result<Vec<u8>, Error> {
-        Ok(encode::encode(input))
+    fn encode_into(
+        &self,
+        input: &[u8],
+        output: &mut Vec<u8>,
+        _options: &Self::Options,
+    ) -> Result<(), Error> {
+        crate::compress::move_into(output, encode::encode(input));
+        Ok(())
     }
 }
 

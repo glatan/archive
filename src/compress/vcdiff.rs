@@ -273,14 +273,12 @@ impl<'a> WindowDecode<'a> {
                 if a < self.source.len() && size > self.source.len() - a {
                     return Err(Error::InvalidData("vcdiff: COPY spans boundary"));
                 }
-                for i in 0..size {
-                    let p = a + i;
-                    let b = if p < self.source.len() {
-                        self.source[p]
-                    } else {
-                        self.out[p - self.source.len()]
-                    };
-                    self.out.push(b);
+                if a < self.source.len() {
+                    self.out.extend_from_slice(&self.source[a..a + size]);
+                } else {
+                    let offset = here - a;
+                    crate::compress::match_ops::copy_match(&mut self.out, offset, size)
+                        .map_err(|_| Error::InvalidData("vcdiff: COPY out of range"))?;
                 }
             }
             _ => return Err(Error::InvalidData("vcdiff: bad instruction")),
@@ -479,15 +477,6 @@ pub fn decode_bounded(source: &[u8], input: &[u8], max_output: usize) -> Result<
     Ok(out)
 }
 
-/// Byte at virtual address `p` in the `source ++ target` address space.
-fn byte_at(source: &[u8], target: &[u8], p: usize) -> u8 {
-    if p < source.len() {
-        source[p]
-    } else {
-        target[p - source.len()]
-    }
-}
-
 struct Encoder<'a> {
     source: &'a [u8],
     data: Vec<u8>,
@@ -614,12 +603,13 @@ fn encode_window_body(seg: &[u8], window_target: &[u8]) -> Vec<u8> {
             if cand >= 0 {
                 let c = cand as usize;
                 debug_assert!(c < abs);
-                let mut len = 0usize;
-                while t + len < window_target.len()
-                    && byte_at(seg, window_target, c + len) == window_target[t + len]
-                {
-                    len += 1;
-                }
+                let mut len = crate::compress::match_ops::match_len_window(
+                    seg,
+                    window_target,
+                    c,
+                    src_len + t,
+                    window_target.len() - t,
+                );
                 // RFC 3284 Section 3: a COPY must be entirely contained in
                 // either the source segment or the target window, so a
                 // match starting in the source may not cross the S/T

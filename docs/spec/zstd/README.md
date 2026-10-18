@@ -197,7 +197,7 @@
 | 128 | 各 frame は少なくとも 1 ブロックを持つ | RFC 8878 §3.1.1.2 | ✅ | decode ループ構造上暗黙に強制 |
 | 129 | literals ヘッダ byte0==0 のとき Repeat_Mode の FSE テーブルは更新されない | RFC 8878 §3.1.1.3.2.1 | ✅ | decode.rs の早期 return パス |
 | 130 | Raw/RLE ブロックは offset history (repeat offsets) に寄与しない | RFC 8878 §3.1.1.5 | ✅ | rep_offsets は compressed block 内でのみ変更 |
-| 131 | Repeat_Mode は直前モード (RLE/Predefined 含む) のテーブルを再利用する | RFC 8878 §3.1.1.3.2.1 | ✅ | `get_fse_table` が prev_table に常に格納 |
+| 131 | Repeat_Mode は直前モード (RLE/Predefined 含む) のテーブルを再利用する | RFC 8878 §3.1.1.3.2.1 | ✅ | 新しい表を作ったときだけ `prev_table` を入れ替え、Repeat はクローンせず同じ表を参照する。`test_get_fse_table_repeat_mode` |
 | 132 | Huffman 重み用 FSE の max accuracy log = 6 | RFC 8878 §4.2.1.2 | ✅ | `from_bitstream(data, 12, 6)` |
 | 133 | raw content dictionary (magic なし、≥8 bytes) | RFC 8878 §5 | ✅ | `ZstdDict::from_content` |
 | 134 | Window_Size より大きい過去データへの offset は error (all offsets leading to previously decoded data must be smaller than Window_Size) | RFC 8878 §3.1.1.4 | ✅ | `execute_sequences_with_dict` で `output.len() > window_size` のとき `offset > window_size` を reject (RFC §5: output ≤ window の間は dict 領域を window 超 offset で参照可能)。`test_execute_offset_beyond_window_size` `test_execute_offset_within_window_size_ok` `test_compressed_block_offset_exceeds_window` |

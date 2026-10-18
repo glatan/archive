@@ -54,3 +54,16 @@ pub(crate) fn model_zpaql(level: u32) -> Result<Zpaql, Error> {
     debug_assert_eq!(pos, blob.len());
     Ok(z)
 }
+
+/// Built-in level whose header is `z`, if it is one of levels 1-3.
+pub(crate) fn builtin_level(z: &Zpaql) -> Option<u32> {
+    if z.is_model(MODEL_LEVEL1) {
+        Some(1)
+    } else if z.is_model(MODEL_LEVEL2) {
+        Some(2)
+    } else if z.is_model(MODEL_LEVEL3) {
+        Some(3)
+    } else {
+        None
+    }
+}

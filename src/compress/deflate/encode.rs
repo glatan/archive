@@ -46,11 +46,19 @@ pub enum Level {
 /// assert_eq!(decompressed, b"Hello!");
 /// ```
 pub fn encode(input: &[u8], level: Level) -> Vec<u8> {
-    match level {
+    let mut output = Vec::new();
+    encode_into(input, &mut output, level);
+    output
+}
+
+/// Append a raw DEFLATE stream to `output`.
+pub fn encode_into(input: &[u8], output: &mut Vec<u8>, level: Level) {
+    let encoded = match level {
         Level::NoCompression => encode_stored(input),
         Level::Fast => encode_compressed(input, level),
         Level::Default => encode_dynamic(input, level),
-    }
+    };
+    crate::compress::move_into(output, encoded);
 }
 
 /// Encode like `encode` but cap LZ77 match lengths at `max_match`.
@@ -77,45 +85,7 @@ pub(crate) fn encode_max_match(input: &[u8], level: Level, max_match: usize) -> 
 ///
 /// Always uses `Level::Default` compression.
 pub(crate) fn encode_with_dict(input: &[u8], dict: &[u8]) -> Vec<u8> {
-    if input.is_empty() {
-        let mut writer = BitWriter::new();
-        writer.write_bits(1, 1); // BFINAL
-        writer.write_bits(0b01, 2); // BTYPE=01 (fixed Huffman)
-        write_fixed_literal(&mut writer, 256);
-        return writer.finish();
-    }
-
-    let matches = lz77_compress_with_dict(input, Level::Default, dict);
-
-    let mut writer = BitWriter::new();
-    writer.write_bits(1, 1); // BFINAL
-    writer.write_bits(0b01, 2); // BTYPE=01 (fixed Huffman)
-
-    for token in &matches {
-        match *token {
-            LZ77Token::Literal(byte) => {
-                write_fixed_literal(&mut writer, byte as u16);
-            }
-            LZ77Token::Match { length, distance } => {
-                let (len_code, len_extra_bits, len_extra_val) = encode_length(length);
-                write_fixed_literal(&mut writer, len_code);
-                if len_extra_bits > 0 {
-                    writer.write_bits(len_extra_val as u32, len_extra_bits);
-                }
-
-                let (dist_code, dist_extra_bits, dist_extra_val) = encode_distance(distance);
-                writer.write_bits_reversed(dist_code as u32, 5);
-                if dist_extra_bits > 0 {
-                    writer.write_bits(dist_extra_val as u32, dist_extra_bits);
-                }
-            }
-        }
-    }
-
-    // End of block
-    write_fixed_literal(&mut writer, 256);
-
-    writer.finish()
+    encode_lz77_blocks(input, dict, Level::Default, MAX_MATCH_LEN, false)
 }
 
 /// Encode as stored (uncompressed) blocks.
@@ -151,45 +121,7 @@ fn encode_compressed(input: &[u8], level: Level) -> Vec<u8> {
 }
 
 fn encode_compressed_with(input: &[u8], level: Level, max_match: usize) -> Vec<u8> {
-    if input.is_empty() {
-        let mut writer = BitWriter::new();
-        writer.write_bits(1, 1); // BFINAL
-        writer.write_bits(0b01, 2); // BTYPE=01 (fixed Huffman)
-        write_fixed_literal(&mut writer, 256);
-        return writer.finish();
-    }
-
-    let matches = lz77_compress_max(input, level, max_match);
-
-    let mut writer = BitWriter::new();
-    writer.write_bits(1, 1); // BFINAL
-    writer.write_bits(0b01, 2); // BTYPE=01 (fixed Huffman)
-
-    for token in &matches {
-        match *token {
-            LZ77Token::Literal(byte) => {
-                write_fixed_literal(&mut writer, byte as u16);
-            }
-            LZ77Token::Match { length, distance } => {
-                let (len_code, len_extra_bits, len_extra_val) = encode_length(length);
-                write_fixed_literal(&mut writer, len_code);
-                if len_extra_bits > 0 {
-                    writer.write_bits(len_extra_val as u32, len_extra_bits);
-                }
-
-                let (dist_code, dist_extra_bits, dist_extra_val) = encode_distance(distance);
-                writer.write_bits_reversed(dist_code as u32, 5);
-                if dist_extra_bits > 0 {
-                    writer.write_bits(dist_extra_val as u32, dist_extra_bits);
-                }
-            }
-        }
-    }
-
-    // End of block
-    write_fixed_literal(&mut writer, 256);
-
-    writer.finish()
+    encode_lz77_blocks(input, &[], level, max_match, false)
 }
 
 /// Encode using LZ77 + dynamic Huffman codes (BTYPE=10).
@@ -199,22 +131,100 @@ fn encode_dynamic(input: &[u8], level: Level) -> Vec<u8> {
 }
 
 fn encode_dynamic_with(input: &[u8], level: Level, max_match: usize) -> Vec<u8> {
+    encode_lz77_blocks(input, &[], level, max_match, true)
+}
+
+/// Split `input` into window-sized blocks. `BFINAL` is set only on the last
+/// block. When `choose_smaller` is set, each block is the shorter of a fixed
+/// Huffman encoding and a dynamic one, measured in bits. LZ77 runs once per
+/// block; the previous window is the dictionary for the next block.
+fn encode_lz77_blocks(
+    input: &[u8],
+    preset: &[u8],
+    level: Level,
+    max_match: usize,
+    choose_smaller: bool,
+) -> Vec<u8> {
     if input.is_empty() {
         let mut writer = BitWriter::new();
-        writer.write_bits(1, 1);
-        writer.write_bits(0b01, 2);
-        write_fixed_literal(&mut writer, 256);
+        write_fixed_block(&mut writer, &[], true);
         return writer.finish();
     }
 
-    let matches = lz77_compress_max(input, level, max_match);
+    let mut writer = BitWriter::new();
+    let mut start = 0;
+    while start < input.len() {
+        let end = (start + BLOCK_SIZE).min(input.len());
+        let history = history_before(preset, input, start);
+        let tokens = lz77_compress_with_dict_max(&input[start..end], level, &history, max_match);
+        let is_final = end == input.len();
+        if choose_smaller {
+            let mut fixed = BitWriter::new();
+            write_fixed_block(&mut fixed, &tokens, is_final);
+            let mut dynamic = BitWriter::new();
+            write_dynamic_block(&mut dynamic, &tokens, is_final);
+            if fixed.bit_len() <= dynamic.bit_len() {
+                writer.append(&fixed);
+            } else {
+                writer.append(&dynamic);
+            }
+        } else {
+            write_fixed_block(&mut writer, &tokens, is_final);
+        }
+        start = end;
+    }
+    writer.finish()
+}
 
-    // Count symbol frequencies
-    let mut lit_freq = vec![0u32; 286]; // 0-255 literals, 256 EOB, 257-285 length codes
-    let mut dist_freq = vec![0u32; 30]; // 0-29 distance codes
-    lit_freq[256] = 1; // EOB always present
+/// Bytes a match at `input[start..]` may reach: the tail of `preset` plus
+/// the input before `start`, capped at the DEFLATE window.
+fn history_before(preset: &[u8], input: &[u8], start: usize) -> Vec<u8> {
+    if start >= WINDOW_SIZE {
+        return input[start - WINDOW_SIZE..start].to_vec();
+    }
+    let from_preset = (WINDOW_SIZE - start).min(preset.len());
+    let mut history = Vec::with_capacity(from_preset + start);
+    if from_preset > 0 {
+        history.extend_from_slice(&preset[preset.len() - from_preset..]);
+    }
+    history.extend_from_slice(&input[..start]);
+    history
+}
 
-    for token in &matches {
+/// Write one fixed Huffman block (BTYPE=01).
+fn write_fixed_block(writer: &mut BitWriter, matches: &[LZ77Token], is_final: bool) {
+    writer.write_bits(u32::from(is_final), 1);
+    writer.write_bits(0b01, 2);
+
+    for token in matches {
+        match *token {
+            LZ77Token::Literal(byte) => {
+                write_fixed_literal(writer, byte as u16);
+            }
+            LZ77Token::Match { length, distance } => {
+                let (len_code, len_extra_bits, len_extra_val) = encode_length(length);
+                write_fixed_literal(writer, len_code);
+                if len_extra_bits > 0 {
+                    writer.write_bits(len_extra_val as u32, len_extra_bits);
+                }
+                let (dist_code, dist_extra_bits, dist_extra_val) = encode_distance(distance);
+                writer.write_bits(FIXED_DIST_CODES[dist_code as usize], 5);
+                if dist_extra_bits > 0 {
+                    writer.write_bits(dist_extra_val as u32, dist_extra_bits);
+                }
+            }
+        }
+    }
+    write_fixed_literal(writer, 256);
+}
+
+/// Write one dynamic Huffman block (BTYPE=10) for `matches`.
+fn write_dynamic_block(writer: &mut BitWriter, matches: &[LZ77Token], is_final: bool) {
+    let mut lit_freq = vec![0u32; 286];
+    let mut dist_freq = vec![0u32; 30];
+    lit_freq[256] = 1;
+
+    for token in matches {
         match *token {
             LZ77Token::Literal(byte) => {
                 lit_freq[byte as usize] += 1;
@@ -228,11 +238,9 @@ fn encode_dynamic_with(input: &[u8], level: Level, max_match: usize) -> Vec<u8> 
         }
     }
 
-    // Build optimal code lengths from frequencies
     let lit_lengths = build_code_lengths(&lit_freq, 15);
     let mut dist_lengths = build_code_lengths(&dist_freq, 15);
 
-    // Determine HLIT and HDIST (trim trailing zeros but keep minimums)
     let hlit = {
         let mut n = lit_lengths.len();
         while n > 257 && lit_lengths[n - 1] == 0 {
@@ -248,12 +256,10 @@ fn encode_dynamic_with(input: &[u8], level: Level, max_match: usize) -> Vec<u8> 
         n
     };
 
-    // Ensure at least one distance code exists
-    if dist_lengths[..hdist].iter().all(|&l| l == 0) {
+    if dist_lengths[..hdist].iter().all(|&len| len == 0) {
         dist_lengths[0] = 1;
     }
 
-    // RLE-encode the combined code lengths
     let combined: Vec<u8> = lit_lengths[..hlit]
         .iter()
         .chain(dist_lengths[..hdist].iter())
@@ -261,14 +267,12 @@ fn encode_dynamic_with(input: &[u8], level: Level, max_match: usize) -> Vec<u8> 
         .collect();
     let cl_symbols = rle_encode_code_lengths(&combined);
 
-    // Count code length alphabet frequencies
     let mut cl_freq = vec![0u32; 19];
     for &(sym, _) in &cl_symbols {
         cl_freq[sym as usize] += 1;
     }
     let cl_lengths_arr = build_code_lengths(&cl_freq, 7);
 
-    // Determine HCLEN
     let hclen = {
         let mut n = 19;
         while n > 4 && cl_lengths_arr[CODE_LENGTH_ORDER[n - 1]] == 0 {
@@ -277,30 +281,24 @@ fn encode_dynamic_with(input: &[u8], level: Level, max_match: usize) -> Vec<u8> 
         n
     };
 
-    // Build canonical codes
-    let lit_codes = build_canonical_codes(&lit_lengths[..hlit]);
-    let dist_codes = build_canonical_codes(&dist_lengths[..hdist]);
-    let cl_codes = build_canonical_codes(&cl_lengths_arr);
+    let lit_codes = reversed_code_table(&lit_lengths[..hlit]);
+    let dist_codes = reversed_code_table(&dist_lengths[..hdist]);
+    let cl_codes = reversed_code_table(&cl_lengths_arr);
 
-    // Write dynamic Huffman block
-    let mut writer = BitWriter::new();
-    writer.write_bits(1, 1); // BFINAL
-    writer.write_bits(0b10, 2); // BTYPE=10
+    writer.write_bits(u32::from(is_final), 1);
+    writer.write_bits(0b10, 2);
 
     writer.write_bits((hlit - 257) as u32, 5);
     writer.write_bits((hdist - 1) as u32, 5);
     writer.write_bits((hclen - 4) as u32, 4);
 
-    // Code length code lengths in spec order
     for i in 0..hclen {
         writer.write_bits(cl_lengths_arr[CODE_LENGTH_ORDER[i]] as u32, 3);
     }
 
-    // RLE-encoded code lengths
     for &(sym, extra) in &cl_symbols {
         let len = cl_lengths_arr[sym as usize];
-        let code = cl_codes[sym as usize];
-        writer.write_bits_reversed(code, len);
+        writer.write_bits(cl_codes[sym as usize], len);
         match sym {
             16 => writer.write_bits(extra as u32, 2),
             17 => writer.write_bits(extra as u32, 3),
@@ -309,24 +307,23 @@ fn encode_dynamic_with(input: &[u8], level: Level, max_match: usize) -> Vec<u8> 
         }
     }
 
-    // Compressed data
-    for token in &matches {
+    for token in matches {
         match *token {
             LZ77Token::Literal(byte) => {
                 let sym = byte as usize;
-                writer.write_bits_reversed(lit_codes[sym], lit_lengths[sym]);
+                writer.write_bits(lit_codes[sym], lit_lengths[sym]);
             }
             LZ77Token::Match { length, distance } => {
                 let (len_code, len_extra_bits, len_extra_val) = encode_length(length);
                 let sym = len_code as usize;
-                writer.write_bits_reversed(lit_codes[sym], lit_lengths[sym]);
+                writer.write_bits(lit_codes[sym], lit_lengths[sym]);
                 if len_extra_bits > 0 {
                     writer.write_bits(len_extra_val as u32, len_extra_bits);
                 }
 
                 let (dist_code, dist_extra_bits, dist_extra_val) = encode_distance(distance);
                 let dsym = dist_code as usize;
-                writer.write_bits_reversed(dist_codes[dsym], dist_lengths[dsym]);
+                writer.write_bits(dist_codes[dsym], dist_lengths[dsym]);
                 if dist_extra_bits > 0 {
                     writer.write_bits(dist_extra_val as u32, dist_extra_bits);
                 }
@@ -334,47 +331,7 @@ fn encode_dynamic_with(input: &[u8], level: Level, max_match: usize) -> Vec<u8> 
         }
     }
 
-    // End of block
-    writer.write_bits_reversed(lit_codes[256], lit_lengths[256]);
-
-    let dynamic_output = writer.finish();
-
-    // Compare with fixed Huffman, use whichever is smaller
-    let fixed_output = encode_fixed_block(&matches);
-    if fixed_output.len() <= dynamic_output.len() {
-        fixed_output
-    } else {
-        dynamic_output
-    }
-}
-
-/// Encode LZ77 tokens as a fixed Huffman block (BTYPE=01).
-fn encode_fixed_block(matches: &[LZ77Token]) -> Vec<u8> {
-    let mut writer = BitWriter::new();
-    writer.write_bits(1, 1); // BFINAL
-    writer.write_bits(0b01, 2); // BTYPE=01
-
-    for token in matches {
-        match *token {
-            LZ77Token::Literal(byte) => {
-                write_fixed_literal(&mut writer, byte as u16);
-            }
-            LZ77Token::Match { length, distance } => {
-                let (len_code, len_extra_bits, len_extra_val) = encode_length(length);
-                write_fixed_literal(&mut writer, len_code);
-                if len_extra_bits > 0 {
-                    writer.write_bits(len_extra_val as u32, len_extra_bits);
-                }
-                let (dist_code, dist_extra_bits, dist_extra_val) = encode_distance(distance);
-                writer.write_bits_reversed(dist_code as u32, 5);
-                if dist_extra_bits > 0 {
-                    writer.write_bits(dist_extra_val as u32, dist_extra_bits);
-                }
-            }
-        }
-    }
-    write_fixed_literal(&mut writer, 256);
-    writer.finish()
+    writer.write_bits(lit_codes[256], lit_lengths[256]);
 }
 
 // ============================================================
@@ -583,6 +540,21 @@ fn kraft_limit(symbols: &mut [(usize, u8)], max_bits: u8) {
     debug_assert_eq!(idx, symbols.len());
 }
 
+/// Canonical codes with bits already reversed for LSB-first output.
+fn reversed_code_table(lengths: &[u8]) -> Vec<u32> {
+    build_canonical_codes(lengths)
+        .into_iter()
+        .zip(lengths)
+        .map(|(code, &len)| {
+            if len == 0 {
+                0
+            } else {
+                super::tables::reverse_bits(code, len)
+            }
+        })
+        .collect()
+}
+
 /// Build canonical Huffman codes from code lengths.
 /// Returns (code, length) for each symbol index.
 fn build_canonical_codes(lengths: &[u8]) -> Vec<u32> {
@@ -677,31 +649,45 @@ fn rle_encode_code_lengths(lengths: &[u8]) -> Vec<(u8, u8)> {
     result
 }
 
+const fn fixed_literal_code(symbol: u16) -> (u32, u8) {
+    let (code, bits) = if symbol <= 143 {
+        (0x30 + symbol as u32, 8)
+    } else if symbol <= 255 {
+        (0x190 + (symbol - 144) as u32, 9)
+    } else if symbol <= 279 {
+        ((symbol - 256) as u32, 7)
+    } else {
+        (0xC0 + (symbol - 280) as u32, 8)
+    };
+    (super::tables::reverse_bits(code, bits), bits)
+}
+
+/// Fixed literal/length codes, bit-reversed for LSB-first output.
+const FIXED_LIT_CODES: [(u32, u8); 288] = {
+    let mut table = [(0u32, 0u8); 288];
+    let mut symbol = 0u16;
+    while symbol < 288 {
+        table[symbol as usize] = fixed_literal_code(symbol);
+        symbol += 1;
+    }
+    table
+};
+
+/// Fixed 5-bit distance codes, bit-reversed for LSB-first output.
+const FIXED_DIST_CODES: [u32; 32] = {
+    let mut table = [0u32; 32];
+    let mut symbol = 0u32;
+    while symbol < 32 {
+        table[symbol as usize] = super::tables::reverse_bits(symbol, 5);
+        symbol += 1;
+    }
+    table
+};
+
 /// Write a literal/length code using fixed Huffman encoding.
 fn write_fixed_literal(writer: &mut BitWriter, symbol: u16) {
-    match symbol {
-        0..=143 => {
-            // 8-bit codes: 00110000 + symbol
-            let code = 0x30 + symbol as u32;
-            writer.write_bits_reversed(code, 8);
-        }
-        144..=255 => {
-            // 9-bit codes: 110010000 + (symbol - 144)
-            let code = 0x190 + (symbol - 144) as u32;
-            writer.write_bits_reversed(code, 9);
-        }
-        256..=279 => {
-            // 7-bit codes: 0000000 + (symbol - 256)
-            let code = (symbol - 256) as u32;
-            writer.write_bits_reversed(code, 7);
-        }
-        280..=287 => {
-            // 8-bit codes: 11000000 + (symbol - 280)
-            let code = 0xC0 + (symbol - 280) as u32;
-            writer.write_bits_reversed(code, 8);
-        }
-        _ => unreachable!(),
-    }
+    let (code, bits) = FIXED_LIT_CODES[symbol as usize];
+    writer.write_bits(code, bits);
 }
 
 /// Encode a match length (3..=258) to (code, extra_bits, extra_value).
@@ -740,23 +726,17 @@ enum LZ77Token {
 const MAX_MATCH_LEN: usize = 258;
 const MIN_MATCH_LEN: usize = 3;
 const WINDOW_SIZE: usize = 32768;
+const BLOCK_SIZE: usize = WINDOW_SIZE;
 const HASH_BITS: usize = 15;
 const HASH_SIZE: usize = 1 << HASH_BITS;
 
 /// Simple hash-chain LZ77 compressor.
+#[cfg(test)]
 fn lz77_compress_max(input: &[u8], level: Level, max_match: usize) -> Vec<LZ77Token> {
     lz77_compress_with_dict_max(input, level, &[], max_match)
 }
 
-/// Simple hash-chain LZ77 compressor with optional preset dictionary.
-///
-/// The dictionary is used to pre-seed the hash chains so that
-/// back-references can reach into dictionary content, but no tokens
-/// are emitted for the dictionary bytes.
-fn lz77_compress_with_dict(input: &[u8], level: Level, dict: &[u8]) -> Vec<LZ77Token> {
-    lz77_compress_with_dict_max(input, level, dict, MAX_MATCH_LEN)
-}
-
+/// Hash-chain LZ77. `dict` pre-seeds the window and emits no tokens of its own.
 fn lz77_compress_with_dict_max(
     input: &[u8],
     level: Level,
@@ -814,7 +794,11 @@ fn lz77_compress_with_dict_max(
             let dist = pos - chain_pos;
             if dist > 0 && dist <= WINDOW_SIZE {
                 let max_len = max_match.min(combined.len() - pos);
-                let match_len = count_match(&combined[chain_pos..], &combined[pos..], max_len);
+                let match_len = crate::compress::match_ops::match_len(
+                    &combined[chain_pos..],
+                    &combined[pos..],
+                    max_len,
+                );
                 if match_len > best_len {
                     best_len = match_len;
                     best_dist = dist as u16;
@@ -866,16 +850,6 @@ fn hash3(data: &[u8]) -> usize {
     (h.wrapping_mul(2654435769) >> (32 - HASH_BITS)) as usize
 }
 
-/// Count matching bytes between two slices.
-fn count_match(a: &[u8], b: &[u8], max_len: usize) -> usize {
-    let mut len = 0;
-    let limit = max_len.min(a.len()).min(b.len());
-    while len < limit && a[len] == b[len] {
-        len += 1;
-    }
-    len
-}
-
 // ============================================================
 // Bit writer (LSB-first)
 // ============================================================
@@ -902,10 +876,18 @@ impl BitWriter {
         self.flush_bytes();
     }
 
-    /// Write `n` bits with the value reversed (for Huffman codes which are MSB-first).
-    fn write_bits_reversed(&mut self, value: u32, n: u8) {
-        let reversed = reverse_bits(value, n);
-        self.write_bits(reversed, n);
+    fn bit_len(&self) -> usize {
+        self.data.len() * 8 + self.bit_count as usize
+    }
+
+    /// Append another unfinished writer. The source is not byte-padded.
+    fn append(&mut self, other: &Self) {
+        for &byte in &other.data {
+            self.write_bits(u32::from(byte), 8);
+        }
+        if other.bit_count > 0 {
+            self.write_bits(other.bit_buf, other.bit_count);
+        }
     }
 
     fn flush_bytes(&mut self) {
@@ -922,16 +904,6 @@ impl BitWriter {
         }
         self.data
     }
-}
-
-fn reverse_bits(value: u32, num_bits: u8) -> u32 {
-    let mut result = 0;
-    let mut v = value;
-    for _ in 0..num_bits {
-        result = (result << 1) | (v & 1);
-        v >>= 1;
-    }
-    result
 }
 
 /// Encode data using DEFLATE compression and write to a [`std::io::Write`] sink.
@@ -1000,6 +972,30 @@ mod tests {
         assert_eq!(decoded, input.as_bytes());
         // Compressed should be much smaller
         assert!(encoded.len() < input.len() / 2);
+    }
+
+    #[test]
+    fn test_lz77_blocks_roundtrip() {
+        let input = vec![b'a'; 40_000];
+        for level in [Level::Fast, Level::Default] {
+            let encoded = encode(&input, level);
+            let flags = decode::block_final_bits(&encoded, &[]).unwrap();
+            assert!(flags.len() > 1, "40 KiB spans more than one block");
+            assert!(flags[..flags.len() - 1].iter().all(|bit| *bit == 0));
+            assert_eq!(*flags.last().unwrap(), 1);
+            let decoded = decode::decode(&encoded).unwrap();
+            assert_eq!(decoded, input);
+        }
+
+        let dict = vec![b'z'; 100];
+        let dictated = vec![b'z'; 40_000];
+        let encoded = encode_with_dict(&dictated, &dict);
+        let flags = decode::block_final_bits(&encoded, &dict).unwrap();
+        assert!(flags.len() > 1);
+        assert!(flags[..flags.len() - 1].iter().all(|bit| *bit == 0));
+        assert_eq!(*flags.last().unwrap(), 1);
+        let decoded = decode::decode_with_dict(&encoded, &dict).unwrap();
+        assert_eq!(decoded, dictated);
     }
 
     #[test]

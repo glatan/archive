@@ -446,6 +446,7 @@ pub(super) fn copy_static_dictionary_word(
     distance: usize,
     copy_len: usize,
     max_allowed_distance: usize,
+    output_limit: Option<usize>,
 ) -> Result<usize, Error> {
     if !(4..=24).contains(&copy_len) {
         return Err(Error::InvalidData("brotli: invalid dictionary length"));
@@ -479,11 +480,26 @@ pub(super) fn copy_static_dictionary_word(
         .get(offset..word_end)
         .ok_or(Error::InvalidData("brotli: invalid dictionary address"))?;
 
-    append_affix(output, transform[0] as usize)?;
-
-    let transformed_start = output.len();
     let transform_type = transform[1];
     let trimmed = trim_word(word, transform_type)?;
+    let prefix = AFFIXES
+        .get(transform[0] as usize)
+        .ok_or(Error::InvalidData("brotli: invalid dictionary affix"))?;
+    let suffix = AFFIXES
+        .get(transform[2] as usize)
+        .ok_or(Error::InvalidData("brotli: invalid dictionary affix"))?;
+    let add = prefix
+        .len()
+        .saturating_add(trimmed.len())
+        .saturating_add(suffix.len());
+    if let Some(max) = output_limit
+        && output.len().saturating_add(add) > max
+    {
+        return Err(Error::OutputLimitExceeded { limit: max });
+    }
+
+    output.extend_from_slice(prefix);
+    let transformed_start = output.len();
     output.extend_from_slice(trimmed);
 
     match transform_type {
@@ -499,7 +515,7 @@ pub(super) fn copy_static_dictionary_word(
         _ => {}
     }
 
-    append_affix(output, transform[2] as usize)?;
+    output.extend_from_slice(suffix);
     Ok(output.len() - transformed_start)
 }
 
@@ -525,15 +541,6 @@ fn trim_word(word: &[u8], transform_type: u8) -> Result<&[u8], Error> {
         }
         _ => Err(Error::InvalidData("brotli: invalid dictionary transform")),
     }
-}
-
-fn append_affix(output: &mut Vec<u8>, affix_id: usize) -> Result<(), Error> {
-    output.extend_from_slice(
-        AFFIXES
-            .get(affix_id)
-            .ok_or(Error::InvalidData("brotli: invalid dictionary affix"))?,
-    );
-    Ok(())
 }
 
 fn uppercase_first(bytes: &mut [u8]) {
@@ -580,7 +587,7 @@ mod tests {
     #[test]
     fn test_copy_static_dictionary_identity_word() {
         let mut output = vec![0, 1, 2, 3, 4, 5, 6, 7];
-        let written = copy_static_dictionary_word(&mut output, 1017, 8, 8).unwrap();
+        let written = copy_static_dictionary_word(&mut output, 1017, 8, 8, None).unwrap();
         assert_eq!(written, 8);
         assert_eq!(output, (0u8..16).collect::<Vec<_>>());
     }
@@ -596,7 +603,7 @@ mod tests {
         // RFC 7932 section 8: dictionary copy lengths are 4..=24.
         let mut output = Vec::new();
         for copy_len in [3usize, 25] {
-            let result = copy_static_dictionary_word(&mut output, 100, copy_len, 0);
+            let result = copy_static_dictionary_word(&mut output, 100, copy_len, 0, None);
             assert!(
                 matches!(&result, Err(Error::InvalidData(msg)) if msg.contains("dictionary length")),
                 "copy_len {copy_len}: expected rejection, got {result:?}"
@@ -610,13 +617,15 @@ mod tests {
         // copy_len 24 uses 5 size bits, so address 121 << 5 selects
         // transform 121, which is out of range.
         let mut output = Vec::new();
-        let result = copy_static_dictionary_word(&mut output, 1 + (121usize << 5), 24, 0);
+        let result = copy_static_dictionary_word(&mut output, 1 + (121usize << 5), 24, 0, None);
         assert!(
             matches!(&result, Err(Error::InvalidData(msg)) if msg.contains("dictionary transform")),
             "expected dictionary transform rejection, got {result:?}"
         );
         // Boundary check: transform 120 (the last valid one) is accepted.
-        assert!(copy_static_dictionary_word(&mut Vec::new(), 1 + (120usize << 5), 24, 0).is_ok());
+        assert!(
+            copy_static_dictionary_word(&mut Vec::new(), 1 + (120usize << 5), 24, 0, None).is_ok()
+        );
     }
 
     #[test]

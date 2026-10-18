@@ -14,6 +14,10 @@ use crate::util::bitreader::BitReader;
 
 /// Decode a Brotli stream into memory.
 pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
+    decode_internal(input, None)
+}
+
+fn decode_internal(input: &[u8], limit: Option<usize>) -> Result<Vec<u8>, Error> {
     let mut reader = BitReader::new(input);
     let window_bits = parse_window_bits(&mut reader)?;
     let window_size = 1usize
@@ -42,6 +46,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
                 }
                 reader.align_to_byte_if_zero()?;
                 let data = reader.read_bytes(len)?;
+                ensure_output_room(output.len(), data.len(), limit)?;
                 output.extend_from_slice(data);
             }
             MetablockHeader::Compressed { is_last, len } => {
@@ -54,6 +59,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
                     is_last,
                     window_size,
                     &mut recent_distances,
+                    limit,
                 )?;
                 if is_last {
                     // RFC 7932 §9.3: unused bits in the last byte
@@ -530,6 +536,7 @@ fn inverse_move_to_front(values: &mut [u8]) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn decode_compressed_metablock(
     reader: &mut BitReader<'_>,
     header: &CompressedMetablockInfo,
@@ -538,6 +545,7 @@ fn decode_compressed_metablock(
     is_last: bool,
     window_size: usize,
     recent_distances: &mut RecentDistances,
+    output_limit: Option<usize>,
 ) -> Result<(), Error> {
     let target_len = output
         .len()
@@ -563,6 +571,7 @@ fn decode_compressed_metablock(
             ));
         }
 
+        ensure_output_room(output.len(), command.insert_len, output_limit)?;
         for _ in 0..command.insert_len {
             let literal_block_type =
                 literal_blocks.prepare_next(reader, &header.literal_block_types)?;
@@ -607,6 +616,7 @@ fn decode_compressed_metablock(
                 distance,
                 command.copy_len,
                 max_allowed_distance,
+                output_limit,
             )?;
         } else {
             let copy_target = output
@@ -619,6 +629,7 @@ fn decode_compressed_metablock(
                 ));
             }
 
+            ensure_output_room(output.len(), command.copy_len, output_limit)?;
             copy_from_distance(output, distance, command.copy_len)?;
         }
         if output.len() > target_len {
@@ -815,12 +826,24 @@ fn copy_from_distance(output: &mut Vec<u8>, distance: usize, copy_len: usize) ->
     if distance == 0 || distance > output.len() {
         return Err(Error::InvalidData("brotli: invalid backward distance"));
     }
+    crate::compress::match_ops::copy_match(output, distance, copy_len)
+        .map_err(|_| Error::InvalidData("brotli: invalid backward distance"))
+}
 
-    for _ in 0..copy_len {
-        let src = output.len() - distance;
-        let byte = output[src];
-        output.push(byte);
-    }
+/// Append the decompressed bytes of `input` to `output`.
+///
+/// `max_output` limits how many bytes are appended. An empty `output`
+/// takes the decoder buffer by move. A non-empty `output` is extended.
+pub fn decode_into(
+    input: &[u8],
+    output: &mut Vec<u8>,
+    max_output: Option<usize>,
+) -> Result<(), Error> {
+    let produced = match max_output {
+        Some(limit) => decode_bounded(input, limit)?,
+        None => decode(input)?,
+    };
+    crate::compress::move_into(output, produced);
     Ok(())
 }
 
@@ -829,11 +852,16 @@ fn copy_from_distance(output: &mut Vec<u8>, distance: usize, copy_len: usize) ->
 /// Returns `Error::OutputLimitExceeded` if the decompressed output
 /// would exceed `max_output` bytes.
 pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
-    let result = decode(input)?;
-    if result.len() > max_output {
-        return Err(Error::OutputLimitExceeded { limit: max_output });
+    decode_internal(input, Some(max_output))
+}
+
+fn ensure_output_room(len: usize, add: usize, limit: Option<usize>) -> Result<(), Error> {
+    if let Some(max) = limit
+        && len.saturating_add(add) > max
+    {
+        return Err(Error::OutputLimitExceeded { limit: max });
     }
-    Ok(result)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1748,6 +1776,7 @@ mod tests {
             true,
             65520,
             &mut recent,
+            None,
         )
         .unwrap();
 

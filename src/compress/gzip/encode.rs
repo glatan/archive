@@ -230,6 +230,17 @@ pub fn encode_writer_with_options<W: std::io::Write>(
 /// assert_eq!(data, b"Hello!");
 /// ```
 pub fn encode(input: &[u8], level: deflate::encode::Level) -> Vec<u8> {
+    let mut output = Vec::new();
+    encode_into(input, &mut output, level);
+    output
+}
+
+/// Append one gzip member to `output`.
+pub fn encode_into(input: &[u8], output: &mut Vec<u8>, level: deflate::encode::Level) {
+    crate::compress::move_into(output, encode_member(input, level));
+}
+
+fn encode_member(input: &[u8], level: deflate::encode::Level) -> Vec<u8> {
     let mut output = vec![
         0x1F, // magic
         0x8B, // magic

@@ -108,11 +108,8 @@ fn decode_level(input: &[u8], max_output: usize, level: Level) -> Result<Vec<u8>
             if out.len() + len > max_output {
                 return Err(Error::OutputLimitExceeded { limit: max_output });
             }
-            let start = out.len() - distance;
-            for i in 0..len {
-                let b = out[start + i];
-                out.push(b);
-            }
+            crate::compress::match_ops::copy_match(&mut out, distance, len)
+                .map_err(|_| Error::InvalidData("fastlz: match offset before start"))?;
         } else {
             let n = ctrl + 1;
             if pos + n > input.len() {
@@ -262,10 +259,12 @@ fn encode_inner(input: &[u8], max_distance: usize, level2: bool) -> Vec<u8> {
         if cand >= 0 {
             let c = cand as usize;
             if pos - c <= max_distance && input[c..c + MIN_MATCH] == input[pos..pos + MIN_MATCH] {
-                let mut len = MIN_MATCH;
-                while pos + len < input.len() && input[c + len] == input[pos + len] {
-                    len += 1;
-                }
+                let len = MIN_MATCH
+                    + crate::compress::match_ops::match_len(
+                        &input[c + MIN_MATCH..],
+                        &input[pos + MIN_MATCH..],
+                        input.len() - (pos + MIN_MATCH),
+                    );
                 flush_literals!();
                 emit_match!(len, pos - c);
                 lit_start = pos + len;

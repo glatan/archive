@@ -59,6 +59,15 @@ fn dec_char(c: u8) -> Result<u8, Error> {
 /// Panics if `name` is empty or contains a newline, or if `mode` exceeds
 /// `0o7777`.
 pub fn encode(name: &str, mode: u32, data: &[u8]) -> Vec<u8> {
+    encode_inner(name, mode, data, true)
+}
+
+#[cfg(test)]
+fn encode_scalar(name: &str, mode: u32, data: &[u8]) -> Vec<u8> {
+    encode_inner(name, mode, data, false)
+}
+
+fn encode_inner(name: &str, mode: u32, data: &[u8], wide: bool) -> Vec<u8> {
     assert!(
         !name.is_empty() && !name.contains('\n'),
         "uuencode: bad name"
@@ -74,20 +83,86 @@ pub fn encode(name: &str, mode: u32, data: &[u8]) -> Vec<u8> {
 
     for chunk in data.chunks(MAX_LINE_OCTETS) {
         out.push(enc_char(chunk.len() as u8));
+        let mut vals = [0u8; 60];
+        let mut n = 0;
         for trio in chunk.chunks(3) {
-            let a = trio[0] as u32;
-            let b = *trio.get(1).unwrap_or(&0) as u32;
-            let c = *trio.get(2).unwrap_or(&0) as u32;
-            out.push(enc_char((a >> 2) as u8));
-            out.push(enc_char(((a << 4) | (b >> 4)) as u8));
-            out.push(enc_char(((b << 2) | (c >> 6)) as u8));
-            out.push(enc_char(c as u8));
+            let a = trio[0];
+            let b = *trio.get(1).unwrap_or(&0);
+            let c = *trio.get(2).unwrap_or(&0);
+            vals[n] = a >> 2;
+            vals[n + 1] = ((a & 0x03) << 4) | (b >> 4);
+            vals[n + 2] = ((b & 0x0f) << 2) | (c >> 6);
+            vals[n + 3] = c & 0x3f;
+            n += 4;
         }
+        map_chars(&vals[..n], &mut out, wide);
         out.push(b'\n');
     }
 
     out.extend_from_slice(b"`\nend\n");
     out
+}
+
+fn map_chars(vals: &[u8], out: &mut Vec<u8>, wide: bool) {
+    if !wide {
+        for &v in vals {
+            out.push(enc_char(v));
+        }
+        return;
+    }
+    let mut i = 0;
+    #[cfg(target_arch = "x86_64")]
+    {
+        while i + 16 <= vals.len() {
+            unsafe { map16_sse2(&vals[i..i + 16], out) };
+            i += 16;
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        while i + 16 <= vals.len() {
+            unsafe { map16_neon(&vals[i..i + 16], out) };
+            i += 16;
+        }
+    }
+    for &v in &vals[i..] {
+        out.push(enc_char(v));
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+fn map16_sse2(vals: &[u8], out: &mut Vec<u8>) {
+    use core::arch::x86_64::{
+        _mm_add_epi8, _mm_and_si128, _mm_andnot_si128, _mm_cmpeq_epi8, _mm_loadu_si128,
+        _mm_or_si128, _mm_set1_epi8, _mm_storeu_si128,
+    };
+    unsafe {
+        let v = _mm_and_si128(_mm_loadu_si128(vals.as_ptr().cast()), _mm_set1_epi8(0x3f));
+        let added = _mm_add_epi8(v, _mm_set1_epi8(0x20));
+        let space = _mm_cmpeq_epi8(added, _mm_set1_epi8(0x20));
+        let tick = _mm_set1_epi8(0x60);
+        let mapped = _mm_or_si128(_mm_andnot_si128(space, added), _mm_and_si128(space, tick));
+        let mut buf = [0u8; 16];
+        _mm_storeu_si128(buf.as_mut_ptr().cast(), mapped);
+        out.extend_from_slice(&buf);
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+fn map16_neon(vals: &[u8], out: &mut Vec<u8>) {
+    use core::arch::aarch64::{
+        vaddq_u8, vandq_u8, vbslq_u8, vceqq_u8, vdupq_n_u8, vld1q_u8, vst1q_u8,
+    };
+    unsafe {
+        let v = vandq_u8(vld1q_u8(vals.as_ptr()), vdupq_n_u8(0x3f));
+        let added = vaddq_u8(v, vdupq_n_u8(0x20));
+        let space = vceqq_u8(added, vdupq_n_u8(0x20));
+        let mut buf = [0u8; 16];
+        vst1q_u8(buf.as_mut_ptr(), vbslq_u8(space, vdupq_n_u8(0x60), added));
+        out.extend_from_slice(&buf);
+    }
 }
 
 /// Encode `data` as a POSIX `begin-base64` uuencode document.
@@ -244,6 +319,22 @@ fn decode_base64_body(
 mod tests {
     use super::*;
     use alloc::vec;
+
+    #[test]
+    fn vector_matches_scalar_lengths() {
+        for n in [0, 1, 2, 3, 4, 44, 45, 46, 90, 128] {
+            let data: Vec<u8> = (0..n).map(|i| (i * 17) as u8).collect();
+            assert_eq!(
+                encode("f", 0o644, &data),
+                encode_scalar("f", 0o644, &data),
+                "len {n}"
+            );
+        }
+        assert_eq!(
+            encode("f", 0o644, &[0u8; 48]),
+            encode_scalar("f", 0o644, &[0u8; 48])
+        );
+    }
 
     #[test]
     fn roundtrip_text() {

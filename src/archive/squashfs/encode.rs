@@ -726,12 +726,9 @@ impl SquashfsEncoder {
             // inodes share a metadata chunk and whose inode-number
             // diff stays within i16. A header covers at most 256
             // entries.
+            let inode_off: BTreeMap<u32, usize> = inode_stream_off.iter().copied().collect();
             let child_ref = |ino: u32| -> (usize, usize) {
-                let off = inode_stream_off
-                    .iter()
-                    .find(|(n, _)| *n == ino)
-                    .map(|(_, o)| *o)
-                    .unwrap_or(0);
+                let off = inode_off.get(&ino).copied().unwrap_or(0);
                 (off / META_BLOCK_SIZE, off % META_BLOCK_SIZE)
             };
             let mut new_plan: Vec<Vec<(usize, usize)>> = alloc::vec![Vec::new(); dir_order.len()];
@@ -764,10 +761,10 @@ impl SquashfsEncoder {
             ));
         }
 
-        let root_stream_off = inode_stream_off
-            .iter()
-            .find(|(n, _)| *n == 1)
-            .map(|(_, o)| *o)
+        let inode_off: BTreeMap<u32, usize> = inode_stream_off.iter().copied().collect();
+        let root_stream_off = inode_off
+            .get(&1)
+            .copied()
             .ok_or(Error::InvalidData("squashfs: missing root inode"))?;
         let root_inode_ref = {
             let c = root_stream_off / META_BLOCK_SIZE;
@@ -779,11 +776,7 @@ impl SquashfsEncoder {
         // Per dir: (listing stream offset, listing byte len).
         let mut dir_listing: Vec<(usize, u32)> = Vec::new();
         let child_ref = |ino: u32| -> (usize, usize) {
-            let off = inode_stream_off
-                .iter()
-                .find(|(n, _)| *n == ino)
-                .map(|(_, o)| *o)
-                .unwrap_or(0);
+            let off = inode_off.get(&ino).copied().unwrap_or(0);
             (off / META_BLOCK_SIZE, off % META_BLOCK_SIZE)
         };
         for (di, children) in dir_children.iter().enumerate() {
@@ -882,11 +875,7 @@ impl SquashfsEncoder {
                 (inode_disk[c] << 16) | (stream_off % META_BLOCK_SIZE) as u64
             };
             for ino in 1..=inode_count {
-                let off = inode_stream_off
-                    .iter()
-                    .find(|(n, _)| *n == ino)
-                    .map(|(_, o)| *o)
-                    .unwrap_or(0);
+                let off = inode_off.get(&ino).copied().unwrap_or(0);
                 es.extend_from_slice(&inode_ref(off).to_le_bytes());
             }
             es

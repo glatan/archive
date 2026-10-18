@@ -112,11 +112,8 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
                     if out.len() + len > max_output {
                         return Err(Error::OutputLimitExceeded { limit: max_output });
                     }
-                    let start = out.len() - disp;
-                    for i in 0..len {
-                        let b = out[start + i];
-                        out.push(b);
-                    }
+                    crate::compress::match_ops::copy_match(&mut out, disp, len)
+                        .map_err(|_| Error::InvalidData("lznt1: displacement before start"))?;
                     u += len;
                 }
                 if out.len() > max_output {

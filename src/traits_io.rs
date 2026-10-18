@@ -8,6 +8,11 @@
 use alloc::vec::Vec;
 
 /// Decode from a [`std::io::Read`] source.
+///
+/// Implementations read the source to the end and then decode that
+/// slice. gzip, xz, zstd, and lz4 are framed, but their parsers index
+/// a contiguous buffer and the bit reader cannot resume on a longer
+/// slice. A streaming reader would have to reimplement those parsers.
 pub trait DecodeReader {
     /// Read all bytes from `reader`, decode, and return the result.
     fn decode_reader<R: std::io::Read>(&self, reader: R) -> std::io::Result<Vec<u8>>;

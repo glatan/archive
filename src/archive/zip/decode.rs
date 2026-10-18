@@ -102,17 +102,38 @@ impl crate::traits::ArchiveEntry for ZipEntry {
 
 /// Decode a ZIP archive into memory.
 pub fn decode(input: &[u8]) -> Result<Vec<ZipEntry>, Error> {
-    decode_impl(input, None, None)
+    decode_collected(input, None, None)
+}
+
+/// Visit each ZIP entry. Payload bytes are dropped when `visit` returns.
+pub fn for_each_entry<F>(input: &[u8], visit: F) -> Result<(), Error>
+where
+    F: FnMut(ZipEntry) -> Result<(), Error>,
+{
+    decode_impl(input, None, None, visit)
+}
+
+fn decode_collected(
+    input: &[u8],
+    password: Option<&[u8]>,
+    disk_map: Option<&DiskMap>,
+) -> Result<Vec<ZipEntry>, Error> {
+    let mut entries = Vec::new();
+    decode_impl(input, password, disk_map, |entry| {
+        entries.push(entry);
+        Ok(())
+    })?;
+    Ok(entries)
 }
 
 /// Decode a ZIP archive into memory using a password for encrypted entries.
 pub fn decode_with_password(input: &[u8], password: &str) -> Result<Vec<ZipEntry>, Error> {
-    decode_impl(input, Some(password.as_bytes()), None)
+    decode_collected(input, Some(password.as_bytes()), None)
 }
 
 /// Decode a ZIP archive into memory using a password for encrypted entries.
 pub fn decode_with_password_bytes(input: &[u8], password: &[u8]) -> Result<Vec<ZipEntry>, Error> {
-    decode_impl(input, Some(password), None)
+    decode_collected(input, Some(password), None)
 }
 
 /// Decode a split/spanned ZIP archive (`file.z01`, `file.z02`, ...,
@@ -153,13 +174,13 @@ fn decode_parts_impl(parts: &[&[u8]], password: Option<&[u8]>) -> Result<Vec<Zip
     }
     let disk_map = DiskMap { starts };
     if parts.len() == 1 {
-        return decode_impl(parts[0], password, Some(&disk_map));
+        return decode_collected(parts[0], password, Some(&disk_map));
     }
     let mut input = Vec::with_capacity(pos);
     for p in parts {
         input.extend_from_slice(p);
     }
-    decode_impl(&input, password, Some(&disk_map))
+    decode_collected(&input, password, Some(&disk_map))
 }
 
 /// Segment map of a split/spanned archive: `starts[d]` is the byte
@@ -186,13 +207,17 @@ impl DiskMap {
     }
 }
 
-fn decode_impl(
+fn decode_impl<F>(
     input: &[u8],
     password: Option<&[u8]>,
     disk_map: Option<&DiskMap>,
-) -> Result<Vec<ZipEntry>, Error> {
+    mut visit: F,
+) -> Result<(), Error>
+where
+    F: FnMut(ZipEntry) -> Result<(), Error>,
+{
     if input.is_empty() {
-        return Ok(Vec::new());
+        return Ok(());
     }
 
     let eocd_offset = find_eocd(input)?;
@@ -322,17 +347,16 @@ fn decode_impl(
         })
         .collect();
 
-    let mut entries = Vec::with_capacity(records.len());
     for (record, next_offset) in records.iter().zip(next_offsets) {
-        entries.push(extract_entry(
+        visit(extract_entry(
             input,
             record,
             next_offset,
             cd_offset,
             password,
-        )?);
+        )?)?;
     }
-    Ok(entries)
+    Ok(())
 }
 
 /// Reject an encrypted Central Directory (APPNOTE §4.3.10, §7.5).
@@ -1619,6 +1643,21 @@ impl<'a> Cursor<'a> {
 mod tests {
     use super::*;
     use crate::compress::deflate::encode::{self, Level};
+
+    #[test]
+    fn for_each_entry_stops_when_visit_fails() {
+        let mut encoder = crate::archive::zip::encode::ZipEncoder::new();
+        encoder.add_file("a.txt", b"aaa");
+        encoder.add_file("b.txt", b"bbb");
+        let archive = encoder.finish().unwrap();
+        let mut seen = Vec::new();
+        let err = for_each_entry(&archive, |entry| {
+            seen.push(entry.name);
+            Err(Error::InvalidData("stop"))
+        });
+        assert!(err.is_err());
+        assert_eq!(seen, ["a.txt"]);
+    }
 
     #[test]
     fn test_decode_empty_input() {

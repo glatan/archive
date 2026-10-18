@@ -221,15 +221,8 @@ fn decode_impl(
         if out.len() + len > max_output {
             return Err(Error::OutputLimitExceeded { limit: max_output });
         }
-        for vpos in (avail - offset)..(avail - offset + len) {
-            let b = if vpos < prefix.len() {
-                prefix[vpos]
-            } else {
-                out[vpos - prefix.len()]
-            };
-            out.push(b);
-        }
-        Ok(())
+        crate::compress::match_ops::copy_match_with_prefix(prefix, out, offset, len)
+            .map_err(|_| Error::InvalidData("zx5: bad match offset"))
     };
 
     // The first block is always a literal block without an indicator bit.
@@ -509,10 +502,14 @@ fn encode_impl(
                     && byte_at(c) == byte_at(pos_v)
                     && byte_at(c + 1) == byte_at(pos_v + 1)
                 {
-                    let mut len = MIN_MATCH;
-                    while pos + len < input.len() && byte_at(c + len) == byte_at(pos_v + len) {
-                        len += 1;
-                    }
+                    let len = MIN_MATCH
+                        + crate::compress::match_ops::match_len_window(
+                            prefix,
+                            input,
+                            c + MIN_MATCH,
+                            pos_v + MIN_MATCH,
+                            input.len() - (pos + MIN_MATCH),
+                        );
                     best = Some((len, dist));
                 }
             }

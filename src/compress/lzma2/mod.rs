@@ -33,71 +33,80 @@ const PROPS_BYTE: u8 = LzmaProperties::LZIP.to_props_byte();
 
 /// Encode data as an LZMA2 stream.
 ///
-/// Uses LZMA1 compression with full reset per chunk and falls back to
-/// uncompressed storage when LZMA cannot reduce size.
+/// The first chunk resets the dictionary. A compressed chunk after that keeps
+/// the probability model and the dictionary (`0x80`). A chunk that does not
+/// shrink is stored uncompressed and does not change the model.
 pub(crate) fn lzma2_encode(data: &[u8], dict_size: u32) -> Vec<u8> {
+    lzma2_encode_chunks(data, dict_size, MAX_UNCOMPRESSED)
+}
+
+fn lzma2_encode_chunks(data: &[u8], dict_size: u32, max_uncompressed: usize) -> Vec<u8> {
     let mut output = Vec::new();
-    let mut pos = 0;
-    let mut first = true;
+    let mut pos = 0usize;
+    let mut dict_origin = 0usize;
+    let mut coder = LzmaDecoderState::new();
 
     while pos < data.len() {
-        let chunk_end = (pos + MAX_UNCOMPRESSED).min(data.len());
+        let chunk_end = (pos + max_uncompressed).min(data.len());
         let chunk = &data[pos..chunk_end];
-        let uncompressed_size = chunk.len();
+        let resetting = pos == dict_origin;
+        let history: &[u8] = if resetting {
+            &[]
+        } else {
+            &data[dict_origin..pos]
+        };
+        let mut trial = if resetting {
+            LzmaDecoderState::new()
+        } else {
+            coder.clone()
+        };
+        let compressed = lzma::lzma_encode_with_state(
+            chunk,
+            history,
+            dict_size,
+            LzmaProperties::LZIP,
+            false,
+            &mut trial,
+        );
 
-        // Try LZMA compression
-        let compressed =
-            lzma::lzma_encode_with_props_no_eos(chunk, dict_size, LzmaProperties::LZIP);
-
-        if compressed.len() < uncompressed_size && compressed.len() <= MAX_COMPRESSED {
-            // LZMA chunk with full reset (0xE0): always reset state, props, and dict
-            let control_base = 0xE0u8;
-            let u_size = uncompressed_size - 1; // stored as size-1
-            let c_size = compressed.len() - 1; // stored as size-1 (does not include props byte)
-
-            // Control byte: bits 4-0 = uncompressed_size bits 20..16
+        if compressed.len() < chunk.len() && compressed.len() <= MAX_COMPRESSED {
+            // 0xE0 resets state, properties, and the dictionary. 0x80 keeps all three.
+            let control_base = if resetting { 0xE0u8 } else { 0x80u8 };
+            let u_size = chunk.len() - 1;
+            let c_size = compressed.len() - 1;
             let control = control_base | ((u_size >> 16) as u8 & 0x1F);
             output.push(control);
-            // Uncompressed size bits 15..8, 7..0
             output.push((u_size >> 8) as u8);
             output.push(u_size as u8);
-            // Compressed size bits 15..8, 7..0 (big-endian)
             output.push((c_size >> 8) as u8);
             output.push(c_size as u8);
-            // Properties byte (for 0xC0+ control)
-            output.push(PROPS_BYTE);
-            // Compressed LZMA data
+            if resetting {
+                output.push(PROPS_BYTE);
+            }
             output.extend_from_slice(&compressed);
+            coder = trial;
         } else {
-            // Uncompressed chunk
-            // Split into 64KB sub-chunks if needed
             let mut sub_pos = 0;
             while sub_pos < chunk.len() {
                 let sub_end = (sub_pos + MAX_COMPRESSED).min(chunk.len());
                 let sub_chunk = &chunk[sub_pos..sub_end];
-                let sub_size = sub_chunk.len() - 1; // stored as size-1
-
-                // 0x01 = uncompressed with dict reset, 0x02 = without
-                let control = if first && sub_pos == 0 {
-                    0x01u8
-                } else {
-                    0x02u8
-                };
+                let sub_size = sub_chunk.len() - 1;
+                let sub_reset = resetting && sub_pos == 0;
+                let control = if sub_reset { 0x01u8 } else { 0x02u8 };
                 output.push(control);
-                // Size bits 15..8, 7..0 (big-endian)
                 output.push((sub_size >> 8) as u8);
                 output.push(sub_size as u8);
                 output.extend_from_slice(sub_chunk);
-
+                if sub_reset {
+                    dict_origin = pos;
+                }
                 sub_pos = sub_end;
             }
         }
 
-        first = false;
         pos = chunk_end;
     }
 
-    // End marker
     output.push(0x00);
     output
 }
@@ -192,21 +201,20 @@ pub(crate) fn lzma2_decode(data: &[u8], dict_size: u32) -> Result<Vec<u8>, Error
                 dict_reset_pos = output.len();
             }
 
-            let history = &output[dict_reset_pos..];
-            let (decoded, _consumed) = lzma::lzma_decode_with_props_and_size_and_history_and_state(
+            let start = output.len();
+            lzma::lzma_decode_into(
                 compressed,
                 dict_size,
                 current_props,
-                u_size,
-                history,
+                Some(u_size),
+                &mut lzma::DictCursor::new(&mut output, dict_reset_pos),
                 &mut decoder_state,
             )?;
 
-            if decoded.len() != u_size {
+            if output.len() - start != u_size {
+                output.truncate(start);
                 return Err(Error::InvalidData("xz: LZMA2 uncompressed size mismatch"));
             }
-
-            output.extend_from_slice(&decoded);
         } else {
             // Control bytes 0x03..=0x7F are invalid
             return Err(Error::InvalidData("xz: invalid LZMA2 control byte"));
@@ -359,5 +367,46 @@ mod tests {
         encoded.push(0x00);
 
         assert_eq!(lzma2_decode(&encoded, 4096).unwrap(), b"props");
+    }
+
+    #[test]
+    fn test_lzma2_keeps_state_across_chunks() {
+        let data = b"abcabcabcabc".repeat(40);
+        let encoded = lzma2_encode_chunks(&data, 4096, 64);
+        let controls = lzma2_control_bytes(&encoded);
+        assert!(
+            controls[0] >= 0xE0 || controls[0] == 0x01,
+            "first chunk resets the dictionary, got {controls:?}"
+        );
+        assert!(
+            controls.iter().any(|c| (0x80..0xA0).contains(c)),
+            "a later chunk keeps the model, got {controls:?}"
+        );
+        assert_eq!(lzma2_decode(&encoded, 4096).unwrap(), data);
+    }
+
+    fn lzma2_control_bytes(data: &[u8]) -> Vec<u8> {
+        let mut controls = Vec::new();
+        let mut pos = 0usize;
+        while pos < data.len() {
+            let control = data[pos];
+            controls.push(control);
+            pos += 1;
+            if control == 0x00 {
+                break;
+            }
+            if control <= 0x02 {
+                let size = ((data[pos] as usize) << 8 | data[pos + 1] as usize) + 1;
+                pos += 2 + size;
+            } else {
+                let c_size = ((data[pos + 2] as usize) << 8 | data[pos + 3] as usize) + 1;
+                pos += 4;
+                if control >= 0xC0 {
+                    pos += 1;
+                }
+                pos += c_size;
+            }
+        }
+        controls
     }
 }

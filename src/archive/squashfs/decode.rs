@@ -6,6 +6,8 @@
 //! All six compressor IDs are recognized; LZMA 1 blocks (id 2, deprecated
 //! upstream) carry `.lzma`-alone payloads.
 
+use alloc::collections::BTreeMap;
+use alloc::collections::btree_map::Entry;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -853,6 +855,7 @@ pub fn decode_with_limit(input: &[u8], _max_output: Option<usize>) -> Result<Squ
 
     let mut entries = Vec::new();
     let mut visited = 0u32;
+    let mut frag_cache = BTreeMap::new();
     walk_dir(
         &reader,
         &inode_run,
@@ -865,6 +868,7 @@ pub fn decode_with_limit(input: &[u8], _max_output: Option<usize>) -> Result<Squ
         &mut entries,
         &mut visited,
         inode_count,
+        &mut frag_cache,
     )?;
 
     let _ = flags & FLAG_COMPRESSOR_OPTIONS;
@@ -912,6 +916,7 @@ fn walk_dir(
     entries: &mut Vec<SquashfsEntry>,
     visited: &mut u32,
     inode_count: u32,
+    frag_cache: &mut BTreeMap<(usize, u32), Vec<u8>>,
 ) -> Result<(), Error> {
     *visited += 1;
     if *visited > inode_count {
@@ -945,6 +950,7 @@ fn walk_dir(
                 *frag_offset,
                 *file_size,
                 block_sizes,
+                frag_cache,
             )?,
             None,
         ),
@@ -997,6 +1003,7 @@ fn walk_dir(
                     entries,
                     visited,
                     inode_count,
+                    frag_cache,
                 )?;
             } else {
                 *visited += 1;
@@ -1018,6 +1025,7 @@ fn walk_dir(
                         *frag_offset,
                         *file_size,
                         block_sizes,
+                        frag_cache,
                     )?,
                     InodeBody::Symlink(target) => target.clone(),
                     InodeBody::Device(dev) => dev.to_le_bytes().to_vec(),
@@ -1097,6 +1105,7 @@ fn read_file(
     frag_offset: u32,
     file_size: u64,
     block_sizes: &[u32],
+    frag_cache: &mut BTreeMap<(usize, u32), Vec<u8>>,
 ) -> Result<Vec<u8>, Error> {
     let block_size = reader.block_size as u64;
     let mut out = Vec::with_capacity(file_size.min(1 << 26) as usize);
@@ -1113,7 +1122,12 @@ fn read_file(
         let base = frag_index as usize * 16;
         let frag_start = le64(frag_table, base)? as usize;
         let frag_size = le32(frag_table, base + 8)?;
-        let frag = reader.read_data_block(frag_start, frag_size, reader.block_size)?;
+        let key = (frag_start, frag_size);
+        if let Entry::Vacant(slot) = frag_cache.entry(key) {
+            let decoded = reader.read_data_block(frag_start, frag_size, reader.block_size)?;
+            slot.insert(decoded);
+        }
+        let frag = &frag_cache[&key];
         let offset = frag_offset as usize;
         let end = offset
             .checked_add(tail as usize)

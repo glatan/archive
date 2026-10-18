@@ -58,19 +58,45 @@ COPY . .
 ENTRYPOINT ["bash"]
 
 # ── test target ──────────────────────────────────────────────
+# x86_64 の SSE2 / AVX2 はこのイメージ上で直接実行する。
+# aarch64 の NEON だけ qemu-user で lib テストを実行する。
+# 他アーキテクチャ向けの分岐はスカラー実装で、x86_64 の比較対象として既に実行される。
 FROM base AS test
+RUN pacman-key --init && \
+    pacman-key --populate archlinux && \
+    pacman -Sy --noconfirm qemu-user aarch64-linux-gnu-gcc && \
+    pacman -Scc --noconfirm
 COPY . .
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER="qemu-aarch64 -L /usr/aarch64-linux-gnu"
 # cargo clean -p forces the crate itself to rebuild: the cache mount's
 # mtime-based fingerprints can otherwise reuse stale binaries when source
-# files arrive with older mtimes (e.g. 9p/drvfs mounts).
+# files arrive with older mtimes (e.g. 9p/drvfs mounts). The package clean
+# leaves build-script output in place, so drop that too.
 RUN --mount=type=cache,id=cargo-registry,target=/root/.cargo/registry \
     --mount=type=cache,id=cargo-git,target=/root/.cargo/git \
     --mount=type=cache,id=test-target,target=/workspace/target \
+    rustup show >/dev/null && \
+    rustup target add aarch64-unknown-linux-gnu && \
     cargo clean -p archive && \
+    { rm -rf target/debug/build/archive-* target/debug/.fingerprint/archive-* \
+        target/aarch64-unknown-linux-gnu/debug/build/archive-* \
+        target/aarch64-unknown-linux-gnu/debug/.fingerprint/archive-* || true; } && \
     cargo test --all-features --no-run && \
-    cp -a target/debug /workspace/_target_debug
-RUN mkdir -p target && mv _target_debug target/debug
-ENTRYPOINT ["cargo", "test", "--all-features"]
+    cargo test --all-features --target aarch64-unknown-linux-gnu --lib --no-run && \
+    cp -a target/debug /workspace/_target_debug && \
+    cp -a target/aarch64-unknown-linux-gnu /workspace/_target_aarch64
+RUN mkdir -p target && \
+    mv _target_debug target/debug && \
+    mv _target_aarch64 target/aarch64-unknown-linux-gnu && \
+    printf '%s\n' \
+        '#!/bin/sh' \
+        'set -eu' \
+        'cargo test --all-features' \
+        'cargo test --all-features --target aarch64-unknown-linux-gnu --lib' \
+        > /usr/local/bin/archive-test && \
+    chmod +x /usr/local/bin/archive-test
+ENTRYPOINT ["/usr/local/bin/archive-test"]
 
 # ── fuzz target ──────────────────────────────────────────────
 FROM base AS fuzz

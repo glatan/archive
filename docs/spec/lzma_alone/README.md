@@ -58,7 +58,7 @@
 | 26 | 既知サイズが 256 GiB 以上を指定するファイルの拒否 (XZ Utils の policy) | lzma-file-format.txt §1.1.3 | ✅ | 実装済み — `parse_header` で既知 unpacked_size >= 256 GiB を reject (XZ Utils policy)。`test_decode_rejects_oversized_known_size` |
 | 27 | 辞書サイズの portability 推奨 (2^n または 2^n+2^(n-1)。XZ Utils はこの形式のみ生成・解凍) | lzma-file-format.txt §1.1.2 | ✅ | encode 側で portable 値のみ受理 (非 portable は `Error::InvalidData`、XZ Utils 互換を保証)。decode は引き続き任意の非 0 値を受理する寛容側 (XZ は decode も portable のみ — 本実装の方が寛容)。`test_encode_accepts_portable_dict_size`, `test_encode_rejects_nonportable_dict_size`, `test_is_portable_dict_size` |
 | 28 | EOS マーカの厳格化: dist=0xFFFFFFFF かつ len=2 (MATCH_MIN_LEN) のみ受理 | lzma-specification.txt は距離のみで EOS 判定 (長さ不問) — 本実装は strict 側 | ✅ | `test_lzma_invalid_eos_marker_wrong_length` (共有 lzma コア) |
-| 29 | rep 距離 `0 <= dis < dict_size` かつ `dis == position` の仮想ゼロバイト受理 (共有 LZMA コア) | lzma-specification.txt / LZMA SDK semantics | ✅ | `lzma_decode_impl` で `rep0 > output.len()` または `rep0 >= dict_size` を reject。実エンコーダは生成しないため直接テストなし |
+| 29 | rep 距離 `0 <= dis < dict_size` かつ `dis == position` の仮想ゼロバイト受理 (共有 LZMA コア) | lzma-specification.txt / LZMA SDK semantics | ✅ | `copy_rep` で辞書窓の占有数 `occ` に対し `rep0 > occ` または `rep0 >= dict_size` を reject。`rep0 == occ` かつ `occ < dict_size` は窓の直前を 0x00 として出す。実エンコーダは生成しないため直接テストなし |
 | 30 | range decoder 初期化: 先頭バイト 0x00 + code < range (0xFFFFFFFF 拒否) | lzma-specification.txt | ✅ | `test_decoder_bad_first_byte`, `test_decoder_initial_code_max_rejected` (共有 range coder) |
 | 31 | 共有 LZMA デコーダは、宣言展開長が 1 GiB を超えると展開ループの前に `OutputLimitExceeded` を返す。サイズ不明の経路は対象外 | crate 防御 | ✅ | `test_decode_with_size_rejects_declared_output_above_limit`。`.lzma` の `decode_bounded` 自体は行 18 の事後チェックのまま |
 

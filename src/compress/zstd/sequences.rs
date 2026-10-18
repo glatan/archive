@@ -77,7 +77,7 @@ pub(crate) fn execute_sequences(
     sequences: &[Sequence],
     output: &mut Vec<u8>,
 ) -> Result<(), Error> {
-    execute_sequences_with_dict(literals, sequences, output, &[], u64::MAX)
+    execute_sequences_with_dict(literals, sequences, output, &[], u64::MAX, None)
 }
 
 /// Execute sequences with optional dictionary content as prefix history.
@@ -97,6 +97,7 @@ pub(crate) fn execute_sequences_with_dict(
     output: &mut Vec<u8>,
     dict_content: &[u8],
     window_size: u64,
+    output_limit: Option<usize>,
 ) -> Result<(), Error> {
     let mut lit_pos = 0;
     let dict_len = dict_content.len();
@@ -107,6 +108,7 @@ pub(crate) fn execute_sequences_with_dict(
         if lit_pos + ll > literals.len() {
             return Err(Error::InvalidData("literal overflow in sequence"));
         }
+        ensure_output_room(output.len(), ll, output_limit)?;
         output.extend_from_slice(&literals[lit_pos..lit_pos + ll]);
         lit_pos += ll;
 
@@ -130,26 +132,43 @@ pub(crate) fn execute_sequences_with_dict(
             return Err(Error::InvalidData("offset exceeds Window_Size"));
         }
 
+        ensure_output_room(output.len(), ml, output_limit)?;
+
         // The virtual history is: [dict_content | output]
         // An offset of N means N bytes back from current end of output.
+        // Bytes that still sit in the dictionary are appended from that
+        // slice. The rest is already in `output`, and `offset` still names
+        // it after the dictionary prefix has been appended.
         let match_start_in_virtual = total_history - offset;
-
-        for i in 0..ml {
-            let vpos = match_start_in_virtual + i;
-            let byte = if vpos < dict_len {
-                dict_content[vpos]
-            } else {
-                output[vpos - dict_len]
-            };
-            output.push(byte);
+        let dict_copy = dict_len.saturating_sub(match_start_in_virtual).min(ml);
+        if dict_copy > 0 {
+            output.extend_from_slice(
+                &dict_content[match_start_in_virtual..match_start_in_virtual + dict_copy],
+            );
+        }
+        let rest = ml - dict_copy;
+        if rest > 0 {
+            crate::compress::match_ops::copy_match(output, offset, rest)
+                .map_err(|_| Error::InvalidData("offset beyond available history"))?;
         }
     }
 
     // Copy remaining literals
     if lit_pos < literals.len() {
+        let rest = literals.len() - lit_pos;
+        ensure_output_room(output.len(), rest, output_limit)?;
         output.extend_from_slice(&literals[lit_pos..]);
     }
 
+    Ok(())
+}
+
+fn ensure_output_room(len: usize, add: usize, limit: Option<usize>) -> Result<(), Error> {
+    if let Some(max) = limit
+        && len.saturating_add(add) > max
+    {
+        return Err(Error::OutputLimitExceeded { limit: max });
+    }
     Ok(())
 }
 
@@ -230,6 +249,28 @@ mod tests {
         let mut output = Vec::new();
         let result = execute_sequences(literals, &sequences, &mut output);
         assert!(matches!(result, Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn test_execute_overlap_match() {
+        let literals = b"ab";
+        let sequences = vec![Sequence {
+            literal_length: 2,
+            offset: 2,
+            match_length: 6,
+        }];
+        let mut output = Vec::new();
+        execute_sequences(literals, &sequences, &mut output).unwrap();
+        assert_eq!(output, b"abababab");
+    }
+
+    #[test]
+    fn test_execute_stops_before_exceeding_limit() {
+        let mut output = Vec::new();
+        let err = execute_sequences_with_dict(b"hello", &[], &mut output, &[], u64::MAX, Some(3))
+            .unwrap_err();
+        assert!(matches!(err, Error::OutputLimitExceeded { limit: 3 }));
+        assert!(output.is_empty());
     }
 
     #[test]
@@ -330,7 +371,7 @@ mod tests {
             match_length: 3,
         }];
         let mut output = Vec::new();
-        let result = execute_sequences_with_dict(literals, &sequences, &mut output, &[], 4);
+        let result = execute_sequences_with_dict(literals, &sequences, &mut output, &[], 4, None);
         assert!(matches!(
             result,
             Err(Error::InvalidData("offset exceeds Window_Size"))
@@ -348,7 +389,7 @@ mod tests {
             match_length: 3,
         }];
         let mut output = Vec::new();
-        execute_sequences_with_dict(literals, &sequences, &mut output, &[], 4).unwrap();
+        execute_sequences_with_dict(literals, &sequences, &mut output, &[], 4, None).unwrap();
         assert_eq!(output, b"abcdefghefg");
     }
 
@@ -365,7 +406,8 @@ mod tests {
             match_length: 3,
         }];
         let mut output = Vec::new();
-        execute_sequences_with_dict(literals, &sequences, &mut output, dict_content, 4).unwrap();
+        execute_sequences_with_dict(literals, &sequences, &mut output, dict_content, 4, None)
+            .unwrap();
         assert_eq!(output, b"WXYZABC");
     }
 
@@ -390,7 +432,7 @@ mod tests {
         ];
         let mut output = Vec::new();
         let result =
-            execute_sequences_with_dict(literals, &sequences, &mut output, dict_content, 4);
+            execute_sequences_with_dict(literals, &sequences, &mut output, dict_content, 4, None);
         assert!(matches!(
             result,
             Err(Error::InvalidData("offset exceeds Window_Size"))
@@ -409,7 +451,8 @@ mod tests {
             match_length: 2,
         }];
         let mut output = Vec::new();
-        execute_sequences_with_dict(literals, &sequences, &mut output, dict_content, 4).unwrap();
+        execute_sequences_with_dict(literals, &sequences, &mut output, dict_content, 4, None)
+            .unwrap();
         assert_eq!(output, b"abcdefde");
     }
 }

@@ -101,28 +101,89 @@ impl HuffmanTable {
 
     /// Decode one symbol from the bit stream.
     fn decode(&self, reader: &mut BitReader) -> Result<u16, Error> {
-        if self.entries.is_empty() {
-            return Err(Error::InvalidData("empty Huffman table"));
-        }
-        let bits = reader.peek_bits(self.max_bits)? as usize;
-        let (symbol, len) = self.entries[bits];
-        if len == 0 {
-            return Err(Error::InvalidData("invalid Huffman code"));
-        }
-        reader.consume(len);
-        Ok(symbol)
+        read_symbol(&self.entries, self.max_bits, reader)
     }
 }
 
-/// Reverse `num_bits` bits of `value`.
-fn reverse_bits(value: u32, num_bits: u8) -> u32 {
-    let mut result = 0;
-    let mut v = value;
-    for _ in 0..num_bits {
-        result = (result << 1) | (v & 1);
-        v >>= 1;
+fn read_symbol(entries: &[(u16, u8)], max_bits: u8, reader: &mut BitReader) -> Result<u16, Error> {
+    if max_bits == 0 || entries.is_empty() {
+        return Err(Error::InvalidData("empty Huffman table"));
     }
-    result
+    let bits = reader.peek_bits(max_bits)? as usize;
+    let (symbol, len) = entries[bits];
+    if len == 0 {
+        return Err(Error::InvalidData("invalid Huffman code"));
+    }
+    reader.consume(len);
+    Ok(symbol)
+}
+
+/// Which length and distance tables a block uses.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InflateKind {
+    /// RFC 1951. Non-zero code lengths for distance codes 30 and 31 are rejected.
+    Deflate,
+    /// Deflate64. Distance codes 30 and 31 are real, and length code 285 takes 16 extra bits.
+    Deflate64,
+}
+
+const FIXED_LITERAL_MAX_BITS: u8 = 9;
+const FIXED_DISTANCE_MAX_BITS: u8 = 5;
+
+/// Lookup rows for the fixed literal/length alphabet. `max_bits` is 9.
+const FIXED_LITERAL_ENTRIES: [(u16, u8); 1 << FIXED_LITERAL_MAX_BITS] =
+    huffman_lookup(&fixed_literal_lengths());
+
+/// Lookup rows for the fixed distance alphabet. `max_bits` is 5.
+const FIXED_DISTANCE_ENTRIES: [(u16, u8); 1 << FIXED_DISTANCE_MAX_BITS] =
+    huffman_lookup(&fixed_distance_lengths());
+
+/// Fill a direct LSB-first Huffman lookup of `N` rows from code lengths.
+const fn huffman_lookup<const N: usize>(code_lengths: &[u8]) -> [(u16, u8); N] {
+    let mut max_bits = 0u8;
+    let mut i = 0usize;
+    while i < code_lengths.len() {
+        if code_lengths[i] > max_bits {
+            max_bits = code_lengths[i];
+        }
+        i += 1;
+    }
+
+    let mut bl_count = [0u32; 16];
+    i = 0;
+    while i < code_lengths.len() {
+        bl_count[code_lengths[i] as usize] += 1;
+        i += 1;
+    }
+    bl_count[0] = 0;
+
+    let mut next_code = [0u32; 16];
+    let mut code = 0u32;
+    let mut bits = 1u8;
+    while bits <= max_bits {
+        code = (code + bl_count[(bits - 1) as usize]) << 1;
+        next_code[bits as usize] = code;
+        bits += 1;
+    }
+
+    let mut entries = [(0u16, 0u8); N];
+    let mut symbol = 0usize;
+    while symbol < code_lengths.len() {
+        let len = code_lengths[symbol];
+        if len != 0 {
+            let assigned = next_code[len as usize];
+            next_code[len as usize] = assigned + 1;
+            let reversed = super::tables::reverse_bits(assigned, len);
+            let step = 1usize << len;
+            let mut idx = reversed as usize;
+            while idx < N {
+                entries[idx] = (symbol as u16, len);
+                idx += step;
+            }
+        }
+        symbol += 1;
+    }
+    entries
 }
 
 /// Decode a DEFLATE compressed stream.
@@ -146,9 +207,44 @@ fn reverse_bits(value: u32, num_bits: u8) -> u32 {
 /// Returns [`Error::UnexpectedEof`] if the input is truncated, [`Error::InvalidData`]
 /// if the stream is malformed.
 pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
+    let mut output = Vec::new();
+    decode_into(input, &mut output, None)?;
+    Ok(output)
+}
+
+/// Append a raw DEFLATE stream to `output`.
+///
+/// `max_output` limits the number of bytes appended. On error, `output`
+/// is truncated back to the length it had on entry. A non-empty `output`
+/// is not used as the LZ77 window: the stream is inflated into a fresh
+/// buffer and then appended, so distances cannot read the caller's prefix.
+pub fn decode_into(
+    input: &[u8],
+    output: &mut Vec<u8>,
+    max_output: Option<usize>,
+) -> Result<(), Error> {
+    let start = output.len();
+    let result = if start == 0 {
+        let mut reader = BitReader::new(input);
+        decode_blocks(&mut reader, output, InflateKind::Deflate, max_output)
+    } else {
+        let mut fresh = Vec::new();
+        let mut reader = BitReader::new(input);
+        decode_blocks(&mut reader, &mut fresh, InflateKind::Deflate, max_output)?;
+        output.extend_from_slice(&fresh);
+        Ok(())
+    };
+    if result.is_err() {
+        output.truncate(start);
+    }
+    result
+}
+
+/// Decode a raw DEFLATE or Deflate64 stream.
+pub(crate) fn decode_kind(input: &[u8], kind: InflateKind) -> Result<Vec<u8>, Error> {
     let mut reader = BitReader::new(input);
     let mut output = Vec::new();
-    decode_stream(&mut reader, &mut output)?;
+    decode_blocks(&mut reader, &mut output, kind, None)?;
     Ok(output)
 }
 
@@ -159,20 +255,69 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 /// stream (e.g. git pack objects): the caller can read the true
 /// consumed byte count afterwards via `reader.byte_position()`.
 pub(crate) fn decode_stream(reader: &mut BitReader, output: &mut Vec<u8>) -> Result<(), Error> {
+    decode_blocks(reader, output, InflateKind::Deflate, None)
+}
+
+fn decode_blocks(
+    reader: &mut BitReader,
+    output: &mut Vec<u8>,
+    kind: InflateKind,
+    limit: Option<usize>,
+) -> Result<(), Error> {
     loop {
         let bfinal = reader.read_bits(1)?;
         let btype = reader.read_bits(2)?;
 
         match btype {
-            0b00 => decode_uncompressed(reader, output)?,
-            0b01 => decode_fixed_huffman(reader, output)?,
-            0b10 => decode_dynamic_huffman(reader, output)?,
-            _ => return Err(Error::InvalidData("invalid DEFLATE block type 11")),
+            0b00 => decode_uncompressed(reader, output, limit)?,
+            0b01 => decode_fixed_huffman(reader, output, kind, limit)?,
+            0b10 => decode_dynamic_huffman(reader, output, kind, limit)?,
+            _ => {
+                return Err(Error::InvalidData(match kind {
+                    InflateKind::Deflate => "invalid DEFLATE block type 11",
+                    InflateKind::Deflate64 => "invalid Deflate64 block type 11",
+                }));
+            }
         }
 
         if bfinal == 1 {
             break;
         }
+    }
+    Ok(())
+}
+
+/// BFINAL bit of each block, in order. The last entry is the final block.
+///
+/// `preset` is the LZ77 window that was already present, as with
+/// `decode_with_dict`. Pass an empty slice for a stream with no dictionary.
+#[cfg(test)]
+pub(crate) fn block_final_bits(input: &[u8], preset: &[u8]) -> Result<Vec<u32>, Error> {
+    let mut reader = BitReader::new(input);
+    let mut output = Vec::from(preset);
+    let mut flags = Vec::new();
+    loop {
+        let bfinal = reader.read_bits(1)?;
+        flags.push(bfinal);
+        let btype = reader.read_bits(2)?;
+        match btype {
+            0b00 => decode_uncompressed(&mut reader, &mut output, None)?,
+            0b01 => decode_fixed_huffman(&mut reader, &mut output, InflateKind::Deflate, None)?,
+            0b10 => decode_dynamic_huffman(&mut reader, &mut output, InflateKind::Deflate, None)?,
+            _ => return Err(Error::InvalidData("invalid DEFLATE block type 11")),
+        }
+        if bfinal == 1 {
+            break;
+        }
+    }
+    Ok(flags)
+}
+
+fn output_limit(output: &[u8], add: usize, limit: Option<usize>) -> Result<(), Error> {
+    if let Some(max) = limit
+        && output.len().saturating_add(add) > max
+    {
+        return Err(Error::OutputLimitExceeded { limit: max });
     }
     Ok(())
 }
@@ -185,48 +330,61 @@ pub(crate) fn decode_with_dict(input: &[u8], dict: &[u8]) -> Result<Vec<u8>, Err
     let mut reader = BitReader::new(input);
     let mut output = Vec::from(dict);
 
-    loop {
-        let bfinal = reader.read_bits(1)?;
-        let btype = reader.read_bits(2)?;
-
-        match btype {
-            0b00 => decode_uncompressed(&mut reader, &mut output)?,
-            0b01 => decode_fixed_huffman(&mut reader, &mut output)?,
-            0b10 => decode_dynamic_huffman(&mut reader, &mut output)?,
-            _ => return Err(Error::InvalidData("invalid DEFLATE block type 11")),
-        }
-
-        if bfinal == 1 {
-            break;
-        }
-    }
+    decode_blocks(&mut reader, &mut output, InflateKind::Deflate, None)?;
 
     // Strip the pre-seeded dictionary from the beginning
     Ok(output[dict.len()..].to_vec())
 }
 
 /// Decode a non-compressed block (BTYPE=00).
-fn decode_uncompressed(reader: &mut BitReader, output: &mut Vec<u8>) -> Result<(), Error> {
+fn decode_uncompressed(
+    reader: &mut BitReader,
+    output: &mut Vec<u8>,
+    limit: Option<usize>,
+) -> Result<(), Error> {
     reader.align_to_byte();
     let len = reader.read_u16_le()?;
     let nlen = reader.read_u16_le()?;
     if len != !nlen {
         return Err(Error::InvalidData("stored block LEN/NLEN mismatch"));
     }
-    let data = reader.read_bytes(len as usize)?;
+    let len = len as usize;
+    output_limit(output, len, limit)?;
+    let data = reader.read_bytes(len)?;
     output.extend_from_slice(data);
     Ok(())
 }
 
 /// Decode a block with fixed Huffman codes (BTYPE=01).
-fn decode_fixed_huffman(reader: &mut BitReader, output: &mut Vec<u8>) -> Result<(), Error> {
-    let lit_table = HuffmanTable::from_lengths(&fixed_literal_lengths())?;
-    let dist_table = HuffmanTable::from_lengths(&fixed_distance_lengths())?;
-    decode_huffman_block(reader, &lit_table, &dist_table, output)
+fn decode_fixed_huffman(
+    reader: &mut BitReader,
+    output: &mut Vec<u8>,
+    kind: InflateKind,
+    limit: Option<usize>,
+) -> Result<(), Error> {
+    decode_huffman_block(
+        reader,
+        CodeTable {
+            entries: &FIXED_LITERAL_ENTRIES,
+            max_bits: FIXED_LITERAL_MAX_BITS,
+        },
+        CodeTable {
+            entries: &FIXED_DISTANCE_ENTRIES,
+            max_bits: FIXED_DISTANCE_MAX_BITS,
+        },
+        output,
+        kind,
+        limit,
+    )
 }
 
 /// Decode a block with dynamic Huffman codes (BTYPE=10).
-fn decode_dynamic_huffman(reader: &mut BitReader, output: &mut Vec<u8>) -> Result<(), Error> {
+fn decode_dynamic_huffman(
+    reader: &mut BitReader,
+    output: &mut Vec<u8>,
+    kind: InflateKind,
+    limit: Option<usize>,
+) -> Result<(), Error> {
     let hlit = reader.read_bits(5)? as usize + 257;
     let hdist = reader.read_bits(5)? as usize + 1;
     let hclen = reader.read_bits(4)? as usize + 4;
@@ -301,10 +459,10 @@ fn decode_dynamic_huffman(reader: &mut BitReader, output: &mut Vec<u8>) -> Resul
             "dynamic Huffman: missing end-of-block symbol (256)",
         ));
     }
-    // Distance codes 30/31 are reserved: HDIST may cover them, but only with
-    // zero code lengths (RFC 1951 §3.2.7 "distance codes 30-31 will never
-    // actually occur in the compressed data").
-    if hdist > 30 && lengths[hlit + 30..].iter().any(|&l| l != 0) {
+    // Distance codes 30/31 are reserved in DEFLATE: HDIST may cover them, but
+    // only with zero code lengths (RFC 1951 §3.2.7). Deflate64 uses those
+    // codes, so a non-zero length is legal there.
+    if kind == InflateKind::Deflate && hdist > 30 && lengths[hlit + 30..].iter().any(|&l| l != 0) {
         return Err(Error::InvalidData(
             "dynamic Huffman: non-zero length for reserved distance code 30/31",
         ));
@@ -312,53 +470,88 @@ fn decode_dynamic_huffman(reader: &mut BitReader, output: &mut Vec<u8>) -> Resul
 
     let lit_table = HuffmanTable::from_lengths(&lengths[..hlit])?;
     let dist_table = HuffmanTable::from_lengths(&lengths[hlit..hlit + hdist])?;
-    decode_huffman_block(reader, &lit_table, &dist_table, output)
+    decode_huffman_block(
+        reader,
+        CodeTable {
+            entries: &lit_table.entries,
+            max_bits: lit_table.max_bits,
+        },
+        CodeTable {
+            entries: &dist_table.entries,
+            max_bits: dist_table.max_bits,
+        },
+        output,
+        kind,
+        limit,
+    )
+}
+
+struct CodeTable<'a> {
+    entries: &'a [(u16, u8)],
+    max_bits: u8,
 }
 
 /// Core Huffman block decode loop (shared by fixed and dynamic).
 fn decode_huffman_block(
     reader: &mut BitReader,
-    lit_table: &HuffmanTable,
-    dist_table: &HuffmanTable,
+    literal: CodeTable<'_>,
+    distance: CodeTable<'_>,
     output: &mut Vec<u8>,
+    kind: InflateKind,
+    limit: Option<usize>,
 ) -> Result<(), Error> {
     loop {
-        let symbol = lit_table.decode(reader)?;
+        let symbol = read_symbol(literal.entries, literal.max_bits, reader)?;
         match symbol {
             0..=255 => {
-                // Literal byte
+                output_limit(output, 1, limit)?;
                 output.push(symbol as u8);
             }
             256 => {
-                // End of block
                 return Ok(());
             }
             257..=285 => {
-                // Length/distance pair
                 let len_idx = (symbol - 257) as usize;
-                if len_idx >= LENGTH_BASE.len() {
-                    return Err(Error::InvalidData("invalid length code"));
-                }
-                let length = LENGTH_BASE[len_idx] as usize
-                    + reader.read_bits(LENGTH_EXTRA[len_idx])? as usize;
+                let (length_base, length_extra, distance_len) = match kind {
+                    InflateKind::Deflate => {
+                        if len_idx >= LENGTH_BASE.len() {
+                            return Err(Error::InvalidData("invalid length code"));
+                        }
+                        (
+                            LENGTH_BASE[len_idx] as usize,
+                            LENGTH_EXTRA[len_idx],
+                            DISTANCE_BASE.len(),
+                        )
+                    }
+                    InflateKind::Deflate64 => (
+                        LENGTH_BASE_64[len_idx] as usize,
+                        LENGTH_EXTRA_64[len_idx],
+                        DISTANCE_BASE_64.len(),
+                    ),
+                };
+                let length = length_base + reader.read_bits(length_extra)? as usize;
 
-                let dist_sym = dist_table.decode(reader)? as usize;
-                if dist_sym >= DISTANCE_BASE.len() {
+                let dist_sym = read_symbol(distance.entries, distance.max_bits, reader)? as usize;
+                if dist_sym >= distance_len {
                     return Err(Error::InvalidData("invalid distance code"));
                 }
-                let distance = DISTANCE_BASE[dist_sym] as usize
-                    + reader.read_bits(DISTANCE_EXTRA[dist_sym])? as usize;
+                let (distance_base, distance_extra) = match kind {
+                    InflateKind::Deflate => {
+                        (DISTANCE_BASE[dist_sym] as usize, DISTANCE_EXTRA[dist_sym])
+                    }
+                    InflateKind::Deflate64 => (
+                        DISTANCE_BASE_64[dist_sym] as usize,
+                        DISTANCE_EXTRA_64[dist_sym],
+                    ),
+                };
+                let distance = distance_base + reader.read_bits(distance_extra)? as usize;
 
-                if distance > output.len() {
+                if distance == 0 || distance > output.len() {
                     return Err(Error::InvalidData("distance too far back"));
                 }
-
-                // Copy from sliding window - byte-by-byte to handle overlapping copies
-                let start = output.len() - distance;
-                for i in 0..length {
-                    let byte = output[start + i];
-                    output.push(byte);
-                }
+                output_limit(output, length, limit)?;
+                crate::compress::match_ops::copy_match(output, distance, length)
+                    .map_err(|_| Error::InvalidData("distance too far back"))?;
             }
             _ => return Err(Error::InvalidData("invalid literal/length symbol")),
         }
@@ -393,19 +586,37 @@ pub fn decode_reader<R: std::io::Read>(mut reader: R) -> Result<Vec<u8>, crate::
 
 /// Decode with a maximum output size limit.
 ///
-/// Returns `Error::OutputLimitExceeded` if the decompressed output
-/// would exceed `max_output` bytes.
+/// Returns `Error::OutputLimitExceeded` before writing the literal, match,
+/// or stored bytes that would make the output longer than `max_output`.
 pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
-    let result = decode(input)?;
-    if result.len() > max_output {
-        return Err(Error::OutputLimitExceeded { limit: max_output });
-    }
-    Ok(result)
+    let mut output = Vec::new();
+    decode_into(input, &mut output, Some(max_output))?;
+    Ok(output)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_decode_into_appends_without_touching_prefix() {
+        let compressed = crate::compress::deflate::encode::encode(
+            b"hello hello hello",
+            super::super::encode::Level::Fast,
+        );
+        let mut output = b"prefix".to_vec();
+        decode_into(&compressed, &mut output, None).unwrap();
+        assert_eq!(output, b"prefixhello hello hello");
+
+        let mut limited = Vec::new();
+        let err = decode_into(&compressed, &mut limited, Some(1));
+        assert!(matches!(err, Err(Error::OutputLimitExceeded { limit: 1 })));
+        assert!(limited.is_empty());
+
+        let mut broken = output.clone();
+        assert!(decode_into(&[0xFF, 0xFF], &mut broken, None).is_err());
+        assert_eq!(broken, output);
+    }
 
     #[test]
     fn test_decode_uncompressed() {
@@ -418,6 +629,16 @@ mod tests {
 
         let result = decode(&data).unwrap();
         assert_eq!(result, b"hello");
+    }
+
+    #[test]
+    fn test_fixed_huffman_tables_match_builder() {
+        let literal = HuffmanTable::from_lengths(&fixed_literal_lengths()).unwrap();
+        assert_eq!(literal.max_bits, FIXED_LITERAL_MAX_BITS);
+        assert_eq!(literal.entries, FIXED_LITERAL_ENTRIES);
+        let distance = HuffmanTable::from_lengths(&fixed_distance_lengths()).unwrap();
+        assert_eq!(distance.max_bits, FIXED_DISTANCE_MAX_BITS);
+        assert_eq!(distance.entries, FIXED_DISTANCE_ENTRIES);
     }
 
     #[test]

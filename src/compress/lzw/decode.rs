@@ -120,7 +120,7 @@ pub(crate) fn decode_body(data: &[u8], max_bits: u32, block_mode: bool) -> Resul
     // wrapping — a full dictionary is signaled by next_code > max_code.
     let mut next_code: u32 = if block_mode { FIRST_CODE as u32 } else { 256 };
     let mut code_bits: u32 = 9;
-    let mut bit_pos: usize = 0;
+    let mut bits = BitCursor::new(data);
     // Bit position (relative to `data`) of the current block-run origin —
     // the landing of the most recent group-of-8 resync. compress42.c's
     // decoder re-bases its input buffer at every resync (the `resetbuf`
@@ -134,7 +134,7 @@ pub(crate) fn decode_body(data: &[u8], max_bits: u32, block_mode: bool) -> Resul
     let mut decode_stack = Vec::with_capacity(max_bits as usize * 2);
 
     // Read the first code — must be a literal (< 256)
-    let mut prev_code = match read_code(data, &mut bit_pos, code_bits) {
+    let mut prev_code = match bits.read(code_bits) {
         Some(c) => c,
         None => return Ok(output), // empty compressed data
     };
@@ -143,7 +143,7 @@ pub(crate) fn decode_body(data: &[u8], max_bits: u32, block_mode: bool) -> Resul
     }
     output.push(prev_code as u8);
 
-    while let Some(code) = read_code(data, &mut bit_pos, code_bits) {
+    while let Some(code) = bits.read(code_bits) {
         if block_mode && code == CLEAR_CODE as u32 {
             // Save old code width for alignment before resetting
             let old_code_bits = code_bits;
@@ -159,14 +159,15 @@ pub(crate) fn decode_body(data: &[u8], max_bits: u32, block_mode: bool) -> Resul
             // from the block-run origin (the previous resync landing),
             // not from the body start — see compress42.c `resetbuf`.
             let group_bits = old_code_bits as usize * 8;
+            let bit_pos = bits.position();
             let remainder = (bit_pos - run_start) % group_bits;
             if remainder != 0 {
-                bit_pos += group_bits - remainder;
+                bits.skip_to(bit_pos + group_bits - remainder);
             }
-            run_start = bit_pos;
+            run_start = bits.position();
 
             // Read next code after clear
-            prev_code = match read_code(data, &mut bit_pos, code_bits) {
+            prev_code = match bits.read(code_bits) {
                 Some(c) => c,
                 None => break,
             };
@@ -179,27 +180,19 @@ pub(crate) fn decode_body(data: &[u8], max_bits: u32, block_mode: bool) -> Resul
             continue;
         }
 
-        let code16 = code as u16;
-
-        // Decode the string for this code
-        let first_byte;
-        if code < next_code {
-            // Known code — decode the chain
-            first_byte = decode_chain(&prefix, &suffix, code16, &mut decode_stack)?;
-        } else if code == next_code {
-            // Special case: code not yet in dictionary (KwKwK)
-            // The string is string(prev_code) + first_byte_of(string(prev_code))
-            first_byte = decode_chain(&prefix, &suffix, prev_code as u16, &mut decode_stack)?;
-            // Insert at position 0 of the reversed stack so it becomes the
-            // last byte when output in reverse order.
-            decode_stack.insert(0, first_byte);
+        // KwKwK: the code is not in the dictionary yet. Its string is
+        // string(prev_code) plus that string's first byte.
+        let kwkwk = code == next_code;
+        let first_byte = if code < next_code {
+            decode_chain(&prefix, &suffix, code as u16, &mut decode_stack)?
+        } else if kwkwk {
+            decode_chain(&prefix, &suffix, prev_code as u16, &mut decode_stack)?
         } else {
             return Err(Error::InvalidData("lzw: code out of range"));
-        }
-
-        // Output the decoded string (stack is in reverse order)
-        for &b in decode_stack.iter().rev() {
-            output.push(b);
+        };
+        output.extend(decode_stack.iter().rev());
+        if kwkwk {
+            output.push(first_byte);
         }
 
         // Add new dictionary entry: prev_code + first_byte
@@ -217,11 +210,12 @@ pub(crate) fn decode_body(data: &[u8], max_bits: u32, block_mode: bool) -> Resul
                 // conforming streams, whose bumps land exactly on the
                 // lattice), and re-origin the lattice at the landing.
                 let group_bits = code_bits as usize * 8;
+                let bit_pos = bits.position();
                 let remainder = (bit_pos - run_start) % group_bits;
                 if remainder != 0 {
-                    bit_pos += group_bits - remainder;
+                    bits.skip_to(bit_pos + group_bits - remainder);
                 }
-                run_start = bit_pos;
+                run_start = bits.position();
                 code_bits += 1;
             }
         }
@@ -263,23 +257,75 @@ fn decode_chain(
         .ok_or(Error::InvalidData("lzw: empty dictionary chain"))
 }
 
-/// Read a variable-width code from the bitstream (LSB-first).
-fn read_code(data: &[u8], bit_pos: &mut usize, code_bits: u32) -> Option<u32> {
-    let bits_needed = code_bits as usize;
-    // Check if enough bits remain
-    if *bit_pos + bits_needed > data.len() * 8 {
-        return None;
-    }
+/// LSB-first bit cursor. Whole bytes are shifted into `acc`; a code is
+/// the low `n` bits. A group-alignment skip drops buffered bits or
+/// discards the accumulator when the skip runs past it.
+struct BitCursor<'a> {
+    data: &'a [u8],
+    bit_pos: usize,
+    acc: u64,
+    acc_bits: u32,
+}
 
-    let mut code = 0u32;
-    for i in 0..bits_needed {
-        let byte_idx = (*bit_pos + i) / 8;
-        let bit_idx = (*bit_pos + i) % 8;
-        if (data[byte_idx] >> bit_idx) & 1 != 0 {
-            code |= 1 << i;
+impl<'a> BitCursor<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self {
+            data,
+            bit_pos: 0,
+            acc: 0,
+            acc_bits: 0,
         }
     }
-    *bit_pos += bits_needed;
+
+    fn position(&self) -> usize {
+        self.bit_pos
+    }
+
+    fn read(&mut self, code_bits: u32) -> Option<u32> {
+        let need = code_bits as usize;
+        if self.bit_pos + need > self.data.len() * 8 {
+            return None;
+        }
+        while self.acc_bits < code_bits {
+            self.pull();
+        }
+        let code = (self.acc & ((1u64 << need) - 1)) as u32;
+        self.acc >>= need;
+        self.acc_bits -= code_bits;
+        self.bit_pos += need;
+        Some(code)
+    }
+
+    fn skip_to(&mut self, new_pos: usize) {
+        let drop = (new_pos - self.bit_pos) as u32;
+        if drop < self.acc_bits {
+            self.acc >>= drop;
+            self.acc_bits -= drop;
+        } else {
+            self.acc = 0;
+            self.acc_bits = 0;
+        }
+        self.bit_pos = new_pos;
+    }
+
+    /// Take the remaining bits of the next byte, low bit first.
+    fn pull(&mut self) {
+        let abs = self.bit_pos + self.acc_bits as usize;
+        let byte = self.data[abs / 8];
+        let bit = (abs % 8) as u32;
+        let width = 8 - bit;
+        self.acc |= ((byte >> bit) as u64) << self.acc_bits;
+        self.acc_bits += width;
+    }
+}
+
+/// Read a variable-width code from the bitstream (LSB-first).
+#[cfg(test)]
+fn read_code(data: &[u8], bit_pos: &mut usize, code_bits: u32) -> Option<u32> {
+    let mut cursor = BitCursor::new(data);
+    cursor.bit_pos = *bit_pos;
+    let code = cursor.read(code_bits)?;
+    *bit_pos = cursor.bit_pos;
     Some(code)
 }
 
@@ -305,6 +351,23 @@ pub fn decode_reader<R: std::io::Read>(mut reader: R) -> std::io::Result<Vec<u8>
     let mut buf = Vec::new();
     reader.read_to_end(&mut buf)?;
     decode(&buf).map_err(Into::into)
+}
+
+/// Append the decompressed bytes of `input` to `output`.
+///
+/// `max_output` limits how many bytes are appended. An empty `output`
+/// takes the decoder buffer by move. A non-empty `output` is extended.
+pub fn decode_into(
+    input: &[u8],
+    output: &mut Vec<u8>,
+    max_output: Option<usize>,
+) -> Result<(), Error> {
+    let produced = match max_output {
+        Some(limit) => decode_bounded(input, limit)?,
+        None => decode(input)?,
+    };
+    crate::compress::move_into(output, produced);
+    Ok(())
 }
 
 /// Decode Unix compress (`.Z`) data with a maximum output size limit.
@@ -444,6 +507,36 @@ mod tests {
         let compressed = super::super::encode::encode(data);
         let decompressed = decode(&compressed).unwrap();
         assert_eq!(decompressed, data);
+    }
+
+    /// Codes packed LSB-first. The bytes were built independently of
+    /// `read_code`: code bit `i` is stream bit `i`.
+    #[test]
+    fn test_code_sequence_matches_packed_bytes() {
+        let data = [90, 3, 252, 127, 247, 13, 0, 0];
+        let mut bp = 0usize;
+        let expect = [
+            (9u32, 0x15Au32),
+            (9, 0x001),
+            (9, 0x1FF),
+            (16, 0xBEEF),
+            (16, 1),
+        ];
+        for (width, code) in expect {
+            assert_eq!(read_code(&data, &mut bp, width), Some(code));
+        }
+        assert_eq!(read_code(&data, &mut bp, 9), None);
+
+        // Two 9-bit codes, then the next 8-code group boundary at bit 72.
+        let aligned = [90, 85, 1, 0, 0, 0, 0, 0, 0, 35, 1];
+        let mut bp = 0usize;
+        assert_eq!(read_code(&aligned, &mut bp, 9), Some(0x15A));
+        assert_eq!(read_code(&aligned, &mut bp, 9), Some(0x0AA));
+        let group_bits = 9 * 8;
+        let remainder = bp % group_bits;
+        bp += group_bits - remainder;
+        assert_eq!(bp, 72);
+        assert_eq!(read_code(&aligned, &mut bp, 9), Some(0x123));
     }
 
     #[test]

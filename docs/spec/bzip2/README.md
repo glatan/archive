@@ -13,7 +13,7 @@
 | 2 | ブロックマジック `0x314159265359` (π の16進表現, 48bit) | bzip2 1.0.x manual / `bzlib.h` stream format | ✅ | `decode_single_stream()` で検証 (`decode_block` は magic 以降を parse) |
 | 3 | ストリームトレーラーマジック `0x177245385090` (√π の16進表現, 48bit) | bzip2 1.0.x manual / `bzlib.h` stream format | ✅ | `decode_single_stream()` で検証 |
 | 4 | ストリーム CRC (combined_crc = rotate_left(1) ^ block_crc) | bzip2 1.0.x manual / `bzlib.h` stream format | ✅ | `decode_single_stream()` でストアCRCと照合、`test_decode_truncated_at_every_position` (全切断位置で拒否) |
-| 5 | ブロック CRC-32 (big-endian, 非反射型 polynomial 0x04C11DB7) | bzip2 1.0.x manual / `bzlib.h` stream format | ✅ | `test_bz2_crc32_single_x`, `test_bz2_crc32_empty`, `test_bz2_crc32_incremental` |
+| 5 | ブロック CRC-32 (big-endian, 非反射型 polynomial 0x04C11DB7) | bzip2 1.0.x manual / `bzlib.h` stream format | ✅ | `test_bz2_crc32_single_x`, `test_bz2_crc32_empty`, `test_bz2_crc32_incremental`, `test_bz2_crc32_slicing_matches_byte_step` |
 | 6 | CRC-32 初期値 0xFFFFFFFF / 最終 XOR 0xFFFFFFFF | bzip2 1.0.x manual / `bzlib.h` stream format | ✅ | `Bz2Crc32::new/finish` |
 | 7 | ブロック CRC は原データ (pre-RLE1) に対して計算 | bzip2 1.0.x manual / `bzlib.h` stream format | ✅ | `encode_block_inner()` / `decode_block()` で検証 |
 | 8 | 空ストリーム (ヘッダー + トレーラーのみ、ブロックなし) | bzip2 1.0.x manual / `bzlib.h` stream format | ✅ | `test_decode_empty_stream` |
@@ -49,7 +49,7 @@
 
 | # | 要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|------|----------|-----------|----------------|
-| 26 | 前方 BWT: 接尾辞配列 (prefix-doubling) によるソート | `blocksort.c` / `decompress.c` BWT logic | ✅ | `test_roundtrip_banana/hello/all_bytes` (bwt) |
+| 26 | 前方 BWT: 巡回回転を整列し、同点は開始位置の昇順 | `blocksort.c` / `decompress.c` BWT logic | ✅ | SA-IS。`test_bwt_banana_vector`, `test_bwt_all_same_pointer`, `test_bwt_lcg32_vector`, `test_bwt_lcg1024`, `test_bwt_long_repeat` |
 | 27 | 逆 BWT: LF-mapping による復元 | `blocksort.c` / `decompress.c` BWT logic | ✅ | `test_roundtrip_banana/hello/all_bytes` (bwt) |
 | 28 | 空入力 | `blocksort.c` / `decompress.c` BWT logic | ✅ | `test_roundtrip_empty` (bwt) |
 | 29 | 全バイト同一入力 | `blocksort.c` / `decompress.c` BWT logic | ✅ | `test_roundtrip_all_same` (bwt) |

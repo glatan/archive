@@ -182,11 +182,7 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
 /// Longest common prefix of `a` (the lookahead text) and `b` (a candidate
 /// source), capped at [`MAX_MATCH`].
 fn match_prefix(a: &[u8], b: &[u8]) -> usize {
-    let mut len = 0;
-    while len < MAX_MATCH && len < a.len() && len < b.len() && a[len] == b[len] {
-        len += 1;
-    }
-    len
+    crate::compress::match_ops::match_len(a, b, MAX_MATCH)
 }
 
 #[cfg(test)]

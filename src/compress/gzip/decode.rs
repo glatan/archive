@@ -7,8 +7,10 @@
 use alloc::vec::Vec;
 
 use crate::compress::deflate;
-use crate::compress::deflate::tables::{CODE_LENGTH_ORDER, DISTANCE_EXTRA, LENGTH_EXTRA};
 use crate::error::Error;
+
+#[cfg(test)]
+use crate::compress::deflate::tables::{CODE_LENGTH_ORDER, DISTANCE_EXTRA, LENGTH_EXTRA};
 use crate::util::bitreader::BitReader;
 use crate::util::crc32;
 
@@ -39,6 +41,44 @@ use super::header::GzipHeader;
 /// [`Error::SizeMismatch`] if the original size does not match.
 pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
     let mut output = Vec::new();
+    decode_into(input, &mut output, None)?;
+    Ok(output)
+}
+
+/// Append every gzip member in `input` to `output`.
+///
+/// Each member is a separate DEFLATE stream. It is inflated into its own
+/// buffer, so neither a non-empty `output` nor an earlier member is part
+/// of the window. `max_output` limits the appended length and is checked
+/// after inflation, matching [`decode_bounded`].
+pub fn decode_into(
+    input: &[u8],
+    output: &mut Vec<u8>,
+    max_output: Option<usize>,
+) -> Result<(), Error> {
+    let start = output.len();
+    let result = if start == 0 {
+        inflate_members(input, output)
+    } else {
+        let mut fresh = Vec::new();
+        inflate_members(input, &mut fresh)?;
+        output.extend_from_slice(&fresh);
+        Ok(())
+    };
+    if result.is_err() {
+        output.truncate(start);
+        return result;
+    }
+    if let Some(limit) = max_output
+        && output.len() - start > limit
+    {
+        output.truncate(start);
+        return Err(Error::OutputLimitExceeded { limit });
+    }
+    Ok(())
+}
+
+fn inflate_members(input: &[u8], output: &mut Vec<u8>) -> Result<(), Error> {
     let mut pos = 0;
 
     while pos < input.len() {
@@ -47,9 +87,11 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
         let compressed_start = header.header_size;
         let compressed_data = &member_data[compressed_start..];
 
-        let decompressed = deflate::decode::decode(compressed_data)?;
-
-        let trailer_start = find_deflate_end(compressed_data)? + compressed_start;
+        let mut member_out = Vec::new();
+        let mut reader = BitReader::new(compressed_data);
+        deflate::decode::decode_stream(&mut reader, &mut member_out)?;
+        reader.align_to_byte();
+        let trailer_start = reader.byte_position() + compressed_start;
 
         if trailer_start + 8 > member_data.len() {
             return Err(Error::UnexpectedEof);
@@ -68,7 +110,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
             member_data[trailer_start + 7],
         ]);
 
-        let actual_crc = crc32::crc32(&decompressed);
+        let actual_crc = crc32::crc32(&member_out);
         if actual_crc != expected_crc {
             return Err(Error::ChecksumMismatch {
                 expected: expected_crc,
@@ -76,13 +118,13 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
             });
         }
 
-        verify_isize(decompressed.len(), expected_size)?;
+        verify_isize(member_out.len(), expected_size)?;
+        output.extend_from_slice(&member_out);
 
-        output.extend_from_slice(&decompressed);
         pos += trailer_start + 8;
     }
 
-    Ok(output)
+    Ok(())
 }
 
 const fn verify_isize(actual_len: usize, expected_size: u32) -> Result<(), Error> {
@@ -96,6 +138,7 @@ const fn verify_isize(actual_len: usize, expected_size: u32) -> Result<(), Error
     Ok(())
 }
 
+#[cfg(test)]
 /// Find the byte position where the DEFLATE stream ends.
 /// This re-parses the DEFLATE blocks to find boundaries.
 fn find_deflate_end(data: &[u8]) -> Result<usize, Error> {
@@ -143,6 +186,7 @@ fn find_deflate_end(data: &[u8]) -> Result<usize, Error> {
     Ok(reader.byte_position())
 }
 
+#[cfg(test)]
 /// Build a simple Huffman table and skip through a Huffman-coded block.
 fn skip_huffman_block(
     reader: &mut BitReader,
@@ -172,6 +216,7 @@ fn skip_huffman_block(
     }
 }
 
+#[cfg(test)]
 fn skip_dynamic_huffman_block(reader: &mut BitReader) -> Result<(), Error> {
     let hlit = reader.read_bits(5)? as usize + 257;
     let hdist = reader.read_bits(5)? as usize + 1;
@@ -227,11 +272,13 @@ fn skip_dynamic_huffman_block(reader: &mut BitReader) -> Result<(), Error> {
 }
 
 /// Minimal Huffman table for stream-skipping in gzip trailer search.
+#[cfg(test)]
 struct SimpleHuffman {
     entries: alloc::vec::Vec<(u16, u8)>,
     max_bits: u8,
 }
 
+#[cfg(test)]
 impl SimpleHuffman {
     fn from_lengths(code_lengths: &[u8]) -> Result<Self, Error> {
         let max_bits = *code_lengths.iter().max().unwrap_or(&0);
@@ -290,6 +337,7 @@ impl SimpleHuffman {
     }
 }
 
+#[cfg(test)]
 fn reverse_bits_simple(value: u32, num_bits: u8) -> u32 {
     let mut result = 0;
     let mut v = value;
@@ -332,11 +380,9 @@ pub fn decode_reader<R: std::io::Read>(mut reader: R) -> Result<Vec<u8>, crate::
 /// Returns `Error::OutputLimitExceeded` if the decompressed output
 /// would exceed `max_output` bytes.
 pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
-    let result = decode(input)?;
-    if result.len() > max_output {
-        return Err(Error::OutputLimitExceeded { limit: max_output });
-    }
-    Ok(result)
+    let mut output = Vec::new();
+    decode_into(input, &mut output, Some(max_output))?;
+    Ok(output)
 }
 
 #[cfg(test)]
@@ -344,6 +390,23 @@ mod tests {
     use super::*;
     use crate::compress::deflate::encode::Level;
     use crate::compress::gzip::encode;
+
+    #[test]
+    fn test_decode_into_appends_without_touching_prefix() {
+        let compressed = encode::encode(b"hello hello hello", Level::Fast);
+        let mut output = b"prefix".to_vec();
+        decode_into(&compressed, &mut output, None).unwrap();
+        assert_eq!(output, b"prefixhello hello hello");
+
+        let mut limited = Vec::new();
+        let err = decode_into(&compressed, &mut limited, Some(1));
+        assert!(matches!(err, Err(Error::OutputLimitExceeded { limit: 1 })));
+        assert!(limited.is_empty());
+
+        let mut broken = output.clone();
+        assert!(decode_into(&[0x1F, 0x8B], &mut broken, None).is_err());
+        assert_eq!(broken, output);
+    }
 
     // Phase 1: Error detection
 
@@ -383,6 +446,51 @@ mod tests {
         combined.extend_from_slice(&member2);
         let result = decode(&combined).unwrap();
         assert_eq!(result, b"Hello World");
+    }
+
+    /// A match in the second member must not read the first member.
+    /// The trailer describes the bytes that leak would produce, so a
+    /// window that crosses the member boundary would decode successfully.
+    #[test]
+    fn test_multi_member_distance_does_not_cross_boundary() {
+        use crate::compress::deflate::tables::reverse_bits;
+
+        let member1 = encode::encode(b"Hello", Level::NoCompression);
+        let mut bits = Vec::new();
+        let mut acc = 0u32;
+        let mut n = 0u8;
+        let mut write = |value: u32, width: u8| {
+            acc |= value << n;
+            n += width;
+            while n >= 8 {
+                bits.push(acc as u8);
+                acc >>= 8;
+                n -= 8;
+            }
+        };
+        write(1, 1);
+        write(0b01, 2);
+        write(reverse_bits(257 - 256, 7), 7);
+        write(reverse_bits(0, 5), 5);
+        write(reverse_bits(0, 7), 7);
+        if n > 0 {
+            bits.push(acc as u8);
+        }
+
+        let leaked = b"ooo";
+        let crc = crate::util::crc32::crc32(leaked);
+        let mut member2 = vec![0x1F, 0x8B, 0x08, 0, 0, 0, 0, 0, 0, 0xFF];
+        member2.extend_from_slice(&bits);
+        member2.extend_from_slice(&crc.to_le_bytes());
+        member2.extend_from_slice(&3u32.to_le_bytes());
+
+        let mut combined = member1;
+        combined.extend_from_slice(&member2);
+        let err = decode(&combined).unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidData("distance too far back")),
+            "{err:?}"
+        );
     }
 
     #[cfg(feature = "std")]

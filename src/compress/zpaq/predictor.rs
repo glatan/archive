@@ -12,6 +12,7 @@ use alloc::vec::Vec;
 
 use crate::error::Error;
 
+use super::builtin::{Hcomp1, Hcomp2, Hcomp3};
 use super::tables::{SDT, SDT2K, SNS, build_squasht, build_stretcht};
 use super::zpaql::{COMP_SIZE, Zpaql};
 
@@ -126,6 +127,11 @@ pub(crate) struct Predictor {
     comp: Vec<Component>,
     /// COMP record bytes, `n` records total (parsed in `init`).
     comp_bytes: Vec<u8>,
+    /// `0` runs HCOMP in the interpreter. `1..=3` uses the native program.
+    builtin: u8,
+    hcomp1: Hcomp1,
+    hcomp2: Hcomp2,
+    hcomp3: Hcomp3,
 }
 
 impl Predictor {
@@ -136,6 +142,16 @@ impl Predictor {
     /// section. Errors correspond to upstream `error()` conditions on
     /// malformed component specifications.
     pub fn new(z: Zpaql) -> Result<Self, Error> {
+        Self::from_vm(z, 0)
+    }
+
+    /// Predictor for a built-in level. Component tables match the
+    /// interpreter; HCOMP and the component order are native.
+    pub fn new_builtin(z: Zpaql, level: u32) -> Result<Self, Error> {
+        Self::from_vm(z, level as u8)
+    }
+
+    fn from_vm(z: Zpaql, builtin: u8) -> Result<Self, Error> {
         let mut pr = Self {
             z,
             c8: 1,
@@ -144,6 +160,10 @@ impl Predictor {
             h: [0; 256],
             comp: Vec::new(),
             comp_bytes: Vec::new(),
+            builtin,
+            hcomp1: Hcomp1::new(),
+            hcomp2: Hcomp2::new(),
+            hcomp3: Hcomp3::new(),
         };
         pr.init()?;
         Ok(pr)
@@ -328,223 +348,337 @@ impl Predictor {
     /// Callers feed `predict() * 2 + 1` to the arithmetic coder.
     pub fn predict(&mut self) -> i32 {
         debug_assert!(self.is_modeled());
+        match self.builtin {
+            1 => {
+                self.predict_icm(0);
+                self.predict_isse(1);
+                return squash(self.p[1]);
+            }
+            2 => {
+                self.predict_icm(0);
+                self.predict_isse(1);
+                self.predict_isse(2);
+                self.predict_isse(3);
+                self.predict_isse(4);
+                self.predict_isse(5);
+                self.predict_match(6);
+                self.predict_mix(7);
+                return squash(self.p[7]);
+            }
+            3 => {
+                self.predict_icm(1);
+                self.predict_isse(2);
+                self.predict_isse(3);
+                self.predict_isse(4);
+                self.predict_isse(5);
+                self.predict_isse(6);
+                self.predict_isse(7);
+                self.predict_match(8);
+                self.predict_icm(9);
+                self.predict_isse(10);
+                self.predict_icm(11);
+                self.predict_icm(12);
+                self.predict_icm(13);
+                self.predict_icm(14);
+                self.predict_mix(15);
+                self.predict_mix(16);
+                self.predict_mix2(17);
+                self.predict_sse(18);
+                self.predict_mix2(19);
+                self.predict_sse(20);
+                self.predict_mix2(21);
+                return squash(self.p[21]);
+            }
+            _ => {}
+        }
         let n = self.comp.len();
         for i in 0..n {
-            let ctype = self.comp[i].ctype;
-            let rec = self.comp[i].params;
-            let rec = &rec;
-            match ctype {
-                CONST => {} // prediction already set in init
-                CM => {
-                    // sizebits limit
-                    let cr = &mut self.comp[i];
-                    cr.cxt = (self.h[i] ^ self.hmap4) as usize;
-                    self.p[i] = stretch((cr.cm[cr.cxt & (cr.cm.len() - 1)] >> 17) as i32);
-                }
-                ICM => {
-                    // sizebits
-                    if self.c8 == 1 || (self.c8 & 0xf0) == 16 {
-                        let ctx = self.h[i].wrapping_add(16 * self.c8);
-                        self.comp[i].c = self.find(rec[1] as usize + 2, ctx, i);
-                    }
-                    let cr = &mut self.comp[i];
-                    cr.cxt = cr.ht[cr.c + (self.hmap4 as usize & 15)] as usize;
-                    self.p[i] = stretch((cr.cm[cr.cxt & 255] >> 8) as i32);
-                }
-                MATCH => {
-                    // sizebits bufbits
-                    let cr = &mut self.comp[i];
-                    if cr.a == 0 {
-                        self.p[i] = 0;
-                    } else {
-                        cr.c = ((cr.ht[cr.limit.wrapping_sub(cr.b) & (cr.ht.len() - 1)]
-                            >> (7 - cr.cxt))
-                            & 1) as usize;
-                        self.p[i] = stretch(
-                            (SDT2K[cr.a] as i32).wrapping_mul(cr.c as i32 * -2 + 1) & 32767,
-                        );
-                    }
-                }
-                AVG => {
-                    // j k wt
-                    let j = rec[1] as usize;
-                    let k = rec[2] as usize;
-                    let wt = rec[3] as i32;
-                    self.p[i] = (self.p[j] * wt + self.p[k] * (256 - wt)) >> 8;
-                }
-                MIX2 => {
-                    // sizebits j k rate mask
-                    let cr = &mut self.comp[i];
-                    cr.cxt =
-                        (self.h[i].wrapping_add(self.c8 & rec[5] as u32) as usize) & (cr.c - 1);
-                    let w = cr.a16[cr.cxt] as i32;
-                    self.p[i] =
-                        (w * self.p[rec[2] as usize] + (65536 - w) * self.p[rec[3] as usize]) >> 16;
-                }
-                MIX => {
-                    // sizebits j m rate mask
-                    let m = rec[3] as usize;
-                    let cr = &mut self.comp[i];
-                    cr.cxt =
-                        (self.h[i].wrapping_add(self.c8 & rec[5] as u32) as usize) & (cr.c - 1);
-                    cr.cxt *= m;
-                    let base = cr.cxt;
-                    let mut sum: i32 = 0;
-                    for j in 0..m {
-                        let w = cr.cm[base + j] as i32;
-                        sum = sum.wrapping_add((w >> 8).wrapping_mul(self.p[rec[2] as usize + j]));
-                    }
-                    self.p[i] = clamp2k(sum >> 8);
-                }
-                ISSE => {
-                    // sizebits j
-                    if self.c8 == 1 || (self.c8 & 0xf0) == 16 {
-                        let ctx = self.h[i].wrapping_add(16 * self.c8);
-                        self.comp[i].c = self.find(rec[1] as usize + 2, ctx, i);
-                    }
-                    let cr = &mut self.comp[i];
-                    cr.cxt = cr.ht[cr.c + (self.hmap4 as usize & 15)] as usize;
-                    let wt0 = cr.cm[cr.cxt * 2] as i32;
-                    let wt1 = cr.cm[cr.cxt * 2 + 1] as i32;
-                    self.p[i] =
-                        clamp2k((wt0.wrapping_mul(self.p[rec[2] as usize]) + wt1 * 64) >> 16);
-                }
-                SSE => {
-                    // sizebits j start limit
-                    let cr = &mut self.comp[i];
-                    cr.cxt = (self.h[i].wrapping_add(self.c8) as usize) * 32;
-                    let mut pq = self.p[rec[2] as usize] + 992;
-                    pq = pq.clamp(0, 1983);
-                    let wt = (pq & 63) as u32;
-                    pq >>= 6;
-                    cr.cxt += pq as usize;
-                    let cxt = cr.cxt;
-                    let v = ((cr.cm[cxt & (cr.cm.len() - 1)] >> 10) * (64 - wt)
-                        + (cr.cm[(cxt + 1) & (cr.cm.len() - 1)] >> 10) * wt)
-                        >> 13;
-                    self.p[i] = stretch(v as i32);
-                    cr.cxt += (wt >> 5) as usize;
-                }
+            match self.comp[i].ctype {
+                CONST => {}
+                CM => self.predict_cm(i),
+                ICM => self.predict_icm(i),
+                MATCH => self.predict_match(i),
+                AVG => self.predict_avg(i),
+                MIX2 => self.predict_mix2(i),
+                MIX => self.predict_mix(i),
+                ISSE => self.predict_isse(i),
+                SSE => self.predict_sse(i),
                 _ => unreachable!("validated in init"),
             }
         }
         squash(self.p[n - 1])
     }
 
+    fn predict_cm(&mut self, i: usize) {
+        let cr = &mut self.comp[i];
+        cr.cxt = (self.h[i] ^ self.hmap4) as usize;
+        self.p[i] = stretch((cr.cm[cr.cxt & (cr.cm.len() - 1)] >> 17) as i32);
+    }
+
+    fn predict_icm(&mut self, i: usize) {
+        let sizebits = self.comp[i].params[1] as usize;
+        if self.c8 == 1 || (self.c8 & 0xf0) == 16 {
+            let ctx = self.h[i].wrapping_add(16 * self.c8);
+            self.comp[i].c = self.find(sizebits + 2, ctx, i);
+        }
+        let cr = &mut self.comp[i];
+        cr.cxt = cr.ht[cr.c + (self.hmap4 as usize & 15)] as usize;
+        self.p[i] = stretch((cr.cm[cr.cxt & 255] >> 8) as i32);
+    }
+
+    fn predict_match(&mut self, i: usize) {
+        let cr = &mut self.comp[i];
+        if cr.a == 0 {
+            self.p[i] = 0;
+        } else {
+            cr.c = ((cr.ht[cr.limit.wrapping_sub(cr.b) & (cr.ht.len() - 1)] >> (7 - cr.cxt)) & 1)
+                as usize;
+            self.p[i] = stretch((SDT2K[cr.a] as i32).wrapping_mul(cr.c as i32 * -2 + 1) & 32767);
+        }
+    }
+
+    fn predict_avg(&mut self, i: usize) {
+        let params = self.comp[i].params;
+        let j = params[1] as usize;
+        let k = params[2] as usize;
+        let wt = params[3] as i32;
+        self.p[i] = (self.p[j] * wt + self.p[k] * (256 - wt)) >> 8;
+    }
+
+    fn predict_mix2(&mut self, i: usize) {
+        let params = self.comp[i].params;
+        let cr = &mut self.comp[i];
+        cr.cxt = (self.h[i].wrapping_add(self.c8 & params[5] as u32) as usize) & (cr.c - 1);
+        let w = cr.a16[cr.cxt] as i32;
+        self.p[i] =
+            (w * self.p[params[2] as usize] + (65536 - w) * self.p[params[3] as usize]) >> 16;
+    }
+
+    fn predict_mix(&mut self, i: usize) {
+        let params = self.comp[i].params;
+        let m = params[3] as usize;
+        let cr = &mut self.comp[i];
+        cr.cxt = (self.h[i].wrapping_add(self.c8 & params[5] as u32) as usize) & (cr.c - 1);
+        cr.cxt *= m;
+        let base = cr.cxt;
+        let mut sum: i32 = 0;
+        for j in 0..m {
+            let w = cr.cm[base + j] as i32;
+            sum = sum.wrapping_add((w >> 8).wrapping_mul(self.p[params[2] as usize + j]));
+        }
+        self.p[i] = clamp2k(sum >> 8);
+    }
+
+    fn predict_isse(&mut self, i: usize) {
+        let params = self.comp[i].params;
+        if self.c8 == 1 || (self.c8 & 0xf0) == 16 {
+            let ctx = self.h[i].wrapping_add(16 * self.c8);
+            self.comp[i].c = self.find(params[1] as usize + 2, ctx, i);
+        }
+        let cr = &mut self.comp[i];
+        cr.cxt = cr.ht[cr.c + (self.hmap4 as usize & 15)] as usize;
+        let wt0 = cr.cm[cr.cxt * 2] as i32;
+        let wt1 = cr.cm[cr.cxt * 2 + 1] as i32;
+        self.p[i] = clamp2k((wt0.wrapping_mul(self.p[params[2] as usize]) + wt1 * 64) >> 16);
+    }
+
+    fn predict_sse(&mut self, i: usize) {
+        let params = self.comp[i].params;
+        let cr = &mut self.comp[i];
+        cr.cxt = (self.h[i].wrapping_add(self.c8) as usize) * 32;
+        let mut pq = self.p[params[2] as usize] + 992;
+        pq = pq.clamp(0, 1983);
+        let wt = (pq & 63) as u32;
+        pq >>= 6;
+        cr.cxt += pq as usize;
+        let cxt = cr.cxt;
+        let v = ((cr.cm[cxt & (cr.cm.len() - 1)] >> 10) * (64 - wt)
+            + (cr.cm[(cxt + 1) & (cr.cm.len() - 1)] >> 10) * wt)
+            >> 13;
+        self.p[i] = stretch(v as i32);
+        cr.cxt += (wt >> 5) as usize;
+    }
+
     /// Update the model after bit `y` (0 or 1) has been coded.
     pub fn update(&mut self, y: u32) -> Result<(), Error> {
         debug_assert!(y <= 1);
-        let n = self.comp.len();
-        for i in 0..n {
-            let ctype = self.comp[i].ctype;
-            let params = self.comp[i].params;
-            let rec = &params;
-            match ctype {
-                CONST | AVG => {}
-                CM | SSE => self.train(i, y),
-                ICM => {
-                    let cr = &mut self.comp[i];
-                    let idx = cr.c + (self.hmap4 as usize & 15);
-                    cr.ht[idx] = next_state(cr.ht[idx], y);
-                    let pn = &mut cr.cm[cr.cxt & 255];
-                    let d = ((y * 32767).wrapping_sub(*pn >> 8)) as i32;
-                    *pn = pn.wrapping_add((d >> 2) as u32);
-                }
-                MATCH => {
-                    let bufmask = self.comp[i].ht.len() - 1;
-                    let cmask = self.comp[i].cm.len() - 1;
-                    let cr = &mut self.comp[i];
-                    if cr.c != y as usize {
-                        cr.a = 0; // mismatch
-                    }
-                    let li = cr.limit & bufmask;
-                    cr.ht[li] = cr.ht[li].wrapping_add(cr.ht[li]).wrapping_add(y as u8);
-                    cr.cxt += 1;
-                    if cr.cxt == 8 {
-                        cr.cxt = 0;
-                        cr.limit = cr.limit.wrapping_add(1) & bufmask;
-                        if cr.a == 0 {
-                            // look for a match
-                            cr.b = cr
-                                .limit
-                                .wrapping_sub(cr.cm[self.h[i] as usize & cmask] as usize);
-                            if cr.b & bufmask != 0 {
-                                while cr.a < 255
-                                    && cr.ht[cr.limit.wrapping_sub(cr.a).wrapping_sub(1) & bufmask]
-                                        == cr.ht[cr
-                                            .limit
-                                            .wrapping_sub(cr.a)
-                                            .wrapping_sub(cr.b)
-                                            .wrapping_sub(1)
-                                            & bufmask]
-                                {
-                                    cr.a += 1;
-                                }
-                            }
-                        } else {
-                            cr.a += usize::from(cr.a < 255);
-                        }
-                        cr.cm[self.h[i] as usize & cmask] = cr.limit as u32;
-                    }
-                }
-                MIX2 => {
-                    let rate = rec[4] as i32;
-                    let j = rec[2] as usize;
-                    let k = rec[3] as usize;
-                    let err = ((y as i32 * 32767 - squash(self.p[i])) * rate) >> 5;
-                    let diff = self.p[j] - self.p[k];
-                    let cr = &mut self.comp[i];
-                    let mut w = cr.a16[cr.cxt] as i32;
-                    w += (err.wrapping_mul(diff) + (1 << 12)) >> 13;
-                    cr.a16[cr.cxt] = w.clamp(0, 65535) as u16;
-                }
-                MIX => {
-                    let m = rec[3] as usize;
-                    let rate = rec[4] as i32;
-                    let j0 = rec[2] as usize;
-                    let err = ((y as i32 * 32767 - squash(self.p[i])) * rate) >> 4;
-                    let cr = &mut self.comp[i];
-                    let base = cr.cxt;
-                    for j in 0..m {
-                        let w = cr.cm[base + j] as i32;
-                        let nw =
-                            w.wrapping_add((err.wrapping_mul(self.p[j0 + j]) + (1 << 12)) >> 13);
-                        cr.cm[base + j] = clamp512k(nw) as u32;
+        match self.builtin {
+            1 => {
+                self.update_icm(0, y);
+                self.update_isse(1, y);
+            }
+            2 => {
+                self.update_icm(0, y);
+                self.update_isse(1, y);
+                self.update_isse(2, y);
+                self.update_isse(3, y);
+                self.update_isse(4, y);
+                self.update_isse(5, y);
+                self.update_match(6, y);
+                self.update_mix(7, y);
+            }
+            3 => {
+                self.update_icm(1, y);
+                self.update_isse(2, y);
+                self.update_isse(3, y);
+                self.update_isse(4, y);
+                self.update_isse(5, y);
+                self.update_isse(6, y);
+                self.update_isse(7, y);
+                self.update_match(8, y);
+                self.update_icm(9, y);
+                self.update_isse(10, y);
+                self.update_icm(11, y);
+                self.update_icm(12, y);
+                self.update_icm(13, y);
+                self.update_icm(14, y);
+                self.update_mix(15, y);
+                self.update_mix(16, y);
+                self.update_mix2(17, y);
+                self.train(18, y);
+                self.update_mix2(19, y);
+                self.train(20, y);
+                self.update_mix2(21, y);
+            }
+            _ => {
+                let n = self.comp.len();
+                for i in 0..n {
+                    match self.comp[i].ctype {
+                        CONST | AVG => {}
+                        CM | SSE => self.train(i, y),
+                        ICM => self.update_icm(i, y),
+                        MATCH => self.update_match(i, y),
+                        MIX2 => self.update_mix2(i, y),
+                        MIX => self.update_mix(i, y),
+                        ISSE => self.update_isse(i, y),
+                        _ => unreachable!("validated in init"),
                     }
                 }
-                ISSE => {
-                    let j = rec[2] as usize;
-                    let err = y as i32 * 32767 - squash(self.p[i]);
-                    let cr = &mut self.comp[i];
-                    let cxt = cr.cxt;
-                    let w0 = cr.cm[cxt * 2] as i32;
-                    let w1 = cr.cm[cxt * 2 + 1] as i32;
-                    cr.cm[cxt * 2] =
-                        clamp512k(w0.wrapping_add((err.wrapping_mul(self.p[j]) + (1 << 12)) >> 13))
-                            as u32;
-                    cr.cm[cxt * 2 + 1] = clamp512k(w1.wrapping_add((err + 16) >> 5)) as u32;
-                    let idx = cr.c + (self.hmap4 as usize & 15);
-                    cr.ht[idx] = next_state(cr.ht[idx], y);
-                }
-                _ => unreachable!("validated in init"),
             }
         }
 
         // Save bit y in c8, hmap4; run HCOMP at each byte boundary.
         self.c8 = self.c8 + self.c8 + y;
         if self.c8 >= 256 {
-            self.z.run(self.c8 - 256)?;
+            let byte = self.c8 - 256;
+            let n = self.comp.len();
+            match self.builtin {
+                1 => {
+                    self.hcomp1.update(byte as u8);
+                    self.h[..n].copy_from_slice(&self.hcomp1.hashes()[..n]);
+                }
+                2 => {
+                    self.hcomp2.update(byte as u8);
+                    self.h[..n].copy_from_slice(&self.hcomp2.hashes()[..n]);
+                }
+                3 => {
+                    self.hcomp3.update(byte as u8);
+                    let src = self.hcomp3.hashes();
+                    self.h[..n].copy_from_slice(&src[..n]);
+                }
+                _ => {
+                    self.z.run(byte)?;
+                    for i in 0..n {
+                        self.h[i] = self.z.hash_at(i);
+                    }
+                }
+            }
             self.hmap4 = 1;
             self.c8 = 1;
-            for i in 0..n {
-                self.h[i] = self.z.hash_at(i);
-            }
         } else if (16..32).contains(&self.c8) {
             self.hmap4 = (self.hmap4 & 0xf) << 5 | y << 4 | 1;
         } else {
             self.hmap4 = (self.hmap4 & 0x1f0) | (((self.hmap4 & 0xf) * 2 + y) & 0xf);
         }
         Ok(())
+    }
+
+    fn update_icm(&mut self, i: usize, y: u32) {
+        let cr = &mut self.comp[i];
+        let idx = cr.c + (self.hmap4 as usize & 15);
+        cr.ht[idx] = next_state(cr.ht[idx], y);
+        let pn = &mut cr.cm[cr.cxt & 255];
+        let d = ((y * 32767).wrapping_sub(*pn >> 8)) as i32;
+        *pn = pn.wrapping_add((d >> 2) as u32);
+    }
+
+    fn update_match(&mut self, i: usize, y: u32) {
+        let bufmask = self.comp[i].ht.len() - 1;
+        let cmask = self.comp[i].cm.len() - 1;
+        let cr = &mut self.comp[i];
+        if cr.c != y as usize {
+            cr.a = 0;
+        }
+        let li = cr.limit & bufmask;
+        cr.ht[li] = cr.ht[li].wrapping_add(cr.ht[li]).wrapping_add(y as u8);
+        cr.cxt += 1;
+        if cr.cxt == 8 {
+            cr.cxt = 0;
+            cr.limit = cr.limit.wrapping_add(1) & bufmask;
+            if cr.a == 0 {
+                cr.b = cr
+                    .limit
+                    .wrapping_sub(cr.cm[self.h[i] as usize & cmask] as usize);
+                if cr.b & bufmask != 0 {
+                    while cr.a < 255
+                        && cr.ht[cr.limit.wrapping_sub(cr.a).wrapping_sub(1) & bufmask]
+                            == cr.ht[cr
+                                .limit
+                                .wrapping_sub(cr.a)
+                                .wrapping_sub(cr.b)
+                                .wrapping_sub(1)
+                                & bufmask]
+                    {
+                        cr.a += 1;
+                    }
+                }
+            } else {
+                cr.a += usize::from(cr.a < 255);
+            }
+            cr.cm[self.h[i] as usize & cmask] = cr.limit as u32;
+        }
+    }
+
+    fn update_mix2(&mut self, i: usize, y: u32) {
+        let params = self.comp[i].params;
+        let rate = params[4] as i32;
+        let j = params[2] as usize;
+        let k = params[3] as usize;
+        let err = ((y as i32 * 32767 - squash(self.p[i])) * rate) >> 5;
+        let diff = self.p[j] - self.p[k];
+        let cr = &mut self.comp[i];
+        let mut w = cr.a16[cr.cxt] as i32;
+        w += (err.wrapping_mul(diff) + (1 << 12)) >> 13;
+        cr.a16[cr.cxt] = w.clamp(0, 65535) as u16;
+    }
+
+    fn update_mix(&mut self, i: usize, y: u32) {
+        let params = self.comp[i].params;
+        let m = params[3] as usize;
+        let rate = params[4] as i32;
+        let j0 = params[2] as usize;
+        let err = ((y as i32 * 32767 - squash(self.p[i])) * rate) >> 4;
+        let cr = &mut self.comp[i];
+        let base = cr.cxt;
+        for j in 0..m {
+            let w = cr.cm[base + j] as i32;
+            let nw = w.wrapping_add((err.wrapping_mul(self.p[j0 + j]) + (1 << 12)) >> 13);
+            cr.cm[base + j] = clamp512k(nw) as u32;
+        }
+    }
+
+    fn update_isse(&mut self, i: usize, y: u32) {
+        let j = self.comp[i].params[2] as usize;
+        let err = y as i32 * 32767 - squash(self.p[i]);
+        let cr = &mut self.comp[i];
+        let cxt = cr.cxt;
+        let w0 = cr.cm[cxt * 2] as i32;
+        let w1 = cr.cm[cxt * 2 + 1] as i32;
+        cr.cm[cxt * 2] =
+            clamp512k(w0.wrapping_add((err.wrapping_mul(self.p[j]) + (1 << 12)) >> 13)) as u32;
+        cr.cm[cxt * 2 + 1] = clamp512k(w1.wrapping_add((err + 16) >> 5)) as u32;
+        let idx = cr.c + (self.hmap4 as usize & 15);
+        cr.ht[idx] = next_state(cr.ht[idx], y);
     }
 
     /// Reduce prediction error in `cm` (CM and SSE components).

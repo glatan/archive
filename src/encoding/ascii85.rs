@@ -38,11 +38,34 @@ fn push_group(out: &mut Vec<u8>, value: u32) {
 }
 
 /// Encode `data` as an Adobe Ascii85 stream bracketed by `<~` and `~>`.
+///
+/// On x86_64 and aarch64, pairs of 4-byte groups take the vector
+/// division path. A zero group is still the single character `z`.
 pub fn encode(data: &[u8]) -> Vec<u8> {
+    encode_inner(data, true)
+}
+
+#[cfg(test)]
+fn encode_scalar(data: &[u8]) -> Vec<u8> {
+    encode_inner(data, false)
+}
+
+fn encode_inner(data: &[u8], wide: bool) -> Vec<u8> {
     let mut out = Vec::with_capacity(data.len() / 4 * 5 + 4);
     out.extend_from_slice(b"<~");
     let (chunks, rem) = data.as_chunks::<4>();
-    for chunk in chunks {
+    let mut i = 0;
+    if wide {
+        while i + 1 < chunks.len() {
+            let a = u32::from_be_bytes(chunks[i]);
+            let b = u32::from_be_bytes(chunks[i + 1]);
+            let (da, db) = digits_pair(a, b);
+            emit_group(&mut out, a, &da);
+            emit_group(&mut out, b, &db);
+            i += 2;
+        }
+    }
+    for chunk in &chunks[i..] {
         let value = u32::from_be_bytes(*chunk);
         if value == 0 {
             out.push(ADOBE_SHORTHAND);
@@ -59,6 +82,110 @@ pub fn encode(data: &[u8]) -> Vec<u8> {
     }
     out.extend_from_slice(b"~>");
     out
+}
+
+fn emit_group(out: &mut Vec<u8>, value: u32, digits: &[u8; 5]) {
+    if value == 0 {
+        out.push(ADOBE_SHORTHAND);
+        return;
+    }
+    for &d in digits {
+        out.push(d + ADOBE_BASE);
+    }
+}
+
+fn digits_pair(a: u32, b: u32) -> ([u8; 5], [u8; 5]) {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        digits_pair_sse2(a, b)
+    }
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        digits_pair_neon(a, b)
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    (digits_scalar(a), digits_scalar(b))
+}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn digits_scalar(mut value: u32) -> [u8; 5] {
+    let mut digits = [0u8; 5];
+    for d in digits.iter_mut().rev() {
+        let q = ((u64::from(value) * 3_233_857_729) >> 38) as u32;
+        *d = (value - q * 85) as u8;
+        value = q;
+    }
+    digits
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+fn digits_pair_sse2(mut a: u32, mut b: u32) -> ([u8; 5], [u8; 5]) {
+    let mut da = [0u8; 5];
+    let mut db = [0u8; 5];
+    for slot in (0..5).rev() {
+        let (qa, ra, qb, rb) = divmod85_sse2(a, b);
+        da[slot] = ra;
+        db[slot] = rb;
+        a = qa;
+        b = qb;
+    }
+    (da, db)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+fn divmod85_sse2(a: u32, b: u32) -> (u32, u8, u32, u8) {
+    use core::arch::x86_64::{
+        _mm_cvtsi128_si64, _mm_mul_epu32, _mm_set_epi64x, _mm_srli_epi64, _mm_srli_si128,
+        _mm_sub_epi64,
+    };
+    let v = _mm_set_epi64x(i64::from(b), i64::from(a));
+    let magic = _mm_set_epi64x(3_233_857_729, 3_233_857_729);
+    let q = _mm_srli_epi64(_mm_mul_epu32(v, magic), 38);
+    let prod85 = _mm_mul_epu32(q, _mm_set_epi64x(85, 85));
+    let r = _mm_sub_epi64(v, prod85);
+    let qa = _mm_cvtsi128_si64(q) as u32;
+    let ra = _mm_cvtsi128_si64(r) as u8;
+    let qb = _mm_cvtsi128_si64(_mm_srli_si128(q, 8)) as u32;
+    let rb = _mm_cvtsi128_si64(_mm_srli_si128(r, 8)) as u8;
+    (qa, ra, qb, rb)
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+fn digits_pair_neon(mut a: u32, mut b: u32) -> ([u8; 5], [u8; 5]) {
+    let mut da = [0u8; 5];
+    let mut db = [0u8; 5];
+    for slot in (0..5).rev() {
+        let (qa, ra, qb, rb) = divmod85_neon(a, b);
+        da[slot] = ra;
+        db[slot] = rb;
+        a = qa;
+        b = qb;
+    }
+    (da, db)
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+fn divmod85_neon(a: u32, b: u32) -> (u32, u8, u32, u8) {
+    use core::arch::aarch64::{
+        vcreate_u32, vget_lane_u32, vmovl_u32, vmovn_u64, vmull_u32, vshrq_n_u64, vsubq_u64,
+    };
+    let pair = vcreate_u32(u64::from(a) | (u64::from(b) << 32));
+    let magic = vcreate_u32(3_233_857_729 | (3_233_857_729 << 32));
+    let q = vshrq_n_u64(vmull_u32(pair, magic), 38);
+    let eightyfive = vcreate_u32(85 | (85 << 32));
+    let r = vsubq_u64(vmovl_u32(pair), vmull_u32(vmovn_u64(q), eightyfive));
+    let qn = vmovn_u64(q);
+    let rn = vmovn_u64(r);
+    (
+        vget_lane_u32(qn, 0),
+        vget_lane_u32(rn, 0) as u8,
+        vget_lane_u32(qn, 1),
+        vget_lane_u32(rn, 1) as u8,
+    )
 }
 
 fn decode_group(out: &mut Vec<u8>, digits: &[u8]) {
@@ -171,6 +298,30 @@ pub fn decode_rfc1924(input: &[u8]) -> Result<Vec<u8>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vector_matches_scalar_lengths() {
+        let patterns = [
+            &[][..],
+            &[0],
+            &[0, 0],
+            &[0, 0, 0],
+            &[0, 0, 0, 0],
+            &[0, 0, 0, 0, 1],
+            &[1, 2, 3],
+            &[1, 2, 3, 4],
+            &[1, 2, 3, 4, 5, 6, 7],
+            &[0, 0, 0, 0, 0, 0, 0, 0],
+            &[0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 1],
+            &[0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0],
+        ];
+        for data in patterns {
+            assert_eq!(encode(data), encode_scalar(data), "{}", data.len());
+        }
+        let mut mixed = vec![0u8; 4];
+        mixed.extend(1u8..=17);
+        assert_eq!(encode(&mixed), encode_scalar(&mixed));
+    }
 
     #[test]
     fn adobe_roundtrip() {

@@ -247,6 +247,23 @@ pub fn read_le_n_at(data: &[u8], pos: &mut usize, n: usize) -> Result<u64, Error
     Ok(u64::from_le_bytes(bytes))
 }
 
+/// Append the decompressed bytes of `input` to `output`.
+///
+/// `max_output` limits how many bytes are appended. An empty `output`
+/// takes the decoder buffer by move. A non-empty `output` is extended.
+pub fn decode_into(
+    input: &[u8],
+    output: &mut Vec<u8>,
+    max_output: Option<usize>,
+) -> Result<(), Error> {
+    let produced = match max_output {
+        Some(limit) => decode_bounded(input, limit)?,
+        None => decode(input)?,
+    };
+    crate::compress::move_into(output, produced);
+    Ok(())
+}
+
 /// Decode an rzip (`.rz`) container with a maximum output size limit.
 ///
 /// Returns `Error::OutputLimitExceeded` if the decompressed output

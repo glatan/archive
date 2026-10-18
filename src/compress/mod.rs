@@ -4,6 +4,50 @@
 //! formats. Shared codec/filter cores such as BCJ, Delta, LZMA, LZMA2, and PPMd
 //! live here as internal building blocks for archive/container formats too.
 
+/// Overlap-safe match copies and bounded match lengths shared by LZ codecs.
+///
+/// Compiled only when a caller feature is on. Each function is further
+/// limited to the features that call it, so an unused helper is not
+/// silenced by a single caller's feature.
+#[cfg(any(
+    test,
+    feature = "deflate",
+    feature = "zstd",
+    feature = "lzs",
+    feature = "lzo",
+    feature = "vcdiff",
+    feature = "xca",
+    feature = "snappy",
+    feature = "fastlz",
+    feature = "lz4",
+    feature = "brotli",
+    feature = "rzip",
+    feature = "lzip",
+    feature = "lzma-alone",
+    feature = "erofs",
+    feature = "lzrw1",
+    feature = "lzrw1a",
+    feature = "lzrw2",
+    feature = "lzrw3",
+    feature = "lzrw3a",
+    feature = "lzsa",
+    feature = "zx0",
+    feature = "zx1",
+    feature = "zx2",
+    feature = "zx5",
+    feature = "packbits",
+    feature = "mppc",
+    feature = "lha",
+    feature = "arj",
+    feature = "mscab",
+    feature = "lzxd",
+    feature = "lzf",
+))]
+pub(crate) mod match_ops;
+
+/// First-byte scan shared by BCJ and LZX.
+pub(crate) mod scan;
+
 /// Branch/Call/Jump conversion filters shared by XZ / 7z style formats.
 pub mod bcj;
 
@@ -253,3 +297,33 @@ pub(crate) mod deflate64;
 /// Shared PPMd (PPMd var.H / PPMdH) codec, used by 7z and ZIP method 98.
 #[cfg(feature = "sevenz")]
 pub(crate) mod ppmd;
+
+/// Move `produced` into an empty `output`, or append it otherwise.
+///
+/// Replacing an empty buffer drops any capacity the caller had reserved.
+pub(crate) fn move_into(output: &mut alloc::vec::Vec<u8>, produced: alloc::vec::Vec<u8>) {
+    if output.is_empty() {
+        *output = produced;
+    } else {
+        output.extend_from_slice(&produced);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::move_into;
+
+    #[test]
+    fn move_into_replaces_empty_and_appends_otherwise() {
+        let mut output = alloc::vec::Vec::new();
+        move_into(&mut output, alloc::vec![1, 2, 3]);
+        assert_eq!(output, [1, 2, 3]);
+
+        let mut kept = alloc::vec![9];
+        kept.reserve(32);
+        let cap = kept.capacity();
+        move_into(&mut kept, alloc::vec![8]);
+        assert_eq!(kept, [9, 8]);
+        assert!(kept.capacity() >= cap);
+    }
+}

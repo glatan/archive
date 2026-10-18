@@ -216,7 +216,7 @@ impl ZstdDict {
 /// Returns [`Error::ChecksumMismatch`] if XXH64 verification fails,
 /// [`Error::InvalidData`] for malformed frames.
 pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
-    decode_internal(input, None)
+    decode_internal(input, None, None)
 }
 
 /// Decode a zstd compressed byte slice using a dictionary.
@@ -244,10 +244,14 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 /// assert_eq!(decompressed, b"some data");
 /// ```
 pub fn decode_with_dict(input: &[u8], dict: &ZstdDict) -> Result<Vec<u8>, Error> {
-    decode_internal(input, Some(dict))
+    decode_internal(input, Some(dict), None)
 }
 
-fn decode_internal(input: &[u8], dict: Option<&ZstdDict>) -> Result<Vec<u8>, Error> {
+fn decode_internal(
+    input: &[u8],
+    dict: Option<&ZstdDict>,
+    limit: Option<usize>,
+) -> Result<Vec<u8>, Error> {
     let mut output = Vec::new();
     let mut pos = 0;
 
@@ -274,7 +278,8 @@ fn decode_internal(input: &[u8], dict: Option<&ZstdDict>) -> Result<Vec<u8>, Err
             }
         }
 
-        let frame_output = decode_frame(&input[pos..], &mut pos, dict)?;
+        let frame_limit = limit.map(|max| max.saturating_sub(output.len()));
+        let frame_output = decode_frame(&input[pos..], &mut pos, dict, frame_limit)?;
         output.extend_from_slice(&frame_output);
     }
 
@@ -329,6 +334,7 @@ fn decode_frame(
     input: &[u8],
     global_pos: &mut usize,
     dict: Option<&ZstdDict>,
+    limit: Option<usize>,
 ) -> Result<Vec<u8>, Error> {
     let header = FrameHeader::parse(input)?;
     let mut pos = header.header_size;
@@ -349,7 +355,11 @@ fn decode_frame(
     // blocks decode.
     const MAX_PREALLOC: u64 = 128 * 1024 * 1024;
     if let Some(size) = header.frame_content_size {
-        let _ = output.try_reserve(size.min(MAX_PREALLOC) as usize);
+        let mut want = size.min(MAX_PREALLOC) as usize;
+        if let Some(max) = limit {
+            want = want.min(max);
+        }
+        let _ = output.try_reserve(want);
     }
 
     // Determine if this frame uses a dictionary
@@ -434,6 +444,7 @@ fn decode_frame(
                 if pos + bh.block_size as usize > input.len() {
                     return Err(Error::UnexpectedEof);
                 }
+                ensure_output_room(output.len(), bh.block_size as usize, limit)?;
                 output.extend_from_slice(&input[pos..pos + bh.block_size as usize]);
                 pos += bh.block_size as usize;
             }
@@ -443,6 +454,7 @@ fn decode_frame(
                 }
                 let byte = input[pos];
                 pos += 1;
+                ensure_output_room(output.len(), bh.block_size as usize, limit)?;
                 output.resize(output.len() + bh.block_size as usize, byte);
             }
             BlockType::Compressed => {
@@ -462,6 +474,7 @@ fn decode_frame(
                     &mut prev_ml_table,
                     dict_content,
                     header.window_size,
+                    limit,
                 )?;
                 // RFC 8878 §3.1.1.2: decompressed block size must not exceed
                 // Block_Maximum_Size = min(Window_Size, 128 KB).
@@ -525,6 +538,7 @@ fn decode_compressed_block(
     prev_ml_table: &mut Option<FseTable>,
     dict_content: &[u8],
     window_size: u64,
+    output_limit: Option<usize>,
 ) -> Result<(), Error> {
     if data.is_empty() {
         return Err(Error::UnexpectedEof);
@@ -538,6 +552,7 @@ fn decode_compressed_block(
     let remaining = &data[pos..];
     if remaining.is_empty() {
         // No sequences, just literals
+        ensure_output_room(output.len(), literals.len(), output_limit)?;
         output.extend_from_slice(&literals);
         return Ok(());
     }
@@ -546,6 +561,7 @@ fn decode_compressed_block(
     pos += seq_header_size;
 
     if num_sequences == 0 {
+        ensure_output_room(output.len(), literals.len(), output_limit)?;
         output.extend_from_slice(&literals);
         return Ok(());
     }
@@ -564,8 +580,10 @@ fn decode_compressed_block(
         ));
     }
 
-    // Get FSE tables based on modes, using previous tables for Repeat mode
-    let ll_table = get_fse_table(
+    // Get FSE tables based on modes, using previous tables for Repeat mode.
+    // Repeat leaves the stored table in place. A newly built table is moved
+    // in once, and the sequence decoder borrows that stored table.
+    get_fse_table(
         ll_mode,
         &data[pos..],
         &mut pos,
@@ -574,7 +592,7 @@ fn decode_compressed_block(
         super::fse::default_literal_length_table(),
         prev_ll_table,
     )?;
-    let of_table = get_fse_table(
+    get_fse_table(
         of_mode,
         &data[pos..],
         &mut pos,
@@ -583,7 +601,7 @@ fn decode_compressed_block(
         super::fse::default_offset_table(),
         prev_of_table,
     )?;
-    let ml_table = get_fse_table(
+    get_fse_table(
         ml_mode,
         &data[pos..],
         &mut pos,
@@ -592,15 +610,24 @@ fn decode_compressed_block(
         super::fse::default_match_length_table(),
         prev_ml_table,
     )?;
+    let ll_table = prev_ll_table
+        .as_ref()
+        .ok_or(Error::InvalidData("repeat mode without previous FSE table"))?;
+    let of_table = prev_of_table
+        .as_ref()
+        .ok_or(Error::InvalidData("repeat mode without previous FSE table"))?;
+    let ml_table = prev_ml_table
+        .as_ref()
+        .ok_or(Error::InvalidData("repeat mode without previous FSE table"))?;
 
     // Decode sequences using reverse bitstream
     let seq_data = &data[pos..];
     let decoded_sequences = decode_sequences_from_bitstream(
         seq_data,
         num_sequences,
-        &ll_table,
-        &of_table,
-        &ml_table,
+        ll_table,
+        of_table,
+        ml_table,
         rep_offsets,
     )?;
 
@@ -611,6 +638,7 @@ fn decode_compressed_block(
         output,
         dict_content,
         window_size,
+        output_limit,
     )?;
 
     Ok(())
@@ -628,11 +656,11 @@ fn get_fse_table(
     max_accuracy_log: u8,
     default_fn: FseTable,
     prev_table: &mut Option<FseTable>,
-) -> Result<FseTable, Error> {
-    let table = match mode {
+) -> Result<(), Error> {
+    match mode {
         0 => {
             // Predefined
-            default_fn
+            *prev_table = Some(default_fn);
         }
         1 => {
             // RLE: single symbol
@@ -646,35 +674,31 @@ fn get_fse_table(
             // It is not a spec FSE table description -- which requires >= 2
             // non-zero-probability symbols (RFC 8878 §4.1.1) -- so build it
             // directly instead of via FseTable::from_probabilities.
-            FseTable {
+            *prev_table = Some(FseTable {
                 entries: vec![FseEntry {
                     symbol,
                     num_bits: 0,
                     baseline: 0,
                 }],
                 accuracy_log: 0,
-            }
+            });
         }
         2 => {
             // FSE compressed
             let (table, consumed) = FseTable::from_bitstream(data, max_symbol, max_accuracy_log)?;
             *pos += consumed;
-            table
+            *prev_table = Some(table);
         }
         3 => {
-            // Repeat: use the previous table from a prior compressed block
-            match prev_table {
-                Some(t) => t.clone(),
-                None => {
-                    return Err(Error::InvalidData("repeat mode without previous FSE table"));
-                }
+            // Repeat: keep the previous table. Cloning it would copy the
+            // whole state table for every block that reuses the last one.
+            if prev_table.is_none() {
+                return Err(Error::InvalidData("repeat mode without previous FSE table"));
             }
         }
         _ => unreachable!(),
-    };
-    // Store as previous table for future Repeat mode usage
-    *prev_table = Some(table.clone());
-    Ok(table)
+    }
+    Ok(())
 }
 
 /// Update repeat offsets based on the current sequence's offset and literal length.
@@ -1161,6 +1185,7 @@ fn decode_huff_stream(
         .map_err(|_| Error::InvalidData("zstd: invalid Huffman bitstream (no sentinel)"))?;
 
     let max_bits = table.max_bits();
+    output.reserve(max_symbols);
 
     for _ in 0..max_symbols {
         // Peek at the top max_bits from the bitstream
@@ -1222,16 +1247,38 @@ pub fn decode_reader<R: std::io::Read>(mut reader: R) -> Result<Vec<u8>, crate::
     decode(&buf)
 }
 
+/// Append the decompressed bytes of `input` to `output`.
+///
+/// `max_output` limits how many bytes are appended. An empty `output`
+/// takes the decoder buffer by move. A non-empty `output` is extended.
+pub fn decode_into(
+    input: &[u8],
+    output: &mut Vec<u8>,
+    max_output: Option<usize>,
+) -> Result<(), Error> {
+    let produced = match max_output {
+        Some(limit) => decode_bounded(input, limit)?,
+        None => decode(input)?,
+    };
+    crate::compress::move_into(output, produced);
+    Ok(())
+}
+
 /// Decode with a maximum output size limit.
 ///
 /// Returns `Error::OutputLimitExceeded` if the decompressed output
 /// would exceed `max_output` bytes.
 pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error> {
-    let result = decode(input)?;
-    if result.len() > max_output {
-        return Err(Error::OutputLimitExceeded { limit: max_output });
+    decode_internal(input, None, Some(max_output))
+}
+
+fn ensure_output_room(len: usize, add: usize, limit: Option<usize>) -> Result<(), Error> {
+    if let Some(max) = limit
+        && len.saturating_add(add) > max
+    {
+        return Err(Error::OutputLimitExceeded { limit: max });
     }
-    Ok(result)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1742,6 +1789,7 @@ mod tests {
             &mut prev_ml_table,
             &[],
             4,
+            None,
         );
         assert!(matches!(
             result,
@@ -1760,6 +1808,7 @@ mod tests {
             &mut prev_ml_table,
             &[],
             1024,
+            None,
         )
         .unwrap();
         assert_eq!(output, b"abcdefghijfgh");
@@ -1940,8 +1989,15 @@ mod tests {
             offset: 10, // 10 bytes back = into dict_content (pos 0 in virtual: dict[0..8] + output[0..2])
         }];
         let mut output = Vec::new();
-        sequences::execute_sequences_with_dict(literals, &seqs, &mut output, dict_content, 1024)
-            .unwrap();
+        sequences::execute_sequences_with_dict(
+            literals,
+            &seqs,
+            &mut output,
+            dict_content,
+            1024,
+            None,
+        )
+        .unwrap();
         // Output: "XY" (literals) + "ABCD" (4 bytes from dict at offset 10 from end)
         // Virtual history: ABCDEFGHXY, offset=10 => start at 0 => "ABCD"
         assert_eq!(output, b"XYABCD");
@@ -2049,8 +2105,15 @@ mod tests {
             offset: 6, // 6 bytes back in "ABCDEF" => start at pos 0 => "ABCDE"
         }];
         let mut output = Vec::new();
-        sequences::execute_sequences_with_dict(literals, &seqs, &mut output, dict_content, 1024)
-            .unwrap();
+        sequences::execute_sequences_with_dict(
+            literals,
+            &seqs,
+            &mut output,
+            dict_content,
+            1024,
+            None,
+        )
+        .unwrap();
         // Virtual: ABCDEF, offset=6 from end(6) = pos 0, copy 5 = ABCDE
         assert_eq!(output, b"EFABCDE");
     }
@@ -2065,15 +2128,13 @@ mod tests {
         let default_table = super::super::fse::default_literal_length_table();
         let mut prev_table: Option<FseTable> = None;
 
-        let table =
-            get_fse_table(1, &data, &mut pos, 35, 9, default_table, &mut prev_table).unwrap();
+        get_fse_table(1, &data, &mut pos, 35, 9, default_table, &mut prev_table).unwrap();
+        let table = prev_table.as_ref().unwrap();
 
         assert_eq!(pos, 1); // consumed 1 byte
         // The RLE table should have 1 entry (accuracy_log=0, table_size=1)
         assert_eq!(table.entries.len(), 1);
         assert_eq!(table.entries[0].symbol, 5);
-        // prev_table should be set
-        assert!(prev_table.is_some());
     }
 
     #[test]
@@ -2087,13 +2148,13 @@ mod tests {
         let expected_first_symbol = default_table.entries[0].symbol;
         let mut prev_table: Option<FseTable> = None;
 
-        let table = get_fse_table(0, &[], &mut pos, 35, 9, default_table, &mut prev_table).unwrap();
+        get_fse_table(0, &[], &mut pos, 35, 9, default_table, &mut prev_table).unwrap();
+        let table = prev_table.as_ref().unwrap();
 
         assert_eq!(pos, 0);
         assert_eq!(table.entries.len(), expected_len);
         assert_eq!(table.accuracy_log, expected_accuracy_log);
         assert_eq!(table.entries[0].symbol, expected_first_symbol);
-        assert!(prev_table.is_some());
     }
 
     #[test]
@@ -2105,14 +2166,13 @@ mod tests {
         let default_table = super::super::fse::default_literal_length_table();
         let mut prev_table: Option<FseTable> = None;
 
-        let table =
-            get_fse_table(2, &data, &mut pos, 12, 6, default_table, &mut prev_table).unwrap();
+        get_fse_table(2, &data, &mut pos, 12, 6, default_table, &mut prev_table).unwrap();
+        let table = prev_table.as_ref().unwrap();
 
         assert_eq!(pos, 3);
         assert_eq!(table.accuracy_log, 5);
         assert_eq!(table.entries.len(), 32);
         assert_eq!(table.entries[0].symbol, 0);
-        assert!(prev_table.is_some());
     }
 
     #[test]
@@ -2138,12 +2198,14 @@ mod tests {
         .unwrap();
         assert!(prev_table.is_some());
 
-        // Now use Repeat mode (3) — should succeed and return the same table
+        // Repeat mode keeps the stored table. The allocation must be the same one.
+        let stored = prev_table.as_ref().unwrap().entries.as_ptr();
         let mut pos2 = 0usize;
-        let table =
-            get_fse_table(3, &[], &mut pos2, 35, 9, default_table, &mut prev_table).unwrap();
+        get_fse_table(3, &[], &mut pos2, 35, 9, default_table, &mut prev_table).unwrap();
+        let table = prev_table.as_ref().unwrap();
 
         assert_eq!(pos2, 0); // Repeat mode consumes no bytes
+        assert_eq!(table.entries.as_ptr(), stored);
         assert_eq!(table.entries.len(), 1);
         assert_eq!(table.entries[0].symbol, 7);
     }
@@ -2174,6 +2236,7 @@ mod tests {
             &mut prev_ml_table,
             &[],
             1024,
+            None,
         );
 
         assert!(matches!(
@@ -2217,6 +2280,7 @@ mod tests {
             &mut prev_ml_table,
             &[],
             1024,
+            None,
         )
         .unwrap();
         assert_eq!(output, b"AAAA");
@@ -2233,6 +2297,7 @@ mod tests {
             &mut prev_ml_table,
             &[],
             1024,
+            None,
         )
         .unwrap();
         assert_eq!(output, b"AAAABBBB");

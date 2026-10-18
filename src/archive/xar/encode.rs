@@ -7,6 +7,7 @@
 //! '/' are emitted as nested `<file>` directory elements, matching
 //! the reference library's tree structure.
 
+use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -136,7 +137,10 @@ fn emit_tree<'a, 'b>(
     #[derive(Default)]
     struct Dir<'a> {
         files: Vec<usize>,             // entry indices, files only
-        dirs: Vec<(&'a str, Dir<'a>)>, // name -> subtree
+        dirs: Vec<(&'a str, Dir<'a>)>, // name -> subtree, insertion order
+        /// Name to child index. Valid while `insert` builds the tree.
+        /// `dirs` stays in insertion order and is not reordered from this map.
+        by_name: BTreeMap<&'a str, usize>,
     }
     fn insert<'a>(root: &mut Dir<'a>, parts: &[&'a str], idx: usize, is_dir: bool) {
         if parts.is_empty() {
@@ -145,10 +149,10 @@ fn emit_tree<'a, 'b>(
         if parts.len() == 1 {
             if is_dir {
                 // Leaf directory: materialize the subtree node.
-                let existing = root.dirs.iter_mut().find(|(n, _)| *n == parts[0]);
-                match existing {
-                    Some(_) => {}
-                    None => root.dirs.push((parts[0], Dir::default())),
+                if !root.by_name.contains_key(parts[0]) {
+                    let at = root.dirs.len();
+                    root.by_name.insert(parts[0], at);
+                    root.dirs.push((parts[0], Dir::default()));
                 }
             } else {
                 root.files.push(idx);
@@ -156,12 +160,13 @@ fn emit_tree<'a, 'b>(
             return;
         }
         let (head, rest) = parts.split_first().unwrap();
-        let pos = root.dirs.iter().position(|(n, _)| *n == *head);
-        let i = match pos {
+        let i = match root.by_name.get(head).copied() {
             Some(i) => i,
             None => {
+                let at = root.dirs.len();
+                root.by_name.insert(head, at);
                 root.dirs.push((head, Dir::default()));
-                root.dirs.len() - 1
+                at
             }
         };
         insert(&mut root.dirs[i].1, rest, idx, is_dir);
