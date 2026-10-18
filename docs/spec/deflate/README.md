@@ -36,8 +36,8 @@
 | 24 | 最大非圧縮ブロック 65535バイト | RFC 1951 §3.2.4 | ✅ | `test_stored_block_max_65535` |
 | 25 | 重複コピー (distance < length) | RFC 1951 §3.2.5 | ✅ | `test_fixed_huffman_overlap_copy_direct`, `test_distance_one_self_copy` |
 | 26 | エンコード: 非圧縮ブロック (BTYPE=00) | RFC 1951 §3.2.4 | ✅ | `test_roundtrip_stored` |
-| 27 | エンコード: 固定ハフマン (BTYPE=01) | RFC 1951 §3.2.6 | ✅ | `test_roundtrip_compressed_short/repetitive` |
-| 28 | エンコード: LZ77 ハッシュチェーン圧縮 | RFC 1951 §4 | ✅ | ラウンドトリップテストで検証 |
+| 27 | エンコード: 固定ハフマン (BTYPE=01) | RFC 1951 §3.2.6 | ✅ | `test_roundtrip_compressed_short/repetitive`。LZ77 経路は非圧縮入力 32KiB ごとにブロックを分け、BFINAL は最終ブロックだけ (`test_lz77_blocks_roundtrip`) |
+| 28 | エンコード: LZ77 ハッシュチェーン圧縮 | RFC 1951 §4 | ✅ | ラウンドトリップテストで検証。一致長は `match_ops::match_len` |
 | 29 | 圧縮率検証 (繰り返しデータが元の50%以下) | RFC 1951 §4 | ✅ | `test_roundtrip_compressed_repetitive` |
 | 30 | 後方参照距離超過エラー | RFC 1951 §3.2.5 | ✅ | `test_distance_too_far_back` |
 | 31 | 65536バイト → 複数ブロック分割 | RFC 1951 §3.2 | ✅ | `test_stored_block_multi` |

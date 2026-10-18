@@ -393,11 +393,17 @@ fn decode_tokens(
         } else {
             (1 << (k + 1)) | bits.get_bits(k + 1)? as usize
         };
-        for _ in 0..len {
-            // Ring-indexed read: the byte (write_pos - offset) mod size.
-            let idx = pos.wrapping_sub(off) & mask;
-            let b = hist[idx];
-            emit(hist, pos, &mut out, b, max_output)?;
+        if *pos + len <= hist.len() && out.len() + len <= max_output {
+            let src = pos.wrapping_sub(off);
+            crate::compress::match_ops::copy_ring(hist, src, *pos, len, &mut out, len);
+            *pos += len;
+        } else {
+            for _ in 0..len {
+                // Ring-indexed read: the byte (write_pos - offset) mod size.
+                let idx = pos.wrapping_sub(off) & mask;
+                let b = hist[idx];
+                emit(hist, pos, &mut out, b, max_output)?;
+            }
         }
     }
     Ok(out)
@@ -540,10 +546,14 @@ fn encode_body(
                     && at(hist, pos, data, cp + 1) == data[produced + 1]
                     && at(hist, pos, data, cp + 2) == data[produced + 2]
                 {
-                    let mut len = MIN_MATCH;
-                    while len < max_len && at(hist, pos, data, cp + len) == data[produced + len] {
-                        len += 1;
-                    }
+                    let len = MIN_MATCH
+                        + crate::compress::match_ops::match_len_window(
+                            &hist[..pos],
+                            data,
+                            cp + MIN_MATCH,
+                            wpos + MIN_MATCH,
+                            max_len - MIN_MATCH,
+                        );
                     let off = wpos - cp;
                     if off <= ty.max_offset() {
                         best_len = len;

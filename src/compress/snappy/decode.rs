@@ -176,15 +176,8 @@ fn read_literal_len(input: &[u8], pos: &mut usize, tag: u8) -> Result<usize, Err
 }
 
 fn copy_from_offset(output: &mut Vec<u8>, offset: usize, len: usize) -> Result<(), Error> {
-    if offset == 0 || offset > output.len() {
-        return Err(Error::InvalidData("snappy: invalid copy offset"));
-    }
-    let target_len = output.len() + len;
-    while output.len() < target_len {
-        let byte = output[output.len() - offset];
-        output.push(byte);
-    }
-    Ok(())
+    crate::compress::match_ops::copy_match(output, offset, len)
+        .map_err(|_| Error::InvalidData("snappy: invalid copy offset"))
 }
 
 fn read_varint(input: &[u8], pos: &mut usize) -> Result<u64, Error> {
@@ -243,6 +236,23 @@ fn read_u32_le(input: &[u8], pos: &mut usize) -> Result<u32, Error> {
     ]);
     *pos += 4;
     Ok(value)
+}
+
+/// Append the decompressed bytes of `input` to `output`.
+///
+/// `max_output` limits how many bytes are appended. An empty `output`
+/// takes the decoder buffer by move. A non-empty `output` is extended.
+pub fn decode_into(
+    input: &[u8],
+    output: &mut Vec<u8>,
+    max_output: Option<usize>,
+) -> Result<(), Error> {
+    let produced = match max_output {
+        Some(limit) => decode_bounded(input, limit)?,
+        None => decode(input)?,
+    };
+    crate::compress::move_into(output, produced);
+    Ok(())
 }
 
 /// Decode a Snappy framed stream with a maximum output size limit.

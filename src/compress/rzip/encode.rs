@@ -51,6 +51,21 @@ pub enum Backend {
 
 /// Rolling hash window for rzip match finding.
 const RZIP_HASH_WINDOW: usize = 31;
+/// Multiplier of the 31-byte polynomial hash.
+const RZIP_HASH_MUL: u32 = 0x0808_8405;
+/// `RZIP_HASH_MUL` raised to the window length. Rolling one byte subtracts
+/// the outgoing byte times this power.
+const RZIP_HASH_WINDOW_POW: u32 = hash_pow(RZIP_HASH_WINDOW as u32);
+
+const fn hash_pow(exp: u32) -> u32 {
+    let mut acc = 1u32;
+    let mut i = 0u32;
+    while i < exp {
+        acc = acc.wrapping_mul(RZIP_HASH_MUL);
+        i += 1;
+    }
+    acc
+}
 /// Minimum match length for rzip.
 const RZIP_MIN_MATCH: usize = 31;
 /// Maximum number of rzip hash table entries.
@@ -117,13 +132,14 @@ pub(crate) fn encode_chunk(chunk: &[u8], crc: u32) -> (Vec<u8>, Vec<u8>) {
     let mut anchor = 0usize;
     let mut pos = 0usize;
     let limit = chunk.len().saturating_sub(RZIP_MIN_MATCH);
+    let mut hash = rolling_hash(&chunk[..RZIP_HASH_WINDOW]) as u32;
 
     while pos < limit {
         if pos + RZIP_HASH_WINDOW > chunk.len() {
             break;
         }
 
-        let h = rolling_hash(&chunk[pos..pos + RZIP_HASH_WINDOW]) & (RZIP_HASH_SIZE - 1);
+        let h = (hash as usize) & (RZIP_HASH_SIZE - 1);
         let candidate = hash_table[h] as usize;
         hash_table[h] = pos as u32;
 
@@ -131,14 +147,12 @@ pub(crate) fn encode_chunk(chunk: &[u8], crc: u32) -> (Vec<u8>, Vec<u8>) {
             && candidate != u32::MAX as usize
             && chunk[candidate..candidate + RZIP_MIN_MATCH] == chunk[pos..pos + RZIP_MIN_MATCH]
         {
-            let mut match_len = RZIP_MIN_MATCH;
-            let max_len = chunk.len() - pos;
-            while match_len < max_len
-                && candidate + match_len < chunk.len()
-                && chunk[candidate + match_len] == chunk[pos + match_len]
-            {
-                match_len += 1;
-            }
+            let match_len = RZIP_MIN_MATCH
+                + crate::compress::match_ops::match_len(
+                    &chunk[candidate + RZIP_MIN_MATCH..],
+                    &chunk[pos + RZIP_MIN_MATCH..],
+                    chunk.len() - pos - RZIP_MIN_MATCH,
+                );
 
             if pos > anchor {
                 emit_rzip_literal(&mut stream0, &mut stream1, &chunk[anchor..pos]);
@@ -149,7 +163,13 @@ pub(crate) fn encode_chunk(chunk: &[u8], crc: u32) -> (Vec<u8>, Vec<u8>) {
 
             pos += match_len;
             anchor = pos;
+            if pos < limit && pos + RZIP_HASH_WINDOW <= chunk.len() {
+                hash = rolling_hash(&chunk[pos..pos + RZIP_HASH_WINDOW]) as u32;
+            }
         } else {
+            if pos + 1 < limit && pos + 1 + RZIP_HASH_WINDOW <= chunk.len() {
+                hash = roll_hash(hash, chunk[pos], chunk[pos + RZIP_HASH_WINDOW]);
+            }
             pos += 1;
         }
     }
@@ -325,13 +345,20 @@ fn emit_rzip_match(stream0: &mut Vec<u8>, offset: usize, mut length: usize) {
     }
 }
 
-/// Simple rolling hash for rzip match finding.
+/// Polynomial hash of one 31-byte window.
 fn rolling_hash(data: &[u8]) -> usize {
     let mut h: u32 = 0;
     for &b in data {
-        h = h.wrapping_mul(0x0808_8405).wrapping_add(b as u32);
+        h = h.wrapping_mul(RZIP_HASH_MUL).wrapping_add(b as u32);
     }
     h as usize
+}
+
+/// Slide `rolling_hash` one byte forward.
+fn roll_hash(hash: u32, outgoing: u8, incoming: u8) -> u32 {
+    hash.wrapping_mul(RZIP_HASH_MUL)
+        .wrapping_sub((outgoing as u32).wrapping_mul(RZIP_HASH_WINDOW_POW))
+        .wrapping_add(incoming as u32)
 }
 
 /// Compute minimum bytes needed to represent a value.
@@ -443,6 +470,33 @@ mod tests {
         let compressed = encode_with_backend(data, Backend::Lzo);
         let decoded = decode::decode(&compressed).unwrap();
         assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn test_rolling_hash_matches_every_position() {
+        let patterns: [Vec<u8>; 4] = [
+            (0..80).map(|i| (i * 17 + 3) as u8).collect(),
+            vec![0; 64],
+            b"abcdefghijklmnopqrstuvwxyz0123456789".repeat(4),
+            (0..100)
+                .map(|i| if i % 7 == 0 { 0xFF } else { i as u8 })
+                .collect(),
+        ];
+        for data in patterns {
+            assert!(data.len() >= RZIP_HASH_WINDOW);
+            let mut hash = rolling_hash(&data[..RZIP_HASH_WINDOW]) as u32;
+            let last = data.len() - RZIP_HASH_WINDOW;
+            for pos in 0..=last {
+                assert_eq!(
+                    hash as usize,
+                    rolling_hash(&data[pos..pos + RZIP_HASH_WINDOW]),
+                    "pos {pos}"
+                );
+                if pos < last {
+                    hash = roll_hash(hash, data[pos], data[pos + RZIP_HASH_WINDOW]);
+                }
+            }
+        }
     }
 
     #[test]

@@ -335,6 +335,16 @@ impl Zpaql {
         self.h[i]
     }
 
+    /// Whether this header is the serialized built-in model `blob`
+    /// (`hsize` through the COMP terminator, then the HCOMP program).
+    pub(crate) fn is_model(&self, blob: &[u8]) -> bool {
+        let prefix = &self.header[..self.cend];
+        let program = &self.header[self.hbegin..self.hend];
+        blob.len() == self.cend + program.len()
+            && prefix == &blob[..self.cend]
+            && program == &blob[self.cend..]
+    }
+
     /// Initialize VM state for HCOMP (`hh`, `hm` fields).
     pub(crate) fn inith(&mut self) -> Result<(), Error> {
         self.init(self.header[2] as usize, self.header[3] as usize)?;

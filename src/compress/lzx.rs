@@ -589,23 +589,19 @@ impl<'a> Decoder<'a> {
         if offset > cur {
             return Err(Error::InvalidData("lzxd: match offset before start"));
         }
-        let start = cur - offset;
-        for i in 0..match_len {
-            let b = window_byte(reference, out, start + i)?;
-            out.push(b);
-        }
+        // A reference-side prefix is copied first. Offset 0 names no
+        // byte, which the shared copy reports separately from a
+        // distance that starts before the window.
+        crate::compress::match_ops::copy_match_with_prefix(reference, out, offset, match_len)
+            .map_err(|err| match err {
+                crate::compress::match_ops::CopyMatchError::ZeroOffset => {
+                    Error::InvalidData("lzxd: match offset out of window")
+                }
+                crate::compress::match_ops::CopyMatchError::OffsetOutOfRange => {
+                    Error::InvalidData("lzxd: match offset out of window")
+                }
+            })?;
         Ok(())
-    }
-}
-
-/// Byte at idx in the logical window (reference ++ output).
-fn window_byte(reference: &[u8], out: &[u8], idx: usize) -> Result<u8, Error> {
-    if idx < reference.len() {
-        Ok(reference[idx])
-    } else {
-        out.get(idx - reference.len())
-            .copied()
-            .ok_or(Error::InvalidData("lzxd: match offset out of window"))
     }
 }
 
@@ -614,27 +610,30 @@ fn window_byte(reference: &[u8], out: &[u8], idx: usize) -> Result<u8, Error> {
 /// bytes of the frame.
 pub(crate) fn e8_reverse(chunk: &mut [u8], chunk_offset: i64, e8_file_size: i64) {
     let n = chunk.len();
+    if n < 11 {
+        return;
+    }
+    let last = n - 11;
     let mut i = 0usize;
-    while i + 10 < n {
-        if chunk[i] == 0xe8 {
-            let cur = chunk_offset + i as i64;
-            let value =
-                i32::from_le_bytes([chunk[i + 1], chunk[i + 2], chunk[i + 3], chunk[i + 4]]) as i64;
-            if value >= -cur && value < e8_file_size {
-                let displacement = if value >= 0 {
-                    value - cur
-                } else {
-                    value + e8_file_size
-                };
-                let d = displacement as u32;
-                chunk[i + 1] = (d & 0xff) as u8;
-                chunk[i + 2] = ((d >> 8) & 0xff) as u8;
-                chunk[i + 3] = ((d >> 16) & 0xff) as u8;
-                chunk[i + 4] = ((d >> 24) & 0xff) as u8;
-            }
-            i += 4;
+    while let Some(at) = crate::compress::scan::find_byte(chunk, i, last, 0xe8, None) {
+        let cur = chunk_offset + at as i64;
+        let value =
+            i32::from_le_bytes([chunk[at + 1], chunk[at + 2], chunk[at + 3], chunk[at + 4]]) as i64;
+        if value >= -cur && value < e8_file_size {
+            let displacement = if value >= 0 {
+                value - cur
+            } else {
+                value + e8_file_size
+            };
+            let d = displacement as u32;
+            chunk[at + 1] = (d & 0xff) as u8;
+            chunk[at + 2] = ((d >> 8) & 0xff) as u8;
+            chunk[at + 3] = ((d >> 16) & 0xff) as u8;
+            chunk[at + 4] = ((d >> 24) & 0xff) as u8;
         }
-        i += 1;
+        // The four displacement bytes are not scanned, matching the
+        // scalar `i += 5` step.
+        i = at + 5;
     }
 }
 

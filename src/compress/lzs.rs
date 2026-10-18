@@ -170,13 +170,12 @@ pub fn encode(input: &[u8]) -> Result<Vec<u8>, Error> {
                 // Cap matches at MAX_MATCH so own output stays within
                 // the decoder's sanity bound; longer runs continue as
                 // a following match token.
-                let mut len = MIN_MATCH;
-                while produced + len < input.len()
-                    && len < MAX_MATCH
-                    && input[cp + len] == input[produced + len]
-                {
-                    len += 1;
-                }
+                let len = MIN_MATCH
+                    + crate::compress::match_ops::match_len(
+                        &input[cp + MIN_MATCH..],
+                        &input[produced + MIN_MATCH..],
+                        (MAX_MATCH - MIN_MATCH).min(input.len() - (produced + MIN_MATCH)),
+                    );
                 let off = produced - cp;
                 if off <= MAX_OFFSET {
                     best_len = len;
@@ -248,10 +247,8 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
         if out.len() + len > max_output {
             return Err(Error::OutputLimitExceeded { limit: max_output });
         }
-        for _ in 0..len {
-            let b = out[out.len() - off];
-            out.push(b);
-        }
+        crate::compress::match_ops::copy_match(&mut out, off, len)
+            .map_err(|_| Error::InvalidData("lzs: offset exceeds history"))?;
     }
     Ok(out)
 }

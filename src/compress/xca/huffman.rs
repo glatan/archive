@@ -226,11 +226,8 @@ fn read_match(
     if out.len() + len > max_output {
         return Err(Error::OutputLimitExceeded { limit: max_output });
     }
-    let start = out.len() - offset;
-    for i in 0..len {
-        let b = out[start + i];
-        out.push(b);
-    }
+    crate::compress::match_ops::copy_match(out, offset, len)
+        .map_err(|_| Error::InvalidData("xpress-huff: match offset before start"))?;
     Ok(())
 }
 

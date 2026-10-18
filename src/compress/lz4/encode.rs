@@ -386,18 +386,16 @@ fn compress_block(input: &[u8], dict: &[u8]) -> Vec<u8> {
     let prefix_start = dict.len().saturating_sub(65_535);
     let prefix = &dict[prefix_start..];
     let prefix_len = prefix.len();
-    let mut window = Vec::with_capacity(prefix_len + input.len());
-    window.extend_from_slice(prefix);
-    window.extend_from_slice(input);
+    let virt_len = prefix_len + input.len();
 
-    // Hash table: maps 4-byte hash → position in prefix+input window
+    // Hash table: maps 4-byte hash → position in the virtual prefix+input window.
     let hash_bits = 14;
     let hash_size = 1 << hash_bits;
     let mut hash_table = vec![u32::MAX; hash_size];
 
-    if window.len() >= 4 {
+    if virt_len >= 4 {
         for p in 0..prefix_len.saturating_sub(3) {
-            let h = hash4(&window[p..]) & (hash_size - 1);
+            let h = hash4_at(prefix, input, prefix_len, p) & (hash_size - 1);
             hash_table[h] = p as u32;
         }
     }
@@ -405,10 +403,10 @@ fn compress_block(input: &[u8], dict: &[u8]) -> Vec<u8> {
     let mut anchor = prefix_len; // Start of current literal run
     let mut pos = prefix_len;
 
-    let limit = window.len() - MF_LIMIT;
+    let limit = virt_len - MF_LIMIT;
 
     while pos < limit {
-        let h = hash4(&window[pos..]) & (hash_size - 1);
+        let h = hash4_at(prefix, input, prefix_len, pos) & (hash_size - 1);
         let candidate = hash_table[h];
         hash_table[h] = pos as u32;
 
@@ -416,22 +414,29 @@ fn compress_block(input: &[u8], dict: &[u8]) -> Vec<u8> {
         if candidate != u32::MAX
             && (candidate as usize) < pos
             && pos - (candidate as usize) <= 65535
-            && window[candidate as usize..candidate as usize + 4] == window[pos..pos + 4]
+            && virt_eq4(prefix, input, prefix_len, candidate as usize, pos)
         {
             // Found a match — emit literals from anchor to pos
             let offset = pos - candidate as usize;
 
             // Extend match forward
-            let mut match_len = 4;
-            let max_match = window.len() - LAST_LITERALS - pos;
-            while match_len < max_match
-                && window[candidate as usize + match_len] == window[pos + match_len]
-            {
-                match_len += 1;
-            }
+            let max_match = virt_len - LAST_LITERALS - pos;
+            let match_len = 4 + virt_match_len(
+                prefix,
+                input,
+                prefix_len,
+                candidate as usize + 4,
+                pos + 4,
+                max_match - 4,
+            );
 
-            // Emit sequence
-            emit_sequence(&mut output, &window[anchor..pos], offset, match_len);
+            // Literals stay inside the current block: the anchor never moves before it.
+            emit_sequence(
+                &mut output,
+                &input[anchor - prefix_len..pos - prefix_len],
+                offset,
+                match_len,
+            );
 
             pos += match_len;
             anchor = pos;
@@ -441,11 +446,68 @@ fn compress_block(input: &[u8], dict: &[u8]) -> Vec<u8> {
     }
 
     // Emit remaining literals (last sequence, no match)
-    if anchor < window.len() {
-        emit_literals(&mut output, &window[anchor..], true);
+    if anchor < virt_len {
+        emit_literals(&mut output, &input[anchor - prefix_len..], true);
     }
 
     output
+}
+
+fn virt_byte(prefix: &[u8], input: &[u8], prefix_len: usize, pos: usize) -> u8 {
+    if pos < prefix_len {
+        prefix[pos]
+    } else {
+        input[pos - prefix_len]
+    }
+}
+
+fn hash4_at(prefix: &[u8], input: &[u8], prefix_len: usize, pos: usize) -> usize {
+    let bytes = [
+        virt_byte(prefix, input, prefix_len, pos),
+        virt_byte(prefix, input, prefix_len, pos + 1),
+        virt_byte(prefix, input, prefix_len, pos + 2),
+        virt_byte(prefix, input, prefix_len, pos + 3),
+    ];
+    hash4(&bytes)
+}
+
+fn virt_eq4(prefix: &[u8], input: &[u8], prefix_len: usize, a: usize, b: usize) -> bool {
+    virt_match_len(prefix, input, prefix_len, a, b, 4) == 4
+}
+
+/// Common prefix of two positions in the virtual `prefix ++ input` window.
+fn virt_match_len(
+    prefix: &[u8],
+    input: &[u8],
+    prefix_len: usize,
+    mut a: usize,
+    mut b: usize,
+    max_len: usize,
+) -> usize {
+    let mut matched = 0;
+    while matched < max_len {
+        let a_in_prefix = a < prefix_len;
+        let b_in_prefix = b < prefix_len;
+        let a_slice = if a_in_prefix {
+            &prefix[a..]
+        } else {
+            &input[a - prefix_len..]
+        };
+        let b_slice = if b_in_prefix {
+            &prefix[b..]
+        } else {
+            &input[b - prefix_len..]
+        };
+        let room = max_len - matched;
+        let n = crate::compress::match_ops::match_len(a_slice, b_slice, room);
+        matched += n;
+        if n < a_slice.len().min(b_slice.len()).min(room) {
+            break;
+        }
+        a += n;
+        b += n;
+    }
+    matched
 }
 
 /// Emit a complete sequence (literals + match).

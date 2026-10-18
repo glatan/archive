@@ -293,17 +293,9 @@ fn decode_standard_frame(
 
         if is_uncompressed {
             output.extend_from_slice(block_data);
-        } else {
-            let mut block_output = Vec::new();
-            let history;
-            let prefix = if block_independent {
-                dict.map_or(&[][..], Lz4Dict::tail)
-            } else {
-                history = dependent_history(dict, output);
-                history.as_slice()
-            };
-            // The decompressed block size must not exceed Block_MaxSize.
-            decompress_block(block_data, &mut block_output, prefix, block_max_size).map_err(
+        } else if block_independent {
+            let prefix = dict.map_or(&[][..], Lz4Dict::tail);
+            decompress_block(block_data, output, prefix, block_max_size).map_err(
                 |err| match err {
                     Error::OutputLimitExceeded { .. } => {
                         Error::InvalidData("lz4: block decompressed size exceeds block max size")
@@ -311,7 +303,17 @@ fn decode_standard_frame(
                     err => err,
                 },
             )?;
-            output.extend_from_slice(&block_output);
+        } else {
+            let history = dependent_history(dict, output);
+            // The decompressed block size must not exceed Block_MaxSize.
+            decompress_block(block_data, output, &history, block_max_size).map_err(
+                |err| match err {
+                    Error::OutputLimitExceeded { .. } => {
+                        Error::InvalidData("lz4: block decompressed size exceeds block max size")
+                    }
+                    err => err,
+                },
+            )?;
         }
 
         // Optional block checksum
@@ -384,9 +386,7 @@ fn decode_legacy_frame(input: &[u8], pos: &mut usize, output: &mut Vec<u8>) -> R
         let block_data = &input[*pos..*pos + block_size];
         *pos += block_size;
 
-        let mut block_output = Vec::new();
-        decompress_block(block_data, &mut block_output, &[], usize::MAX)?;
-        output.extend_from_slice(&block_output);
+        decompress_block(block_data, output, &[], usize::MAX)?;
     }
 
     Ok(())
@@ -501,16 +501,18 @@ fn decompress_block(
             });
         }
 
-        // Copy match from dictionary prefix and/or current output.
-        for _ in 0..match_len {
-            let history_len = dict.len() + dst.len();
-            let match_start = history_len - offset;
-            let b = if match_start < dict.len() {
-                dict[match_start]
-            } else {
-                dst[match_start - dict.len()]
-            };
-            dst.push(b);
+        // A match that begins in the dictionary is copied from there first.
+        // The part already in `dst` uses the shared overlap copy.
+        let history_len = dict.len() + dst.len();
+        let match_start = history_len - offset;
+        let dict_copy = dict.len().saturating_sub(match_start).min(match_len);
+        if dict_copy > 0 {
+            dst.extend_from_slice(&dict[match_start..match_start + dict_copy]);
+        }
+        let rest = match_len - dict_copy;
+        if rest > 0 {
+            crate::compress::match_ops::copy_match(dst, offset, rest)
+                .map_err(|_| Error::InvalidData("lz4: match offset exceeds history"))?;
         }
     }
 
@@ -574,6 +576,23 @@ pub fn decode_reader<R: std::io::Read>(mut reader: R) -> std::io::Result<Vec<u8>
     let mut buf = Vec::new();
     reader.read_to_end(&mut buf)?;
     decode(&buf).map_err(Into::into)
+}
+
+/// Append the decompressed bytes of `input` to `output`.
+///
+/// `max_output` limits how many bytes are appended. An empty `output`
+/// takes the decoder buffer by move. A non-empty `output` is extended.
+pub fn decode_into(
+    input: &[u8],
+    output: &mut Vec<u8>,
+    max_output: Option<usize>,
+) -> Result<(), Error> {
+    let produced = match max_output {
+        Some(limit) => decode_bounded(input, limit)?,
+        None => decode(input)?,
+    };
+    crate::compress::move_into(output, produced);
+    Ok(())
 }
 
 /// Decode LZ4 frame data with a maximum output size limit.

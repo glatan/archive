@@ -25,7 +25,7 @@
 | 13 | ISIZE トレーラー検証 | RFC 1952 §2.3.1 | ✅ | `test_valid_trailer_crc32_and_isize`, `test_verify_isize_modulo_wrap_accepts_4gib_boundary` |
 | 14 | CRC32 不一致エラー | RFC 1952 §2.3.1 | ✅ | `test_crc32_mismatch` |
 | 15 | ISIZE 不一致エラー | RFC 1952 §2.3.1 | ✅ | `test_isize_mismatch` |
-| 16 | マルチメンバーストリーム | RFC 1952 §2.2 | ✅ | `test_multi_member_gzip`、`test_multi_member_gzip_three_members`、`test_multi_member_second_member_invalid` |
+| 16 | マルチメンバーストリーム | RFC 1952 §2.2 | ✅ | `test_multi_member_gzip`、`test_multi_member_gzip_three_members`、`test_multi_member_second_member_invalid`。メンバー境界を跨ぐ距離は `test_multi_member_distance_does_not_cross_boundary` が拒否する |
 | 17 | 空データのgzip | RFC 1952 §2.2 / §2.3.1 | ✅ | `test_roundtrip_empty` (エンコーダー) |
 | 18 | MTIME フィールド解釈 | RFC 1952 §2.3.1 | ✅ | `test_mtime_xfl_os_fields` |
 | 19 | XFL フィールド (2=最大圧縮, 4=最速) | RFC 1952 §2.3.1 | ✅ | `test_mtime_xfl_os_fields`、`test_xfl_fast_compression`、`test_xfl_arbitrary_values_accepted` (informational、任意値受理) |
@@ -45,7 +45,7 @@
 | 33 | FNAME 空 (ヌル終端のみ) | RFC 1952 §2.3.1 | ✅ | `test_fname_empty` |
 | 34 | FCOMMENT 空 (ヌル終端のみ) | RFC 1952 §2.3.1 | ✅ | `test_fcomment_empty` |
 | 35 | DEFLATE ストリーム切り詰めエラー | RFC 1952 §2.2 / §2.3.1 | ✅ | `test_truncated_deflate_stream`、`test_truncated_at_every_position` (全切断位置で拒否) |
-| 36 | gzip ストリーム境界の NLEN 検証 | RFC 1951 §3.2.4 (embedded DEFLATE stream) | ✅ | `find_deflate_end` 内で検証 |
+| 36 | gzip ストリーム境界の NLEN 検証 | RFC 1951 §3.2.4 (embedded DEFLATE stream) | ✅ | `inflate_members` が `decode_stream` を呼び、`decode_uncompressed` が `LEN != !NLEN` を拒否する。`find_deflate_end` はテスト専用で、同じ不一致を拒否する |
 
 ### 追加要件
 

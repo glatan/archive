@@ -133,6 +133,24 @@ fn sixbit_decode(chars: &[u8]) -> Result<Vec<u8>, Error> {
 }
 
 fn sixbit_encode(data: &[u8], out: &mut Vec<u8>) {
+    sixbit_encode_inner(data, out, true);
+}
+
+#[cfg(test)]
+fn sixbit_encode_scalar(data: &[u8], out: &mut Vec<u8>) {
+    sixbit_encode_inner(data, out, false);
+}
+
+fn trio_indices(a: u8, b: u8, c: u8) -> [u8; 4] {
+    [
+        a >> 2,
+        ((a & 0x03) << 4) | (b >> 4),
+        ((b & 0x0f) << 2) | (c >> 6),
+        c & 0x3f,
+    ]
+}
+
+fn sixbit_encode_inner(data: &[u8], out: &mut Vec<u8>, wide: bool) {
     // First output line holds ':' + 63 characters; later lines 64.
     // Wrap lazily (before the next character, not after filling a line)
     // so the terminating ':' always shares its line with the last data
@@ -146,9 +164,24 @@ fn sixbit_encode(data: &[u8], out: &mut Vec<u8>) {
         out.push(c);
         col += 1;
     };
+    let mut pos = 0;
+    if wide {
+        while pos + 12 <= data.len() {
+            for &v in &indices4(&data[pos..pos + 12]) {
+                put(out, ALPHABET[v as usize]);
+            }
+            pos += 12;
+        }
+    }
+    while pos + 3 <= data.len() {
+        for &v in &trio_indices(data[pos], data[pos + 1], data[pos + 2]) {
+            put(out, ALPHABET[v as usize]);
+        }
+        pos += 3;
+    }
     let mut acc: u32 = 0;
     let mut nbits = 0u32;
-    for &b in data {
+    for &b in &data[pos..] {
         acc = (acc << 8) | b as u32;
         nbits += 8;
         while nbits >= 6 {
@@ -160,6 +193,139 @@ fn sixbit_encode(data: &[u8], out: &mut Vec<u8>) {
         put(out, ALPHABET[((acc << (6 - nbits)) & 0x3F) as usize]);
     }
     out.extend_from_slice(b":\n");
+}
+
+fn indices4(input: &[u8]) -> [u8; 16] {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        indices4_sse2(input)
+    }
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        indices4_neon(input)
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        let mut out = [0u8; 16];
+        for k in 0..4 {
+            let i = k * 3;
+            out[k * 4..k * 4 + 4].copy_from_slice(&trio_indices(
+                input[i],
+                input[i + 1],
+                input[i + 2],
+            ));
+        }
+        out
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+fn indices4_sse2(input: &[u8]) -> [u8; 16] {
+    use core::arch::x86_64::{
+        _mm_and_si128, _mm_extract_epi16, _mm_or_si128, _mm_set1_epi16, _mm_setr_epi16,
+        _mm_slli_epi16, _mm_srli_epi16,
+    };
+    let b0 = _mm_setr_epi16(
+        i16::from(input[0]),
+        i16::from(input[3]),
+        i16::from(input[6]),
+        i16::from(input[9]),
+        0,
+        0,
+        0,
+        0,
+    );
+    let b1 = _mm_setr_epi16(
+        i16::from(input[1]),
+        i16::from(input[4]),
+        i16::from(input[7]),
+        i16::from(input[10]),
+        0,
+        0,
+        0,
+        0,
+    );
+    let b2 = _mm_setr_epi16(
+        i16::from(input[2]),
+        i16::from(input[5]),
+        i16::from(input[8]),
+        i16::from(input[11]),
+        0,
+        0,
+        0,
+        0,
+    );
+    let c0 = _mm_srli_epi16(b0, 2);
+    let c1 = _mm_or_si128(
+        _mm_slli_epi16(_mm_and_si128(b0, _mm_set1_epi16(0x03)), 4),
+        _mm_srli_epi16(b1, 4),
+    );
+    let c2 = _mm_or_si128(
+        _mm_slli_epi16(_mm_and_si128(b1, _mm_set1_epi16(0x0f)), 2),
+        _mm_srli_epi16(b2, 6),
+    );
+    let c3 = _mm_and_si128(b2, _mm_set1_epi16(0x3f));
+    let mut out = [0u8; 16];
+    out[0] = _mm_extract_epi16(c0, 0) as u8;
+    out[1] = _mm_extract_epi16(c1, 0) as u8;
+    out[2] = _mm_extract_epi16(c2, 0) as u8;
+    out[3] = _mm_extract_epi16(c3, 0) as u8;
+    out[4] = _mm_extract_epi16(c0, 1) as u8;
+    out[5] = _mm_extract_epi16(c1, 1) as u8;
+    out[6] = _mm_extract_epi16(c2, 1) as u8;
+    out[7] = _mm_extract_epi16(c3, 1) as u8;
+    out[8] = _mm_extract_epi16(c0, 2) as u8;
+    out[9] = _mm_extract_epi16(c1, 2) as u8;
+    out[10] = _mm_extract_epi16(c2, 2) as u8;
+    out[11] = _mm_extract_epi16(c3, 2) as u8;
+    out[12] = _mm_extract_epi16(c0, 3) as u8;
+    out[13] = _mm_extract_epi16(c1, 3) as u8;
+    out[14] = _mm_extract_epi16(c2, 3) as u8;
+    out[15] = _mm_extract_epi16(c3, 3) as u8;
+    out
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+fn indices4_neon(input: &[u8]) -> [u8; 16] {
+    use core::arch::aarch64::{
+        vand_u16, vcreate_u16, vdup_n_u16, vget_lane_u16, vorr_u16, vshl_n_u16, vshr_n_u16,
+    };
+    let pack = |a: u8, b: u8, c: u8, d: u8| {
+        vcreate_u16(
+            u64::from(a) | (u64::from(b) << 16) | (u64::from(c) << 32) | (u64::from(d) << 48),
+        )
+    };
+    let b0 = pack(input[0], input[3], input[6], input[9]);
+    let b1 = pack(input[1], input[4], input[7], input[10]);
+    let b2 = pack(input[2], input[5], input[8], input[11]);
+    let c0 = vshr_n_u16(b0, 2);
+    let c1 = vorr_u16(
+        vshl_n_u16(vand_u16(b0, vdup_n_u16(0x03)), 4),
+        vshr_n_u16(b1, 4),
+    );
+    let c2 = vorr_u16(
+        vshl_n_u16(vand_u16(b1, vdup_n_u16(0x0f)), 2),
+        vshr_n_u16(b2, 6),
+    );
+    let c3 = vand_u16(b2, vdup_n_u16(0x3f));
+    let lane = |v, i: i32| -> u8 {
+        match i {
+            0 => vget_lane_u16(v, 0) as u8,
+            1 => vget_lane_u16(v, 1) as u8,
+            2 => vget_lane_u16(v, 2) as u8,
+            _ => vget_lane_u16(v, 3) as u8,
+        }
+    };
+    let mut out = [0u8; 16];
+    for k in 0..4 {
+        out[k * 4] = lane(c0, k as i32);
+        out[k * 4 + 1] = lane(c1, k as i32);
+        out[k * 4 + 2] = lane(c2, k as i32);
+        out[k * 4 + 3] = lane(c3, k as i32);
+    }
+    out
 }
 
 // ---------- fork layer ----------
@@ -423,6 +589,26 @@ pub fn decode_parts(parts: &[&[u8]]) -> Result<BinHexEntry, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vector_matches_scalar_trios() {
+        for n in [0, 1, 2, 3, 4, 11, 12, 13, 47, 48, 49, 96, 128] {
+            let data: Vec<u8> = (0..n)
+                .map(|i| (i as u8).wrapping_mul(3).wrapping_add(1))
+                .collect();
+            let mut wide = Vec::new();
+            let mut scalar = Vec::new();
+            sixbit_encode(&data, &mut wide);
+            sixbit_encode_scalar(&data, &mut scalar);
+            assert_eq!(wide, scalar, "len {n}");
+        }
+        let zeros = vec![0u8; 64];
+        let mut wide = Vec::new();
+        let mut scalar = Vec::new();
+        sixbit_encode(&zeros, &mut wide);
+        sixbit_encode_scalar(&zeros, &mut scalar);
+        assert_eq!(wide, scalar);
+    }
 
     fn entry() -> BinHexEntry {
         BinHexEntry {

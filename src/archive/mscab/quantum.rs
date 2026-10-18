@@ -377,17 +377,18 @@ pub(crate) fn decode(input: &[u8], window_bits: u32, expected: usize) -> Result<
                 if off == 0 || off > window_size {
                     return Err(Error::InvalidData("mscab: quantum distance out of range"));
                 }
-                for _ in 0..len {
-                    let src = wpos.wrapping_sub(off) & window_mask;
-                    let b = window[src];
-                    window[wpos & window_mask] = b;
-                    wpos += 1;
-                    // A match may overshoot the declared output size;
-                    // the window still records those bytes.
-                    if out.len() < expected {
-                        out.push(b);
-                    }
-                }
+                // A match may overshoot the declared output size;
+                // the window still records those bytes.
+                let emit = (expected - out.len()).min(len);
+                crate::compress::match_ops::copy_ring(
+                    &mut window,
+                    wpos.wrapping_sub(off),
+                    wpos,
+                    len,
+                    &mut out,
+                    emit,
+                );
+                wpos += len;
                 frame_todo -= len as i64;
             }
             _ => return Err(Error::InvalidData("mscab: bad quantum selector")),

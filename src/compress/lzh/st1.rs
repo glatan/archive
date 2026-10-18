@@ -110,17 +110,12 @@ pub(crate) fn decode(
             // `offset` is stream-controlled and can exceed the ring
             // size; the source index is defined mod n (lhasa/ar002),
             // so wrap instead of letting the subtraction underflow.
-            let mut src = w.wrapping_add(n).wrapping_sub(offset).wrapping_sub(1) & (n - 1);
-            for _ in 0..len {
-                if out.len() >= expected {
-                    break;
-                }
-                let v = ring[src];
-                out.push(v);
-                ring[w] = v;
-                w = (w + 1) & (n - 1);
-                src = (src + 1) & (n - 1);
-            }
+            // Bitstream offset 0 means one byte back, which is the
+            // extra `wrapping_sub(1)` here.
+            let src = w.wrapping_add(n).wrapping_sub(offset).wrapping_sub(1);
+            let take = len.min(expected - out.len());
+            crate::compress::match_ops::copy_ring(&mut ring, src, w, take, &mut out, take);
+            w = (w + take) & (n - 1);
         }
     }
     Ok(out)

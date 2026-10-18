@@ -166,12 +166,13 @@ pub(crate) fn compress_lzo1x(input: &[u8]) -> Vec<u8> {
                 output.extend_from_slice(&input[anchor..pos]);
             }
 
-            // Extend match forward
-            let mut match_len = 4;
+            // Extend match forward. The first four bytes already matched.
             let max_match = (input.len() - LAST_LITERALS).saturating_sub(pos);
-            while match_len < max_match && input[candidate + match_len] == input[pos + match_len] {
-                match_len += 1;
-            }
+            let match_len = 4 + crate::compress::match_ops::match_len(
+                &input[candidate + 4..],
+                &input[pos + 4..],
+                max_match.saturating_sub(4),
+            );
 
             let offset = pos - candidate;
             emit_match_instruction(&mut output, offset, match_len);

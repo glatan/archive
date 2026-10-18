@@ -51,7 +51,31 @@ pub fn generate_text_data(size: usize) -> Vec<u8> {
     buf
 }
 
+/// Generate a single repeated byte. Matches overlap on every copy.
+///
+/// `archive` benches keep a single text corpus, so this stays unused there.
+#[allow(dead_code)]
+pub fn generate_run_data(size: usize) -> Vec<u8> {
+    vec![0xA5; size]
+}
+
+/// Generate a 4-byte periodic pattern.
+///
+/// `archive` benches keep a single text corpus, so this stays unused there.
+#[allow(dead_code)]
+pub fn generate_periodic_data(size: usize) -> Vec<u8> {
+    const PATTERN: [u8; 4] = [0x10, 0x20, 0x30, 0x40];
+    let mut buf = Vec::with_capacity(size);
+    while buf.len() < size {
+        let n = (size - buf.len()).min(PATTERN.len());
+        buf.extend_from_slice(&PATTERN[..n]);
+    }
+    buf
+}
+
 /// Generate deterministic binary data (less compressible) of the given size.
+///
+/// `archive` benches keep a single text corpus, so this stays unused there.
 #[allow(dead_code)]
 pub fn generate_binary_data(size: usize) -> Vec<u8> {
     let mut buf = Vec::with_capacity(size);
@@ -64,4 +88,54 @@ pub fn generate_binary_data(size: usize) -> Vec<u8> {
     }
     buf.truncate(size);
     buf
+}
+
+/// One compression-bench input.
+///
+/// `archive` benches keep a single text corpus, so this stays unused there.
+#[allow(dead_code)]
+pub struct BenchInput {
+    /// Criterion parameter. The repetitive text corpus keeps the historical
+    /// size id (`4KiB`, `256KiB`, `1KiB`) so those series stay comparable.
+    pub label: String,
+    pub data: Vec<u8>,
+    /// `true` for the 4MiB cases, which use a shorter Criterion sample.
+    pub large: bool,
+}
+
+/// Text, single-byte run, incompressible bytes, and a 4-byte period.
+///
+/// `with_4mib` appends a 4MiB size. Those cases are marked [`BenchInput::large`]
+/// and are emitted after the smaller sizes.
+///
+/// `archive` benches keep a single text corpus, so this stays unused there.
+#[allow(dead_code)]
+pub fn compression_inputs(sizes: &[(&str, usize)], with_4mib: bool) -> Vec<BenchInput> {
+    let mut sizes: Vec<(&str, usize)> = sizes.to_vec();
+    if with_4mib {
+        sizes.push(("4MiB", 4 * 1024 * 1024));
+    }
+    let mut out = Vec::new();
+    for &(size_label, size) in &sizes {
+        let large = size >= 4 * 1024 * 1024;
+        let corpora = [
+            ("", generate_text_data as fn(usize) -> Vec<u8>),
+            ("run", generate_run_data as fn(usize) -> Vec<u8>),
+            ("random", generate_binary_data as fn(usize) -> Vec<u8>),
+            ("periodic", generate_periodic_data as fn(usize) -> Vec<u8>),
+        ];
+        for (name, generate) in corpora {
+            let label = if name.is_empty() {
+                size_label.to_string()
+            } else {
+                format!("{name}/{size_label}")
+            };
+            out.push(BenchInput {
+                label,
+                data: generate(size),
+                large,
+            });
+        }
+    }
+    out
 }

@@ -1293,14 +1293,8 @@ fn lz77_compress_with_dict(input: &[u8], history: &[u8]) -> (Vec<u8>, Vec<EncSeq
         while chain_pos >= min_vpos && chain_pos < vpos && chain_count < MAX_CHAIN_LEN {
             let dist = vpos - chain_pos;
             if dist > 0 && dist <= WINDOW_SIZE {
-                // Count match between chain_pos and vpos in virtual buffer
                 let max_len = MAX_MATCH_LEN.min(input.len() - pos);
-                let mut match_len = 0;
-                while match_len < max_len
-                    && virt_byte(chain_pos + match_len) == input[pos + match_len]
-                {
-                    match_len += 1;
-                }
+                let match_len = virt_match_len(history, input, chain_pos, pos, max_len);
                 if match_len > best_len {
                     best_len = match_len;
                     best_dist = dist;
@@ -1354,6 +1348,34 @@ fn lz77_compress_with_dict(input: &[u8], history: &[u8]) -> (Vec<u8>, Vec<EncSeq
     }
 
     (literals, sequences)
+}
+
+/// Common prefix of the virtual byte at `chain_pos` and `input[pos..]`.
+///
+/// `chain_pos` is an index into `[history | input]`. The current position
+/// is always inside `input`, so a match that starts in the history is two
+/// slices: the history tail, then `input` against the remainder.
+fn virt_match_len(
+    history: &[u8],
+    input: &[u8],
+    chain_pos: usize,
+    pos: usize,
+    max_len: usize,
+) -> usize {
+    let right = &input[pos..];
+    let max_len = max_len.min(right.len());
+    if chain_pos >= history.len() {
+        let src = chain_pos - history.len();
+        return crate::compress::match_ops::match_len(&input[src..], right, max_len);
+    }
+    let hist_left = history.len() - chain_pos;
+    let from_hist =
+        crate::compress::match_ops::match_len(&history[chain_pos..], right, max_len.min(hist_left));
+    if from_hist < hist_left || from_hist == max_len {
+        return from_hist;
+    }
+    from_hist
+        + crate::compress::match_ops::match_len(input, &right[from_hist..], max_len - from_hist)
 }
 
 const fn hash3_virt(b0: u8, b1: u8, b2: u8) -> usize {
@@ -1988,6 +2010,21 @@ mod tests {
     }
 
     #[test]
+    fn test_lz77_match_spans_history_into_input() {
+        // The 3-byte hash hits inside the history, and the equal run continues
+        // past the history/input boundary. Stopping at the boundary would
+        // report 3.
+        let history = b"xyzxyzxy";
+        let input = b"zxyzxyzHELLO";
+        let (_literals, sequences) = lz77_compress_with_dict(input, history);
+        let longest = sequences
+            .iter()
+            .map(|seq| seq.match_length)
+            .max()
+            .unwrap_or(0);
+        assert!(longest >= 7, "span match length {longest}");
+    }
+
     fn test_encode_with_dict_roundtrip() {
         // Test that encode_with_dict produces output decodable by decode_with_dict.
         // We construct a minimal dictionary by hand for testing purposes.

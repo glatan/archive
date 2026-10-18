@@ -256,7 +256,11 @@ fn decode_stream(
         }
 
         pos = block_data_start + padded_len;
-        let decoded = apply_decoder_filters(&lzma2_decoded, &custom_filters, registry)?;
+        let decoded = if custom_filters.is_empty() {
+            lzma2_decoded
+        } else {
+            apply_decoder_filters(&lzma2_decoded, &custom_filters, registry)?
+        };
 
         if let Some(expected_compressed_size) = compressed_size
             && expected_compressed_size != compressed_len as u64
@@ -326,7 +330,11 @@ fn decode_stream(
         let unpadded_size = (pos - block_start) as u64 - ((padded_len - compressed_len) as u64);
         let uncompressed_size = decoded.len() as u64;
         block_records.push((unpadded_size, uncompressed_size));
-        output.extend_from_slice(&decoded);
+        if output.is_empty() {
+            output = decoded;
+        } else {
+            output.extend_from_slice(&decoded);
+        }
     }
 
     let index_start = pos;
@@ -719,6 +727,23 @@ pub fn decode_reader_with_registry<R: std::io::Read>(
     let mut buf = Vec::new();
     reader.read_to_end(&mut buf)?;
     decode_with_registry(&buf, registry).map_err(Into::into)
+}
+
+/// Append the decompressed bytes of `input` to `output`.
+///
+/// `max_output` limits how many bytes are appended. An empty `output`
+/// takes the decoder buffer by move. A non-empty `output` is extended.
+pub fn decode_into(
+    input: &[u8],
+    output: &mut Vec<u8>,
+    max_output: Option<usize>,
+) -> Result<(), Error> {
+    let produced = match max_output {
+        Some(limit) => decode_bounded(input, limit)?,
+        None => decode(input)?,
+    };
+    crate::compress::move_into(output, produced);
+    Ok(())
 }
 
 /// Decode with a maximum output size limit.

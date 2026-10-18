@@ -7,6 +7,7 @@ FUZZ_DURATION ?= 60
 FUZZ_PATTERN ?= all
 FUZZ_JOBS ?= 1
 
+# イメージ内で x86_64 の全テストのあと、aarch64 の lib テストを qemu-user で実行する。
 .PHONY: test
 test:
 	podman run --rm $(TEST_IMAGE)

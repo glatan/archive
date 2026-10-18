@@ -45,10 +45,29 @@ use crate::error::Error;
 ///
 /// Every compression codec struct implements this trait.
 /// Pass `max_output: Some(n)` to enforce an output size limit
-/// (decompression bomb protection).
+/// (decompression bomb protection). `n` counts only the bytes this
+/// call appends.
 pub trait Decode {
+    /// Append the decompressed bytes of `input` to `output`.
+    ///
+    /// `max_output` is the maximum number of bytes this call may append.
+    /// Bytes already in `output` do not count. `Some(n)` yields
+    /// [`Error::OutputLimitExceeded`] when the decompressed size would
+    /// exceed `n`. On error, `output` is left as it was when this call
+    /// started.
+    fn decode_into(
+        &self,
+        input: &[u8],
+        output: &mut Vec<u8>,
+        max_output: Option<usize>,
+    ) -> Result<(), Error>;
+
     /// Decode `input`, optionally limiting output to `max_output` bytes.
-    fn decode(&self, input: &[u8], max_output: Option<usize>) -> Result<Vec<u8>, Error>;
+    fn decode(&self, input: &[u8], max_output: Option<usize>) -> Result<Vec<u8>, Error> {
+        let mut output = Vec::new();
+        self.decode_into(input, &mut output, max_output)?;
+        Ok(output)
+    }
 }
 
 /// Encode data into a compressed byte stream.
@@ -59,8 +78,20 @@ pub trait Encode {
     /// Format-specific encoding options. Use `()` for formats with no options.
     type Options;
 
+    /// Append the compressed bytes of `input` to `output`.
+    fn encode_into(
+        &self,
+        input: &[u8],
+        output: &mut Vec<u8>,
+        options: &Self::Options,
+    ) -> Result<(), Error>;
+
     /// Encode `input` with the given options.
-    fn encode(&self, input: &[u8], options: &Self::Options) -> Result<Vec<u8>, Error>;
+    fn encode(&self, input: &[u8], options: &Self::Options) -> Result<Vec<u8>, Error> {
+        let mut output = Vec::new();
+        self.encode_into(input, &mut output, options)?;
+        Ok(output)
+    }
 }
 
 /// Read-only access to an archive entry's name and data.
@@ -81,6 +112,21 @@ pub trait ArchiveDecode {
 
     /// Decode an archive, returning its entries.
     fn decode(&self, input: &[u8]) -> Result<Vec<Self::Entry>, Error>;
+
+    /// Visit each entry. The default collects every entry, then walks them.
+    ///
+    /// Formats that override this build one entry, pass it to `visit`, and
+    /// drop it before the next, so peak memory is one payload rather than
+    /// the whole archive.
+    fn for_each_entry<F>(&self, input: &[u8], mut visit: F) -> Result<(), Error>
+    where
+        F: FnMut(Self::Entry) -> Result<(), Error>,
+    {
+        for entry in self.decode(input)? {
+            visit(entry)?;
+        }
+        Ok(())
+    }
 }
 
 /// Build and finalize an archive from file entries.

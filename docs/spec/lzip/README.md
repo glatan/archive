@@ -77,7 +77,7 @@
 | 40 | multimember file 内の empty member (data size = 0) は不許可 | lzip manual ch.5 | ✅ | 実装済み — multimember 内の empty member (data size = 0) を reject。単一メンバーの空ファイルは受理。`test_empty_member_in_multimember_rejected` |
 | 41 | member size 上限 (member あたり 2 PiB / 16 EiB−1) | lzip manual ch.5 | ✅ | `MAX_MEMBER_SIZE = 2^51` (2 PiB) を明示。decode は trailer の member size 超過を reject、encode 側も data/member size の上限を検証。`test_decode_rejects_oversized_member` |
 | 42 | LZMA match length: len−2 を 3 range (0+3bit / 10+3bit / 11+8bit) で符号化、範囲 2..=273 | lzip manual §6.2 | ✅ | `test_min_match_length_2`, `test_max_match_length_273` |
-| 43 | rep 距離は `0 <= dis < dict_size`、かつ `dis == position` は位置 0 の直前に仮想ゼロバイトがあるものとして受理 | lzip manual §6.2 | ✅ | 実装済み (`lzma_decode_impl`: `rep0 > output.len()` または `rep0 >= dict_size` で reject、rep0==len は idx underflow → 0 出力)。実エンコーダは生成しないため直接テストなし |
+| 43 | rep 距離は `0 <= dis < dict_size`、かつ `dis == position` は位置 0 の直前に仮想ゼロバイトがあるものとして受理 | lzip manual §6.2 | ✅ | 実装済み (`copy_rep`: 辞書窓の占有数を `occ` とし、`rep0 > occ` または `rep0 >= dict_size` で reject。`rep0 == occ` かつ `occ < dict_size` は窓の直前を 0x00 として出す)。実エンコーダは生成しないため直接テストなし |
 | 44 | range decoder 初期化: 先頭バイト 0x00 必須、code < range (0xFFFFFFFF は拒否) | lzip manual §6.1 | ✅ | `test_decoder_bad_first_byte`, `test_decoder_initial_code_max_rejected` |
 | 45 | EOS 後の range decoder 未消費バイト (encoder flush 由来、最大 ~5B) を許容して trailer を探索 | lzip manual §6.1 | ✅ | `test_decode_member_with_range_coder_padding_patterns` (slack 0..=5 で検証) |
 
@@ -85,7 +85,7 @@
 
 ## 実装メモ
 
-- エンコーダのマッチ探索は後方 4096 バイトに限定 (`find_match` の `search_limit`)。dict_size を大きくしても 4KiB 超の距離は emit しない (圧縮率のみの制約、形式準拠性に影響なし)。
+- エンコーダのマッチ探索は、3 バイトのハッシュ鎖と、同じ 2 バイト列の直近位置を、後方 4096 バイトかつ辞書サイズまで見る (`find_match`)。dict_size を大きくしても 4KiB 超の距離は emit しない (圧縮率のみの制約、形式準拠性に影響なし)。長さ 2 の一致は 3 バイト鎖に載らないので、2 バイト側を残している。
 - `decode()` のデフォルト dict_size バイトは 0x0C (4 KiB 固定)。GNU lzip の「file size 以下で最大の dict」方針とは異なるが形式上有効。
 - `decode_bounded` は完全 decode 後にサイズ判定する post-hoc 方式 (出力爆発の事前防止ではない)。
 - 共有 LZMA コアのエラーメッセージ prefix は `lzma:` (lzma_alone / lrzip / sevenz / squashfs / zip / erofs microlzma と共有のため)。

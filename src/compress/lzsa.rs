@@ -228,15 +228,8 @@ fn copy_match(
     if out.len() + len > max_output {
         return Err(Error::OutputLimitExceeded { limit: max_output });
     }
-    for vpos in (avail - distance)..(avail - distance + len) {
-        let b = if vpos < prefix.len() {
-            prefix[vpos]
-        } else {
-            out[vpos - prefix.len()]
-        };
-        out.push(b);
-    }
-    Ok(())
+    crate::compress::match_ops::copy_match_with_prefix(prefix, out, distance, len)
+        .map_err(|_| Error::InvalidData(msg))
 }
 
 // ---------------------------------------------------------------------------
@@ -727,14 +720,13 @@ fn encode_lzsa1_block_window(window: &[u8], block_start: usize, eod: bool) -> Op
             if dist <= L1_MAX_DIST
                 && window[c..c + L1_MIN_MATCH] == window[gpos..gpos + L1_MIN_MATCH]
             {
-                len = L1_MIN_MATCH;
-                while gpos + len < window.len() && window[c + len] == window[gpos + len] {
-                    len += 1;
-                }
                 let max_len = (input.len() - pos).min(L1_MAX_RUN);
-                if len > max_len {
-                    len = max_len;
-                }
+                len = L1_MIN_MATCH
+                    + crate::compress::match_ops::match_len(
+                        &window[c + L1_MIN_MATCH..],
+                        &window[gpos + L1_MIN_MATCH..],
+                        max_len - L1_MIN_MATCH,
+                    );
             }
         }
         if len >= L1_MIN_MATCH {
@@ -860,14 +852,13 @@ fn encode_lzsa2_block_window(window: &[u8], block_start: usize, eod: bool) -> Op
             if dist <= L2_MAX_DIST
                 && window[c..c + L2_MIN_MATCH] == window[gpos..gpos + L2_MIN_MATCH]
             {
-                len = L2_MIN_MATCH;
-                while gpos + len < window.len() && window[c + len] == window[gpos + len] {
-                    len += 1;
-                }
                 let max_len = (input.len() - pos).min(L2_MAX_RUN);
-                if len > max_len {
-                    len = max_len;
-                }
+                len = L2_MIN_MATCH
+                    + crate::compress::match_ops::match_len(
+                        &window[c + L2_MIN_MATCH..],
+                        &window[gpos + L2_MIN_MATCH..],
+                        max_len - L2_MIN_MATCH,
+                    );
             }
         }
         if len >= L2_MIN_MATCH {

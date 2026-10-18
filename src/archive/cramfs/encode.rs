@@ -79,6 +79,9 @@ struct Node {
     /// File contents or symlink target; empty for directories.
     data: Vec<u8>,
     children: Vec<Node>,
+    /// Name to child index. Valid while `insert` builds the tree.
+    /// `sort_dir` reorders `children` and does not consult this map.
+    by_name: BTreeMap<String, usize>,
 }
 
 impl Node {
@@ -146,6 +149,7 @@ impl CramfsEncoder {
                 gid: 0,
                 data: Vec::new(),
                 children: Vec::new(),
+                by_name: BTreeMap::new(),
             },
             volume: [0; 16],
             error: None,
@@ -240,9 +244,11 @@ impl CramfsEncoder {
                 self.error = Some("cramfs invalid path");
                 return;
             }
-            let idx = match cur.children.iter().position(|n| n.name == comp) {
+            let idx = match cur.by_name.get(comp).copied() {
                 Some(i) => i,
                 None => {
+                    let idx = cur.children.len();
+                    cur.by_name.insert(String::from(comp), idx);
                     cur.children.push(Node {
                         name: String::from(comp),
                         mode: S_IFDIR | 0o755,
@@ -250,8 +256,9 @@ impl CramfsEncoder {
                         gid: 0,
                         data: Vec::new(),
                         children: Vec::new(),
+                        by_name: BTreeMap::new(),
                     });
-                    cur.children.len() - 1
+                    idx
                 }
             };
             let child = &mut cur.children[idx];

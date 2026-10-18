@@ -329,9 +329,9 @@ fn resolve(input: &[u8], kind: HashKind, raws: Vec<RawEntry>) -> Result<Vec<GitP
         );
         resolving[i] = false;
         r?;
-        let (bt, bdata) = resolved[base_idx].clone().unwrap();
-        let out = apply_delta(&bdata, &raws[i].payload)?;
-        resolved[i] = Some((bt, out));
+        let (bt, bdata) = resolved[base_idx].as_ref().unwrap();
+        let out = apply_delta(bdata, &raws[i].payload)?;
+        resolved[i] = Some((*bt, out));
         Ok(())
     }
 

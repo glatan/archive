@@ -217,10 +217,9 @@ pub(crate) fn verbatim(input: &[u8]) -> Vec<u8> {
 /// Copy `len` bytes starting at absolute output position `pos`, allowing
 /// the copy to overlap the bytes being produced (LZ77-style).
 pub(crate) fn copy_from_output(out: &mut Vec<u8>, pos: usize, len: usize) {
-    for i in 0..len {
-        let b = out[pos + i];
-        out.push(b);
-    }
+    let offset = out.len() - pos;
+    crate::compress::match_ops::copy_match(out, offset, len)
+        .expect("lzrw copy stays inside the output");
 }
 
 /// The LZRW2/LZRW3/LZRW3-A three-byte hash used by each compressor (and by the

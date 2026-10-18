@@ -80,7 +80,7 @@
 | 38 | Properties byte validation (lc+lp<=4, pb<=4) | xz-file-format.txt §5.3.1 + liblzma LZMA2 semantics | ✅ | `test_lzma2_control_byte_ranges` |
 | 39 | decode 側は妥当な lc/lp/pb 組 (`lc+lp<=4`, `pb<=4`) を受理 | xz-file-format.txt §5.3.1 + liblzma LZMA2 semantics | ✅ | `test_decode_system_xz_with_non_default_lzma_props` |
 | 40 | LZMA2 uncompressed chunk: 0x01 = dictionary reset, 0x02 = no reset | liblzma LZMA2 chunk semantics (xz-file-format.txt §3.2 で範囲外) | ✅ | lzma2 実装で対応 |
-| 41 | LZMA2 compressed chunk: state/properties reset flags in control byte high nibble | liblzma LZMA2 chunk semantics (xz-file-format.txt §3.2 で範囲外) | ✅ | lzma2 実装で対応 |
+| 41 | LZMA2 compressed chunk: state/properties reset flags in control byte high nibble | liblzma LZMA2 chunk semantics (xz-file-format.txt §3.2 で範囲外) | ✅ | エンコーダは、辞書原点の圧縮チャンクを `0xE0` に非圧縮長−1 の上位 5 ビットを足した制御バイトにし、辞書を持ち越す圧縮チャンクは `0x80` に同じ 5 ビットを足す。縮まない塊は、その塊の先頭だけ `0x01`、続きは `0x02`。`test_lzma2_keeps_state_across_chunks` は先頭が `0xE0` 以上または `0x01` で、後続に `0x80..0xA0` があることを見る。`test_lzma2_control_byte_ranges` は `0x02`、`0x80`、`0xA0`、`0xC0` を復号する |
 | 42 | LZMA2 chunk sizes: 2-byte uncompressed + 2-byte compressed | liblzma LZMA2 chunk semantics (xz-file-format.txt §3.2 で範囲外) | ✅ | lzma2 実装で対応 |
 
 ### チェックサム
@@ -122,7 +122,7 @@
 
 ## 実装メモ (liblzma との差分 — いずれも lenient 側)
 
-- 共有 LZMA コアの仮想ゼロ距離受理 (`rep0 == output.len()` で初期距離を 0x00 として読む): lzip manual §6.2 由来の仕様だが liblzma は `rep0 == full` を reject。辞書リセット直後に限る狭い差分で、正当な .xz には影響なし。
+- 共有 LZMA コアの仮想ゼロ距離受理 (辞書窓の占有数 `occ` が `dict_size` 未満で `rep0 == occ` のとき、その参照の先頭を 0x00 として読む): lzip manual §6.2 由来の仕様だが liblzma は `rep0 == full` を reject。辞書が埋まるまでの間に限る狭い差分で、正当な .xz には影響なし。
 - LZMA2 first-chunk dict-reset 規則を強制しない: liblzma は `need_dictionary_reset` で先頭 chunk が 0x02 / 0x80-0x9F (reset なし) を拒否するが、本実装は受理する。
 - uncompressed chunk 直後の compressed chunk で state reset (0xA0+) を強制しない: liblzma は要求するが、本実装は `decoder_state` を継続利用して受理する。
 - `decode_bounded` は完全 decode 後の事後チェックであり、decode 中のメモリ使用量は bounded ではない。

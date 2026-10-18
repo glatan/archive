@@ -29,19 +29,27 @@ const MAX_MEMBER_SIZE: u64 = 0x8_0000_0000_0000;
 pub struct LzipCodec;
 
 impl Decode for LzipCodec {
-    fn decode(&self, input: &[u8], max_output: Option<usize>) -> Result<Vec<u8>, Error> {
-        match max_output {
-            Some(limit) => decode::decode_bounded(input, limit),
-            None => decode::decode(input),
-        }
+    fn decode_into(
+        &self,
+        input: &[u8],
+        output: &mut Vec<u8>,
+        max_output: Option<usize>,
+    ) -> Result<(), Error> {
+        decode::decode_into(input, output, max_output)
     }
 }
 
 impl Encode for LzipCodec {
     type Options = ();
 
-    fn encode(&self, input: &[u8], _options: &Self::Options) -> Result<Vec<u8>, Error> {
-        Ok(encode::encode(input))
+    fn encode_into(
+        &self,
+        input: &[u8],
+        output: &mut Vec<u8>,
+        _options: &Self::Options,
+    ) -> Result<(), Error> {
+        crate::compress::move_into(output, encode::encode(input));
+        Ok(())
     }
 }
 

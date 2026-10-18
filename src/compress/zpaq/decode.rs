@@ -300,7 +300,11 @@ impl<'a> BlockDecoder<'a> {
         header: &ParsedBlockHeader,
         max_output: usize,
     ) -> Result<Self, Error> {
-        let pred = Predictor::new(header.zpaql.clone())?;
+        let pred = if let Some(level) = super::models::builtin_level(&header.zpaql) {
+            Predictor::new_builtin(header.zpaql.clone(), level)?
+        } else {
+            Predictor::new(header.zpaql.clone())?
+        };
         Ok(Self {
             dec: ArithDecoder::new(&input[header.next_pos..]),
             pred,
@@ -541,6 +545,23 @@ impl<'a> BlockDecoder<'a> {
 /// ```
 pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
     decode_bounded(input, 0)
+}
+
+/// Append the decompressed bytes of `input` to `output`.
+///
+/// `max_output` limits how many bytes are appended. An empty `output`
+/// takes the decoder buffer by move. A non-empty `output` is extended.
+pub fn decode_into(
+    input: &[u8],
+    output: &mut Vec<u8>,
+    max_output: Option<usize>,
+) -> Result<(), Error> {
+    let produced = match max_output {
+        Some(limit) => decode_bounded(input, limit)?,
+        None => decode(input)?,
+    };
+    crate::compress::move_into(output, produced);
+    Ok(())
 }
 
 /// Decode with a maximum output size limit.

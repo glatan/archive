@@ -33,6 +33,13 @@ impl crate::traits::ArchiveDecode for TarCodec {
     fn decode(&self, input: &[u8]) -> Result<Vec<Self::Entry>, Error> {
         decode::decode(input)
     }
+
+    fn for_each_entry<F>(&self, input: &[u8], visit: F) -> Result<(), Error>
+    where
+        F: FnMut(Self::Entry) -> Result<(), Error>,
+    {
+        decode::for_each_entry(input, visit)
+    }
 }
 
 /// Encoder struct for trait-based tar encode operations.

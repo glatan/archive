@@ -99,13 +99,12 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
                 let c = cand as usize;
                 let dist = pos - c;
                 if dist <= MAX_OFFSET && input[c..c + MIN_MATCH] == input[pos..pos + MIN_MATCH] {
-                    let mut len = MIN_MATCH;
-                    while len < MAX_MATCH
-                        && pos + len < input.len()
-                        && input[c + len] == input[pos + len]
-                    {
-                        len += 1;
-                    }
+                    let len = MIN_MATCH
+                        + crate::compress::match_ops::match_len(
+                            &input[c + MIN_MATCH..],
+                            &input[pos + MIN_MATCH..],
+                            (MAX_MATCH - MIN_MATCH).min(input.len() - (pos + MIN_MATCH)),
+                        );
                     match_len = len;
                     match_off = dist;
                 }

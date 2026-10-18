@@ -88,10 +88,10 @@
 | # | 仕様要件 | 仕様参照 | 状態 | テスト名 / 備考 |
 |---|---------|---------|------|----------------|
 | 32 | §3.5 Complex prefix codes (encode) | RFC 7932 §3.5 | ✅ | `write_complex_prefix_code()` |
-| 33 | §4 Distance encoding (encode) | RFC 7932 §4 | ✅ | `encode_distance()` |
-| 34 | §5 Full insert-and-copy command (copy 含む encode) | RFC 7932 §5 | ✅ | `generate_lz77_commands()`, LZ77 hash-chain match finder, `test_single_block_lz77_path_produces_valid_stream` |
+| 33 | §4 Distance encoding (encode) | RFC 7932 §4 | ✅ | `encode_distance()` は `floor(log2(distance+3))-1` でスロットを決める。`test_encode_distance_matches_linear_scan` |
+| 34 | §5 Full insert-and-copy command (copy 含む encode) | RFC 7932 §5 | ✅ | `generate_lz77_commands()`, 単一スロットのハッシュ, `test_single_block_lz77_path_produces_valid_stream` |
 | 35 | §7 Context modeling (encode) | RFC 7932 §7 | ✅ | `write_ctx_model()`, `test_context_modeling_roundtrip`, `test_context_modeling_lz77_path_produces_valid_stream`, `test_brotli_encode_metablock_boundary_context` |
-| 36 | §8 Static dictionary usage (encode) | RFC 7932 §8 | ✅ | `find_dictionary_match()` |
+| 36 | §8 Static dictionary usage (encode) | RFC 7932 §8 | ✅ | `find_dictionary_match()`。索引はビルド時に `dictionary.bin` から生成する。`test_embedded_dict_index_matches_runtime_build` |
 | 37 | §9.2 Metadata metablock encode | RFC 7932 §9.2 | ✅ | `encode_with_metadata()`, `test_metadata_roundtrip` |
 | 38 | Multi-block-type encoder | RFC 7932 §9.2 | ✅ | `write_multi_block()`, `test_multi_block_lz77_path_produces_valid_stream` |
 

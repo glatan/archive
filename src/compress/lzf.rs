@@ -70,11 +70,8 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
             if out.len() + len > max_output {
                 return Err(Error::OutputLimitExceeded { limit: max_output });
             }
-            let start = out.len() - offset;
-            for i in 0..len {
-                let b = out[start + i];
-                out.push(b);
-            }
+            crate::compress::match_ops::copy_match(&mut out, offset, len)
+                .map_err(|_| Error::InvalidData("lzf: match offset before start"))?;
         }
     }
     Ok(out)
@@ -115,11 +112,12 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
         if cand >= 0 {
             let c = cand as usize;
             if pos - c <= MAX_OFFSET && input[c..c + MIN_MATCH] == input[pos..pos + MIN_MATCH] {
-                let mut len = MIN_MATCH;
-                while pos + len < input.len() && input[c + len] == input[pos + len] {
-                    len += 1;
-                }
-                len = len.min(MAX_MATCH_LEN);
+                let len = MIN_MATCH
+                    + crate::compress::match_ops::match_len(
+                        &input[c + MIN_MATCH..],
+                        &input[pos + MIN_MATCH..],
+                        (input.len() - (pos + MIN_MATCH)).min(MAX_MATCH_LEN - MIN_MATCH),
+                    );
 
                 flush_literals!();
 

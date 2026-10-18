@@ -155,6 +155,8 @@ pub(crate) struct BlockEncoder {
     pz: Option<Zpaql>,
     /// SHA-1 of the current segment's postprocessed data.
     sha1: crate::util::sha1::Sha1,
+    /// Built-in levels use the native HCOMP and component order.
+    native: bool,
 }
 
 impl BlockEncoder {
@@ -179,7 +181,14 @@ impl BlockEncoder {
             pcomp: None,
             pz: None,
             sha1: crate::util::sha1::Sha1::new(),
+            native: false,
         })
+    }
+
+    /// Use the native built-in model instead of the HCOMP interpreter.
+    pub(crate) fn with_native(mut self) -> Self {
+        self.native = true;
+        self
     }
 
     /// Write `tag "zPQ" level 1 header` to `out`.
@@ -215,7 +224,13 @@ impl BlockEncoder {
             // selector (`0` = PASS, or `1` + 2-byte length + program
             // for PROG). The selector appears only on a block's first
             // segment; the loaded program applies to the whole block.
-            let pred = Predictor::new(self.z.clone())?;
+            let pred = if self.native {
+                let level = super::models::builtin_level(&self.z)
+                    .expect("native blocks use a built-in model");
+                Predictor::new_builtin(self.z.clone(), level)?
+            } else {
+                Predictor::new(self.z.clone())?
+            };
             if !pred.is_modeled() {
                 self.enc.init_stored();
             }
@@ -316,8 +331,9 @@ pub fn encode(input: &[u8], level: u32) -> Vec<u8> {
     let level = level.clamp(1, 3);
     let z = models::model_zpaql(level).expect("built-in model headers are valid");
     let wire_level = 1 + u8::from(z.component_count() == 0);
-    let mut block =
-        BlockEncoder::new(z, wire_level).expect("built-in model headers produce valid blocks");
+    let mut block = BlockEncoder::new(z, wire_level)
+        .expect("built-in model headers produce valid blocks")
+        .with_native();
     let mut output = Vec::new();
     block.write_block_header(&mut output);
     block
@@ -336,4 +352,35 @@ pub fn encode_with_model(input: &[u8], model: &CustomModel) -> Result<Vec<u8>, E
     block.encode_segment(&mut output, b"", b"", input)?;
     output.push(255);
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_encode_matches_interpreter() {
+        let samples: &[&[u8]] = &[
+            b"",
+            b"Hello, ZPAQ!",
+            b"BANANA",
+            b"The quick brown fox jumps over the lazy dog.",
+            &[0, 255, 1, 2, 3, 128],
+        ];
+        for level in 1..=3 {
+            let z = models::model_zpaql(level).expect("built-in header");
+            let wire = 1 + u8::from(z.component_count() == 0);
+            for sample in samples {
+                let native = encode(sample, level);
+                let mut block = BlockEncoder::new(z.clone(), wire).expect("block");
+                let mut interpreted = Vec::new();
+                block.write_block_header(&mut interpreted);
+                block
+                    .encode_segment(&mut interpreted, b"", b"", sample)
+                    .expect("interpreter encode");
+                interpreted.push(255);
+                assert_eq!(native, interpreted, "level {level}");
+            }
+        }
+    }
 }

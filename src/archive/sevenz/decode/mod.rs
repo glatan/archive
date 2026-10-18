@@ -122,8 +122,28 @@ pub fn decode_with_password_bytes(
 }
 
 fn decode_impl(input: &[u8], password: Option<&[u8]>) -> Result<Vec<SevenZEntry>, Error> {
+    let mut entries = Vec::new();
+    decode_visit(input, password, |entry| {
+        entries.push(entry);
+        Ok(())
+    })?;
+    Ok(entries)
+}
+
+/// Visit each 7z file. The entry is dropped when `visit` returns.
+pub fn for_each_entry<F>(input: &[u8], visit: F) -> Result<(), Error>
+where
+    F: FnMut(SevenZEntry) -> Result<(), Error>,
+{
+    decode_visit(input, None, visit)
+}
+
+fn decode_visit<F>(input: &[u8], password: Option<&[u8]>, visit: F) -> Result<(), Error>
+where
+    F: FnMut(SevenZEntry) -> Result<(), Error>,
+{
     if input.is_empty() {
-        return Ok(Vec::new());
+        return Ok(());
     }
     if input.len() < SIGNATURE_HEADER_SIZE {
         return Err(Error::UnexpectedEof);
@@ -171,7 +191,7 @@ fn decode_impl(input: &[u8], password: Option<&[u8]>) -> Result<Vec<SevenZEntry>
     }
 
     let metadata = parse_next_header(input, next_header, password)?;
-    decode_entries(input, metadata, password)
+    decode_entries(input, metadata, password, visit)
 }
 
 fn parse_next_header(
@@ -200,13 +220,17 @@ fn parse_next_header(
     }
 }
 
-fn decode_entries(
+fn decode_entries<F>(
     input: &[u8],
     metadata: ArchiveMetadata,
     password: Option<&[u8]>,
-) -> Result<Vec<SevenZEntry>, Error> {
+    mut visit: F,
+) -> Result<(), Error>
+where
+    F: FnMut(SevenZEntry) -> Result<(), Error>,
+{
     if metadata.files.is_empty() {
-        return Ok(Vec::new());
+        return Ok(());
     }
     let streams = metadata
         .main_streams
@@ -216,7 +240,6 @@ fn decode_entries(
         return Err(Error::InvalidData("7z: file/substream count mismatch"));
     }
 
-    let mut entries = Vec::with_capacity(metadata.files.len());
     let mut files = metadata.files.into_iter();
 
     for (folder_index, folder) in streams.folders.iter().enumerate() {
@@ -241,21 +264,20 @@ fn decode_entries(
             .substreams
             .get(folder_index)
             .ok_or(Error::InvalidData("7z: missing substream metadata"))?;
-        let mut pos = 0usize;
+        let mut unpacked = unpacked;
         for substream in substreams {
             let file = files
                 .next()
                 .ok_or(Error::InvalidData("7z: file/substream count mismatch"))?;
             let unpack_len = usize::try_from(substream.unpack_size)
                 .map_err(|_| Error::InvalidData("7z: substream size overflow"))?;
-            let end = pos
-                .checked_add(unpack_len)
-                .ok_or(Error::InvalidData("7z: substream size overflow"))?;
-            if end > unpacked.len() {
+            if unpack_len > unpacked.len() {
                 return Err(Error::UnexpectedEof);
             }
-            let data = unpacked[pos..end].to_vec();
-            pos = end;
+            // `split_off` moves the tail. The prefix stays in place, so
+            // each substream is detached without copying its bytes.
+            let rest = unpacked.split_off(unpack_len);
+            let data = core::mem::replace(&mut unpacked, rest);
             if let Some(expected_crc) = substream.crc32 {
                 let actual_crc = crc32::crc32(&data);
                 if actual_crc != expected_crc {
@@ -265,7 +287,7 @@ fn decode_entries(
                     });
                 }
             }
-            entries.push(SevenZEntry {
+            visit(SevenZEntry {
                 name: file.name,
                 data,
                 crc32: substream.crc32,
@@ -273,9 +295,9 @@ fn decode_entries(
                 ctime: file.ctime,
                 atime: file.atime,
                 mtime: file.mtime,
-            });
+            })?;
         }
-        if pos != unpacked.len() {
+        if !unpacked.is_empty() {
             return Err(Error::InvalidData("7z: unused unpacked bytes remain"));
         }
     }
@@ -283,7 +305,7 @@ fn decode_entries(
     if files.next().is_some() {
         return Err(Error::InvalidData("7z: file/substream count mismatch"));
     }
-    Ok(entries)
+    Ok(())
 }
 
 fn decode_streams_blob(
@@ -384,6 +406,21 @@ fn pack_stream_slices<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn for_each_entry_stops_when_visit_fails() {
+        let mut encoder = SevenZEncoder::new();
+        encoder.add_file("a.txt", b"aaa");
+        encoder.add_file("b.txt", b"bbb");
+        let archive = encoder.finish().unwrap();
+        let mut seen = Vec::new();
+        let err = for_each_entry(&archive, |entry| {
+            seen.push(entry.name);
+            Err(Error::InvalidData("stop"))
+        });
+        assert!(err.is_err());
+        assert_eq!(seen, ["a.txt"]);
+    }
     use crate::archive::sevenz::encode::{SevenZEncoder, SevenZFilter};
     use crate::compress::lzma::{self, LzmaProperties};
     use crate::util::aes256::Aes256;

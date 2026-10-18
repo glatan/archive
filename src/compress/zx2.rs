@@ -239,15 +239,8 @@ fn copy_match(
     if out.len() + len > max_output {
         return Err(Error::OutputLimitExceeded { limit: max_output });
     }
-    for vpos in (avail - offset)..(avail - offset + len) {
-        let b = if vpos < prefix.len() {
-            prefix[vpos]
-        } else {
-            out[vpos - prefix.len()]
-        };
-        out.push(b);
-    }
-    Ok(())
+    crate::compress::match_ops::copy_match_with_prefix(prefix, out, offset, len)
+        .map_err(|_| Error::InvalidData(msg))
 }
 
 fn decode_impl(
@@ -592,10 +585,14 @@ fn encode_impl(
                     && hist(c + 1) == input[pos + 1]
                     && hist(c + 2) == input[pos + 2]
                 {
-                    let mut len = MIN_MATCH;
-                    while pos + len < input.len() && hist(c + len) == input[pos + len] {
-                        len += 1;
-                    }
+                    let len = MIN_MATCH
+                        + crate::compress::match_ops::match_len_window(
+                            prefix,
+                            input,
+                            c + MIN_MATCH,
+                            plen + pos + MIN_MATCH,
+                            input.len() - (pos + MIN_MATCH),
+                        );
                     best = Some((len, dist));
                 }
             }

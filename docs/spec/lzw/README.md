@@ -15,7 +15,7 @@
 | 4 | ブロックモード (クリアコード 256) | ncompress `compress42.c`: code stream / dictionary growth | ✅ | `test_roundtrip_large` (辞書フル→クリア) |
 | 5 | 可変幅コード 9-16ビット | ncompress `compress42.c`: code stream / dictionary growth | ✅ | `test_roundtrip_max_bits_range`, `test_roundtrip_large` |
 | 6 | コード幅遷移タイミング (ncompress互換) | ncompress `compress42.c`: code stream / dictionary growth | ✅ | `test_roundtrip_large` (max_bits=10, 512バイト) |
-| 7 | LSB-first ビットパッキング | ncompress `compress42.c`: bit packing | ✅ | `test_read_code_lsb_first` |
+| 7 | LSB-first ビットパッキング | ncompress `compress42.c`: bit packing | ✅ | `test_read_code_lsb_first`, `test_code_sequence_matches_packed_bytes` |
 | 8 | KwKwK 特殊ケース (code == next_code) | ncompress `compress42.c`: code stream / dictionary growth | ✅ | `test_roundtrip_kwkwk` |
 | 9 | 空データの圧縮/伸張 | ncompress `compress42.c` | ✅ | `test_roundtrip_empty`, `test_empty_compressed_data` |
 | 10 | 単一バイトの圧縮/伸張 | ncompress `compress42.c` | ✅ | `test_roundtrip_single_byte` |

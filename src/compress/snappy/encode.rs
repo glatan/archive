@@ -72,13 +72,12 @@ pub fn encode_raw(input: &[u8]) -> Vec<u8> {
         emit_literal(&mut output, &input[anchor..pos]);
 
         let offset = pos - candidate;
-        let mut match_len = 4usize;
-        while pos + match_len < input.len()
-            && candidate + match_len < input.len()
-            && input[candidate + match_len] == input[pos + match_len]
-        {
-            match_len += 1;
-        }
+        let max_extra = (input.len() - pos).min(input.len() - candidate) - 4;
+        let match_len = 4 + crate::compress::match_ops::match_len(
+            &input[candidate + 4..],
+            &input[pos + 4..],
+            max_extra,
+        );
         emit_copy(&mut output, offset, match_len);
 
         let end = pos + match_len;
