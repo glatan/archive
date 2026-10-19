@@ -1,6 +1,6 @@
 //! `ar` archive decoding (GNU and BSD dialects).
 
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use crate::error::Error;

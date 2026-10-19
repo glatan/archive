@@ -590,6 +590,33 @@ pub fn decode_parts(parts: &[&[u8]]) -> Result<BinHexEntry, Error> {
 mod tests {
     use super::*;
 
+    fn scalar_indices(input: &[u8; 12]) -> [u8; 16] {
+        let mut out = [0u8; 16];
+        for k in 0..4 {
+            let i = k * 3;
+            out[k * 4..k * 4 + 4].copy_from_slice(&trio_indices(
+                input[i],
+                input[i + 1],
+                input[i + 2],
+            ));
+        }
+        out
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn indices4_sse2_matches_scalar() {
+        let input = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        assert_eq!(unsafe { indices4_sse2(&input) }, scalar_indices(&input));
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn indices4_neon_matches_scalar() {
+        let input = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        assert_eq!(unsafe { indices4_neon(&input) }, scalar_indices(&input));
+    }
+
     #[test]
     fn vector_matches_scalar_trios() {
         for n in [0, 1, 2, 3, 4, 11, 12, 13, 47, 48, 49, 96, 128] {

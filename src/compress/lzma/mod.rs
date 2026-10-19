@@ -75,6 +75,16 @@ impl LzmaProperties {
     }
 
     /// Decode an LZMA properties byte.
+    #[cfg_attr(
+        not(any(
+            feature = "lrzip",
+            feature = "lzma-alone",
+            feature = "squashfs",
+            feature = "xz",
+            feature = "sevenz",
+        )),
+        allow(dead_code)
+    )]
     pub(crate) const fn from_props_byte(props_byte: u8) -> Result<Self, Error> {
         let lc = props_byte % 9;
         let rem = props_byte / 9;
@@ -88,6 +98,16 @@ impl LzmaProperties {
     }
 
     /// Encode an LZMA properties byte.
+    #[cfg_attr(
+        not(any(
+            feature = "lrzip",
+            feature = "lzma-alone",
+            feature = "squashfs",
+            feature = "xz",
+            feature = "sevenz",
+        )),
+        allow(dead_code)
+    )]
     pub(crate) const fn to_props_byte(self) -> u8 {
         (self.pb * 5 + self.lp) * 9 + self.lc
     }
@@ -400,6 +420,7 @@ const fn distance_to_slot(dist: u32) -> usize {
 /// Decode an LZMA stream (as used in lzip).
 ///
 /// Returns `(decoded_data, bytes_consumed)`.
+#[cfg_attr(not(feature = "lzip"), allow(dead_code))]
 pub(crate) fn lzma_decode(data: &[u8], dict_size: u32) -> Result<(Vec<u8>, usize), Error> {
     lzma_decode_with_props(data, dict_size, LzmaProperties::LZIP)
 }
@@ -776,6 +797,7 @@ impl LzmaDecoderState {
         }
     }
 
+    #[cfg_attr(not(any(feature = "xz", feature = "sevenz")), allow(dead_code))]
     pub(crate) const fn reset(&mut self) {
         *self = Self::new();
     }
@@ -784,6 +806,16 @@ impl LzmaDecoderState {
 /// Encode data as an LZMA stream (as used in lzip).
 ///
 /// Returns the LZMA byte stream including the leading 0x00 byte.
+#[cfg_attr(
+    not(any(
+        feature = "lzip",
+        feature = "lrzip",
+        feature = "zip",
+        feature = "xz",
+        feature = "sevenz",
+    )),
+    allow(dead_code)
+)]
 pub(crate) fn lzma_encode(data: &[u8], dict_size: u32) -> Vec<u8> {
     lzma_encode_with_props(data, dict_size, LzmaProperties::LZIP)
 }

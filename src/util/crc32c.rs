@@ -28,10 +28,12 @@ pub fn crc32c(data: &[u8]) -> u32 {
     state.finish()
 }
 
+#[cfg_attr(not(feature = "snappy"), allow(dead_code))]
 pub const fn mask_crc32c(crc: u32) -> u32 {
     crc.rotate_right(15).wrapping_add(0xA282_EAD8)
 }
 
+#[cfg_attr(not(feature = "snappy"), allow(dead_code))]
 pub const fn unmask_crc32c(masked: u32) -> u32 {
     masked.wrapping_sub(0xA282_EAD8).rotate_left(15)
 }

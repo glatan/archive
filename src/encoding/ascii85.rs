@@ -10,6 +10,7 @@
 //! (20 characters over the alphabet `0-9 A-Z a-z !#$%&()*+-;<=>?@^_`{|}~`).
 //! It is exposed separately via [`encode_rfc1924`] / [`decode_rfc1924`].
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::Error;
@@ -107,7 +108,7 @@ fn digits_pair(a: u32, b: u32) -> ([u8; 5], [u8; 5]) {
     (digits_scalar(a), digits_scalar(b))
 }
 
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(any(test, not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
 fn digits_scalar(mut value: u32) -> [u8; 5] {
     let mut digits = [0u8; 5];
     for d in digits.iter_mut().rev() {
@@ -298,6 +299,27 @@ pub fn decode_rfc1924(input: &[u8]) -> Result<Vec<u8>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_digits_match(simd: ([u8; 5], [u8; 5]), a: u32, b: u32) {
+        assert_eq!(simd.0, digits_scalar(a));
+        assert_eq!(simd.1, digits_scalar(b));
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn digits_pair_sse2_matches_scalar() {
+        for (a, b) in [(0, 0), (1, 85), (0x0102_0304, u32::MAX)] {
+            assert_digits_match(unsafe { digits_pair_sse2(a, b) }, a, b);
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn digits_pair_neon_matches_scalar() {
+        for (a, b) in [(0, 0), (1, 85), (0x0102_0304, u32::MAX)] {
+            assert_digits_match(unsafe { digits_pair_neon(a, b) }, a, b);
+        }
+    }
 
     #[test]
     fn vector_matches_scalar_lengths() {

@@ -2,6 +2,7 @@
 //!
 //! [RFC 1952]: https://datatracker.ietf.org/doc/html/rfc1952
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::compress::deflate;

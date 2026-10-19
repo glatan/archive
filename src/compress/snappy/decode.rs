@@ -107,7 +107,12 @@ pub fn decode_raw(input: &[u8]) -> Result<Vec<u8>, Error> {
         return Err(Error::InvalidData("snappy: preamble length exceeds 2^32-1"));
     }
     let expected_len = expected_len as usize;
-    let mut output = Vec::with_capacity(expected_len);
+    let mut output = Vec::new();
+    // A corrupt block can declare a multi-gigabyte length. `with_capacity`
+    // aborts when that reservation is refused.
+    output
+        .try_reserve_exact(expected_len)
+        .map_err(|_| Error::InvalidData("snappy: uncompressed size too large"))?;
 
     while output.len() < expected_len {
         let tag = read_byte(input, &mut pos)?;

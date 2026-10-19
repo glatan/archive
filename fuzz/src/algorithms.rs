@@ -14,6 +14,7 @@ use archive::archive::{
     romfs, rpm, sevenz, squashfs, tar, warc, xar, zim, zip, zpaq as zpaq_archive,
 };
 use archive::compress::*;
+use archive::encoding::{ascii85, binhex, uuencode, yenc};
 use archive::error::Error;
 use std::fmt;
 use std::sync::OnceLock;
@@ -175,6 +176,10 @@ pub enum Algorithm {
     PeaStore,
     PeaSha256,
     Crx3,
+    Ascii85,
+    Yenc,
+    Uuencode,
+    BinHex,
 }
 
 impl Algorithm {
@@ -334,6 +339,10 @@ impl Algorithm {
         Algorithm::PeaStore,
         Algorithm::PeaSha256,
         Algorithm::Crx3,
+        Algorithm::Ascii85,
+        Algorithm::Yenc,
+        Algorithm::Uuencode,
+        Algorithm::BinHex,
     ];
 
     /// CLI-facing name used in `--algorithm` and log output.
@@ -493,6 +502,10 @@ impl Algorithm {
             Algorithm::PeaStore => "pea-store",
             Algorithm::PeaSha256 => "pea-sha256",
             Algorithm::Crx3 => "crx3",
+            Algorithm::Ascii85 => "ascii85",
+            Algorithm::Yenc => "yenc",
+            Algorithm::Uuencode => "uuencode",
+            Algorithm::BinHex => "binhex",
         }
     }
 
@@ -920,6 +933,17 @@ pub fn encode_with(algo: Algorithm, data: &[u8]) -> Vec<u8> {
             enc.finish().expect("pea-sha256 encode should succeed")
         }
         Algorithm::Crx3 => crx3_fixture(data),
+        Algorithm::Ascii85 => ascii85::encode(data),
+        Algorithm::Yenc => yenc::encode("fuzz", data),
+        Algorithm::Uuencode => uuencode::encode("fuzz", 0o644, data),
+        Algorithm::BinHex => binhex::encode(&binhex::BinHexEntry {
+            name: "fuzz".to_string(),
+            file_type: *b"TEXT",
+            creator: *b"fuzz",
+            flags: 0,
+            data: data.to_vec(),
+            resource: Vec::new(),
+        }),
     }
 }
 
@@ -1292,6 +1316,10 @@ pub fn decode_with(algo: Algorithm, data: &[u8]) -> Result<Vec<u8>, Error> {
                 .next()
                 .map_or(Vec::new(), |e| e.data))
         }
+        Algorithm::Ascii85 => ascii85::decode(data),
+        Algorithm::Yenc => Ok(yenc::decode(data)?.data),
+        Algorithm::Uuencode => Ok(uuencode::decode(data)?.data),
+        Algorithm::BinHex => Ok(binhex::decode(data)?.data),
     }
 }
 
@@ -1385,13 +1413,217 @@ pub fn decode_bounded_with(
     }
 }
 
+/// Append a decode into a non-empty buffer when this algorithm's codec
+/// implements `decode_into`. `None` means the algorithm is not one of those
+/// codecs.
+pub fn decode_into_with(
+    algo: Algorithm,
+    data: &[u8],
+    output: &mut Vec<u8>,
+    max_output: Option<usize>,
+) -> Option<Result<(), Error>> {
+    let result = match algo {
+        Algorithm::Deflate => deflate::decode::decode_into(data, output, max_output),
+        Algorithm::Gzip | Algorithm::GzipFast | Algorithm::GzipStore => {
+            gzip::decode::decode_into(data, output, max_output)
+        }
+        Algorithm::Zlib => zlib::decode::decode_into(data, output, max_output),
+        Algorithm::Zstd | Algorithm::ZstdFast | Algorithm::ZstdBest | Algorithm::ZstdNoChecksum => {
+            zstd::decode::decode_into(data, output, max_output)
+        }
+        Algorithm::Lz4
+        | Algorithm::Lz4Fast
+        | Algorithm::Lz4Best
+        | Algorithm::Lz4SmallBlock
+        | Algorithm::Lz4Legacy
+        | Algorithm::Lz4BlockDependent => lz4::decode::decode_into(data, output, max_output),
+        Algorithm::LzmaAlone => lzma_alone::decode::decode_into(data, output, max_output),
+        Algorithm::Bzip2 | Algorithm::Bzip2Fast | Algorithm::Bzip2Best => {
+            bzip2::decode::decode_into(data, output, max_output)
+        }
+        Algorithm::Lzip | Algorithm::LzipFast | Algorithm::LzipBest | Algorithm::LzipDict => {
+            lzip::decode::decode_into(data, output, max_output)
+        }
+        Algorithm::Lzo | Algorithm::LzoFast | Algorithm::LzoBest => {
+            lzo::decode::decode_into(data, output, max_output)
+        }
+        Algorithm::Brotli
+        | Algorithm::BrotliFast
+        | Algorithm::BrotliBest
+        | Algorithm::BrotliMeta => brotli::decode::decode_into(data, output, max_output),
+        Algorithm::Lzw | Algorithm::LzwBits9 => lzw::decode::decode_into(data, output, max_output),
+        Algorithm::LrzipLzma
+        | Algorithm::LrzipBzip2
+        | Algorithm::LrzipGzip
+        | Algorithm::LrzipLzo
+        | Algorithm::LrzipNone
+        | Algorithm::LrzipZpaq => lrzip::decode::decode_into(data, output, max_output),
+        Algorithm::Snappy => snappy::decode::decode_into(data, output, max_output),
+        Algorithm::Rzip => rzip::decode::decode_into(data, output, max_output),
+        Algorithm::Xz
+        | Algorithm::XzFast
+        | Algorithm::XzBest
+        | Algorithm::XzDelta
+        | Algorithm::XzX86
+        | Algorithm::XzPpc
+        | Algorithm::XzIa64
+        | Algorithm::XzSparc
+        | Algorithm::XzArm
+        | Algorithm::XzArmThumb
+        | Algorithm::XzArm64
+        | Algorithm::XzRiscV => xz::decode::decode_into(data, output, max_output),
+        Algorithm::Zpaq | Algorithm::ZpaqLevel2 | Algorithm::ZpaqLevel3 => {
+            zpaq::decode::decode_into(data, output, max_output)
+        }
+        // Formats without a dedicated `decode_into` still append the ordinary
+        // decode onto the caller buffer, and leave that buffer unchanged on error.
+        _ => append_ordinary_decode(algo, data, output, max_output),
+    };
+    Some(result)
+}
+
+fn append_ordinary_decode(
+    algo: Algorithm,
+    data: &[u8],
+    output: &mut Vec<u8>,
+    max_output: Option<usize>,
+) -> Result<(), Error> {
+    let start = output.len();
+    let produced = match max_output {
+        Some(limit) => decode_bounded_with(algo, data, limit),
+        None => decode_with(algo, data),
+    };
+    match produced {
+        Ok(bytes) => {
+            output.extend_from_slice(&bytes);
+            Ok(())
+        }
+        Err(err) => {
+            output.truncate(start);
+            Err(err)
+        }
+    }
+}
+
+const DECODE_INTO_PREFIX: &[u8] = b"fuzz-prefix";
+
+/// Check `decode_into` on a non-empty buffer.
+///
+/// Success keeps the prefix and appends the same bytes as the ordinary
+/// decode (`decode_bounded_with` when `max_output` is set). `Err` and
+/// [`Error::OutputLimitExceeded`] restore the buffer length from entry.
+/// Every algorithm takes this path. Formats without a dedicated
+/// `decode_into` append the ordinary decode.
+pub fn check_prefixed_decode_into(
+    algo: Algorithm,
+    data: &[u8],
+    max_output: Option<usize>,
+) -> Result<(), String> {
+    let mut output = DECODE_INTO_PREFIX.to_vec();
+    let start = output.len();
+    let Some(result) = decode_into_with(algo, data, &mut output, max_output) else {
+        return Ok(());
+    };
+    match result {
+        Ok(()) => {
+            if !output.starts_with(DECODE_INTO_PREFIX) {
+                return Err("decode_into dropped the caller prefix".to_string());
+            }
+            let got = &output[start..];
+            if let Some(limit) = max_output
+                && got.len() > limit
+            {
+                return Err(format!(
+                    "decode_into appended {} bytes > {limit}",
+                    got.len()
+                ));
+            }
+            let expected = match max_output {
+                Some(limit) => decode_bounded_with(algo, data, limit),
+                None => decode_with(algo, data),
+            };
+            match expected {
+                Ok(bytes) if bytes.as_slice() == got => Ok(()),
+                Ok(_) => Err("decode_into suffix disagrees with decode".to_string()),
+                Err(err) => Err(format!("decode_into succeeded but decode failed: {err}")),
+            }
+        }
+        Err(Error::OutputLimitExceeded { .. }) => {
+            if output.len() != start {
+                return Err("decode_into did not restore the prefix length".to_string());
+            }
+            Ok(())
+        }
+        Err(_) => {
+            if output.len() != start {
+                return Err("decode_into did not restore the prefix length".to_string());
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Two gzip members. The second is a length-3 distance-1 match whose
+/// trailer matches the bytes a window crossing into the first member
+/// would emit. A correct decoder rejects it with `distance too far back`.
+pub fn gzip_cross_member_stream() -> Vec<u8> {
+    let mut combined = gzip::encode::encode(b"Hello", deflate::encode::Level::NoCompression);
+    let mut bits = Vec::new();
+    let mut acc = 0u32;
+    let mut n = 0u8;
+    let mut write = |value: u32, width: u8| {
+        acc |= value << n;
+        n += width;
+        while n >= 8 {
+            bits.push(acc as u8);
+            acc >>= 8;
+            n -= 8;
+        }
+    };
+    let rev = |mut value: u32, mut width: u8| {
+        let mut out = 0u32;
+        while width > 0 {
+            out = (out << 1) | (value & 1);
+            value >>= 1;
+            width -= 1;
+        }
+        out
+    };
+    write(1, 1);
+    write(0b01, 2);
+    write(rev(1, 7), 7);
+    write(rev(0, 5), 5);
+    write(rev(0, 7), 7);
+    if n > 0 {
+        bits.push(acc as u8);
+    }
+    let mut member2 = vec![0x1F, 0x8B, 0x08, 0, 0, 0, 0, 0, 0, 0xFF];
+    member2.extend_from_slice(&bits);
+    member2.extend_from_slice(&0x83a2_5eae_u32.to_le_bytes());
+    member2.extend_from_slice(&3u32.to_le_bytes());
+    combined.extend_from_slice(&member2);
+    combined
+}
+
+pub fn extra_corrupt_bases(algo: Algorithm) -> Vec<Vec<u8>> {
+    match algo {
+        Algorithm::Gzip | Algorithm::GzipFast | Algorithm::GzipStore => {
+            vec![gzip_cross_member_stream()]
+        }
+        _ => Vec::new(),
+    }
+}
+
 pub const fn special_case_labels(algo: Algorithm) -> &'static [&'static str] {
     match algo {
         Algorithm::Ar => &["gnu-long-name", "multi-entry"],
         Algorithm::ArBsd => &["bsd-long-name", "multi-entry"],
-        Algorithm::TarGnu => &["gnu-long-name", "multi-entry"],
-        Algorithm::TarUstar => &["multi-entry"],
-        Algorithm::TarPax => &["pax-metadata", "multi-entry"],
+        Algorithm::Gzip | Algorithm::GzipFast | Algorithm::GzipStore => {
+            &["determinism", "multi-member-distance"]
+        }
+        Algorithm::TarGnu => &["gnu-long-name", "multi-entry", "visit-stop"],
+        Algorithm::TarUstar => &["multi-entry", "visit-stop"],
+        Algorithm::TarPax => &["pax-metadata", "multi-entry", "visit-stop"],
         Algorithm::Cpio => &["newc-metadata", "multi-entry"],
         Algorithm::CpioCrc => &["newcrc-metadata", "multi-entry"],
         Algorithm::CpioOdc | Algorithm::CpioBin => &["multi-entry"],
@@ -1401,6 +1633,7 @@ pub const fn special_case_labels(algo: Algorithm) -> &'static [&'static str] {
             "aes256",
             "traditional",
             "multi-entry",
+            "visit-stop",
         ],
         Algorithm::SevenZ => &[
             "copy-method",
@@ -1409,6 +1642,7 @@ pub const fn special_case_labels(algo: Algorithm) -> &'static [&'static str] {
             "encoded-header",
             "encrypted-header",
             "multi-entry",
+            "visit-stop",
         ],
         Algorithm::Lha | Algorithm::Arj | Algorithm::Arc | Algorithm::Xar => &["multi-entry"],
         Algorithm::Mscfb | Algorithm::MscfbV4 => &["multi-entry"],
@@ -1428,9 +1662,6 @@ const fn is_codec(algo: Algorithm) -> bool {
     matches!(
         algo,
         Algorithm::Deflate
-            | Algorithm::Gzip
-            | Algorithm::GzipFast
-            | Algorithm::GzipStore
             | Algorithm::Zstd
             | Algorithm::ZstdFast
             | Algorithm::ZstdBest
@@ -1511,13 +1742,18 @@ const fn is_codec(algo: Algorithm) -> bool {
             | Algorithm::Zpaq
             | Algorithm::ZpaqLevel2
             | Algorithm::ZpaqLevel3
+            | Algorithm::Ascii85
+            | Algorithm::Yenc
+            | Algorithm::Uuencode
+            | Algorithm::BinHex
     )
 }
 
 /// Variants that share the base codec's encode/decode path and differ only
 /// in the external tool's compression level (e.g. `zstd -1` vs `zstd -19`).
-/// They exist for original-tool interop coverage; self/corrupt work on them
-/// duplicates the base variant.
+/// `--pattern all` still runs them. `self` and `corrupt` repeat the base
+/// variant; `original-*` is the level-specific check when the tool exists.
+#[cfg_attr(not(test), allow(dead_code))]
 pub const fn is_level_alias(algo: Algorithm) -> bool {
     matches!(
         algo,
@@ -1758,6 +1994,66 @@ pub fn run_special_case(algo: Algorithm, label: &str, data: &[u8]) -> Result<Vec
             let entries = sevenz::decode::decode_with_password(&archive, "secret")
                 .map_err(|e| e.to_string())?;
             Ok(entries[0].data.clone())
+        }
+        (Algorithm::Gzip | Algorithm::GzipFast | Algorithm::GzipStore, "multi-member-distance") => {
+            let combined = gzip_cross_member_stream();
+            match gzip::decode::decode(&combined) {
+                Err(Error::InvalidData("distance too far back")) => Ok(data.to_vec()),
+                Err(err) => Err(format!("gzip multi-member distance: {err}")),
+                Ok(_) => Err("gzip multi-member distance was accepted".to_string()),
+            }
+        }
+        (Algorithm::TarGnu | Algorithm::TarUstar | Algorithm::TarPax, "visit-stop") => {
+            let mut enc = if algo == Algorithm::TarPax {
+                tar::encode::TarEncoder::new_pax()
+            } else {
+                tar::encode::TarEncoder::new()
+            };
+            enc.add_file("a.txt", b"aaa");
+            enc.add_file("b.txt", b"bbb");
+            let archive = enc.finish();
+            let mut seen = Vec::new();
+            let err = tar::decode::for_each_entry(&archive, |entry| {
+                seen.push(entry.header.name);
+                Err(Error::InvalidData("stop"))
+            });
+            if err.is_err() && seen == ["a.txt"] {
+                Ok(data.to_vec())
+            } else {
+                Err(format!("tar visit-stop saw {seen:?}: {err:?}"))
+            }
+        }
+        (Algorithm::Zip, "visit-stop") => {
+            let mut enc = zip::encode::ZipEncoder::new();
+            enc.add_file("a.txt", b"aaa");
+            enc.add_file("b.txt", b"bbb");
+            let archive = enc.finish().map_err(|err| err.to_string())?;
+            let mut seen = Vec::new();
+            let err = zip::decode::for_each_entry(&archive, |entry| {
+                seen.push(entry.name);
+                Err(Error::InvalidData("stop"))
+            });
+            if err.is_err() && seen == ["a.txt"] {
+                Ok(data.to_vec())
+            } else {
+                Err(format!("zip visit-stop saw {seen:?}: {err:?}"))
+            }
+        }
+        (Algorithm::SevenZ, "visit-stop") => {
+            let mut enc = sevenz::encode::SevenZEncoder::new();
+            enc.add_file("a.txt", b"aaa");
+            enc.add_file("b.txt", b"bbb");
+            let archive = enc.finish().map_err(|err| err.to_string())?;
+            let mut seen = Vec::new();
+            let err = sevenz::decode::for_each_entry(&archive, |entry| {
+                seen.push(entry.name);
+                Err(Error::InvalidData("stop"))
+            });
+            if err.is_err() && !seen.iter().any(|name| name == "b.txt") && seen.len() <= 1 {
+                Ok(data.to_vec())
+            } else {
+                Err(format!("7z visit-stop saw {seen:?}: {err:?}"))
+            }
         }
         _ if label == "multi-entry" => run_multi_entry_case(algo, data),
         (_, "determinism") => {

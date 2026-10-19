@@ -40,13 +40,62 @@ enum ArchiveSpec {
     Zpaq {
         method: &'static str,
     },
+    Rzip,
 }
 
 const EXTERNAL_TOOL_TIMEOUT_SECS: u64 = 30;
 
+const DEFLATE_COMPRESS_ARGS: &[&str] = &[
+    "-c",
+    "import sys, zlib\n\
+data = sys.stdin.buffer.read()\n\
+c = zlib.compressobj(6, zlib.DEFLATED, -15)\n\
+sys.stdout.buffer.write(c.compress(data) + c.flush())\n",
+];
+const DEFLATE_DECOMPRESS_ARGS: &[&str] = &[
+    "-c",
+    "import sys, zlib\n\
+sys.stdout.buffer.write(zlib.decompress(sys.stdin.buffer.read(), -15))\n",
+];
+const ZLIB_COMPRESS_ARGS: &[&str] = &[
+    "-c",
+    "import sys, zlib\n\
+sys.stdout.buffer.write(zlib.compress(sys.stdin.buffer.read(), 6))\n",
+];
+const ZLIB_DECOMPRESS_ARGS: &[&str] = &[
+    "-c",
+    "import sys, zlib\n\
+sys.stdout.buffer.write(zlib.decompress(sys.stdin.buffer.read()))\n",
+];
+const GZIP_STORE_COMPRESS_ARGS: &[&str] = &[
+    "-c",
+    "import gzip, sys\n\
+sys.stdout.buffer.write(gzip.compress(sys.stdin.buffer.read(), compresslevel=0, mtime=0))\n",
+];
+const GZIP_DECOMPRESS_ARGS: &[&str] = &[
+    "-c",
+    "import gzip, sys\n\
+sys.stdout.buffer.write(gzip.decompress(sys.stdin.buffer.read()))\n",
+];
+const ASCII85_COMPRESS_ARGS: &[&str] = &[
+    "-c",
+    "import base64, sys\n\
+sys.stdout.buffer.write(base64.a85encode(sys.stdin.buffer.read(), adobe=True))\n",
+];
+const ASCII85_DECOMPRESS_ARGS: &[&str] = &[
+    "-c",
+    "import base64, sys\n\
+sys.stdout.buffer.write(base64.a85decode(sys.stdin.buffer.read(), adobe=True))\n",
+];
+
 const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
     match algo {
-        Algorithm::Deflate => None,
+        Algorithm::Deflate => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "python3",
+            compress_args: DEFLATE_COMPRESS_ARGS,
+            decompress_cmd: "python3",
+            decompress_args: DEFLATE_DECOMPRESS_ARGS,
+        })),
         Algorithm::Gzip => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "gzip",
             compress_args: &["-c"],
@@ -59,7 +108,12 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
             decompress_cmd: "gzip",
             decompress_args: &["-dc"],
         })),
-        Algorithm::GzipStore => None,
+        Algorithm::GzipStore => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "python3",
+            compress_args: GZIP_STORE_COMPRESS_ARGS,
+            decompress_cmd: "python3",
+            decompress_args: GZIP_DECOMPRESS_ARGS,
+        })),
         Algorithm::Zstd => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "zstd",
             compress_args: &["-c"],
@@ -169,12 +223,42 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
             decompress_cmd: "xz",
             decompress_args: &["-dc"],
         })),
-        Algorithm::XzPpc
-        | Algorithm::XzIa64
-        | Algorithm::XzSparc
-        | Algorithm::XzArm
-        | Algorithm::XzArmThumb
-        | Algorithm::XzRiscV => None,
+        Algorithm::XzPpc => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "xz",
+            compress_args: &["--check=crc32", "--powerpc", "--lzma2", "-c"],
+            decompress_cmd: "xz",
+            decompress_args: &["-dc"],
+        })),
+        Algorithm::XzIa64 => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "xz",
+            compress_args: &["--check=crc32", "--ia64", "--lzma2", "-c"],
+            decompress_cmd: "xz",
+            decompress_args: &["-dc"],
+        })),
+        Algorithm::XzSparc => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "xz",
+            compress_args: &["--check=crc32", "--sparc", "--lzma2", "-c"],
+            decompress_cmd: "xz",
+            decompress_args: &["-dc"],
+        })),
+        Algorithm::XzArm => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "xz",
+            compress_args: &["--check=crc32", "--arm", "--lzma2", "-c"],
+            decompress_cmd: "xz",
+            decompress_args: &["-dc"],
+        })),
+        Algorithm::XzArmThumb => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "xz",
+            compress_args: &["--check=crc32", "--armthumb", "--lzma2", "-c"],
+            decompress_cmd: "xz",
+            decompress_args: &["-dc"],
+        })),
+        Algorithm::XzRiscV => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "xz",
+            compress_args: &["--check=crc32", "--riscv", "--lzma2", "-c"],
+            decompress_cmd: "xz",
+            decompress_args: &["-dc"],
+        })),
         Algorithm::Lzw => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "compress",
             compress_args: &["-c", "-f"],
@@ -205,7 +289,13 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
             decompress_cmd: "lz4",
             decompress_args: &["-dc"],
         })),
-        Algorithm::Lz4SmallBlock | Algorithm::Lz4Block | Algorithm::Lz4Dict => None,
+        Algorithm::Lz4SmallBlock => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "lz4",
+            compress_args: &["-c"],
+            decompress_cmd: "lz4",
+            decompress_args: &["-dc"],
+        })),
+        Algorithm::Lz4Block | Algorithm::Lz4Dict => None,
         Algorithm::Lz4Legacy => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "lz4",
             compress_args: &["-l", "-c"],
@@ -236,41 +326,46 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
             decompress_cmd: "lzop",
             decompress_args: &["-dc"],
         })),
+        // Stdin lrzip sizes its buffers from detected RAM and one backend
+        // overhead per CPU. On a large host that exceeds the fuzz-process cap
+        // and the tool reports `Out of memory` before the decoder runs.
+        // `-w 1` is a 100MB window, `-p 1` is one thread, `-m 18` is 1.8GB
+        // of nominal RAM (hundreds of MB). `LRZIP=NOCONFIG` is set at spawn.
         Algorithm::LrzipLzma => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "lrzip",
-            compress_args: &["--lzma"],
+            compress_args: &["-w", "1", "-p", "1", "-m", "18", "--lzma"],
             decompress_cmd: "lrzip",
-            decompress_args: &["-d"],
+            decompress_args: &["-d", "-p", "1", "-m", "18"],
         })),
         Algorithm::LrzipBzip2 => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "lrzip",
-            compress_args: &["-b"],
+            compress_args: &["-w", "1", "-p", "1", "-m", "18", "-b"],
             decompress_cmd: "lrzip",
-            decompress_args: &["-d"],
+            decompress_args: &["-d", "-p", "1", "-m", "18"],
         })),
         Algorithm::LrzipGzip => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "lrzip",
-            compress_args: &["-g"],
+            compress_args: &["-w", "1", "-p", "1", "-m", "18", "-g"],
             decompress_cmd: "lrzip",
-            decompress_args: &["-d"],
+            decompress_args: &["-d", "-p", "1", "-m", "18"],
         })),
         Algorithm::LrzipLzo => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "lrzip",
-            compress_args: &["-l"],
+            compress_args: &["-w", "1", "-p", "1", "-m", "18", "-l"],
             decompress_cmd: "lrzip",
-            decompress_args: &["-d"],
+            decompress_args: &["-d", "-p", "1", "-m", "18"],
         })),
         Algorithm::LrzipNone => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "lrzip",
-            compress_args: &["-n"],
+            compress_args: &["-w", "1", "-p", "1", "-m", "18", "-n"],
             decompress_cmd: "lrzip",
-            decompress_args: &["-d"],
+            decompress_args: &["-d", "-p", "1", "-m", "18"],
         })),
         Algorithm::LrzipZpaq => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "lrzip",
-            compress_args: &["-z"],
+            compress_args: &["-w", "1", "-p", "1", "-m", "18", "-z"],
             decompress_cmd: "lrzip",
-            decompress_args: &["-d"],
+            decompress_args: &["-d", "-p", "1", "-m", "18"],
         })),
         Algorithm::Brotli => Some(ExternalSpec::Pipe(PipeToolSpec {
             compress_cmd: "brotli",
@@ -293,8 +388,13 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
         // Metadata blocks are spec-valid but system brotli rejects them.
         Algorithm::BrotliMeta => None,
         Algorithm::Snappy => None,
-        Algorithm::Rzip => None,
-        Algorithm::Zlib => None,
+        Algorithm::Rzip => Some(ExternalSpec::Archive(ArchiveSpec::Rzip)),
+        Algorithm::Zlib => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "python3",
+            compress_args: ZLIB_COMPRESS_ARGS,
+            decompress_cmd: "python3",
+            decompress_args: ZLIB_DECOMPRESS_ARGS,
+        })),
         Algorithm::Zpaq => Some(ExternalSpec::Archive(ArchiveSpec::Zpaq { method: "-m1" })),
         Algorithm::ZpaqLevel2 => Some(ExternalSpec::Archive(ArchiveSpec::Zpaq { method: "-m3" })),
         Algorithm::ZpaqLevel3 => Some(ExternalSpec::Archive(ArchiveSpec::Zpaq { method: "-m5" })),
@@ -392,6 +492,12 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
         }
         Algorithm::CpioOdc => Some(ExternalSpec::Archive(ArchiveSpec::Cpio { format: "odc" })),
         Algorithm::CpioBin => Some(ExternalSpec::Archive(ArchiveSpec::Cpio { format: "bin" })),
+        Algorithm::Ascii85 => Some(ExternalSpec::Pipe(PipeToolSpec {
+            compress_cmd: "python3",
+            compress_args: ASCII85_COMPRESS_ARGS,
+            decompress_cmd: "python3",
+            decompress_args: ASCII85_DECOMPRESS_ARGS,
+        })),
         // No pipe-style external oracle exists for these formats; self and
         // corrupt patterns cover them.
         Algorithm::Cramfs
@@ -404,7 +510,10 @@ const fn tool_spec(algo: Algorithm) -> Option<ExternalSpec> {
         | Algorithm::Pea
         | Algorithm::PeaStore
         | Algorithm::PeaSha256
-        | Algorithm::Crx3 => None,
+        | Algorithm::Crx3
+        | Algorithm::Yenc
+        | Algorithm::Uuencode
+        | Algorithm::BinHex => None,
     }
 }
 
@@ -451,6 +560,7 @@ fn is_available(algo: Algorithm) -> bool {
         Some(ExternalSpec::Archive(ArchiveSpec::Tar { .. })) => which_exists("tar"),
         Some(ExternalSpec::Archive(ArchiveSpec::Cpio { .. })) => which_exists("cpio"),
         Some(ExternalSpec::Archive(ArchiveSpec::Zpaq { .. })) => which_exists("zpaq"),
+        Some(ExternalSpec::Archive(ArchiveSpec::Rzip)) => which_exists("rzip"),
         None => false,
     }
 }
@@ -564,8 +674,39 @@ fn wait_timeout(
     }
 }
 
+/// Soft address-space cap for one external tool, in KiB (`ulimit -v`).
+///
+/// The fuzz process keeps its own soft cap (`FUZZ_AS_KB`, 2GiB) so a corrupt
+/// decoder cannot reserve a multi-gigabyte model and get the host OOM-killed.
+/// Tool children raise their soft limit to this value instead of keeping the
+/// fuzz cap. 4GiB is enough for the bounded `lrzip` invocation and stays small
+/// enough that three parallel fuzz processes cannot each allocate a buffer
+/// sized to host RAM.
+const EXTERNAL_TOOL_AS_KB: u64 = 4 * 1024 * 1024;
+
+/// Build a command that runs `cmd` under [`EXTERNAL_TOOL_AS_KB`].
+///
+/// `ulimit` is a shell builtin, so the spawned process is a shell that raises
+/// its own soft limit and then `exec`s `cmd`. The hard limit is left alone:
+/// `ulimit -S` can raise the soft limit only up to the hard limit inherited
+/// from the fuzz process. `lrzip` also ignores `lrzip.conf`, which can set a
+/// window above `-w`.
+fn tool_command(cmd: &str) -> Command {
+    let mut command = Command::new("sh");
+    command
+        .arg("-c")
+        .arg(format!(
+            "ulimit -S -v {EXTERNAL_TOOL_AS_KB} && exec \"$0\" \"$@\""
+        ))
+        .arg(cmd);
+    if cmd == "lrzip" {
+        command.env("LRZIP", "NOCONFIG");
+    }
+    command
+}
+
 fn run_pipe_tool(cmd: &str, args: &[&str], input: &[u8]) -> Result<Vec<u8>, String> {
-    let mut child = Command::new(cmd)
+    let mut child = tool_command(cmd)
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -629,6 +770,7 @@ fn run_archive_compress(spec: ArchiveSpec, data: &[u8]) -> Result<Vec<u8>, Strin
         ArchiveSpec::Tar { .. } => temp.path().join("sample.tar"),
         ArchiveSpec::Cpio { .. } => temp.path().join("sample.cpio"),
         ArchiveSpec::Zpaq { .. } => temp.path().join("sample.zpaq"),
+        ArchiveSpec::Rzip => temp.path().join("sample.rz"),
     };
 
     let archive_name = archive_path.file_name().unwrap().to_str().unwrap();
@@ -678,6 +820,15 @@ fn run_archive_compress(spec: ArchiveSpec, data: &[u8]) -> Result<Vec<u8>, Strin
                 temp.path(),
             )?
         }
+        ArchiveSpec::Rzip => {
+            let archive_str = archive_path.to_str().ok_or("invalid archive path")?;
+            let input_str = input_path.to_str().ok_or("invalid input path")?;
+            run_command_in_dir(
+                "rzip",
+                &["-k", "-f", "-o", archive_str, input_str],
+                temp.path(),
+            )?
+        }
     }
 
     fs::read(archive_path).map_err(|e| format!("read temp archive failed: {e}"))
@@ -692,6 +843,7 @@ fn run_archive_decompress(spec: ArchiveSpec, data: &[u8]) -> Result<Vec<u8>, Str
         ArchiveSpec::Tar { .. } => temp.path().join("sample.tar"),
         ArchiveSpec::Cpio { .. } => temp.path().join("sample.cpio"),
         ArchiveSpec::Zpaq { .. } => temp.path().join("sample.zpaq"),
+        ArchiveSpec::Rzip => temp.path().join("sample.rz"),
     };
     fs::write(&archive_path, data).map_err(|e| format!("write temp archive failed: {e}"))?;
 
@@ -732,11 +884,21 @@ fn run_archive_decompress(spec: ArchiveSpec, data: &[u8]) -> Result<Vec<u8>, Str
             fs::read(temp.path().join("sample"))
                 .map_err(|e| format!("read extracted file failed: {e}"))
         }
+        ArchiveSpec::Rzip => {
+            let decoded = temp.path().join("decoded.bin");
+            let decoded_str = decoded.to_str().ok_or("invalid output path")?;
+            run_command_in_dir(
+                "rzip",
+                &["-d", "-k", "-f", "-o", decoded_str, archive_str],
+                temp.path(),
+            )?;
+            fs::read(decoded).map_err(|e| format!("read extracted file failed: {e}"))
+        }
     }
 }
 
 fn run_command_in_dir(cmd: &str, args: &[&str], dir: &Path) -> Result<(), String> {
-    let child = Command::new(cmd)
+    let child = tool_command(cmd)
         .args(args)
         .current_dir(dir)
         .stdin(Stdio::null())
@@ -760,7 +922,7 @@ fn run_command_in_dir(cmd: &str, args: &[&str], dir: &Path) -> Result<(), String
 }
 
 fn run_command_capture(cmd: &str, args: &[&str], dir: &Path) -> Result<Vec<u8>, String> {
-    let child = Command::new(cmd)
+    let child = tool_command(cmd)
         .args(args)
         .current_dir(dir)
         .stdin(Stdio::null())
@@ -856,7 +1018,11 @@ mod tests {
         assert!(temp.path().exists());
     }
 
-    use super::{run_command_capture, run_command_in_dir, run_pipe_tool, wait_timeout};
+    use super::{
+        EXTERNAL_TOOL_AS_KB, ExternalSpec, run_command_capture, run_command_in_dir, run_pipe_tool,
+        tool_spec, wait_timeout,
+    };
+    use crate::algorithms::Algorithm;
     use std::process::{Command, Stdio};
     use std::time::Duration;
 
@@ -1056,5 +1222,110 @@ mod tests {
         // sh exits quickly (exit 0); without process-group kill this hangs.
         let result = wait_timeout(child, "sh", Duration::from_secs(5));
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
+    }
+
+    #[test]
+    fn lrzip_compress_uses_100mb_window() {
+        for algo in [
+            Algorithm::LrzipLzma,
+            Algorithm::LrzipBzip2,
+            Algorithm::LrzipGzip,
+            Algorithm::LrzipLzo,
+            Algorithm::LrzipNone,
+            Algorithm::LrzipZpaq,
+        ] {
+            let Some(ExternalSpec::Pipe(spec)) = tool_spec(algo) else {
+                panic!("{algo:?} has no pipe spec");
+            };
+            assert_eq!(spec.compress_cmd, "lrzip");
+            assert!(
+                spec.compress_args
+                    .windows(2)
+                    .any(|pair| pair == ["-w", "1"]),
+                "{algo:?} compress args {:?} lack -w 1",
+                spec.compress_args
+            );
+            assert!(
+                spec.compress_args
+                    .windows(2)
+                    .any(|pair| pair == ["-p", "1"]),
+                "{algo:?} compress args {:?} lack -p 1",
+                spec.compress_args
+            );
+            assert!(
+                spec.compress_args
+                    .windows(2)
+                    .any(|pair| pair == ["-m", "18"]),
+                "{algo:?} compress args {:?} lack -m 18",
+                spec.compress_args
+            );
+            assert_eq!(spec.decompress_args, &["-d", "-p", "1", "-m", "18"]);
+        }
+    }
+
+    fn tool_soft_address_limit_bytes() -> u64 {
+        let out = run_pipe_tool(
+            "sh",
+            &[
+                "-c",
+                "awk '/^Max address space/ { print $4 }' /proc/self/limits",
+            ],
+            b"",
+        )
+        .unwrap_or_else(|e| panic!("failed to read address limit: {e}"));
+        let text = String::from_utf8(out).unwrap();
+        text.trim()
+            .parse()
+            .unwrap_or_else(|_| panic!("unexpected limit text: {text:?}"))
+    }
+
+    #[test]
+    fn external_tool_soft_address_limit_is_four_gib() {
+        assert_eq!(tool_soft_address_limit_bytes(), EXTERNAL_TOOL_AS_KB * 1024);
+    }
+
+    /// The fuzz process lowers only its soft limit. A tool child must raise
+    /// that soft limit to the tool cap. This spawns a fresh process under a
+    /// soft limit below 4GiB so the assertion is not running in the shared
+    /// `cargo test` process.
+    #[test]
+    fn external_tool_raises_soft_limit_above_parent() {
+        if std::env::var_os("ARCHIVE_FUZZ_RLIMIT_PROBE").is_some() {
+            assert_eq!(tool_soft_address_limit_bytes(), EXTERNAL_TOOL_AS_KB * 1024);
+            std::process::exit(0);
+        }
+
+        let status = std::fs::read_to_string("/proc/self/status").unwrap();
+        let vm_kb: u64 = status
+            .lines()
+            .find_map(|line| line.strip_prefix("VmSize:"))
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        // Headroom for the probe process itself. Still below the tool cap.
+        let parent_kb = vm_kb.saturating_add(1024 * 1024);
+        assert!(
+            parent_kb < EXTERNAL_TOOL_AS_KB,
+            "test process VmSize {vm_kb}KiB leaves no gap under the tool cap"
+        );
+
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg(format!("ulimit -S -v {parent_kb} && exec \"$0\" \"$@\""))
+            .arg(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("tests::external_tool_raises_soft_limit_above_parent")
+            .env("ARCHIVE_FUZZ_RLIMIT_PROBE", "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "probe failed: {}\n{}",
+            String::from_utf8_lossy(&output.stderr),
+            String::from_utf8_lossy(&output.stdout)
+        );
     }
 }

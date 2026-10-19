@@ -56,7 +56,7 @@ cargo test --all-features
 ```sh
 cargo fmt --all
 cargo test --all-features
-cargo test --no-default-features
+make check-features
 cargo clippy --all-features --all-targets --workspace -- -D warnings
 cargo doc --all-features --workspace 2>&1 | grep warning
 ```

@@ -610,6 +610,7 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "std")]
     use alloc::format;
     use alloc::vec;
     use alloc::vec::Vec;

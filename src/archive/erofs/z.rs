@@ -1117,7 +1117,9 @@ pub(crate) fn read_compressed(
 #[cfg(test)]
 mod tests {
     use super::lz4_decode_partial;
+    #[cfg(feature = "lz4")]
     use crate::compress::lz4::decode::decode_block;
+    #[cfg(feature = "lz4")]
     use crate::error::Error;
 
     /// Five literals. erofs keeps the prefix that fits; block LZ4 refuses
@@ -1126,6 +1128,7 @@ mod tests {
     fn lz4_partial_keeps_literal_prefix_block_lz4_rejects() {
         let src = [0x50, b'a', b'b', b'c', b'd', b'e'];
         assert_eq!(lz4_decode_partial(&src, 3).unwrap(), b"abc");
+        #[cfg(feature = "lz4")]
         assert!(matches!(
             decode_block(&src, 3),
             Err(Error::OutputLimitExceeded { limit: 3 })
@@ -1138,6 +1141,7 @@ mod tests {
     fn lz4_partial_truncates_match_block_lz4_rejects() {
         let src = [0x22, b'a', b'b', 0x01, 0x00];
         assert_eq!(lz4_decode_partial(&src, 4).unwrap(), b"abbb");
+        #[cfg(feature = "lz4")]
         assert!(matches!(
             decode_block(&src, 4),
             Err(Error::OutputLimitExceeded { limit: 4 })
@@ -1150,6 +1154,7 @@ mod tests {
     fn lz4_partial_overlap_match_writes_full_length() {
         let src = [0x22, b'a', b'b', 0x02, 0x00];
         assert_eq!(lz4_decode_partial(&src, 8).unwrap(), b"abababab");
+        #[cfg(feature = "lz4")]
         assert_eq!(decode_block(&src, 8).unwrap(), b"abababab");
     }
 }

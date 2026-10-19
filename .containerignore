@@ -12,6 +12,7 @@
 !archive-cli/
 !fuzz/
 !pkg/
+!scripts/
 
 # Generated fuzz artifacts stay out even inside allowed dirs.
 fuzz/failures/

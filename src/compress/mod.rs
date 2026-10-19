@@ -6,43 +6,8 @@
 
 /// Overlap-safe match copies and bounded match lengths shared by LZ codecs.
 ///
-/// Compiled only when a caller feature is on. Each function is further
-/// limited to the features that call it, so an unused helper is not
-/// silenced by a single caller's feature.
-#[cfg(any(
-    test,
-    feature = "deflate",
-    feature = "zstd",
-    feature = "lzs",
-    feature = "lzo",
-    feature = "vcdiff",
-    feature = "xca",
-    feature = "snappy",
-    feature = "fastlz",
-    feature = "lz4",
-    feature = "brotli",
-    feature = "rzip",
-    feature = "lzip",
-    feature = "lzma-alone",
-    feature = "erofs",
-    feature = "lzrw1",
-    feature = "lzrw1a",
-    feature = "lzrw2",
-    feature = "lzrw3",
-    feature = "lzrw3a",
-    feature = "lzsa",
-    feature = "zx0",
-    feature = "zx1",
-    feature = "zx2",
-    feature = "zx5",
-    feature = "packbits",
-    feature = "mppc",
-    feature = "lha",
-    feature = "arj",
-    feature = "mscab",
-    feature = "lzxd",
-    feature = "lzf",
-))]
+/// The module is compiled with its parent. Each entry point allows
+/// `dead_code` only when none of its callers' features are enabled.
 pub(crate) mod match_ops;
 
 /// First-byte scan shared by BCJ and LZX.
@@ -301,6 +266,27 @@ pub(crate) mod ppmd;
 /// Move `produced` into an empty `output`, or append it otherwise.
 ///
 /// Replacing an empty buffer drops any capacity the caller had reserved.
+#[cfg_attr(
+    not(any(
+        feature = "deflate",
+        feature = "gzip",
+        feature = "zlib",
+        feature = "zstd",
+        feature = "lz4",
+        feature = "lzma-alone",
+        feature = "bzip2",
+        feature = "lzip",
+        feature = "lzo",
+        feature = "brotli",
+        feature = "lzw",
+        feature = "lrzip",
+        feature = "snappy",
+        feature = "rzip",
+        feature = "xz",
+        feature = "zpaq",
+    )),
+    allow(dead_code)
+)]
 pub(crate) fn move_into(output: &mut alloc::vec::Vec<u8>, produced: alloc::vec::Vec<u8>) {
     if output.is_empty() {
         *output = produced;

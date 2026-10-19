@@ -15,17 +15,31 @@ fuzz failure を分析する読み取り専用エージェント。共通ルー�
 
 ## 入力
 
-`fuzz/failures/` 内の artifact:
-- `*.json` — failure メタデータ (algorithm, pattern, error, data_size 等)
-- `*.bin` — 再現用入力バイナリ
+今回の実行は 3 本に分かれている。各本の `run-<timestamp>/` を見る。
+
+- `fuzz/failures/x86_64/` — x86_64 の SSE2 (`archive-fuzz-x86_64`)
+- `fuzz/failures/avx2/` — x86-64-v3 の AVX2 (`archive-fuzz-avx2`)
+- `fuzz/failures/aarch64/` — aarch64 の NEON (`archive-fuzz-aarch64`)
+
+失敗ケースは次のファイルである。
+
+- `failure-*.json` — メタデータ (algorithm, pattern, error, data_size 等)
+- `failure-*.bin` — 再現用入力
+- `failure-*.mut.bin` — corrupt の変異後ストリーム
+- `hang-*.json` / `hang-*.bin` — watchdog が残したハング
+
+`summary.json`、`manifest.json`、`matrix.json` は集計であり、失敗ケースではない。`known` は `fuzz/src/known_issues.rs` で除外済みで、artifact には残らない。
 
 ## 分析手順
 
 ### 1. failure の列挙
 
 ```sh
-find fuzz/failures/ -name "*.json" -newer <timestamp_file> | sort
+find fuzz/failures/x86_64 fuzz/failures/avx2 fuzz/failures/aarch64 \
+  -name 'failure-*.json' -o -name 'hang-*.json' | sort
 ```
+
+3 本の `summary.json` を並べ、`fail` が 0 の本を先に分ける。同じ失敗が 3 本にあれば共有の不具合、1 本だけにあればその公開経路の不具合として扱う。
 
 ### 2. 各 failure の分類
 
@@ -62,8 +76,10 @@ find fuzz/failures/ -name "*.json" -newer <timestamp_file> | sort
 - resource oracle 違反: N 件
 
 ### バグ詳細
-| # | algorithm | pattern | error | input_size | 推定原因 |
-|---|-----------|---------|-------|-----------|---------|
+| # | 対象 | algorithm | pattern | error | input_size | 推定原因 |
+|---|------|-----------|---------|-------|-----------|---------|
+
+対象は `x86_64`、`avx2`、`aarch64` のいずれかである。3 本に同じ失敗があるときは対象を `共通` と書く。
 
 ### リグレッションテスト候補
 | # | テスト名 | 入力データ | 配置先 |

@@ -10,35 +10,6 @@
 
 use alloc::vec::Vec;
 
-#[cfg(any(
-    test,
-    feature = "deflate",
-    feature = "zstd",
-    feature = "lzs",
-    feature = "lzo",
-    feature = "vcdiff",
-    feature = "xca",
-    feature = "snappy",
-    feature = "fastlz",
-    feature = "lz4",
-    feature = "brotli",
-    feature = "lzip",
-    feature = "lzma-alone",
-    feature = "erofs",
-    feature = "lzrw1",
-    feature = "lzrw1a",
-    feature = "lzrw2",
-    feature = "lzrw3",
-    feature = "lzrw3a",
-    feature = "lzsa",
-    feature = "zx0",
-    feature = "zx1",
-    feature = "zx2",
-    feature = "zx5",
-    feature = "lzxd",
-    feature = "mscab",
-    feature = "lzf",
-))]
 /// `copy_match` was asked for a distance this buffer cannot satisfy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CopyMatchError {
@@ -48,35 +19,37 @@ pub(crate) enum CopyMatchError {
     OffsetOutOfRange,
 }
 
-#[cfg(any(
-    test,
-    feature = "deflate",
-    feature = "zstd",
-    feature = "lzs",
-    feature = "lzo",
-    feature = "vcdiff",
-    feature = "xca",
-    feature = "snappy",
-    feature = "fastlz",
-    feature = "lz4",
-    feature = "brotli",
-    feature = "lzip",
-    feature = "lzma-alone",
-    feature = "erofs",
-    feature = "lzrw1",
-    feature = "lzrw1a",
-    feature = "lzrw2",
-    feature = "lzrw3",
-    feature = "lzrw3a",
-    feature = "lzsa",
-    feature = "zx0",
-    feature = "zx1",
-    feature = "zx2",
-    feature = "zx5",
-    feature = "lzxd",
-    feature = "mscab",
-    feature = "lzf",
-))]
+#[cfg_attr(
+    not(any(
+        feature = "deflate",
+        feature = "zstd",
+        feature = "lzs",
+        feature = "lzo",
+        feature = "vcdiff",
+        feature = "xca",
+        feature = "snappy",
+        feature = "fastlz",
+        feature = "lz4",
+        feature = "brotli",
+        feature = "lzip",
+        feature = "lzma-alone",
+        feature = "erofs",
+        feature = "lzrw1",
+        feature = "lzrw1a",
+        feature = "lzrw2",
+        feature = "lzrw3",
+        feature = "lzrw3a",
+        feature = "lzsa",
+        feature = "zx0",
+        feature = "zx1",
+        feature = "zx2",
+        feature = "zx5",
+        feature = "lzxd",
+        feature = "mscab",
+        feature = "lzf",
+    )),
+    allow(dead_code)
+)]
 /// Append `len` bytes copied from `offset` bytes before the current end.
 ///
 /// The source and the destination overlap when `len > offset`. The copy is
@@ -111,16 +84,18 @@ pub(crate) fn copy_match(
     Ok(())
 }
 
-#[cfg(any(
-    test,
-    feature = "lzxd",
-    feature = "mscab",
-    feature = "lzsa",
-    feature = "zx0",
-    feature = "zx1",
-    feature = "zx2",
-    feature = "zx5",
-))]
+#[cfg_attr(
+    not(any(
+        feature = "lzxd",
+        feature = "mscab",
+        feature = "lzsa",
+        feature = "zx0",
+        feature = "zx1",
+        feature = "zx2",
+        feature = "zx5",
+    )),
+    allow(dead_code)
+)]
 /// Append `len` bytes from `distance` before the end of `prefix ++ output`.
 ///
 /// Bytes that still lie in `prefix` are copied from there. The remainder is
@@ -151,15 +126,17 @@ pub(crate) fn copy_match_with_prefix(
     Ok(())
 }
 
-#[cfg(any(
-    test,
-    feature = "vcdiff",
-    feature = "mppc",
-    feature = "zx0",
-    feature = "zx1",
-    feature = "zx2",
-    feature = "zx5",
-))]
+#[cfg_attr(
+    not(any(
+        feature = "vcdiff",
+        feature = "mppc",
+        feature = "zx0",
+        feature = "zx1",
+        feature = "zx2",
+        feature = "zx5",
+    )),
+    allow(dead_code)
+)]
 /// Common prefix of two indexes into the virtual buffer `prefix ++ body`.
 ///
 /// Each side is split where it crosses from `prefix` into `body`, and each
@@ -188,13 +165,10 @@ pub(crate) fn match_len_window(
     matched
 }
 
-#[cfg(any(
-    test,
-    feature = "mscab",
-    feature = "lha",
-    feature = "arj",
-    feature = "mppc",
-))]
+#[cfg_attr(
+    not(any(feature = "mscab", feature = "lha", feature = "arj", feature = "mppc",)),
+    allow(dead_code)
+)]
 /// Copy `len` bytes inside a power-of-two ring.
 ///
 /// `src` and `dst` are absolute indexes. Each access is reduced with
@@ -233,21 +207,14 @@ pub(crate) fn copy_ring(
             out.extend_from_slice(&ring[d..d + emit_n]);
             emit -= emit_n;
         }
-        src += n;
-        dst += n;
+        // Indexes are absolute and reduced with `mask`, so a copy that
+        // starts just below zero stays defined for a corrupt offset.
+        src = src.wrapping_add(n);
+        dst = dst.wrapping_add(n);
         len -= n;
     }
 }
 
-#[cfg(any(
-    test,
-    feature = "vcdiff",
-    feature = "mppc",
-    feature = "zx0",
-    feature = "zx1",
-    feature = "zx2",
-    feature = "zx5",
-))]
 fn window_from<'a>(prefix: &'a [u8], body: &'a [u8], pos: usize) -> &'a [u8] {
     if pos < prefix.len() {
         &prefix[pos..]
@@ -260,35 +227,6 @@ fn window_from<'a>(prefix: &'a [u8], body: &'a [u8], pos: usize) -> &'a [u8] {
 ///
 /// `src + n` must be at most the current length, so the source does not
 /// overlap the spare capacity being filled.
-#[cfg(any(
-    test,
-    feature = "deflate",
-    feature = "zstd",
-    feature = "lzs",
-    feature = "lzo",
-    feature = "vcdiff",
-    feature = "xca",
-    feature = "snappy",
-    feature = "fastlz",
-    feature = "lz4",
-    feature = "brotli",
-    feature = "lzip",
-    feature = "lzma-alone",
-    feature = "erofs",
-    feature = "lzrw1",
-    feature = "lzrw1a",
-    feature = "lzrw2",
-    feature = "lzrw3",
-    feature = "lzrw3a",
-    feature = "lzsa",
-    feature = "zx0",
-    feature = "zx1",
-    feature = "zx2",
-    feature = "zx5",
-    feature = "lzxd",
-    feature = "mscab",
-    feature = "lzf",
-))]
 fn append_from(output: &mut Vec<u8>, src: usize, n: usize) {
     debug_assert!(src.saturating_add(n) <= output.len());
     let dst = output.len();
@@ -302,35 +240,37 @@ fn append_from(output: &mut Vec<u8>, src: usize, n: usize) {
     }
 }
 
-#[cfg(any(
-    test,
-    feature = "deflate",
-    feature = "lzs",
-    feature = "lzrw1",
-    feature = "lzrw1a",
-    feature = "lzrw2",
-    feature = "lzrw3",
-    feature = "lzrw3a",
-    feature = "lzsa",
-    feature = "snappy",
-    feature = "zstd",
-    feature = "lz4",
-    feature = "fastlz",
-    feature = "brotli",
-    feature = "lzo",
-    feature = "rzip",
-    feature = "lzip",
-    feature = "lzma-alone",
-    feature = "packbits",
-    feature = "zx0",
-    feature = "zx1",
-    feature = "zx2",
-    feature = "zx5",
-    feature = "lzf",
-    feature = "vcdiff",
-    feature = "mppc",
-    feature = "xca",
-))]
+#[cfg_attr(
+    not(any(
+        feature = "deflate",
+        feature = "lzs",
+        feature = "lzrw1",
+        feature = "lzrw1a",
+        feature = "lzrw2",
+        feature = "lzrw3",
+        feature = "lzrw3a",
+        feature = "lzsa",
+        feature = "snappy",
+        feature = "zstd",
+        feature = "lz4",
+        feature = "fastlz",
+        feature = "brotli",
+        feature = "lzo",
+        feature = "rzip",
+        feature = "lzip",
+        feature = "lzma-alone",
+        feature = "packbits",
+        feature = "zx0",
+        feature = "zx1",
+        feature = "zx2",
+        feature = "zx5",
+        feature = "lzf",
+        feature = "vcdiff",
+        feature = "mppc",
+        feature = "xca",
+    )),
+    allow(dead_code)
+)]
 /// Length of the common prefix of `a` and `b`, capped by `max_len`.
 pub(crate) fn match_len(a: &[u8], b: &[u8], max_len: usize) -> usize {
     let limit = max_len.min(a.len()).min(b.len());
@@ -344,35 +284,6 @@ pub(crate) fn match_len(a: &[u8], b: &[u8], max_len: usize) -> usize {
     }
 }
 
-#[cfg(any(
-    test,
-    feature = "deflate",
-    feature = "lzs",
-    feature = "lzrw1",
-    feature = "lzrw1a",
-    feature = "lzrw2",
-    feature = "lzrw3",
-    feature = "lzrw3a",
-    feature = "lzsa",
-    feature = "snappy",
-    feature = "zstd",
-    feature = "lz4",
-    feature = "fastlz",
-    feature = "brotli",
-    feature = "lzo",
-    feature = "rzip",
-    feature = "lzip",
-    feature = "lzma-alone",
-    feature = "packbits",
-    feature = "zx0",
-    feature = "zx1",
-    feature = "zx2",
-    feature = "zx5",
-    feature = "lzf",
-    feature = "vcdiff",
-    feature = "mppc",
-    feature = "xca",
-))]
 pub(crate) fn match_len_scalar(a: &[u8], b: &[u8], limit: usize) -> usize {
     let n = limit.min(a.len()).min(b.len());
     for i in 0..n {
@@ -383,79 +294,43 @@ pub(crate) fn match_len_scalar(a: &[u8], b: &[u8], limit: usize) -> usize {
     n
 }
 
-#[cfg(any(
-    test,
-    feature = "deflate",
-    feature = "lzs",
-    feature = "lzrw1",
-    feature = "lzrw1a",
-    feature = "lzrw2",
-    feature = "lzrw3",
-    feature = "lzrw3a",
-    feature = "lzsa",
-    feature = "snappy",
-    feature = "zstd",
-    feature = "lz4",
-    feature = "fastlz",
-    feature = "brotli",
-    feature = "lzo",
-    feature = "rzip",
-    feature = "lzip",
-    feature = "lzma-alone",
-    feature = "packbits",
-    feature = "zx0",
-    feature = "zx1",
-    feature = "zx2",
-    feature = "zx5",
-    feature = "lzf",
-    feature = "vcdiff",
-    feature = "mppc",
-    feature = "xca",
-))]
 #[cfg(target_arch = "x86_64")]
 fn match_len_x86(a: &[u8], b: &[u8], limit: usize) -> usize {
-    #[cfg(feature = "std")]
-    {
-        if std::is_x86_feature_detected!("avx2") {
-            // AVX2 is not part of the x86_64 ABI. The runtime check above
-            // is what makes this call valid.
-            return unsafe { match_len_avx2(a, b, limit) };
-        }
+    // The baseline crate uses SSE2. A crate built with `target-cpu=x86-64-v3`
+    // uses AVX2. Neither path reads CPUID.
+    #[cfg(target_feature = "avx2")]
+    unsafe {
+        match_len_avx2(a, b, limit)
     }
-    // SSE2 is baseline on x86_64.
-    unsafe { match_len_sse2(a, b, limit) }
+    #[cfg(not(target_feature = "avx2"))]
+    unsafe {
+        match_len_sse2(a, b, limit)
+    }
 }
 
-#[cfg(any(
-    test,
-    feature = "deflate",
-    feature = "lzs",
-    feature = "lzrw1",
-    feature = "lzrw1a",
-    feature = "lzrw2",
-    feature = "lzrw3",
-    feature = "lzrw3a",
-    feature = "lzsa",
-    feature = "snappy",
-    feature = "zstd",
-    feature = "lz4",
-    feature = "fastlz",
-    feature = "brotli",
-    feature = "lzo",
-    feature = "rzip",
-    feature = "lzip",
-    feature = "lzma-alone",
-    feature = "packbits",
-    feature = "zx0",
-    feature = "zx1",
-    feature = "zx2",
-    feature = "zx5",
-    feature = "lzf",
-    feature = "vcdiff",
-    feature = "mppc",
-    feature = "xca",
-))]
 #[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(target_feature = "avx2"), allow(dead_code))]
+#[target_feature(enable = "avx2")]
+unsafe fn match_len_avx2(a: &[u8], b: &[u8], limit: usize) -> usize {
+    use core::arch::x86_64::{
+        __m256i, _mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8,
+    };
+
+    let mut i = 0;
+    while i + 32 <= limit {
+        let left = unsafe { _mm256_loadu_si256(a.as_ptr().add(i).cast::<__m256i>()) };
+        let right = unsafe { _mm256_loadu_si256(b.as_ptr().add(i).cast::<__m256i>()) };
+        let mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(left, right)) as u32;
+        if mask != 0xFFFF_FFFF {
+            return i + mask.trailing_ones() as usize;
+        }
+        i += 32;
+    }
+    i + match_len_scalar(&a[i..], &b[i..], limit - i)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(all(not(test), target_feature = "avx2"), allow(dead_code))]
 #[target_feature(enable = "sse2")]
 unsafe fn match_len_sse2(a: &[u8], b: &[u8], limit: usize) -> usize {
     use core::arch::x86_64::{__m128i, _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8};
@@ -471,57 +346,6 @@ unsafe fn match_len_sse2(a: &[u8], b: &[u8], limit: usize) -> usize {
         i += 16;
     }
     i + match_len_scalar(&a[i..], &b[i..], limit - i)
-}
-
-#[cfg(any(
-    test,
-    feature = "deflate",
-    feature = "lzs",
-    feature = "lzrw1",
-    feature = "lzrw1a",
-    feature = "lzrw2",
-    feature = "lzrw3",
-    feature = "lzrw3a",
-    feature = "lzsa",
-    feature = "snappy",
-    feature = "zstd",
-    feature = "lz4",
-    feature = "fastlz",
-    feature = "brotli",
-    feature = "lzo",
-    feature = "rzip",
-    feature = "lzip",
-    feature = "lzma-alone",
-    feature = "packbits",
-    feature = "zx0",
-    feature = "zx1",
-    feature = "zx2",
-    feature = "zx5",
-    feature = "lzf",
-    feature = "vcdiff",
-    feature = "mppc",
-    feature = "xca",
-))]
-#[cfg(all(feature = "std", target_arch = "x86_64"))]
-#[target_feature(enable = "avx2,sse2")]
-unsafe fn match_len_avx2(a: &[u8], b: &[u8], limit: usize) -> usize {
-    use core::arch::x86_64::{
-        __m256i, _mm256_cmpeq_epi8, _mm256_loadu_si256, _mm256_movemask_epi8,
-    };
-
-    let mut i = 0;
-    while i + 32 <= limit {
-        let left = unsafe { _mm256_loadu_si256(a.as_ptr().add(i).cast::<__m256i>()) };
-        let right = unsafe { _mm256_loadu_si256(b.as_ptr().add(i).cast::<__m256i>()) };
-        let mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(left, right)) as u32;
-        if mask != u32::MAX {
-            return i + mask.trailing_ones() as usize;
-        }
-        i += 32;
-    }
-    // AVX2 implies SSE2 on the CPU. This function enables both so the tail
-    // can call the 16-byte compare.
-    i + unsafe { match_len_sse2(&a[i..], &b[i..], limit - i) }
 }
 
 #[cfg(test)]
@@ -632,19 +456,18 @@ mod tests {
         assert_eq!(unsafe { super::match_len_sse2(&a, &a, n) }, n);
     }
 
-    #[cfg(all(feature = "std", target_arch = "x86_64"))]
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
     #[test]
-    fn match_len_avx2_matches_scalar_when_present() {
-        if !std::is_x86_feature_detected!("avx2") {
-            return;
-        }
-        let n = 100;
-        let a: Vec<u8> = (0..n).map(|i| (i * 5) as u8).collect();
+    fn match_len_avx2_matches_scalar() {
+        let n = 96;
+        let a: Vec<u8> = (0..n).map(|i| i as u8).collect();
         let mut b = a.clone();
-        b[70] ^= 1;
+        b[47] ^= 1;
         let avx2 = unsafe { super::match_len_avx2(&a, &b, n) };
         assert_eq!(avx2, match_len_scalar(&a, &b, n));
         assert_eq!(unsafe { super::match_len_avx2(&a, &a, n) }, n);
+        let tail = unsafe { super::match_len_avx2(&a, &a, 31) };
+        assert_eq!(tail, 31);
     }
 
     #[test]
@@ -672,8 +495,8 @@ mod tests {
             let b = ring[src & mask];
             ring[dst & mask] = b;
             out.push(b);
-            src += 1;
-            dst += 1;
+            src = src.wrapping_add(1);
+            dst = dst.wrapping_add(1);
         }
         out
     }
@@ -686,6 +509,8 @@ mod tests {
             (16, 14, 2, 10),
             (8, 3, 3, 4),
             (8, 1, 0, 5),
+            (8, usize::MAX, 0, 5),
+            (8, usize::MAX - 2, 1, 6),
         ];
         for (size, src, dst, len) in cases {
             let mut seed = vec![0u8; size];
