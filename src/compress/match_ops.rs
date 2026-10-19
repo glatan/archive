@@ -272,13 +272,36 @@ fn append_from(output: &mut Vec<u8>, src: usize, n: usize) {
     allow(dead_code)
 )]
 /// Length of the common prefix of `a` and `b`, capped by `max_len`.
+///
+/// The baseline x86_64 crate and the default i686 crate compare 16 bytes
+/// with SSE2. An `x86-64-v3` crate compares 32 bytes with AVX2, and an
+/// `x86-64-v4` crate compares 64 bytes with AVX-512BW. aarch64 compares 16
+/// bytes with NEON. A wasm32 crate built with `simd128` compares 16 bytes.
+/// Each path finishes the tail with [`match_len_scalar`].
 pub(crate) fn match_len(a: &[u8], b: &[u8], max_len: usize) -> usize {
     let limit = max_len.min(a.len()).min(b.len());
     #[cfg(target_arch = "x86_64")]
     {
         match_len_x86(a, b, limit)
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(all(target_arch = "x86", target_feature = "sse2"))]
+    {
+        unsafe { match_len_sse2(a, b, limit) }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { match_len_neon(a, b, limit) }
+    }
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        unsafe { match_len_wasm(a, b, limit) }
+    }
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        all(target_arch = "x86", target_feature = "sse2"),
+        target_arch = "aarch64",
+        all(target_arch = "wasm32", target_feature = "simd128"),
+    )))]
     {
         match_len_scalar(a, b, limit)
     }
@@ -296,9 +319,14 @@ pub(crate) fn match_len_scalar(a: &[u8], b: &[u8], limit: usize) -> usize {
 
 #[cfg(target_arch = "x86_64")]
 fn match_len_x86(a: &[u8], b: &[u8], limit: usize) -> usize {
-    // The baseline crate uses SSE2. A crate built with `target-cpu=x86-64-v3`
-    // uses AVX2. Neither path reads CPUID.
-    #[cfg(target_feature = "avx2")]
+    // The baseline crate uses SSE2. `target-cpu=x86-64-v3` uses AVX2.
+    // `target-cpu=x86-64-v4` uses AVX-512BW. None of the paths read CPUID.
+    // v4 also enables AVX2, so the 64-byte path has to win that cfg.
+    #[cfg(target_feature = "avx512bw")]
+    unsafe {
+        match_len_avx512(a, b, limit)
+    }
+    #[cfg(all(target_feature = "avx2", not(target_feature = "avx512bw")))]
     unsafe {
         match_len_avx2(a, b, limit)
     }
@@ -309,7 +337,68 @@ fn match_len_x86(a: &[u8], b: &[u8], limit: usize) -> usize {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[cfg_attr(not(target_feature = "avx2"), allow(dead_code))]
+#[cfg_attr(not(target_feature = "avx512bw"), allow(dead_code))]
+#[target_feature(enable = "avx512bw")]
+unsafe fn match_len_avx512(a: &[u8], b: &[u8], limit: usize) -> usize {
+    use core::arch::x86_64::{__m512i, _mm512_cmpeq_epi8_mask, _mm512_loadu_si512};
+
+    let mut i = 0;
+    while i + 64 <= limit {
+        let left = unsafe { _mm512_loadu_si512(a.as_ptr().add(i).cast::<__m512i>()) };
+        let right = unsafe { _mm512_loadu_si512(b.as_ptr().add(i).cast::<__m512i>()) };
+        let mask = _mm512_cmpeq_epi8_mask(left, right);
+        if mask != u64::MAX {
+            return i + mask.trailing_ones() as usize;
+        }
+        i += 64;
+    }
+    i + match_len_scalar(&a[i..], &b[i..], limit - i)
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+unsafe fn match_len_wasm(a: &[u8], b: &[u8], limit: usize) -> usize {
+    use core::arch::wasm32::{i8x16_bitmask, i8x16_eq, v128_load};
+
+    let mut i = 0;
+    while i + 16 <= limit {
+        let left = unsafe { v128_load(a.as_ptr().add(i).cast()) };
+        let right = unsafe { v128_load(b.as_ptr().add(i).cast()) };
+        let mask = i8x16_bitmask(i8x16_eq(left, right));
+        if mask != 0xFFFF {
+            return i + mask.trailing_ones() as usize;
+        }
+        i += 16;
+    }
+    i + match_len_scalar(&a[i..], &b[i..], limit - i)
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn match_len_neon(a: &[u8], b: &[u8], limit: usize) -> usize {
+    use core::arch::aarch64::{vceqq_u8, vld1q_u8};
+
+    let mut i = 0;
+    while i + 16 <= limit {
+        let left = unsafe { vld1q_u8(a.as_ptr().add(i)) };
+        let right = unsafe { vld1q_u8(b.as_ptr().add(i)) };
+        let mask = unsafe { crate::compress::scan::neon_movemask(vceqq_u8(left, right)) };
+        if mask != 0xFFFF {
+            return i + (mask as u16).trailing_ones() as usize;
+        }
+        i += 16;
+    }
+    i + match_len_scalar(&a[i..], &b[i..], limit - i)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(
+    any(
+        not(target_feature = "avx2"),
+        all(not(test), target_feature = "avx512bw")
+    ),
+    allow(dead_code)
+)]
 #[target_feature(enable = "avx2")]
 unsafe fn match_len_avx2(a: &[u8], b: &[u8], limit: usize) -> usize {
     use core::arch::x86_64::{
@@ -329,10 +418,13 @@ unsafe fn match_len_avx2(a: &[u8], b: &[u8], limit: usize) -> usize {
     i + match_len_scalar(&a[i..], &b[i..], limit - i)
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[cfg_attr(all(not(test), target_feature = "avx2"), allow(dead_code))]
 #[target_feature(enable = "sse2")]
 unsafe fn match_len_sse2(a: &[u8], b: &[u8], limit: usize) -> usize {
+    #[cfg(target_arch = "x86")]
+    use core::arch::x86::{__m128i, _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8};
+    #[cfg(target_arch = "x86_64")]
     use core::arch::x86_64::{__m128i, _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8};
 
     let mut i = 0;
@@ -444,7 +536,7 @@ mod tests {
         }
     }
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     #[test]
     fn match_len_sse2_matches_scalar() {
         let n = 80;
@@ -468,6 +560,48 @@ mod tests {
         assert_eq!(unsafe { super::match_len_avx2(&a, &a, n) }, n);
         let tail = unsafe { super::match_len_avx2(&a, &a, 31) };
         assert_eq!(tail, 31);
+    }
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx512bw"))]
+    #[test]
+    fn match_len_avx512_matches_scalar() {
+        let n = 160;
+        let a: Vec<u8> = (0..n).map(|i| i as u8).collect();
+        let mut b = a.clone();
+        b[70] ^= 1;
+        let wide = unsafe { super::match_len_avx512(&a, &b, n) };
+        assert_eq!(wide, match_len_scalar(&a, &b, n));
+        assert_eq!(unsafe { super::match_len_avx512(&a, &a, n) }, n);
+        let tail = unsafe { super::match_len_avx512(&a, &a, 63) };
+        assert_eq!(tail, 63);
+    }
+
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[test]
+    fn match_len_wasm_matches_scalar() {
+        let n = 80;
+        let a: Vec<u8> = (0..n).map(|i| i as u8).collect();
+        let mut b = a.clone();
+        b[47] ^= 1;
+        let wide = unsafe { super::match_len_wasm(&a, &b, n) };
+        assert_eq!(wide, match_len_scalar(&a, &b, n));
+        assert_eq!(unsafe { super::match_len_wasm(&a, &a, n) }, n);
+        let tail = unsafe { super::match_len_wasm(&a, &a, 15) };
+        assert_eq!(tail, 15);
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn match_len_neon_matches_scalar() {
+        let n = 80;
+        let a: Vec<u8> = (0..n).map(|i| i as u8).collect();
+        let mut b = a.clone();
+        b[47] ^= 1;
+        let neon = unsafe { super::match_len_neon(&a, &b, n) };
+        assert_eq!(neon, match_len_scalar(&a, &b, n));
+        assert_eq!(unsafe { super::match_len_neon(&a, &a, n) }, n);
+        let tail = unsafe { super::match_len_neon(&a, &a, 15) };
+        assert_eq!(tail, 15);
     }
 
     #[test]

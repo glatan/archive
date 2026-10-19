@@ -8,7 +8,18 @@ rust-version.workspace = true
 name = "archive-fuzz"
 path = "src/main.rs"
 
+[[bin]]
+name = "archive-fuzz-wasm"
+path = "src/wasm_host_bin.rs"
+required-features = ["wasm-host"]
+
+[features]
+wasm-host = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:wasmtime-wasi-threads"]
+
 [dependencies]
+wasmtime = { version = "=46.0.3", optional = true }
+wasmtime-wasi = { version = "=46.0.3", optional = true }
+wasmtime-wasi-threads = { version = "=46.0.3", optional = true }
 archive = { path = "..", features = ["std", "tar", "cpio", "ar", "deb", "rpm", "squashfs", "cramfs", "romfs", "erofs", "iso9660", "mscab", "mscfb", "zim", "mtree", "warc", "lha", "arj", "arc", "git-pack", "xar", "pea", "crx3", "xca", "lzf", "fastlz", "packbits", "lzrw1", "lzrw1a", "lzrw2", "lzrw3", "lzrw3a", "lzsa", "zx0", "zx1", "zx2", "zx5", "vcdiff", "mppc", "lzs", "lzxd", "cmpsc", "uuencode", "ascii85", "yenc", "macbinary", "binhex", "gzip", "zstd", "bzip2", "lzip", "lzma-alone", "lzw", "lz4", "lzo", "lrzip", "xz", "zlib", "zpaq", "rzip", "snappy", "brotli", "zip", "sevenz"] }
 sha3 = "0.10.8"
 blake3 = "1.8.3"

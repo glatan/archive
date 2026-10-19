@@ -2,14 +2,18 @@
 //!
 //! `find_byte` returns the first index whose byte is one of the needles.
 //! The baseline x86_64 crate scans 16 bytes at a time with SSE2. A crate
-//! built with `target-cpu=x86-64-v3` scans 32 bytes with AVX2. aarch64
-//! scans 16 bytes with NEON. The index matches [`find_byte_scalar`].
+//! built with `target-cpu=x86-64-v3` scans 32 bytes with AVX2. A crate
+//! built with `target-cpu=x86-64-v4` scans 64 bytes with AVX-512BW.
+//! i686 scans 16 bytes with SSE2. aarch64 scans 16 bytes with NEON.
+//! wasm32 with `simd128` scans 16 bytes. The index matches
+//! [`find_byte_scalar`].
 
 /// First index in `from..=last` whose byte is `first` or `second`.
 ///
 /// The baseline x86_64 crate scans 16 bytes at a time. An `x86-64-v3`
-/// crate scans 32 bytes. Both then run the scalar tail. The returned
-/// index is the same as [`find_byte_scalar`].
+/// crate scans 32 bytes. An `x86-64-v4` crate scans 64 bytes. Each then
+/// runs the scalar tail. The returned index is the same as
+/// [`find_byte_scalar`].
 pub(crate) fn find_byte(
     data: &[u8],
     from: usize,
@@ -28,16 +32,24 @@ pub(crate) fn find_byte(
     {
         unsafe { find_byte_x86(data, from, last, first, second) }
     }
+    #[cfg(all(target_arch = "x86", target_feature = "sse2"))]
+    {
+        unsafe { find_byte_width16(data, from, last, first, second, find_byte_sse2) }
+    }
     #[cfg(target_arch = "aarch64")]
     {
-        if let Some(hit) = unsafe { find_byte_neon(data, from, last, first, second) } {
-            return Some(hit);
-        }
-        let consumed = from + ((data.len() - from) / 16) * 16;
-        let tail = consumed.min(last.saturating_add(1));
-        find_byte_scalar(data, tail.max(from), last, first, second)
+        unsafe { find_byte_width16(data, from, last, first, second, find_byte_neon) }
     }
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        unsafe { find_byte_width16(data, from, last, first, second, find_byte_wasm) }
+    }
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        all(target_arch = "x86", target_feature = "sse2"),
+        target_arch = "aarch64",
+        all(target_arch = "wasm32", target_feature = "simd128"),
+    )))]
     {
         find_byte_scalar(data, from, last, first, second)
     }
@@ -65,6 +77,35 @@ pub(crate) fn find_byte_scalar(
     None
 }
 
+#[cfg(any(
+    all(target_arch = "x86", target_feature = "sse2"),
+    target_arch = "aarch64",
+    all(target_arch = "wasm32", target_feature = "simd128"),
+))]
+type FindByteScan = unsafe fn(&[u8], usize, usize, u8, Option<u8>) -> Option<usize>;
+
+/// Run a 16-byte scan, then the scalar tail the scan did not consume.
+#[cfg(any(
+    all(target_arch = "x86", target_feature = "sse2"),
+    target_arch = "aarch64",
+    all(target_arch = "wasm32", target_feature = "simd128"),
+))]
+unsafe fn find_byte_width16(
+    data: &[u8],
+    from: usize,
+    last: usize,
+    first: u8,
+    second: Option<u8>,
+    scan: FindByteScan,
+) -> Option<usize> {
+    if let Some(hit) = unsafe { scan(data, from, last, first, second) } {
+        return Some(hit);
+    }
+    let consumed = from + ((data.len() - from) / 16) * 16;
+    let tail = consumed.min(last.saturating_add(1));
+    find_byte_scalar(data, tail.max(from), last, first, second)
+}
+
 #[cfg(target_arch = "x86_64")]
 unsafe fn find_byte_x86(
     data: &[u8],
@@ -73,7 +114,12 @@ unsafe fn find_byte_x86(
     first: u8,
     second: Option<u8>,
 ) -> Option<usize> {
-    #[cfg(target_feature = "avx2")]
+    #[cfg(target_feature = "avx512bw")]
+    let (hit, width) = (
+        unsafe { find_byte_avx512(data, from, last, first, second) },
+        64,
+    );
+    #[cfg(all(target_feature = "avx2", not(target_feature = "avx512bw")))]
     let (hit, width) = (
         unsafe { find_byte_avx2(data, from, last, first, second) },
         32,
@@ -92,7 +138,51 @@ unsafe fn find_byte_x86(
 }
 
 #[cfg(target_arch = "x86_64")]
-#[cfg_attr(not(target_feature = "avx2"), allow(dead_code))]
+#[cfg_attr(not(target_feature = "avx512bw"), allow(dead_code))]
+#[target_feature(enable = "avx512bw")]
+unsafe fn find_byte_avx512(
+    data: &[u8],
+    from: usize,
+    last: usize,
+    first: u8,
+    second: Option<u8>,
+) -> Option<usize> {
+    use core::arch::x86_64::{
+        __m512i, _mm512_cmpeq_epi8_mask, _mm512_loadu_si512, _mm512_set1_epi8,
+    };
+
+    let needle_a = _mm512_set1_epi8(first as i8);
+    let needle_b = _mm512_set1_epi8(second.unwrap_or(first) as i8);
+    let mut i = from;
+    while i + 64 <= data.len() {
+        let v = unsafe { _mm512_loadu_si512(data.as_ptr().add(i).cast::<__m512i>()) };
+        let mut mask = _mm512_cmpeq_epi8_mask(v, needle_a);
+        if second.is_some() {
+            mask |= _mm512_cmpeq_epi8_mask(v, needle_b);
+        }
+        if mask != 0 {
+            let bit = mask.trailing_zeros() as usize;
+            if i + bit <= last {
+                return Some(i + bit);
+            }
+            return None;
+        }
+        if i + 63 > last {
+            return None;
+        }
+        i += 64;
+    }
+    None
+}
+
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(
+    any(
+        not(target_feature = "avx2"),
+        all(not(test), target_feature = "avx512bw")
+    ),
+    allow(dead_code)
+)]
 #[target_feature(enable = "avx2")]
 unsafe fn find_byte_avx2(
     data: &[u8],
@@ -131,7 +221,7 @@ unsafe fn find_byte_avx2(
     None
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[cfg_attr(all(not(test), target_feature = "avx2"), allow(dead_code))]
 #[target_feature(enable = "sse2")]
 unsafe fn find_byte_sse2(
@@ -141,6 +231,11 @@ unsafe fn find_byte_sse2(
     first: u8,
     second: Option<u8>,
 ) -> Option<usize> {
+    #[cfg(target_arch = "x86")]
+    use core::arch::x86::{
+        __m128i, _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_or_si128, _mm_set1_epi8,
+    };
+    #[cfg(target_arch = "x86_64")]
     use core::arch::x86_64::{
         __m128i, _mm_cmpeq_epi8, _mm_loadu_si128, _mm_movemask_epi8, _mm_or_si128, _mm_set1_epi8,
     };
@@ -155,6 +250,42 @@ unsafe fn find_byte_sse2(
             cmp = _mm_or_si128(cmp, _mm_cmpeq_epi8(v, needle_b));
         }
         let mask = _mm_movemask_epi8(cmp) as u32;
+        if mask != 0 {
+            let bit = mask.trailing_zeros() as usize;
+            if i + bit <= last {
+                return Some(i + bit);
+            }
+            return None;
+        }
+        if i + 15 > last {
+            return None;
+        }
+        i += 16;
+    }
+    None
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+unsafe fn find_byte_wasm(
+    data: &[u8],
+    from: usize,
+    last: usize,
+    first: u8,
+    second: Option<u8>,
+) -> Option<usize> {
+    use core::arch::wasm32::{i8x16_bitmask, i8x16_eq, u8x16_splat, v128_load, v128_or};
+
+    let needle_a = u8x16_splat(first);
+    let needle_b = u8x16_splat(second.unwrap_or(first));
+    let mut i = from;
+    while i + 16 <= data.len() {
+        let v = unsafe { v128_load(data.as_ptr().add(i).cast()) };
+        let mut cmp = i8x16_eq(v, needle_a);
+        if second.is_some() {
+            cmp = v128_or(cmp, i8x16_eq(v, needle_b));
+        }
+        let mask = u32::from(i8x16_bitmask(cmp));
         if mask != 0 {
             let bit = mask.trailing_zeros() as usize;
             if i + bit <= last {
@@ -253,7 +384,7 @@ mod tests {
         assert_eq!(find_byte(&empty, 0, 70, 0xE8, Some(0xE9)), None);
     }
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     #[test]
     fn find_byte_sse2_matches_scalar_inside_groups() {
         let mut data = vec![0u8; 64];
@@ -266,6 +397,23 @@ mod tests {
         let none = vec![1u8; 32];
         assert_eq!(
             unsafe { super::find_byte_sse2(&none, 0, 31, 0xE8, None) },
+            None
+        );
+    }
+
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[test]
+    fn find_byte_wasm_matches_scalar_inside_groups() {
+        let mut data = vec![0u8; 64];
+        data[20] = 0xE8;
+        data[50] = 0xE9;
+        let wide = unsafe { super::find_byte_wasm(&data, 0, 63, 0xE8, Some(0xE9)) };
+        assert_eq!(wide, find_byte_scalar(&data, 0, 63, 0xE8, Some(0xE9)));
+        let later = unsafe { super::find_byte_wasm(&data, 21, 63, 0xE8, Some(0xE9)) };
+        assert_eq!(later, find_byte_scalar(&data, 21, 63, 0xE8, Some(0xE9)));
+        let none = vec![1u8; 32];
+        assert_eq!(
+            unsafe { super::find_byte_wasm(&none, 0, 31, 0xE8, None) },
             None
         );
     }
@@ -283,6 +431,23 @@ mod tests {
         let none = vec![1u8; 32];
         assert_eq!(
             unsafe { super::find_byte_neon(&none, 0, 31, 0xE8, None) },
+            None
+        );
+    }
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx512bw"))]
+    #[test]
+    fn find_byte_avx512_matches_scalar_inside_groups() {
+        let mut data = vec![0u8; 160];
+        data[20] = 0xE8;
+        data[100] = 0xE9;
+        let wide = unsafe { super::find_byte_avx512(&data, 0, 159, 0xE8, Some(0xE9)) };
+        assert_eq!(wide, find_byte_scalar(&data, 0, 159, 0xE8, Some(0xE9)));
+        let later = unsafe { super::find_byte_avx512(&data, 21, 159, 0xE8, Some(0xE9)) };
+        assert_eq!(later, find_byte_scalar(&data, 21, 159, 0xE8, Some(0xE9)));
+        let none = vec![1u8; 128];
+        assert_eq!(
+            unsafe { super::find_byte_avx512(&none, 0, 127, 0xE8, None) },
             None
         );
     }

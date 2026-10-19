@@ -40,8 +40,10 @@ fn push_group(out: &mut Vec<u8>, value: u32) {
 
 /// Encode `data` as an Adobe Ascii85 stream bracketed by `<~` and `~>`.
 ///
-/// On x86_64 and aarch64, pairs of 4-byte groups take the vector
-/// division path. A zero group is still the single character `z`.
+/// Groups of 4 bytes take the vector division path: two groups on
+/// baseline x86_64, i686 SSE2, aarch64, and wasm32 `simd128`; four on
+/// `x86-64-v3`; eight on `x86-64-v4`. A zero group is still the single
+/// character `z`.
 pub fn encode(data: &[u8]) -> Vec<u8> {
     encode_inner(data, true)
 }
@@ -57,6 +59,30 @@ fn encode_inner(data: &[u8], wide: bool) -> Vec<u8> {
     let (chunks, rem) = data.as_chunks::<4>();
     let mut i = 0;
     if wide {
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx512bw"))]
+        while i + 8 <= chunks.len() {
+            let mut vals = [0u32; 8];
+            for k in 0..8 {
+                vals[k] = u32::from_be_bytes(chunks[i + k]);
+            }
+            let digits = unsafe { digits8_avx512(vals) };
+            for k in 0..8 {
+                emit_group(&mut out, vals[k], &digits[k]);
+            }
+            i += 8;
+        }
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+        while i + 4 <= chunks.len() {
+            let mut vals = [0u32; 4];
+            for k in 0..4 {
+                vals[k] = u32::from_be_bytes(chunks[i + k]);
+            }
+            let digits = unsafe { digits4_avx2(vals) };
+            for k in 0..4 {
+                emit_group(&mut out, vals[k], &digits[k]);
+            }
+            i += 4;
+        }
         while i + 1 < chunks.len() {
             let a = u32::from_be_bytes(chunks[i]);
             let b = u32::from_be_bytes(chunks[i + 1]);
@@ -96,7 +122,10 @@ fn emit_group(out: &mut Vec<u8>, value: u32, digits: &[u8; 5]) {
 }
 
 fn digits_pair(a: u32, b: u32) -> ([u8; 5], [u8; 5]) {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "x86", target_feature = "sse2")
+    ))]
     unsafe {
         digits_pair_sse2(a, b)
     }
@@ -104,11 +133,28 @@ fn digits_pair(a: u32, b: u32) -> ([u8; 5], [u8; 5]) {
     unsafe {
         digits_pair_neon(a, b)
     }
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        digits_pair_wasm(a, b)
+    }
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        all(target_arch = "x86", target_feature = "sse2"),
+        target_arch = "aarch64",
+        all(target_arch = "wasm32", target_feature = "simd128"),
+    )))]
     (digits_scalar(a), digits_scalar(b))
 }
 
-#[cfg(any(test, not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
+#[cfg(any(
+    test,
+    not(any(
+        target_arch = "x86_64",
+        all(target_arch = "x86", target_feature = "sse2"),
+        target_arch = "aarch64",
+        all(target_arch = "wasm32", target_feature = "simd128"),
+    ))
+))]
 fn digits_scalar(mut value: u32) -> [u8; 5] {
     let mut digits = [0u8; 5];
     for d in digits.iter_mut().rev() {
@@ -119,7 +165,7 @@ fn digits_scalar(mut value: u32) -> [u8; 5] {
     digits
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "sse2")]
 fn digits_pair_sse2(mut a: u32, mut b: u32) -> ([u8; 5], [u8; 5]) {
     let mut da = [0u8; 5];
@@ -134,9 +180,15 @@ fn digits_pair_sse2(mut a: u32, mut b: u32) -> ([u8; 5], [u8; 5]) {
     (da, db)
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "sse2")]
 fn divmod85_sse2(a: u32, b: u32) -> (u32, u8, u32, u8) {
+    #[cfg(target_arch = "x86")]
+    use core::arch::x86::{
+        _mm_cvtsi128_si32, _mm_mul_epu32, _mm_set_epi64x, _mm_srli_epi64, _mm_srli_si128,
+        _mm_sub_epi64,
+    };
+    #[cfg(target_arch = "x86_64")]
     use core::arch::x86_64::{
         _mm_cvtsi128_si64, _mm_mul_epu32, _mm_set_epi64x, _mm_srli_epi64, _mm_srli_si128,
         _mm_sub_epi64,
@@ -146,11 +198,135 @@ fn divmod85_sse2(a: u32, b: u32) -> (u32, u8, u32, u8) {
     let q = _mm_srli_epi64(_mm_mul_epu32(v, magic), 38);
     let prod85 = _mm_mul_epu32(q, _mm_set_epi64x(85, 85));
     let r = _mm_sub_epi64(v, prod85);
+    // `_mm_cvtsi128_si64` exists only on x86_64. The quotient and remainder
+    // each fit in 32 bits, so i686 reads them with `_mm_cvtsi128_si32`.
+    #[cfg(target_arch = "x86_64")]
     let qa = _mm_cvtsi128_si64(q) as u32;
+    #[cfg(target_arch = "x86_64")]
     let ra = _mm_cvtsi128_si64(r) as u8;
+    #[cfg(target_arch = "x86_64")]
     let qb = _mm_cvtsi128_si64(_mm_srli_si128(q, 8)) as u32;
+    #[cfg(target_arch = "x86_64")]
     let rb = _mm_cvtsi128_si64(_mm_srli_si128(r, 8)) as u8;
+    #[cfg(target_arch = "x86")]
+    let qa = _mm_cvtsi128_si32(q) as u32;
+    #[cfg(target_arch = "x86")]
+    let ra = _mm_cvtsi128_si32(r) as u8;
+    #[cfg(target_arch = "x86")]
+    let qb = _mm_cvtsi128_si32(_mm_srli_si128(q, 8)) as u32;
+    #[cfg(target_arch = "x86")]
+    let rb = _mm_cvtsi128_si32(_mm_srli_si128(r, 8)) as u8;
     (qa, ra, qb, rb)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(target_feature = "avx2"), allow(dead_code))]
+#[target_feature(enable = "avx2")]
+fn digits4_avx2(mut vals: [u32; 4]) -> [[u8; 5]; 4] {
+    use core::arch::x86_64::{
+        _mm256_mul_epu32, _mm256_set1_epi64x, _mm256_setr_epi64x, _mm256_srli_epi64,
+        _mm256_storeu_si256, _mm256_sub_epi64,
+    };
+    let mut digits = [[0u8; 5]; 4];
+    for slot in (0..5).rev() {
+        let v = _mm256_setr_epi64x(
+            i64::from(vals[0]),
+            i64::from(vals[1]),
+            i64::from(vals[2]),
+            i64::from(vals[3]),
+        );
+        let magic = _mm256_set1_epi64x(3_233_857_729);
+        let q = _mm256_srli_epi64(_mm256_mul_epu32(v, magic), 38);
+        let prod = _mm256_mul_epu32(q, _mm256_set1_epi64x(85));
+        let r = _mm256_sub_epi64(v, prod);
+        let mut qs = [0u64; 4];
+        let mut rs = [0u64; 4];
+        unsafe {
+            _mm256_storeu_si256(qs.as_mut_ptr().cast(), q);
+            _mm256_storeu_si256(rs.as_mut_ptr().cast(), r);
+        }
+        for k in 0..4 {
+            digits[k][slot] = rs[k] as u8;
+            vals[k] = qs[k] as u32;
+        }
+    }
+    digits
+}
+
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(target_feature = "avx512bw"), allow(dead_code))]
+#[target_feature(enable = "avx512bw")]
+fn digits8_avx512(mut vals: [u32; 8]) -> [[u8; 5]; 8] {
+    use core::arch::x86_64::{
+        _mm512_mul_epu32, _mm512_set_epi64, _mm512_set1_epi64, _mm512_srli_epi64,
+        _mm512_storeu_si512, _mm512_sub_epi64,
+    };
+    let mut digits = [[0u8; 5]; 8];
+    for slot in (0..5).rev() {
+        // `_mm512_set_epi64` takes the highest lane first. The multiply is
+        // AVX-512F `vpmuludq`, not AVX-512DQ.
+        let v = _mm512_set_epi64(
+            i64::from(vals[7]),
+            i64::from(vals[6]),
+            i64::from(vals[5]),
+            i64::from(vals[4]),
+            i64::from(vals[3]),
+            i64::from(vals[2]),
+            i64::from(vals[1]),
+            i64::from(vals[0]),
+        );
+        let magic = _mm512_set1_epi64(3_233_857_729);
+        let q = _mm512_srli_epi64(_mm512_mul_epu32(v, magic), 38);
+        let prod = _mm512_mul_epu32(q, _mm512_set1_epi64(85));
+        let r = _mm512_sub_epi64(v, prod);
+        let mut qs = [0u64; 8];
+        let mut rs = [0u64; 8];
+        unsafe {
+            _mm512_storeu_si512(qs.as_mut_ptr().cast(), q);
+            _mm512_storeu_si512(rs.as_mut_ptr().cast(), r);
+        }
+        for k in 0..8 {
+            digits[k][slot] = rs[k] as u8;
+            vals[k] = qs[k] as u32;
+        }
+    }
+    digits
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+fn digits_pair_wasm(mut a: u32, mut b: u32) -> ([u8; 5], [u8; 5]) {
+    let mut da = [0u8; 5];
+    let mut db = [0u8; 5];
+    for slot in (0..5).rev() {
+        let (qa, ra, qb, rb) = divmod85_wasm(a, b);
+        da[slot] = ra;
+        db[slot] = rb;
+        a = qa;
+        b = qb;
+    }
+    (da, db)
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+fn divmod85_wasm(a: u32, b: u32) -> (u32, u8, u32, u8) {
+    use core::arch::wasm32::{
+        i64x2_extend_low_u32x4, i64x2_mul, u32x4_replace_lane, u32x4_splat, u64x2_extract_lane,
+        u64x2_shr, u64x2_splat, u64x2_sub,
+    };
+    let packed = u32x4_replace_lane::<1>(u32x4_replace_lane::<0>(u32x4_splat(0), a), b);
+    let v = i64x2_extend_low_u32x4(packed);
+    let magic = u64x2_splat(3_233_857_729);
+    let q = u64x2_shr(i64x2_mul(v, magic), 38);
+    let prod = i64x2_mul(q, u64x2_splat(85));
+    let r = u64x2_sub(v, prod);
+    (
+        u64x2_extract_lane::<0>(q) as u32,
+        u64x2_extract_lane::<0>(r) as u8,
+        u64x2_extract_lane::<1>(q) as u32,
+        u64x2_extract_lane::<1>(r) as u8,
+    )
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -305,11 +481,39 @@ mod tests {
         assert_eq!(simd.1, digits_scalar(b));
     }
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    #[test]
+    fn digits4_avx2_matches_scalar() {
+        let vals = [0, 1, 85, u32::MAX];
+        let got = unsafe { digits4_avx2(vals) };
+        for k in 0..4 {
+            assert_eq!(got[k], digits_scalar(vals[k]));
+        }
+    }
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx512bw"))]
+    #[test]
+    fn digits8_avx512_matches_scalar() {
+        let vals = [0, 1, 85, 0x0102_0304, u32::MAX, 84, 255, 0x8000_0000];
+        let got = unsafe { digits8_avx512(vals) };
+        for k in 0..8 {
+            assert_eq!(got[k], digits_scalar(vals[k]));
+        }
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     #[test]
     fn digits_pair_sse2_matches_scalar() {
         for (a, b) in [(0, 0), (1, 85), (0x0102_0304, u32::MAX)] {
             assert_digits_match(unsafe { digits_pair_sse2(a, b) }, a, b);
+        }
+    }
+
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[test]
+    fn digits_pair_wasm_matches_scalar() {
+        for (a, b) in [(0, 0), (1, 85), (0x0102_0304, u32::MAX), (0x8000_0000, 1)] {
+            assert_digits_match(digits_pair_wasm(a, b), a, b);
         }
     }
 

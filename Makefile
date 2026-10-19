@@ -18,10 +18,11 @@ FUZZ_AS_KB ?= 2097152
 test:
 	podman run --rm $(TEST_IMAGE)
 
-# x86_64（SSE2）、AVX2、aarch64（NEON）は失敗とコーパスを分けて書く。
-# `make -j3 fuzz` で 3 本を同時に起動する。`-j` を付けないときは順に実行する。
+# x86_64（SSE2）、AVX2、AVX-512、i686（SSE2）、aarch64（NEON）、
+# wasm32（simd128）は失敗とコーパスを分けて書く。
+# `make -j6 fuzz` で 6 本を同時に起動する。`-j` を付けないときは順に実行する。
 .PHONY: fuzz
-fuzz: fuzz-x86_64 fuzz-avx2 fuzz-aarch64
+fuzz: fuzz-x86_64 fuzz-avx2 fuzz-avx512 fuzz-i686 fuzz-aarch64 fuzz-wasm
 
 .PHONY: fuzz-x86_64
 fuzz-x86_64:
@@ -37,11 +38,33 @@ clean-fuzz:
 	cargo run -q --profile fuzz -p archive-fuzz -- clean
 
 # x86-64-v3 向けにコンパイルした公開経路。AVX2 を実行時には選ばない。
-# ホスト CPU に AVX2 が無いときは SIGILL で失敗する。
+# テストイメージで実行する。ホスト CPU に AVX2 が無いときは SIGILL で失敗する。
 .PHONY: test-avx2
 test-avx2:
-	CARGO_TARGET_DIR=target/avx2 RUSTFLAGS="-C target-cpu=x86-64-v3" \
-		cargo test --lib --all-features
+	podman run --rm --entrypoint /bin/sh $(TEST_IMAGE) \
+		-c 'CARGO_TARGET_DIR=target/avx2 RUSTFLAGS="-C target-cpu=x86-64-v3" cargo test --lib --all-features'
+
+# x86-64-v4 向けにコンパイルした公開経路。AVX-512 を実行時には選ばない。
+# テストイメージで実行する。ホスト CPU に AVX-512 が無いときは SIGILL で失敗する。
+# 既定の `make test` には入れない。
+.PHONY: test-avx512
+test-avx512:
+	podman run --rm --entrypoint /bin/sh $(TEST_IMAGE) \
+		-c 'CARGO_TARGET_DIR=target/avx512 RUSTFLAGS="-C target-cpu=x86-64-v4" cargo test --lib --all-features'
+
+# i686 の既定ターゲットは SSE2 が有効。テストイメージの 32-bit ローダで実行する。
+# 既定の `make test` には入れない。
+.PHONY: test-i686
+test-i686:
+	podman run --rm --entrypoint cargo $(TEST_IMAGE) \
+		test --lib --all-features --target i686-unknown-linux-gnu
+
+# wasm32 の既定ターゲットに simd128 は無い。テストイメージで `+simd128` の check を実行する。
+# `scripts/archive-features.py` は std を除く。既定の `make test` には入れない。
+.PHONY: test-wasm
+test-wasm:
+	podman run --rm --entrypoint /bin/sh $(TEST_IMAGE) \
+		-c 'RUSTFLAGS="-C target-feature=+simd128" cargo check --lib --no-default-features --features "$$(cat /usr/local/share/archive-features)" --target wasm32-unknown-unknown'
 
 .PHONY: fuzz-avx2
 fuzz-avx2:
@@ -51,6 +74,40 @@ fuzz-avx2:
 		-v ./fuzz/corpus/avx2:/workspace/fuzz/corpus \
 		$(FUZZ_IMAGE) \
 		-c "ulimit -S -v $(FUZZ_AS_KB) && exec /usr/local/bin/archive-fuzz-avx2 run --algorithm '$(FUZZ_ALGORITHM)' --duration '$(FUZZ_DURATION)' --pattern '$(FUZZ_PATTERN)' --jobs '$(FUZZ_JOBS)'"
+
+# x86-64-v4 向けにコンパイルした公開経路。AVX-512 を実行時には選ばない。
+# ホスト CPU に AVX-512 が無いときは SIGILL で失敗する。
+.PHONY: fuzz-avx512
+fuzz-avx512:
+	mkdir -p fuzz/failures/avx512 fuzz/corpus/avx512
+	podman run --rm --entrypoint /bin/sh \
+		-v ./fuzz/failures/avx512:/workspace/fuzz/failures \
+		-v ./fuzz/corpus/avx512:/workspace/fuzz/corpus \
+		$(FUZZ_IMAGE) \
+		-c "ulimit -S -v $(FUZZ_AS_KB) && exec /usr/local/bin/archive-fuzz-avx512 run --algorithm '$(FUZZ_ALGORITHM)' --duration '$(FUZZ_DURATION)' --pattern '$(FUZZ_PATTERN)' --jobs '$(FUZZ_JOBS)'"
+
+# i686 の既定 SSE2。イメージ内の 32-bit ローダで実行する。
+.PHONY: fuzz-i686
+fuzz-i686:
+	mkdir -p fuzz/failures/i686 fuzz/corpus/i686
+	podman run --rm --entrypoint /bin/sh \
+		-v ./fuzz/failures/i686:/workspace/fuzz/failures \
+		-v ./fuzz/corpus/i686:/workspace/fuzz/corpus \
+		$(FUZZ_IMAGE) \
+		-c "ulimit -S -v $(FUZZ_AS_KB) && exec /usr/local/bin/archive-fuzz-i686 run --algorithm '$(FUZZ_ALGORITHM)' --duration '$(FUZZ_DURATION)' --pattern '$(FUZZ_PATTERN)' --jobs '$(FUZZ_JOBS)'"
+
+# wasm32 + simd128。ゲストは wasmtime 上で動き、外部ツールはホストの
+# archive-fuzz-wasm がプロセスグループと ulimit 付きで起動する。
+# 共有メモリは 2GiB を起動時に予約する。2GiB のソフト上限では連続領域が
+# 取れないので、このプロセスだけ 4GiB にする。ゲストの線形メモリ上限は 2GiB。
+.PHONY: fuzz-wasm
+fuzz-wasm:
+	mkdir -p fuzz/failures/wasm fuzz/corpus/wasm
+	podman run --rm --entrypoint /bin/sh \
+		-v ./fuzz/failures/wasm:/workspace/fuzz/failures \
+		-v ./fuzz/corpus/wasm:/workspace/fuzz/corpus \
+		$(FUZZ_IMAGE) \
+		-c "ulimit -S -v 4194304 && exec /usr/local/bin/archive-fuzz-wasm run --algorithm '$(FUZZ_ALGORITHM)' --duration '$(FUZZ_DURATION)' --pattern '$(FUZZ_PATTERN)' --jobs '$(FUZZ_JOBS)'"
 
 # aarch64 の公開経路は NEON。qemu-user で実行する。
 .PHONY: fuzz-aarch64
