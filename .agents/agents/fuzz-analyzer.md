@@ -15,11 +15,14 @@ fuzz failure を分析する読み取り専用エージェント。共通ルー�
 
 ## 入力
 
-今回の実行は 3 本に分かれている。各本の `run-<timestamp>/` を見る。
+今回の実行は 6 本に分かれている。各本の `run-<timestamp>/` を見る。
 
 - `fuzz/failures/x86_64/` — x86_64 の SSE2 (`archive-fuzz-x86_64`)
 - `fuzz/failures/avx2/` — x86-64-v3 の AVX2 (`archive-fuzz-avx2`)
+- `fuzz/failures/avx512/` — x86-64-v4 の AVX-512BW (`archive-fuzz-avx512`)
+- `fuzz/failures/i686/` — i686 の SSE2 (`archive-fuzz-i686`)
 - `fuzz/failures/aarch64/` — aarch64 の NEON (`archive-fuzz-aarch64`)
+- `fuzz/failures/wasm/` — wasm32 の simd128 (`archive-fuzz-wasm`)
 
 失敗ケースは次のファイルである。
 
@@ -35,11 +38,11 @@ fuzz failure を分析する読み取り専用エージェント。共通ルー�
 ### 1. failure の列挙
 
 ```sh
-find fuzz/failures/x86_64 fuzz/failures/avx2 fuzz/failures/aarch64 \
+find fuzz/failures/x86_64 fuzz/failures/avx2 fuzz/failures/avx512 fuzz/failures/i686 fuzz/failures/aarch64 fuzz/failures/wasm \
   -name 'failure-*.json' -o -name 'hang-*.json' | sort
 ```
 
-3 本の `summary.json` を並べ、`fail` が 0 の本を先に分ける。同じ失敗が 3 本にあれば共有の不具合、1 本だけにあればその公開経路の不具合として扱う。
+6 本の `summary.json` を並べ、`fail` が 0 の本を先に分ける。同じ失敗が 6 本にあれば共有の不具合、1 本だけにあればその公開経路の不具合として扱う。
 
 ### 2. 各 failure の分類
 
@@ -79,7 +82,7 @@ find fuzz/failures/x86_64 fuzz/failures/avx2 fuzz/failures/aarch64 \
 | # | 対象 | algorithm | pattern | error | input_size | 推定原因 |
 |---|------|-----------|---------|-------|-----------|---------|
 
-対象は `x86_64`、`avx2`、`aarch64` のいずれかである。3 本に同じ失敗があるときは対象を `共通` と書く。
+対象は `x86_64`、`avx2`、`avx512`、`i686`、`aarch64`、`wasm` のいずれかである。6 本に同じ失敗があるときは対象を `共通` と書く。
 
 ### リグレッションテスト候補
 | # | テスト名 | 入力データ | 配置先 |

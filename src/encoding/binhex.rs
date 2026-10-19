@@ -166,6 +166,22 @@ fn sixbit_encode_inner(data: &[u8], out: &mut Vec<u8>, wide: bool) {
     };
     let mut pos = 0;
     if wide {
+        // Index math widens; each character still goes through `put`, so the
+        // first line stays 63 data characters and later lines stay 64.
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx512bw"))]
+        while pos + 48 <= data.len() {
+            for &v in &unsafe { indices16_avx2(&data[pos..pos + 48]) } {
+                put(out, ALPHABET[v as usize]);
+            }
+            pos += 48;
+        }
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+        while pos + 24 <= data.len() {
+            for &v in &unsafe { indices8_sse2(&data[pos..pos + 24]) } {
+                put(out, ALPHABET[v as usize]);
+            }
+            pos += 24;
+        }
         while pos + 12 <= data.len() {
             for &v in &indices4(&data[pos..pos + 12]) {
                 put(out, ALPHABET[v as usize]);
@@ -196,7 +212,10 @@ fn sixbit_encode_inner(data: &[u8], out: &mut Vec<u8>, wide: bool) {
 }
 
 fn indices4(input: &[u8]) -> [u8; 16] {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(
+        target_arch = "x86_64",
+        all(target_arch = "x86", target_feature = "sse2")
+    ))]
     unsafe {
         indices4_sse2(input)
     }
@@ -204,7 +223,16 @@ fn indices4(input: &[u8]) -> [u8; 16] {
     unsafe {
         indices4_neon(input)
     }
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        indices4_wasm(input)
+    }
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        all(target_arch = "x86", target_feature = "sse2"),
+        target_arch = "aarch64",
+        all(target_arch = "wasm32", target_feature = "simd128"),
+    )))]
     {
         let mut out = [0u8; 16];
         for k in 0..4 {
@@ -219,9 +247,15 @@ fn indices4(input: &[u8]) -> [u8; 16] {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "sse2")]
 fn indices4_sse2(input: &[u8]) -> [u8; 16] {
+    #[cfg(target_arch = "x86")]
+    use core::arch::x86::{
+        _mm_and_si128, _mm_extract_epi16, _mm_or_si128, _mm_set1_epi16, _mm_setr_epi16,
+        _mm_slli_epi16, _mm_srli_epi16,
+    };
+    #[cfg(target_arch = "x86_64")]
     use core::arch::x86_64::{
         _mm_and_si128, _mm_extract_epi16, _mm_or_si128, _mm_set1_epi16, _mm_setr_epi16,
         _mm_slli_epi16, _mm_srli_epi16,
@@ -283,6 +317,165 @@ fn indices4_sse2(input: &[u8]) -> [u8; 16] {
     out[13] = _mm_extract_epi16(c1, 3) as u8;
     out[14] = _mm_extract_epi16(c2, 3) as u8;
     out[15] = _mm_extract_epi16(c3, 3) as u8;
+    out
+}
+
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(target_feature = "avx2"), allow(dead_code))]
+#[target_feature(enable = "sse2")]
+fn indices8_sse2(input: &[u8]) -> [u8; 32] {
+    use core::arch::x86_64::{
+        _mm_and_si128, _mm_or_si128, _mm_set1_epi16, _mm_setr_epi16, _mm_slli_epi16,
+        _mm_srli_epi16, _mm_storeu_si128,
+    };
+    let lane = |step: usize| {
+        _mm_setr_epi16(
+            i16::from(input[step]),
+            i16::from(input[step + 3]),
+            i16::from(input[step + 6]),
+            i16::from(input[step + 9]),
+            i16::from(input[step + 12]),
+            i16::from(input[step + 15]),
+            i16::from(input[step + 18]),
+            i16::from(input[step + 21]),
+        )
+    };
+    let b0 = lane(0);
+    let b1 = lane(1);
+    let b2 = lane(2);
+    let c0 = _mm_srli_epi16(b0, 2);
+    let c1 = _mm_or_si128(
+        _mm_slli_epi16(_mm_and_si128(b0, _mm_set1_epi16(0x03)), 4),
+        _mm_srli_epi16(b1, 4),
+    );
+    let c2 = _mm_or_si128(
+        _mm_slli_epi16(_mm_and_si128(b1, _mm_set1_epi16(0x0f)), 2),
+        _mm_srli_epi16(b2, 6),
+    );
+    let c3 = _mm_and_si128(b2, _mm_set1_epi16(0x3f));
+    let mut s0 = [0u16; 8];
+    let mut s1 = [0u16; 8];
+    let mut s2 = [0u16; 8];
+    let mut s3 = [0u16; 8];
+    unsafe {
+        _mm_storeu_si128(s0.as_mut_ptr().cast(), c0);
+        _mm_storeu_si128(s1.as_mut_ptr().cast(), c1);
+        _mm_storeu_si128(s2.as_mut_ptr().cast(), c2);
+        _mm_storeu_si128(s3.as_mut_ptr().cast(), c3);
+    }
+    let mut out = [0u8; 32];
+    for k in 0..8 {
+        out[k * 4] = s0[k] as u8;
+        out[k * 4 + 1] = s1[k] as u8;
+        out[k * 4 + 2] = s2[k] as u8;
+        out[k * 4 + 3] = s3[k] as u8;
+    }
+    out
+}
+
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(target_feature = "avx512bw"), allow(dead_code))]
+#[target_feature(enable = "avx2")]
+fn indices16_avx2(input: &[u8]) -> [u8; 64] {
+    use core::arch::x86_64::{
+        _mm256_and_si256, _mm256_or_si256, _mm256_set1_epi16, _mm256_setr_epi16, _mm256_slli_epi16,
+        _mm256_srli_epi16, _mm256_storeu_si256,
+    };
+    let lane = |step: usize| {
+        _mm256_setr_epi16(
+            i16::from(input[step]),
+            i16::from(input[step + 3]),
+            i16::from(input[step + 6]),
+            i16::from(input[step + 9]),
+            i16::from(input[step + 12]),
+            i16::from(input[step + 15]),
+            i16::from(input[step + 18]),
+            i16::from(input[step + 21]),
+            i16::from(input[step + 24]),
+            i16::from(input[step + 27]),
+            i16::from(input[step + 30]),
+            i16::from(input[step + 33]),
+            i16::from(input[step + 36]),
+            i16::from(input[step + 39]),
+            i16::from(input[step + 42]),
+            i16::from(input[step + 45]),
+        )
+    };
+    let b0 = lane(0);
+    let b1 = lane(1);
+    let b2 = lane(2);
+    let c0 = _mm256_srli_epi16(b0, 2);
+    let c1 = _mm256_or_si256(
+        _mm256_slli_epi16(_mm256_and_si256(b0, _mm256_set1_epi16(0x03)), 4),
+        _mm256_srli_epi16(b1, 4),
+    );
+    let c2 = _mm256_or_si256(
+        _mm256_slli_epi16(_mm256_and_si256(b1, _mm256_set1_epi16(0x0f)), 2),
+        _mm256_srli_epi16(b2, 6),
+    );
+    let c3 = _mm256_and_si256(b2, _mm256_set1_epi16(0x3f));
+    let mut s0 = [0u16; 16];
+    let mut s1 = [0u16; 16];
+    let mut s2 = [0u16; 16];
+    let mut s3 = [0u16; 16];
+    unsafe {
+        _mm256_storeu_si256(s0.as_mut_ptr().cast(), c0);
+        _mm256_storeu_si256(s1.as_mut_ptr().cast(), c1);
+        _mm256_storeu_si256(s2.as_mut_ptr().cast(), c2);
+        _mm256_storeu_si256(s3.as_mut_ptr().cast(), c3);
+    }
+    let mut out = [0u8; 64];
+    for k in 0..16 {
+        out[k * 4] = s0[k] as u8;
+        out[k * 4 + 1] = s1[k] as u8;
+        out[k * 4 + 2] = s2[k] as u8;
+        out[k * 4 + 3] = s3[k] as u8;
+    }
+    out
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+fn indices4_wasm(input: &[u8]) -> [u8; 16] {
+    use core::arch::wasm32::{
+        i16x8_extract_lane, i16x8_replace_lane, i16x8_shl, i16x8_shr, i16x8_splat, v128_and,
+        v128_or,
+    };
+    let pack = |a: u8, b: u8, c: u8, d: u8| {
+        let v = i16x8_splat(0);
+        let v = i16x8_replace_lane::<0>(v, i16::from(a));
+        let v = i16x8_replace_lane::<1>(v, i16::from(b));
+        let v = i16x8_replace_lane::<2>(v, i16::from(c));
+        i16x8_replace_lane::<3>(v, i16::from(d))
+    };
+    let b0 = pack(input[0], input[3], input[6], input[9]);
+    let b1 = pack(input[1], input[4], input[7], input[10]);
+    let b2 = pack(input[2], input[5], input[8], input[11]);
+    let c0 = i16x8_shr(b0, 2);
+    let c1 = v128_or(
+        i16x8_shl(v128_and(b0, i16x8_splat(0x03)), 4),
+        i16x8_shr(b1, 4),
+    );
+    let c2 = v128_or(
+        i16x8_shl(v128_and(b1, i16x8_splat(0x0f)), 2),
+        i16x8_shr(b2, 6),
+    );
+    let c3 = v128_and(b2, i16x8_splat(0x3f));
+    let lane = |v, i: usize| -> u8 {
+        match i {
+            0 => i16x8_extract_lane::<0>(v) as u8,
+            1 => i16x8_extract_lane::<1>(v) as u8,
+            2 => i16x8_extract_lane::<2>(v) as u8,
+            _ => i16x8_extract_lane::<3>(v) as u8,
+        }
+    };
+    let mut out = [0u8; 16];
+    for k in 0..4 {
+        out[k * 4] = lane(c0, k);
+        out[k * 4 + 1] = lane(c1, k);
+        out[k * 4 + 2] = lane(c2, k);
+        out[k * 4 + 3] = lane(c3, k);
+    }
     out
 }
 
@@ -603,11 +796,52 @@ mod tests {
         out
     }
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    #[test]
+    fn indices8_sse2_matches_scalar() {
+        let input: Vec<u8> = (0..24).map(|i| i as u8).collect();
+        let got = unsafe { indices8_sse2(&input) };
+        let mut expect = [0u8; 32];
+        for k in 0..8 {
+            let i = k * 3;
+            expect[k * 4..k * 4 + 4].copy_from_slice(&trio_indices(
+                input[i],
+                input[i + 1],
+                input[i + 2],
+            ));
+        }
+        assert_eq!(got, expect);
+    }
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx512bw"))]
+    #[test]
+    fn indices16_avx2_matches_scalar() {
+        let input: Vec<u8> = (0..48).map(|i| (i as u8).wrapping_mul(3)).collect();
+        let got = unsafe { indices16_avx2(&input) };
+        let mut expect = [0u8; 64];
+        for k in 0..16 {
+            let i = k * 3;
+            expect[k * 4..k * 4 + 4].copy_from_slice(&trio_indices(
+                input[i],
+                input[i + 1],
+                input[i + 2],
+            ));
+        }
+        assert_eq!(got, expect);
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     #[test]
     fn indices4_sse2_matches_scalar() {
         let input = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
         assert_eq!(unsafe { indices4_sse2(&input) }, scalar_indices(&input));
+    }
+
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[test]
+    fn indices4_wasm_matches_scalar() {
+        let input = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        assert_eq!(indices4_wasm(&input), scalar_indices(&input));
     }
 
     #[cfg(target_arch = "aarch64")]

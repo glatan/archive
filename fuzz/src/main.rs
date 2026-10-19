@@ -13,6 +13,7 @@ mod corpus;
 mod datagen;
 mod external;
 mod fixtures;
+mod host_proto;
 mod known_issues;
 mod minimizer;
 mod regression;

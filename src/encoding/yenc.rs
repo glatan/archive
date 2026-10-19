@@ -48,8 +48,8 @@ fn push_encoded_rotated(out: &mut Vec<u8>, data: &[u8], scalar: bool) {
     let mut col = 0usize;
     let mut off = 0usize;
     while off < data.len() {
-        let n = (data.len() - off).min(32);
-        let mut rotated = [0u8; 32];
+        let n = (data.len() - off).min(64);
+        let mut rotated = [0u8; 64];
         if scalar {
             rotate_scalar(&data[off..off + n], &mut rotated[..n]);
         } else {
@@ -89,16 +89,31 @@ fn rotate_scalar(src: &[u8], dst: &mut [u8]) {
 }
 
 fn rotate_chunk(src: &[u8], dst: &mut [u8]) {
+    // Baseline x86_64 and i686 rotate 16 bytes with SSE2. An `x86-64-v3`
+    // crate rotates 32 bytes with AVX2. An `x86-64-v4` crate rotates 64
+    // bytes with AVX-512BW and leaves 32-byte and 16-byte tails. aarch64
+    // uses NEON and wasm32 `simd128` uses a 16-byte add. The line length
+    // stays 128, so the rotation width does not cross a line break.
     let mut i = 0;
     #[cfg(target_arch = "x86_64")]
     {
-        // Baseline crates rotate 16 bytes with SSE2. An `x86-64-v3` crate
-        // rotates 32 bytes with AVX2 and leaves a 16-byte SSE2 tail.
+        #[cfg(target_feature = "avx512bw")]
+        while i + 64 <= src.len() {
+            unsafe { rotate64_avx512(&src[i..i + 64], &mut dst[i..i + 64]) };
+            i += 64;
+        }
         #[cfg(target_feature = "avx2")]
         while i + 32 <= src.len() {
             unsafe { rotate32_avx2(&src[i..i + 32], &mut dst[i..i + 32]) };
             i += 32;
         }
+        while i + 16 <= src.len() {
+            unsafe { rotate16_sse2(&src[i..i + 16], &mut dst[i..i + 16]) };
+            i += 16;
+        }
+    }
+    #[cfg(all(target_arch = "x86", target_feature = "sse2"))]
+    {
         while i + 16 <= src.len() {
             unsafe { rotate16_sse2(&src[i..i + 16], &mut dst[i..i + 16]) };
             i += 16;
@@ -111,7 +126,28 @@ fn rotate_chunk(src: &[u8], dst: &mut [u8]) {
             i += 16;
         }
     }
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        while i + 16 <= src.len() {
+            rotate16_wasm(&src[i..i + 16], &mut dst[i..i + 16]);
+            i += 16;
+        }
+    }
     rotate_scalar(&src[i..], &mut dst[i..]);
+}
+
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(target_feature = "avx512bw"), allow(dead_code))]
+#[target_feature(enable = "avx512bw")]
+fn rotate64_avx512(src: &[u8], dst: &mut [u8]) {
+    use core::arch::x86_64::{
+        _mm512_add_epi8, _mm512_loadu_si512, _mm512_set1_epi8, _mm512_storeu_si512,
+    };
+    unsafe {
+        let v = _mm512_loadu_si512(src.as_ptr().cast());
+        let r = _mm512_add_epi8(v, _mm512_set1_epi8(42));
+        _mm512_storeu_si512(dst.as_mut_ptr().cast(), r);
+    }
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -128,14 +164,27 @@ fn rotate32_avx2(src: &[u8], dst: &mut [u8]) {
     }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "sse2")]
 fn rotate16_sse2(src: &[u8], dst: &mut [u8]) {
+    #[cfg(target_arch = "x86")]
+    use core::arch::x86::{_mm_add_epi8, _mm_loadu_si128, _mm_set1_epi8, _mm_storeu_si128};
+    #[cfg(target_arch = "x86_64")]
     use core::arch::x86_64::{_mm_add_epi8, _mm_loadu_si128, _mm_set1_epi8, _mm_storeu_si128};
     unsafe {
         let v = _mm_loadu_si128(src.as_ptr().cast());
         let r = _mm_add_epi8(v, _mm_set1_epi8(42));
         _mm_storeu_si128(dst.as_mut_ptr().cast(), r);
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+fn rotate16_wasm(src: &[u8], dst: &mut [u8]) {
+    use core::arch::wasm32::{i8x16_add, u8x16_splat, v128_load, v128_store};
+    unsafe {
+        let v = v128_load(src.as_ptr().cast());
+        v128_store(dst.as_mut_ptr().cast(), i8x16_add(v, u8x16_splat(42)));
     }
 }
 
@@ -501,13 +550,24 @@ pub fn join_parts(parts: &[YEncEntry]) -> Result<YEncEntry, Error> {
 mod tests {
     use super::*;
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     #[test]
     fn rotate16_sse2_matches_scalar() {
         let src: Vec<u8> = (0..16).map(|i| i as u8).collect();
         let mut wide = vec![0u8; 16];
         let mut scalar = vec![0u8; 16];
         unsafe { rotate16_sse2(&src, &mut wide) };
+        rotate_scalar(&src, &mut scalar);
+        assert_eq!(wide, scalar);
+    }
+
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[test]
+    fn rotate16_wasm_matches_scalar() {
+        let src: Vec<u8> = (0..16).map(|i| i as u8).collect();
+        let mut wide = vec![0u8; 16];
+        let mut scalar = vec![0u8; 16];
+        rotate16_wasm(&src, &mut wide);
         rotate_scalar(&src, &mut scalar);
         assert_eq!(wide, scalar);
     }
@@ -531,6 +591,22 @@ mod tests {
         let mut scalar = vec![0u8; 32];
         unsafe { rotate32_avx2(&src[..32], &mut wide) };
         rotate_scalar(&src[..32], &mut scalar);
+        assert_eq!(wide, scalar);
+        let mut via_chunk = vec![0u8; src.len()];
+        let mut all_scalar = vec![0u8; src.len()];
+        rotate_chunk(&src, &mut via_chunk);
+        rotate_scalar(&src, &mut all_scalar);
+        assert_eq!(via_chunk, all_scalar);
+    }
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx512bw"))]
+    #[test]
+    fn rotate64_avx512_matches_scalar() {
+        let src: Vec<u8> = (0..160).map(|i| i as u8).collect();
+        let mut wide = vec![0u8; 64];
+        let mut scalar = vec![0u8; 64];
+        unsafe { rotate64_avx512(&src[..64], &mut wide) };
+        rotate_scalar(&src[..64], &mut scalar);
         assert_eq!(wide, scalar);
         let mut via_chunk = vec![0u8; src.len()];
         let mut all_scalar = vec![0u8; src.len()];

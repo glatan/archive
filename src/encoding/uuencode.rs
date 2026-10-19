@@ -113,6 +113,20 @@ fn map_chars(vals: &[u8], out: &mut Vec<u8>, wide: bool) {
     let mut i = 0;
     #[cfg(target_arch = "x86_64")]
     {
+        // One line is at most 60 values, so a 64-byte map never fills.
+        // An `x86-64-v3` crate maps 32, then 16, then a scalar tail.
+        #[cfg(target_feature = "avx2")]
+        while i + 32 <= vals.len() {
+            unsafe { map32_avx2(&vals[i..i + 32], out) };
+            i += 32;
+        }
+        while i + 16 <= vals.len() {
+            unsafe { map16_sse2(&vals[i..i + 16], out) };
+            i += 16;
+        }
+    }
+    #[cfg(all(target_arch = "x86", target_feature = "sse2"))]
+    {
         while i + 16 <= vals.len() {
             unsafe { map16_sse2(&vals[i..i + 16], out) };
             i += 16;
@@ -125,14 +139,53 @@ fn map_chars(vals: &[u8], out: &mut Vec<u8>, wide: bool) {
             i += 16;
         }
     }
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    {
+        while i + 16 <= vals.len() {
+            map16_wasm(&vals[i..i + 16], out);
+            i += 16;
+        }
+    }
     for &v in &vals[i..] {
         out.push(enc_char(v));
     }
 }
 
 #[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(target_feature = "avx2"), allow(dead_code))]
+#[target_feature(enable = "avx2")]
+fn map32_avx2(vals: &[u8], out: &mut Vec<u8>) {
+    use core::arch::x86_64::{
+        _mm256_add_epi8, _mm256_and_si256, _mm256_andnot_si256, _mm256_cmpeq_epi8,
+        _mm256_loadu_si256, _mm256_or_si256, _mm256_set1_epi8, _mm256_storeu_si256,
+    };
+    unsafe {
+        let v = _mm256_and_si256(
+            _mm256_loadu_si256(vals.as_ptr().cast()),
+            _mm256_set1_epi8(0x3f),
+        );
+        let added = _mm256_add_epi8(v, _mm256_set1_epi8(0x20));
+        let space = _mm256_cmpeq_epi8(added, _mm256_set1_epi8(0x20));
+        let tick = _mm256_set1_epi8(0x60);
+        let mapped = _mm256_or_si256(
+            _mm256_andnot_si256(space, added),
+            _mm256_and_si256(space, tick),
+        );
+        let mut buf = [0u8; 32];
+        _mm256_storeu_si256(buf.as_mut_ptr().cast(), mapped);
+        out.extend_from_slice(&buf);
+    }
+}
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "sse2")]
 fn map16_sse2(vals: &[u8], out: &mut Vec<u8>) {
+    #[cfg(target_arch = "x86")]
+    use core::arch::x86::{
+        _mm_add_epi8, _mm_and_si128, _mm_andnot_si128, _mm_cmpeq_epi8, _mm_loadu_si128,
+        _mm_or_si128, _mm_set1_epi8, _mm_storeu_si128,
+    };
+    #[cfg(target_arch = "x86_64")]
     use core::arch::x86_64::{
         _mm_add_epi8, _mm_and_si128, _mm_andnot_si128, _mm_cmpeq_epi8, _mm_loadu_si128,
         _mm_or_si128, _mm_set1_epi8, _mm_storeu_si128,
@@ -145,6 +198,26 @@ fn map16_sse2(vals: &[u8], out: &mut Vec<u8>) {
         let mapped = _mm_or_si128(_mm_andnot_si128(space, added), _mm_and_si128(space, tick));
         let mut buf = [0u8; 16];
         _mm_storeu_si128(buf.as_mut_ptr().cast(), mapped);
+        out.extend_from_slice(&buf);
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+fn map16_wasm(vals: &[u8], out: &mut Vec<u8>) {
+    use core::arch::wasm32::{
+        i8x16_add, i8x16_eq, u8x16_splat, v128_and, v128_andnot, v128_load, v128_or, v128_store,
+    };
+    unsafe {
+        let v = v128_and(v128_load(vals.as_ptr().cast()), u8x16_splat(0x3f));
+        let added = i8x16_add(v, u8x16_splat(0x20));
+        let space = i8x16_eq(added, u8x16_splat(0x20));
+        let mapped = v128_or(
+            v128_andnot(added, space),
+            v128_and(space, u8x16_splat(0x60)),
+        );
+        let mut buf = [0u8; 16];
+        v128_store(buf.as_mut_ptr().cast(), mapped);
         out.extend_from_slice(&buf);
     }
 }
@@ -325,12 +398,30 @@ mod tests {
         vals.iter().copied().map(enc_char).collect()
     }
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    #[test]
+    fn map32_avx2_matches_scalar() {
+        let vals: Vec<u8> = (0..32).map(|i| i & 0x3f).collect();
+        let mut simd = Vec::new();
+        unsafe { map32_avx2(&vals, &mut simd) };
+        assert_eq!(simd, scalar_map(&vals));
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     #[test]
     fn map16_sse2_matches_scalar() {
         let vals: Vec<u8> = (0..16).collect();
         let mut simd = Vec::new();
         unsafe { map16_sse2(&vals, &mut simd) };
+        assert_eq!(simd, scalar_map(&vals));
+    }
+
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[test]
+    fn map16_wasm_matches_scalar() {
+        let vals: Vec<u8> = (0..16).collect();
+        let mut simd = Vec::new();
+        map16_wasm(&vals, &mut simd);
         assert_eq!(simd, scalar_map(&vals));
     }
 

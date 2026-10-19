@@ -1,11 +1,16 @@
 use crate::algorithms::Algorithm;
 use std::collections::HashSet;
 use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
 use std::io::{Read, Write};
+#[cfg(not(target_arch = "wasm32"))]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
 use std::process::{Command, Output, Stdio};
+#[cfg(not(target_arch = "wasm32"))]
 use std::thread;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
 
 struct PipeToolSpec {
@@ -566,12 +571,19 @@ fn is_available(algo: Algorithm) -> bool {
 }
 
 fn which_exists(cmd: &str) -> bool {
-    Command::new("which")
-        .arg(cmd)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Command::new("which")
+            .arg(cmd)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        execute_tool("which", &[cmd], None, None).is_ok_and(|output| output.success)
+    }
 }
 
 /// Send SIGKILL to every process in the given process group.
@@ -583,6 +595,7 @@ fn which_exists(cmd: &str) -> bool {
 ///
 /// Errors are ignored: if the group is already empty the `kill` command exits
 /// with a non-zero status, which we discard with `.ok()`.
+#[cfg(not(target_arch = "wasm32"))]
 fn kill_process_group(pgid: u32) {
     Command::new("kill")
         .args(["-9", &format!("-{pgid}")])
@@ -604,6 +617,7 @@ fn kill_process_group(pgid: u32) {
 ///   closing their copies of the pipe write ends and unblocking drain threads.
 /// - All paths join the drain threads before returning (no detached threads
 ///   leaking open file descriptors into future child spawns).
+#[cfg(not(target_arch = "wasm32"))]
 fn wait_timeout(
     mut child: std::process::Child,
     cmd: &str,
@@ -682,6 +696,7 @@ fn wait_timeout(
 /// fuzz cap. 4GiB is enough for the bounded `lrzip` invocation and stays small
 /// enough that three parallel fuzz processes cannot each allocate a buffer
 /// sized to host RAM.
+#[cfg(not(target_arch = "wasm32"))]
 const EXTERNAL_TOOL_AS_KB: u64 = 4 * 1024 * 1024;
 
 /// Build a command that runs `cmd` under [`EXTERNAL_TOOL_AS_KB`].
@@ -691,6 +706,7 @@ const EXTERNAL_TOOL_AS_KB: u64 = 4 * 1024 * 1024;
 /// `ulimit -S` can raise the soft limit only up to the hard limit inherited
 /// from the fuzz process. `lrzip` also ignores `lrzip.conf`, which can set a
 /// window above `-w`.
+#[cfg(not(target_arch = "wasm32"))]
 fn tool_command(cmd: &str) -> Command {
     let mut command = Command::new("sh");
     command
@@ -706,54 +722,14 @@ fn tool_command(cmd: &str) -> Command {
 }
 
 fn run_pipe_tool(cmd: &str, args: &[&str], input: &[u8]) -> Result<Vec<u8>, String> {
-    let mut child = tool_command(cmd)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0)
-        .spawn()
-        .map_err(|e| format!("Failed to spawn {cmd}: {e}"))?;
-
-    // Write stdin in a background thread so it runs concurrently with the
-    // stdout/stderr drain threads that wait_timeout spawns immediately after.
-    //
-    // Without this, a deadlock is possible for large inputs:
-    //   1. write_all fills the stdin pipe (64 KB) and blocks.
-    //   2. The child reads stdin and writes to stdout; stdout fills and the
-    //      child blocks on write.
-    //   3. The child stops reading stdin; write_all never unblocks.
-    //   4. wait_timeout is never reached, so no drain thread exists.
-    //      → Both sides block forever.
-    //
-    // With this thread, the drain threads in wait_timeout consume stdout
-    // concurrently, keeping the child unblocked so it keeps reading stdin,
-    // which in turn unblocks the stdin write thread.
-    let input_owned = input.to_vec();
-    let stdin_handle = child.stdin.take().map(|mut stdin| {
-        thread::spawn(move || {
-            stdin.write_all(&input_owned).ok();
-            // Dropping stdin closes the write end, signalling EOF to the child.
-        })
-    });
-
-    let output = wait_timeout(child, cmd, Duration::from_secs(EXTERNAL_TOOL_TIMEOUT_SECS));
-
-    // Join in all paths. If wait_timeout killed the process group (timeout or
-    // error), write_all fails with EPIPE and the thread returns quickly.
-    if let Some(h) = stdin_handle {
-        h.join().ok();
-    }
-
-    let output = output?;
-    if !output.status.success() {
+    let output = execute_tool(cmd, args, None, Some(input))?;
+    if !output.success {
         return Err(format!(
             "{cmd} exited with {}: {}",
-            output.status,
+            output.status_display,
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-
     Ok(output.stdout)
 }
 
@@ -898,51 +874,224 @@ fn run_archive_decompress(spec: ArchiveSpec, data: &[u8]) -> Result<Vec<u8>, Str
 }
 
 fn run_command_in_dir(cmd: &str, args: &[&str], dir: &Path) -> Result<(), String> {
-    let child = tool_command(cmd)
-        .args(args)
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0)
-        .spawn()
-        .map_err(|e| format!("Failed to spawn {cmd}: {e}"))?;
-
-    let output = wait_timeout(child, cmd, Duration::from_secs(EXTERNAL_TOOL_TIMEOUT_SECS))?;
-
-    if !output.status.success() {
+    let output = execute_tool(cmd, args, Some(dir), None)?;
+    if !output.success {
         return Err(format!(
             "{cmd} exited with {}: {}",
-            output.status,
+            output.status_display,
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-
     Ok(())
 }
 
 fn run_command_capture(cmd: &str, args: &[&str], dir: &Path) -> Result<Vec<u8>, String> {
-    let child = tool_command(cmd)
-        .args(args)
-        .current_dir(dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0)
-        .spawn()
-        .map_err(|e| format!("Failed to spawn {cmd}: {e}"))?;
-
-    let output = wait_timeout(child, cmd, Duration::from_secs(EXTERNAL_TOOL_TIMEOUT_SECS))?;
-
-    if !output.status.success() {
+    let output = execute_tool(cmd, args, Some(dir), None)?;
+    if !output.success {
         return Err(format!(
             "{cmd} exited with {}: {}",
-            output.status,
+            output.status_display,
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-
     Ok(output.stdout)
+}
+
+struct ToolOutput {
+    success: bool,
+    #[allow(dead_code)]
+    code: i32,
+    status_display: String,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+/// Run `cmd` under the external-tool address-space cap.
+///
+/// On Unix this is a process group with `ulimit` and a hard timeout. On wasm32
+/// the same work happens in the native host: WASI cannot exec host binaries or
+/// signal a process group, so `fuzz_host::exec` crosses that boundary.
+fn execute_tool(
+    cmd: &str,
+    args: &[&str],
+    dir: Option<&Path>,
+    stdin_data: Option<&[u8]>,
+) -> Result<ToolOutput, String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        execute_tool_unix(
+            cmd,
+            args,
+            dir,
+            stdin_data,
+            Duration::from_secs(EXTERNAL_TOOL_TIMEOUT_SECS),
+        )
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        execute_tool_wasm(cmd, args, dir, stdin_data)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn execute_tool_unix(
+    cmd: &str,
+    args: &[&str],
+    dir: Option<&Path>,
+    stdin_data: Option<&[u8]>,
+    timeout: Duration,
+) -> Result<ToolOutput, String> {
+    let mut command = tool_command(cmd);
+    command.args(args);
+    if let Some(dir) = dir {
+        command.current_dir(dir);
+    }
+    // Write stdin in a background thread so it runs concurrently with the
+    // stdout/stderr drain threads that wait_timeout spawns immediately after.
+    //
+    // Without this, a deadlock is possible for large inputs:
+    //   1. write_all fills the stdin pipe (64 KB) and blocks.
+    //   2. The child reads stdin and writes to stdout; stdout fills and the
+    //      child blocks on write.
+    //   3. The child stops reading stdin; write_all never unblocks.
+    //   4. wait_timeout is never reached, so no drain thread exists.
+    //      Both sides block forever.
+    command
+        .stdin(if stdin_data.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Failed to spawn {cmd}: {e}"))?;
+
+    let stdin_handle = stdin_data.and_then(|input| {
+        let input_owned = input.to_vec();
+        child.stdin.take().map(|mut stdin| {
+            thread::spawn(move || {
+                stdin.write_all(&input_owned).ok();
+            })
+        })
+    });
+
+    let output = wait_timeout(child, cmd, timeout);
+
+    // Join in all paths. If wait_timeout killed the process group (timeout or
+    // error), write_all fails with EPIPE and the thread returns quickly.
+    if let Some(handle) = stdin_handle {
+        handle.join().ok();
+    }
+
+    let output = output?;
+    Ok(ToolOutput {
+        success: output.status.success(),
+        code: output.status.code().unwrap_or(-1),
+        status_display: output.status.to_string(),
+        stdout: output.stdout,
+        stderr: output.stderr,
+    })
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "wasm-host"))]
+#[allow(dead_code)]
+pub(crate) fn execute_tool_packed(
+    cmd: &str,
+    args: &[&str],
+    dir: Option<&Path>,
+    stdin_data: Option<&[u8]>,
+    timeout: Duration,
+) -> Vec<u8> {
+    match execute_tool_unix(cmd, args, dir, stdin_data, timeout) {
+        Ok(output) => crate::host_proto::pack(
+            true,
+            output.code,
+            &output.status_display,
+            &output.stdout,
+            &output.stderr,
+        ),
+        Err(err) => crate::host_proto::pack(false, -1, "", &[], err.as_bytes()),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn execute_tool_wasm(
+    cmd: &str,
+    args: &[&str],
+    dir: Option<&Path>,
+    stdin_data: Option<&[u8]>,
+) -> Result<ToolOutput, String> {
+    let args_blob = args.join("\0");
+    let dir_blob = dir
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let stdin = stdin_data.unwrap_or(&[]);
+    // 1MiB is enough for probes. A larger result returns only its length; the
+    // host keeps the bytes and this loop copies them. The command runs once.
+    let mut cap = 1024 * 1024;
+    loop {
+        let mut buf = vec![0u8; cap];
+        let need = unsafe {
+            host_exec(
+                cmd.as_ptr(),
+                cmd.len() as i32,
+                args_blob.as_ptr(),
+                args_blob.len() as i32,
+                dir_blob.as_ptr(),
+                dir_blob.len() as i32,
+                stdin.as_ptr(),
+                stdin.len() as i32,
+                i32::from(stdin_data.is_none()),
+                (EXTERNAL_TOOL_TIMEOUT_SECS * 1000) as i32,
+                buf.as_mut_ptr(),
+                cap as i32,
+            )
+        };
+        if need < 0 {
+            return Err(format!("Failed to spawn {cmd}: host exec failed"));
+        }
+        let need = need as usize;
+        if need <= cap {
+            let body = crate::host_proto::unpack(&buf[..need])?;
+            if !body.finished {
+                return Err(String::from_utf8_lossy(&body.stderr).into_owned());
+            }
+            return Ok(ToolOutput {
+                // Signaled processes are packed with code -1. Exit code 0 is
+                // the only success, matching `ExitStatus::success`.
+                success: body.code == 0,
+                code: body.code,
+                status_display: body.status_display,
+                stdout: body.stdout,
+                stderr: body.stderr,
+            });
+        }
+        cap = need;
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[link(wasm_import_module = "fuzz_host")]
+#[allow(clippy::too_many_arguments)]
+unsafe extern "C" {
+    #[link_name = "exec"]
+    fn host_exec(
+        cmd: *const u8,
+        cmd_len: i32,
+        args: *const u8,
+        args_len: i32,
+        dir: *const u8,
+        dir_len: i32,
+        stdin: *const u8,
+        stdin_len: i32,
+        stdin_null: i32,
+        timeout_ms: i32,
+        out: *mut u8,
+        out_cap: i32,
+    ) -> i32;
 }
 
 const fn archive_entry_name() -> &'static str {
@@ -959,13 +1108,20 @@ fn sevenz_binary() -> Option<&'static str> {
     static CACHE: OnceLock<Option<&'static str>> = OnceLock::new();
     *CACHE.get_or_init(|| {
         ["7z", "7zz", "7zr"].into_iter().find(|&candidate| {
-            Command::new(candidate)
-                .arg("i")
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .is_ok_and(|s| s.success())
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                Command::new(candidate)
+                    .arg("i")
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .is_ok_and(|s| s.success())
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                execute_tool(candidate, &["i"], None, None).is_ok_and(|output| output.success)
+            }
         })
     })
 }
@@ -974,9 +1130,20 @@ struct TempDir {
     path: PathBuf,
 }
 
+fn temp_base() -> PathBuf {
+    #[cfg(target_arch = "wasm32")]
+    {
+        PathBuf::from("/tmp")
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::temp_dir()
+    }
+}
+
 impl TempDir {
     fn new(prefix: &str) -> Result<Self, String> {
-        let base = std::env::temp_dir();
+        let base = temp_base();
         for attempt in 0..1000u32 {
             let path = base.join(format!(
                 "{prefix}-{}-{}-{}",

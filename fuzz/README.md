@@ -129,15 +129,18 @@ cargo run --profile fuzz -p archive-fuzz -- run \
 ```
 
 新規に観測された入力（novel observation）は `fuzz/corpus/<algorithm>/` に収集する。
-コンテナの `make fuzz` は 3 本を起動する。`make -j3 fuzz` で同時に走る。`-j` を付けないときは順に実行する。
+コンテナの `make fuzz` は 6 本を起動する。`make -j6 fuzz` で同時に走る。`-j` を付けないときは順に実行する。
 
 | ターゲット | バイナリ | 公開経路 | ホスト側の成果物 |
 |---|---|---|---|
 | `fuzz-x86_64` | `archive-fuzz-x86_64` | x86_64 の SSE2 | `fuzz/failures/x86_64/`、`fuzz/corpus/x86_64/` |
 | `fuzz-avx2` | `archive-fuzz-avx2` | x86-64-v3 の AVX2 | `fuzz/failures/avx2/`、`fuzz/corpus/avx2/` |
+| `fuzz-avx512` | `archive-fuzz-avx512` | x86-64-v4 の AVX-512BW | `fuzz/failures/avx512/`、`fuzz/corpus/avx512/` |
+| `fuzz-i686` | `archive-fuzz-i686` | i686 の SSE2 | `fuzz/failures/i686/`、`fuzz/corpus/i686/` |
 | `fuzz-aarch64` | `archive-fuzz-aarch64`（qemu-user） | aarch64 の NEON | `fuzz/failures/aarch64/`、`fuzz/corpus/aarch64/` |
+| `fuzz-wasm` | `archive-fuzz-wasm`（wasmtime） | wasm32 の simd128 | `fuzz/failures/wasm/`、`fuzz/corpus/wasm/` |
 
-3 本は `FUZZ_ALGORITHM`、`FUZZ_DURATION`、`FUZZ_PATTERN`、`FUZZ_JOBS` を共有する。`FUZZ_JOBS` は 1 本の中でアルゴリズムを分ける並列度で、既定は 1 である。各プロセスのソフトアドレス空間は `FUZZ_AS_KB`（既定 2097152、2GiB）に制限する。ハード上限は変えない。corrupt な zpaq が 2^32 要素のモデルを確保しようとしたとき、overcommit 下の OOM killer ではなくデコーダの確保失敗として返すためである。外部ツールの子プロセスはソフト上限を 4GiB に上げる。`lrzip` は `LRZIP=NOCONFIG` で起動する。圧縮は `-w 1`（100MB ウィンドウ）、`-p 1`、`-m 18`（名目 RAM 1.8GB）を付け、伸長は `-p 1 -m 18` を付ける。検出した RAM や CPU 数に比例したバッファは取らない。AVX2 は実行時の CPUID では切り替えない。ホストに AVX2 が無いときは `fuzz-avx2` が SIGILL で失敗する。`make test-avx2` は同じターゲットで lib テストを実行する。
+6 本は `FUZZ_ALGORITHM`、`FUZZ_DURATION`、`FUZZ_PATTERN`、`FUZZ_JOBS` を共有する。`FUZZ_JOBS` は 1 本の中でアルゴリズムを分ける並列度で、既定は 1 である。各プロセスのソフトアドレス空間は `FUZZ_AS_KB`（既定 2097152、2GiB）に制限する。ハード上限は変えない。corrupt な zpaq が 2^32 要素のモデルを確保しようとしたとき、overcommit 下の OOM killer ではなくデコーダの確保失敗として返すためである。外部ツールの子プロセスはソフト上限を 4GiB に上げる。`lrzip` は `LRZIP=NOCONFIG` で起動する。圧縮は `-w 1`（100MB ウィンドウ）、`-p 1`、`-m 18`（名目 RAM 1.8GB）を付け、伸長は `-p 1 -m 18` を付ける。検出した RAM や CPU 数に比例したバッファは取らない。AVX2 と AVX-512 は実行時の CPUID では切り替えない。ホストに AVX2 が無いときは `fuzz-avx2` が、AVX-512 が無いときは `fuzz-avx512` が SIGILL で失敗する。`make test-avx2` と `make test-avx512` はテストイメージで同じターゲットの lib テストを実行する。i686 はイメージ内の 32-bit ローダで SSE2 を実行する。wasm32 は `wasm32-wasip1-threads` に `simd128` を付け、wasmtime 46 で実行する。ゲストの `thread::spawn` は wasip1-threads が受ける。外部ツールはゲストから `fuzz_host::exec` を呼び、ホストの `archive-fuzz-wasm` が Unix のプロセスグループと `ulimit` で起動する。ゲストの受け取りバッファが結果より短いときは、ホストがその結果を保持し、同じ引数の続きの呼び出しに返す。コマンドは一度だけ実行する。終了状態の表示は Unix の `ExitStatus` と同じで、シグナルで終了したときは `signal: 15 (SIGTERM)` のようになる。共有メモリは 2GiB を起動時に予約する。2GiB のソフト上限ではその連続領域が取れないため、`fuzz-wasm` のプロセスだけソフト上限を 4GiB にする。ゲストの線形メモリ上限は 2GiB で、他の本と同じ確保失敗の境界になる。
 
 ### コーパスの上限
 

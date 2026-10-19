@@ -7,6 +7,11 @@
 
 use alloc::vec::Vec;
 
+#[cfg(target_arch = "x86")]
+use core::arch::x86 as sse;
+#[cfg(target_arch = "x86_64")]
+use core::arch::x86_64 as sse;
+
 use crate::error::Error;
 
 /// Stateful byte-wise Delta filter.
@@ -71,13 +76,27 @@ impl Filter {
     /// Distance 1 is a byte-wise scan. Other SIMD distances are multiples
     /// of the 16-byte vector width, so each lane stays on its own chain.
     /// An `x86-64-v3` build uses 32-byte chunks only when the distance is
-    /// 1 or a multiple of 32. Distance 16 stays on 16-byte chunks.
+    /// 1 or a multiple of 32. An `x86-64-v4` build uses 64-byte chunks
+    /// when the distance is 1 or a multiple of 64, and keeps 32 and 16
+    /// on the narrower paths. Distance 16 stays on 16-byte chunks.
+    /// i686 SSE2 and wasm32 `simd128` use the 16-byte path for distance
+    /// 1 and multiples of 16.
     fn simd_distance(&self) -> bool {
-        #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+        #[cfg(any(
+            target_arch = "x86_64",
+            all(target_arch = "x86", target_feature = "sse2"),
+            target_arch = "aarch64",
+            all(target_arch = "wasm32", target_feature = "simd128"),
+        ))]
         {
             self.distance == 1 || self.distance.is_multiple_of(16)
         }
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        #[cfg(not(any(
+            target_arch = "x86_64",
+            all(target_arch = "x86", target_feature = "sse2"),
+            target_arch = "aarch64",
+            all(target_arch = "wasm32", target_feature = "simd128"),
+        )))]
         {
             let _ = self;
             false
@@ -85,6 +104,11 @@ impl Filter {
     }
 
     fn encode_simd(&mut self, buffer: &mut [u8]) {
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx512bw"))]
+        if self.distance == 1 || self.distance.is_multiple_of(64) {
+            self.encode_width64(buffer, true);
+            return;
+        }
         #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
         if self.distance == 1 || self.distance.is_multiple_of(32) {
             self.encode_width32(buffer, true);
@@ -94,6 +118,11 @@ impl Filter {
     }
 
     fn decode_simd(&mut self, buffer: &mut [u8]) {
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx512bw"))]
+        if self.distance == 1 || self.distance.is_multiple_of(64) {
+            self.encode_width64(buffer, false);
+            return;
+        }
         #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
         if self.distance == 1 || self.distance.is_multiple_of(32) {
             self.encode_width32(buffer, false);
@@ -104,7 +133,10 @@ impl Filter {
 
     /// 16-byte chunks once `pos` is 15 modulo 16, then a scalar tail.
     fn encode_width16(&mut self, buffer: &mut [u8], encode: bool) {
-        #[cfg(target_arch = "x86_64")]
+        #[cfg(any(
+            target_arch = "x86_64",
+            all(target_arch = "x86", target_feature = "sse2")
+        ))]
         {
             let prefix = (((self.pos & 0xFF) + 1) & 15).min(buffer.len());
             if encode {
@@ -154,7 +186,37 @@ impl Filter {
                 self.decode_scalar(&mut buffer[off..]);
             }
         }
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            let prefix = (((self.pos & 0xFF) + 1) & 15).min(buffer.len());
+            if encode {
+                self.encode_scalar(&mut buffer[..prefix]);
+            } else {
+                self.decode_scalar(&mut buffer[..prefix]);
+            }
+            let mut off = prefix;
+            while off + 16 <= buffer.len() {
+                unsafe {
+                    if encode {
+                        self.encode_chunk16_wasm(&mut buffer[off..off + 16]);
+                    } else {
+                        self.decode_chunk16_wasm(&mut buffer[off..off + 16]);
+                    }
+                }
+                off += 16;
+            }
+            if encode {
+                self.encode_scalar(&mut buffer[off..]);
+            } else {
+                self.decode_scalar(&mut buffer[off..]);
+            }
+        }
+        #[cfg(not(any(
+            target_arch = "x86_64",
+            all(target_arch = "x86", target_feature = "sse2"),
+            target_arch = "aarch64",
+            all(target_arch = "wasm32", target_feature = "simd128"),
+        )))]
         {
             let _ = (buffer, encode);
         }
@@ -234,9 +296,15 @@ impl Filter {
         self.pos = self.pos.wrapping_sub(16);
     }
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     #[target_feature(enable = "sse2")]
     unsafe fn encode_chunk16(&mut self, chunk: &mut [u8]) {
+        #[cfg(target_arch = "x86")]
+        use core::arch::x86::{
+            __m128i, _mm_cvtsi32_si128, _mm_loadu_si128, _mm_or_si128, _mm_slli_si128,
+            _mm_storeu_si128, _mm_sub_epi8,
+        };
+        #[cfg(target_arch = "x86_64")]
         use core::arch::x86_64::{
             __m128i, _mm_cvtsi32_si128, _mm_loadu_si128, _mm_or_si128, _mm_slli_si128,
             _mm_storeu_si128, _mm_sub_epi8,
@@ -258,9 +326,14 @@ impl Filter {
         self.pos = self.pos.wrapping_sub(16);
     }
 
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     #[target_feature(enable = "sse2")]
     unsafe fn decode_chunk16(&mut self, chunk: &mut [u8]) {
+        #[cfg(target_arch = "x86")]
+        use core::arch::x86::{
+            __m128i, _mm_add_epi8, _mm_loadu_si128, _mm_set1_epi8, _mm_storeu_si128,
+        };
+        #[cfg(target_arch = "x86_64")]
         use core::arch::x86_64::{
             __m128i, _mm_add_epi8, _mm_loadu_si128, _mm_set1_epi8, _mm_storeu_si128,
         };
@@ -278,6 +351,46 @@ impl Filter {
         };
         unsafe { _mm_storeu_si128(chunk.as_mut_ptr().cast::<__m128i>(), decoded) };
         unsafe { store_reversed16(self.history.as_mut_ptr().add(p - 15), decoded) };
+        self.pos = self.pos.wrapping_sub(16);
+    }
+
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[target_feature(enable = "simd128")]
+    unsafe fn encode_chunk16_wasm(&mut self, chunk: &mut [u8]) {
+        use core::arch::wasm32::{i8x16_sub, v128_load, v128_store};
+
+        let p = self.pos & 0xFF;
+        let input = unsafe { v128_load(chunk.as_ptr().cast()) };
+        let out = if self.distance == 1 {
+            let carry = self.history[(p + 1) & 0xFF];
+            i8x16_sub(input, wasm_insert_carry(input, carry))
+        } else {
+            let r = (p + self.distance) & 0xFF;
+            let prev = unsafe { wasm_load_reversed(self.history.as_ptr().add(r - 15)) };
+            i8x16_sub(input, prev)
+        };
+        unsafe { v128_store(chunk.as_mut_ptr().cast(), out) };
+        unsafe { wasm_store_reversed(self.history.as_mut_ptr().add(p - 15), input) };
+        self.pos = self.pos.wrapping_sub(16);
+    }
+
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    #[target_feature(enable = "simd128")]
+    unsafe fn decode_chunk16_wasm(&mut self, chunk: &mut [u8]) {
+        use core::arch::wasm32::{i8x16_add, u8x16_splat, v128_load, v128_store};
+
+        let p = self.pos & 0xFF;
+        let input = unsafe { v128_load(chunk.as_ptr().cast()) };
+        let decoded = if self.distance == 1 {
+            let carry = self.history[(p + 1) & 0xFF];
+            i8x16_add(wasm_prefix_sum(input), u8x16_splat(carry))
+        } else {
+            let r = (p + self.distance) & 0xFF;
+            let prev = unsafe { wasm_load_reversed(self.history.as_ptr().add(r - 15)) };
+            i8x16_add(input, prev)
+        };
+        unsafe { v128_store(chunk.as_mut_ptr().cast(), decoded) };
+        unsafe { wasm_store_reversed(self.history.as_mut_ptr().add(p - 15), decoded) };
         self.pos = self.pos.wrapping_sub(16);
     }
 
@@ -333,12 +446,105 @@ impl Filter {
         unsafe { store_reversed32(self.history.as_mut_ptr().add(p - 31), decoded) };
         self.pos = self.pos.wrapping_sub(32);
     }
+
+    /// 64-byte chunks once `pos` is 63 modulo 64, then a scalar tail.
+    ///
+    /// Checked before the 32-byte path: distance 64 is also a multiple of
+    /// 32. The ring store stays inside the 256-byte history.
+    #[cfg(target_arch = "x86_64")]
+    #[cfg_attr(not(target_feature = "avx512bw"), allow(dead_code))]
+    fn encode_width64(&mut self, buffer: &mut [u8], encode: bool) {
+        let prefix = (((self.pos & 0xFF) + 1) & 63).min(buffer.len());
+        if encode {
+            self.encode_scalar(&mut buffer[..prefix]);
+        } else {
+            self.decode_scalar(&mut buffer[..prefix]);
+        }
+        let mut off = prefix;
+        while off + 64 <= buffer.len() {
+            unsafe {
+                if encode {
+                    self.encode_chunk64(&mut buffer[off..off + 64]);
+                } else {
+                    self.decode_chunk64(&mut buffer[off..off + 64]);
+                }
+            }
+            off += 64;
+        }
+        if encode {
+            self.encode_scalar(&mut buffer[off..]);
+        } else {
+            self.decode_scalar(&mut buffer[off..]);
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[cfg_attr(not(target_feature = "avx512bw"), allow(dead_code))]
+    #[target_feature(enable = "avx512bw")]
+    unsafe fn encode_chunk64(&mut self, chunk: &mut [u8]) {
+        use core::arch::x86_64::{
+            __m512i, _mm_cvtsi32_si128, _mm_or_si128, _mm_slli_si128, _mm_srli_si128, _mm_sub_epi8,
+            _mm512_castsi512_si128, _mm512_extracti32x4_epi32, _mm512_loadu_si512,
+            _mm512_storeu_si512, _mm512_sub_epi8,
+        };
+
+        let p = self.pos & 0xFF;
+        let input = unsafe { _mm512_loadu_si512(chunk.as_ptr().cast::<__m512i>()) };
+        let out = if self.distance == 1 {
+            let carry = i32::from(self.history[(p + 1) & 0xFF]);
+            let l0 = _mm512_castsi512_si128(input);
+            let l1 = _mm512_extracti32x4_epi32::<1>(input);
+            let l2 = _mm512_extracti32x4_epi32::<2>(input);
+            let l3 = _mm512_extracti32x4_epi32::<3>(input);
+            let prev0 = _mm_or_si128(_mm_slli_si128(l0, 1), _mm_cvtsi32_si128(carry));
+            let prev1 = _mm_or_si128(_mm_slli_si128(l1, 1), _mm_srli_si128(l0, 15));
+            let prev2 = _mm_or_si128(_mm_slli_si128(l2, 1), _mm_srli_si128(l1, 15));
+            let prev3 = _mm_or_si128(_mm_slli_si128(l3, 1), _mm_srli_si128(l2, 15));
+            lanes4(
+                _mm_sub_epi8(l0, prev0),
+                _mm_sub_epi8(l1, prev1),
+                _mm_sub_epi8(l2, prev2),
+                _mm_sub_epi8(l3, prev3),
+            )
+        } else {
+            let r = (p + self.distance) & 0xFF;
+            let prev = unsafe { load_reversed64(self.history.as_ptr().add(r - 63)) };
+            _mm512_sub_epi8(input, prev)
+        };
+        unsafe { _mm512_storeu_si512(chunk.as_mut_ptr().cast::<__m512i>(), out) };
+        unsafe { store_reversed64(self.history.as_mut_ptr().add(p - 63), input) };
+        self.pos = self.pos.wrapping_sub(64);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[cfg_attr(not(target_feature = "avx512bw"), allow(dead_code))]
+    #[target_feature(enable = "avx512bw")]
+    unsafe fn decode_chunk64(&mut self, chunk: &mut [u8]) {
+        use core::arch::x86_64::{
+            __m512i, _mm512_add_epi8, _mm512_loadu_si512, _mm512_set1_epi8, _mm512_storeu_si512,
+        };
+
+        let p = self.pos & 0xFF;
+        let input = unsafe { _mm512_loadu_si512(chunk.as_ptr().cast::<__m512i>()) };
+        let decoded = if self.distance == 1 {
+            let carry = self.history[(p + 1) & 0xFF] as i8;
+            let sum = unsafe { prefix_sum64(input) };
+            _mm512_add_epi8(sum, _mm512_set1_epi8(carry))
+        } else {
+            let r = (p + self.distance) & 0xFF;
+            let prev = unsafe { load_reversed64(self.history.as_ptr().add(r - 63)) };
+            _mm512_add_epi8(input, prev)
+        };
+        unsafe { _mm512_storeu_si512(chunk.as_mut_ptr().cast::<__m512i>(), decoded) };
+        unsafe { store_reversed64(self.history.as_mut_ptr().add(p - 63), decoded) };
+        self.pos = self.pos.wrapping_sub(64);
+    }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "sse2")]
-unsafe fn reverse16(v: core::arch::x86_64::__m128i) -> core::arch::x86_64::__m128i {
-    use core::arch::x86_64::{
+unsafe fn reverse16(v: sse::__m128i) -> sse::__m128i {
+    use sse::{
         _mm_or_si128, _mm_shuffle_epi32, _mm_shufflehi_epi16, _mm_shufflelo_epi16, _mm_slli_epi16,
         _mm_srli_epi16,
     };
@@ -349,28 +555,28 @@ unsafe fn reverse16(v: core::arch::x86_64::__m128i) -> core::arch::x86_64::__m12
     _mm_shuffle_epi32(hi, 0x1B)
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "sse2")]
-unsafe fn load_reversed16(ptr: *const u8) -> core::arch::x86_64::__m128i {
-    use core::arch::x86_64::{__m128i, _mm_loadu_si128};
+unsafe fn load_reversed16(ptr: *const u8) -> sse::__m128i {
+    use sse::{__m128i, _mm_loadu_si128};
 
     let mem = unsafe { _mm_loadu_si128(ptr.cast::<__m128i>()) };
     unsafe { reverse16(mem) }
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "sse2")]
-unsafe fn store_reversed16(ptr: *mut u8, buf_order: core::arch::x86_64::__m128i) {
-    use core::arch::x86_64::{__m128i, _mm_storeu_si128};
+unsafe fn store_reversed16(ptr: *mut u8, buf_order: sse::__m128i) {
+    use sse::{__m128i, _mm_storeu_si128};
 
     let mem = unsafe { reverse16(buf_order) };
     unsafe { _mm_storeu_si128(ptr.cast::<__m128i>(), mem) };
 }
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "sse2")]
-unsafe fn prefix_sum16(v: core::arch::x86_64::__m128i) -> core::arch::x86_64::__m128i {
-    use core::arch::x86_64::{_mm_add_epi8, _mm_slli_si128};
+unsafe fn prefix_sum16(v: sse::__m128i) -> sse::__m128i {
+    use sse::{_mm_add_epi8, _mm_slli_si128};
 
     let mut v = v;
     v = _mm_add_epi8(v, _mm_slli_si128(v, 1));
@@ -429,6 +635,87 @@ unsafe fn prefix_sum32(v: core::arch::x86_64::__m256i) -> core::arch::x86_64::__
     _mm256_set_m128i(high, low)
 }
 
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(target_feature = "avx512bw"), allow(dead_code))]
+#[target_feature(enable = "avx512bw")]
+fn lanes4(
+    l0: core::arch::x86_64::__m128i,
+    l1: core::arch::x86_64::__m128i,
+    l2: core::arch::x86_64::__m128i,
+    l3: core::arch::x86_64::__m128i,
+) -> core::arch::x86_64::__m512i {
+    use core::arch::x86_64::{_mm512_castsi128_si512, _mm512_inserti32x4};
+
+    let mut v = _mm512_castsi128_si512(l0);
+    v = _mm512_inserti32x4::<1>(v, l1);
+    v = _mm512_inserti32x4::<2>(v, l2);
+    _mm512_inserti32x4::<3>(v, l3)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(target_feature = "avx512bw"), allow(dead_code))]
+#[target_feature(enable = "avx512bw")]
+unsafe fn reverse64(v: core::arch::x86_64::__m512i) -> core::arch::x86_64::__m512i {
+    use core::arch::x86_64::{
+        _mm_setr_epi8, _mm512_broadcast_i32x4, _mm512_shuffle_epi8, _mm512_shuffle_i32x4,
+    };
+
+    // Byte reverse inside each 128-bit lane, then reverse the four lanes.
+    // `_mm512_permutexvar_epi8` needs AVX-512VBMI, which x86-64-v4 lacks.
+    let index16 = _mm_setr_epi8(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+    let index = _mm512_broadcast_i32x4(index16);
+    let lanes = _mm512_shuffle_epi8(v, index);
+    _mm512_shuffle_i32x4::<0x1B>(lanes, lanes)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(target_feature = "avx512bw"), allow(dead_code))]
+#[target_feature(enable = "avx512bw")]
+unsafe fn load_reversed64(ptr: *const u8) -> core::arch::x86_64::__m512i {
+    use core::arch::x86_64::{__m512i, _mm512_loadu_si512};
+
+    let mem = unsafe { _mm512_loadu_si512(ptr.cast::<__m512i>()) };
+    unsafe { reverse64(mem) }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(target_feature = "avx512bw"), allow(dead_code))]
+#[target_feature(enable = "avx512bw")]
+unsafe fn store_reversed64(ptr: *mut u8, buf_order: core::arch::x86_64::__m512i) {
+    use core::arch::x86_64::{__m512i, _mm512_storeu_si512};
+
+    let mem = unsafe { reverse64(buf_order) };
+    unsafe { _mm512_storeu_si512(ptr.cast::<__m512i>(), mem) };
+}
+
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(target_feature = "avx512bw"), allow(dead_code))]
+#[target_feature(enable = "avx512bw")]
+unsafe fn prefix_sum64(v: core::arch::x86_64::__m512i) -> core::arch::x86_64::__m512i {
+    use core::arch::x86_64::{
+        _mm_add_epi8, _mm_cvtsi128_si32, _mm_set1_epi8, _mm_srli_si128, _mm512_castsi512_si128,
+        _mm512_extracti32x4_epi32,
+    };
+
+    let l0 = unsafe { prefix_sum16(_mm512_castsi512_si128(v)) };
+    let c0 = _mm_cvtsi128_si32(_mm_srli_si128(l0, 15)) as i8;
+    let l1 = _mm_add_epi8(
+        unsafe { prefix_sum16(_mm512_extracti32x4_epi32::<1>(v)) },
+        _mm_set1_epi8(c0),
+    );
+    let c1 = _mm_cvtsi128_si32(_mm_srli_si128(l1, 15)) as i8;
+    let l2 = _mm_add_epi8(
+        unsafe { prefix_sum16(_mm512_extracti32x4_epi32::<2>(v)) },
+        _mm_set1_epi8(c1),
+    );
+    let c2 = _mm_cvtsi128_si32(_mm_srli_si128(l2, 15)) as i8;
+    let l3 = _mm_add_epi8(
+        unsafe { prefix_sum16(_mm512_extracti32x4_epi32::<3>(v)) },
+        _mm_set1_epi8(c2),
+    );
+    lanes4(l0, l1, l2, l3)
+}
+
 #[cfg(target_arch = "aarch64")]
 #[target_feature(enable = "neon")]
 fn neon_reverse(v: core::arch::aarch64::uint8x16_t) -> core::arch::aarch64::uint8x16_t {
@@ -479,6 +766,85 @@ unsafe fn neon_store_reversed(ptr: *mut u8, buf_order: core::arch::aarch64::uint
 
     let mem = neon_reverse(buf_order);
     unsafe { vst1q_u8(ptr, mem) };
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+fn wasm_reverse(v: core::arch::wasm32::v128) -> core::arch::wasm32::v128 {
+    use core::arch::wasm32::{i8x16_swizzle, u8x16};
+
+    i8x16_swizzle(
+        v,
+        u8x16(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0),
+    )
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+fn wasm_insert_carry(input: core::arch::wasm32::v128, carry: u8) -> core::arch::wasm32::v128 {
+    use core::arch::wasm32::{i8x16_replace_lane, i8x16_swizzle, u8x16};
+
+    let shifted = i8x16_swizzle(
+        input,
+        u8x16(0xff, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14),
+    );
+    i8x16_replace_lane::<0>(shifted, carry as i8)
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+fn wasm_prefix_sum(v: core::arch::wasm32::v128) -> core::arch::wasm32::v128 {
+    use core::arch::wasm32::{i8x16_add, i8x16_swizzle, u8x16};
+
+    let mut v = v;
+    v = i8x16_add(
+        v,
+        i8x16_swizzle(
+            v,
+            u8x16(0xff, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14),
+        ),
+    );
+    v = i8x16_add(
+        v,
+        i8x16_swizzle(
+            v,
+            u8x16(0xff, 0xff, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13),
+        ),
+    );
+    v = i8x16_add(
+        v,
+        i8x16_swizzle(
+            v,
+            u8x16(0xff, 0xff, 0xff, 0xff, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+        ),
+    );
+    i8x16_add(
+        v,
+        i8x16_swizzle(
+            v,
+            u8x16(
+                0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 1, 2, 3, 4, 5, 6, 7,
+            ),
+        ),
+    )
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+unsafe fn wasm_load_reversed(ptr: *const u8) -> core::arch::wasm32::v128 {
+    use core::arch::wasm32::v128_load;
+
+    let mem = unsafe { v128_load(ptr.cast()) };
+    wasm_reverse(mem)
+}
+
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[target_feature(enable = "simd128")]
+unsafe fn wasm_store_reversed(ptr: *mut u8, buf_order: core::arch::wasm32::v128) {
+    use core::arch::wasm32::v128_store;
+
+    let mem = wasm_reverse(buf_order);
+    unsafe { v128_store(ptr.cast(), mem) };
 }
 
 /// Encode bytes using the Delta filter.
