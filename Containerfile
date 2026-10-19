@@ -1,4 +1,4 @@
-FROM archlinux:base-devel-20260315.0.500537 AS base
+FROM docker.io/library/archlinux:base-devel-20261011.0.609700@sha256:061679925e5d5028f2df9395d441ce6c4b9accf0157ff3486c06b6962e014ef1 AS base
 
 # パッケージマネージャーで入る外部ツール
 RUN pacman -Syu --noconfirm && \
