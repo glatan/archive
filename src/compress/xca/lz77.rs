@@ -11,6 +11,7 @@
 //! The encoder pads the final flag word with one bits; the decoder treats a
 //! match flag observed with no input remaining as normal termination.
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::Error;

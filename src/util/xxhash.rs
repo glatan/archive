@@ -21,6 +21,7 @@ const PRIME64_5: u64 = 0x27D4EB2F165667C5;
 /// let hash = xxhash64(b"Hello, World!", 0);
 /// assert_eq!(hash, 0xC49AACF8080FE47F);
 /// ```
+#[cfg_attr(not(feature = "zstd"), allow(dead_code))]
 pub fn xxhash64(data: &[u8], seed: u64) -> u64 {
     let len = data.len();
     let mut h: u64;

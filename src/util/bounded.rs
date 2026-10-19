@@ -20,18 +20,7 @@ pub(crate) const DECLARED_OUTPUT_LIMIT: usize = 1 << 30;
 
 /// Accept a header-declared output length only when it fits in `usize` and
 /// does not exceed [`DECLARED_OUTPUT_LIMIT`].
-#[cfg_attr(
-    not(any(
-        feature = "sevenz",
-        feature = "zip",
-        feature = "git-pack",
-        feature = "lzip",
-        feature = "xz",
-        feature = "lrzip",
-        feature = "lzma-alone",
-    )),
-    allow(dead_code)
-)]
+#[cfg_attr(not(any(feature = "zip", feature = "git-pack")), allow(dead_code))]
 pub(crate) fn declared_output_len(size: u64) -> Result<usize, Error> {
     let size = usize::try_from(size).map_err(|_| Error::OutputLimitExceeded {
         limit: DECLARED_OUTPUT_LIMIT,

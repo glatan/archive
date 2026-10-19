@@ -11,6 +11,7 @@
 //! Long lengths carry extra bytes that are interleaved into the stream at
 //! the position where the decoder's 16-bit reads have reached.
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::Error;

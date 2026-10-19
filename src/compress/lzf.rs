@@ -16,6 +16,7 @@
 //! `lzfP.h` carries only the constants) and the LZFFormat
 //! description used by the Java LZF implementation.
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::Error;

@@ -15,8 +15,8 @@ pub(crate) mod crc16ccitt;
 #[cfg(any(feature = "snappy", feature = "erofs"))]
 pub(crate) mod crc32c;
 
-/// LSB-first bit reader for DEFLATE and zstd streams.
-#[cfg(any(feature = "deflate", feature = "zstd"))]
+/// LSB-first bit reader for DEFLATE and Brotli streams.
+#[cfg(any(feature = "deflate", feature = "brotli"))]
 pub(crate) mod bitreader;
 
 /// Shared range coder for LZMA-style entropy coding.
@@ -25,6 +25,7 @@ pub(crate) mod bitreader;
     feature = "lrzip",
     feature = "xz",
     feature = "sevenz",
+    feature = "lzma-alone",
 ))]
 pub(crate) mod range_coder;
 

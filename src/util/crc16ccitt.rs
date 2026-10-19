@@ -22,6 +22,7 @@ pub fn crc16_ccitt(data: &[u8]) -> u16 {
 ///
 /// BinHex 4.0 stores the CRC state after processing the data plus two
 /// 0x00 bytes ("augmented" form); empty forks therefore checksum to 0.
+#[cfg_attr(not(feature = "binhex"), allow(dead_code))]
 pub fn crc16_ccitt_aug(data: &[u8]) -> u16 {
     let crc = crc16_ccitt(data);
     update(update(crc, 0), 0)

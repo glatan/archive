@@ -19,7 +19,7 @@ variables:
   # Reduce CI noise
   CARGO_TERM_COLOR: always
 
-# Containerfile の ENTRYPOINT は `make test` / `make fuzz` 用。
+# Containerfile の ENTRYPOINT は `make test` と fuzz イメージの既定起動用。
 # GitLab CI Docker executor はスクリプト実行時に ENTRYPOINT に引数を渡すため、
 # シェル以外の ENTRYPOINT を持つイメージでは entrypoint: [""] で上書きが必要。
 .test_image: &test_image
@@ -57,6 +57,10 @@ build-test-image:
         - Cargo.lock
         - Containerfile
         - .gitlab-ci.yml
+        - scripts/archive-features.py
+        - scripts/check-features.py
+        - archive-cli/**/*
+        - Makefile
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
@@ -70,6 +74,8 @@ test:
   needs: [build-test-image]
   script:
     - cargo test --all-features
+    - cargo test --all-features --target aarch64-unknown-linux-gnu --lib
+    - CARGO_TARGET_DIR=target/avx2 RUSTFLAGS="-C target-cpu=x86-64-v3" cargo test --lib --all-features
   rules:
     - changes:
         - src/**/*
@@ -86,7 +92,7 @@ test-no-default-features:
   image: *test_image
   needs: [build-test-image]
   script:
-    - cargo test --no-default-features
+    - cargo test --lib --no-default-features --features "$(python3 scripts/archive-features.py)"
   rules:
     - changes:
         - src/**/*
@@ -95,6 +101,7 @@ test-no-default-features:
         - Cargo.lock
         - Containerfile
         - .gitlab-ci.yml
+        - scripts/archive-features.py
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
@@ -135,6 +142,28 @@ fmt:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
+check-features:
+  stage: test
+  image: *test_image
+  needs: [build-test-image]
+  script:
+    - rustup component add clippy
+    - make check-features
+  rules:
+    - changes:
+        - src/**/*
+        - tests/**/*
+        - benches/**/*
+        - archive-cli/**/*
+        - Cargo.toml
+        - Cargo.lock
+        - .gitlab-ci.yml
+        - Makefile
+        - scripts/archive-features.py
+        - scripts/check-features.py
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 doc:
   stage: test
   image: *test_image
@@ -157,7 +186,10 @@ doc:
 fuzz-smoke:
   stage: fuzz
   image: *fuzz_image
-  needs: [test]
+  needs:
+    - job: build-test-image
+    - job: test
+      optional: true
   script:
     - cargo test -p archive-fuzz
     - >-
@@ -178,6 +210,22 @@ fuzz-smoke:
           cargo run -q --profile fuzz -p archive-fuzz -- replay "$first_json"
         fi
       fi
+    - mkdir -p fuzz/failures/x86_64 fuzz/corpus/x86_64 fuzz/failures/avx2 fuzz/corpus/avx2 fuzz/failures/aarch64 fuzz/corpus/aarch64
+    - |
+      set -eu
+      # ソフト上限だけ下げる。ハード上限を下げると外部ツールが 4GiB へ戻せない。
+      ulimit -S -v 2097152
+      /usr/local/bin/archive-fuzz-x86_64 run --algorithm all --duration 60 --pattern all --jobs 1 --failures-dir fuzz/failures/x86_64 --corpus-dir fuzz/corpus/x86_64 &
+      pid_x86=$!
+      /usr/local/bin/archive-fuzz-avx2 run --algorithm all --duration 60 --pattern all --jobs 1 --failures-dir fuzz/failures/avx2 --corpus-dir fuzz/corpus/avx2 &
+      pid_avx=$!
+      qemu-aarch64 -L /usr/aarch64-linux-gnu /usr/local/bin/archive-fuzz-aarch64 run --algorithm all --duration 60 --pattern all --jobs 1 --failures-dir fuzz/failures/aarch64 --corpus-dir fuzz/corpus/aarch64 &
+      pid_arm=$!
+      status=0
+      wait "$pid_x86" || status=1
+      wait "$pid_avx" || status=1
+      wait "$pid_arm" || status=1
+      exit "$status"
   artifacts:
     when: always
     paths:

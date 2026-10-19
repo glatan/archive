@@ -8,10 +8,10 @@
         feature = "lzip",
         feature = "lzo",
         feature = "lrzip",
-        feature = "rzip",
         feature = "xz",
         feature = "zip",
-        feature = "sevenz"
+        feature = "sevenz",
+        feature = "rzip",
     )),
     allow(dead_code)
 )]
@@ -50,6 +50,17 @@ const CRC32_TABLE: [u32; 256] = make_crc32_table();
 /// assert_eq!(crc32(b"123456789"), 0xCBF43926);
 /// assert_eq!(crc32(b""), 0x00000000);
 /// ```
+#[cfg_attr(
+    not(any(
+        feature = "gzip",
+        feature = "lzip",
+        feature = "lzo",
+        feature = "xz",
+        feature = "zip",
+        feature = "sevenz",
+    )),
+    allow(dead_code)
+)]
 pub fn crc32(data: &[u8]) -> u32 {
     let mut state = Crc32::new();
     state.update(data);
@@ -138,6 +149,17 @@ impl Crc32 {
     /// let v2 = crc.finish();
     /// assert_eq!(v1, v2);
     /// ```
+    #[cfg_attr(
+        not(any(
+            feature = "gzip",
+            feature = "lzip",
+            feature = "lzo",
+            feature = "xz",
+            feature = "zip",
+            feature = "sevenz",
+        )),
+        allow(dead_code)
+    )]
     pub const fn finish(&self) -> u32 {
         self.value ^ 0xFFFF_FFFF
     }

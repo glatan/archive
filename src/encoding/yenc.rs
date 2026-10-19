@@ -55,8 +55,10 @@ fn push_encoded_rotated(out: &mut Vec<u8>, data: &[u8], scalar: bool) {
         } else {
             rotate_chunk(&data[off..off + n], &mut rotated[..n]);
         }
-        for &c in &rotated[..n] {
-            let last_col = col + 1 >= LINE_LEN;
+        for (i, &c) in rotated[..n].iter().enumerate() {
+            // A short final line still has a last column: the decoder
+            // strips a trailing space or tab, so that byte must be escaped.
+            let last_col = col + 1 >= LINE_LEN || off + i + 1 == data.len();
             let escape = matches!(c, 0 | 10 | 13 | b'=')
                 || (col == 0 && matches!(c, b' ' | b'\t' | b'.'))
                 || (last_col && matches!(c, b' ' | b'\t'));
@@ -88,15 +90,15 @@ fn rotate_scalar(src: &[u8], dst: &mut [u8]) {
 
 fn rotate_chunk(src: &[u8], dst: &mut [u8]) {
     let mut i = 0;
-    #[cfg(all(feature = "std", target_arch = "x86_64"))]
-    if std::is_x86_feature_detected!("avx2") {
+    #[cfg(target_arch = "x86_64")]
+    {
+        // Baseline crates rotate 16 bytes with SSE2. An `x86-64-v3` crate
+        // rotates 32 bytes with AVX2 and leaves a 16-byte SSE2 tail.
+        #[cfg(target_feature = "avx2")]
         while i + 32 <= src.len() {
             unsafe { rotate32_avx2(&src[i..i + 32], &mut dst[i..i + 32]) };
             i += 32;
         }
-    }
-    #[cfg(target_arch = "x86_64")]
-    {
         while i + 16 <= src.len() {
             unsafe { rotate16_sse2(&src[i..i + 16], &mut dst[i..i + 16]) };
             i += 16;
@@ -113,17 +115,7 @@ fn rotate_chunk(src: &[u8], dst: &mut [u8]) {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[target_feature(enable = "sse2")]
-fn rotate16_sse2(src: &[u8], dst: &mut [u8]) {
-    use core::arch::x86_64::{_mm_add_epi8, _mm_loadu_si128, _mm_set1_epi8, _mm_storeu_si128};
-    unsafe {
-        let v = _mm_loadu_si128(src.as_ptr().cast());
-        let r = _mm_add_epi8(v, _mm_set1_epi8(42));
-        _mm_storeu_si128(dst.as_mut_ptr().cast(), r);
-    }
-}
-
-#[cfg(all(feature = "std", target_arch = "x86_64"))]
+#[cfg_attr(not(target_feature = "avx2"), allow(dead_code))]
 #[target_feature(enable = "avx2")]
 fn rotate32_avx2(src: &[u8], dst: &mut [u8]) {
     use core::arch::x86_64::{
@@ -133,6 +125,17 @@ fn rotate32_avx2(src: &[u8], dst: &mut [u8]) {
         let v = _mm256_loadu_si256(src.as_ptr().cast());
         let r = _mm256_add_epi8(v, _mm256_set1_epi8(42));
         _mm256_storeu_si256(dst.as_mut_ptr().cast(), r);
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+fn rotate16_sse2(src: &[u8], dst: &mut [u8]) {
+    use core::arch::x86_64::{_mm_add_epi8, _mm_loadu_si128, _mm_set1_epi8, _mm_storeu_si128};
+    unsafe {
+        let v = _mm_loadu_si128(src.as_ptr().cast());
+        let r = _mm_add_epi8(v, _mm_set1_epi8(42));
+        _mm_storeu_si128(dst.as_mut_ptr().cast(), r);
     }
 }
 
@@ -497,6 +500,53 @@ pub fn join_parts(parts: &[YEncEntry]) -> Result<YEncEntry, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn rotate16_sse2_matches_scalar() {
+        let src: Vec<u8> = (0..16).map(|i| i as u8).collect();
+        let mut wide = vec![0u8; 16];
+        let mut scalar = vec![0u8; 16];
+        unsafe { rotate16_sse2(&src, &mut wide) };
+        rotate_scalar(&src, &mut scalar);
+        assert_eq!(wide, scalar);
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn rotate16_neon_matches_scalar() {
+        let src: Vec<u8> = (0..16).map(|i| i as u8).collect();
+        let mut wide = vec![0u8; 16];
+        let mut scalar = vec![0u8; 16];
+        unsafe { rotate16_neon(&src, &mut wide) };
+        rotate_scalar(&src, &mut scalar);
+        assert_eq!(wide, scalar);
+    }
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+    #[test]
+    fn rotate32_avx2_matches_scalar() {
+        let src: Vec<u8> = (0..96).map(|i| i as u8).collect();
+        let mut wide = vec![0u8; 32];
+        let mut scalar = vec![0u8; 32];
+        unsafe { rotate32_avx2(&src[..32], &mut wide) };
+        rotate_scalar(&src[..32], &mut scalar);
+        assert_eq!(wide, scalar);
+        let mut via_chunk = vec![0u8; src.len()];
+        let mut all_scalar = vec![0u8; src.len()];
+        rotate_chunk(&src, &mut via_chunk);
+        rotate_scalar(&src, &mut all_scalar);
+        assert_eq!(via_chunk, all_scalar);
+    }
+
+    #[test]
+    fn short_line_trailing_space_or_tab_roundtrips() {
+        for data in [b"\x00\xdf".as_slice(), b"\xf6", b"\xdf", b"abc\xdf"] {
+            let encoded = encode("fuzz", data);
+            let decoded = decode(&encoded).unwrap();
+            assert_eq!(decoded.data, data, "data {data:?}");
+        }
+    }
 
     #[test]
     fn vector_matches_scalar_lengths_and_escapes() {

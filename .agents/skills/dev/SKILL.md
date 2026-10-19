@@ -96,7 +96,7 @@ description: "開発タスクの分類 → 適切な skill/agent の選択・実
 3. 最終検証
    cargo fmt --all
    make build-container.test && make test
-   cargo test --no-default-features
+   make check-features
    cargo clippy --all-features --all-targets --workspace -- -D warnings
    cargo doc --all-features --workspace 2>&1 | grep warning
 4. (任意) /fuzz all <duration>

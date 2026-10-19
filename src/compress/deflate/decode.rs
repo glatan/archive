@@ -124,6 +124,7 @@ pub(crate) enum InflateKind {
     /// RFC 1951. Non-zero code lengths for distance codes 30 and 31 are rejected.
     Deflate,
     /// Deflate64. Distance codes 30 and 31 are real, and length code 285 takes 16 extra bits.
+    #[cfg_attr(not(any(feature = "zip", feature = "sevenz")), allow(dead_code))]
     Deflate64,
 }
 
@@ -241,6 +242,7 @@ pub fn decode_into(
 }
 
 /// Decode a raw DEFLATE or Deflate64 stream.
+#[cfg_attr(not(any(feature = "zip", feature = "sevenz")), allow(dead_code))]
 pub(crate) fn decode_kind(input: &[u8], kind: InflateKind) -> Result<Vec<u8>, Error> {
     let mut reader = BitReader::new(input);
     let mut output = Vec::new();
@@ -254,6 +256,10 @@ pub(crate) fn decode_kind(input: &[u8], kind: InflateKind) -> Result<Vec<u8>, Er
 /// Used by container formats that embed a self-terminating DEFLATE
 /// stream (e.g. git pack objects): the caller can read the true
 /// consumed byte count afterwards via `reader.byte_position()`.
+#[cfg_attr(
+    not(any(feature = "gzip", feature = "zlib", feature = "git-pack")),
+    allow(dead_code)
+)]
 pub(crate) fn decode_stream(reader: &mut BitReader, output: &mut Vec<u8>) -> Result<(), Error> {
     decode_blocks(reader, output, InflateKind::Deflate, None)
 }
@@ -326,6 +332,7 @@ fn output_limit(output: &[u8], add: usize, limit: Option<usize>) -> Result<(), E
 ///
 /// The dictionary is pre-seeded into the output buffer so that back-references
 /// can reach into it. The dictionary bytes are stripped from the returned result.
+#[cfg_attr(not(feature = "mscab"), allow(dead_code))]
 pub(crate) fn decode_with_dict(input: &[u8], dict: &[u8]) -> Result<Vec<u8>, Error> {
     let mut reader = BitReader::new(input);
     let mut output = Vec::from(dict);

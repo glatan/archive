@@ -353,6 +353,10 @@ const fn feature_gate_for(algo: Algorithm) -> &'static str {
         Algorithm::Mscfb | Algorithm::MscfbV4 => "mscfb",
         Algorithm::Pea | Algorithm::PeaStore | Algorithm::PeaSha256 => "pea",
         Algorithm::Crx3 => "crx3",
+        Algorithm::Ascii85 => "ascii85",
+        Algorithm::Yenc => "yenc",
+        Algorithm::Uuencode => "uuencode",
+        Algorithm::BinHex => "binhex",
     }
 }
 
@@ -1090,6 +1094,32 @@ fn self_pattern_body(algo: Algorithm) -> String {
         Algorithm::PeaSha256 => pea_body(
             "archive::archive::pea::encode::PeaEncoder::new().stream_control(archive::archive::pea::decode::PeaAlgo::Sha256).object_control(archive::archive::pea::decode::PeaAlgo::Sha256).volume_control(archive::archive::pea::decode::PeaAlgo::Sha256)",
         ),
+        Algorithm::Ascii85 => roundtrip_body(
+            "archive::encoding::ascii85::encode(input)",
+            "archive::encoding::ascii85::decode(&encoded).unwrap()",
+        ),
+        Algorithm::Yenc => roundtrip_body(
+            "archive::encoding::yenc::encode(\"fuzz\", input)",
+            "archive::encoding::yenc::decode(&encoded).unwrap().data",
+        ),
+        Algorithm::Uuencode => roundtrip_body(
+            "archive::encoding::uuencode::encode(\"fuzz\", 0o644, input)",
+            "archive::encoding::uuencode::decode(&encoded).unwrap().data",
+        ),
+        Algorithm::BinHex => concat!(
+            "    let entry = archive::encoding::binhex::BinHexEntry {\n",
+            "        name: \"fuzz\".to_string(),\n",
+            "        file_type: *b\"TEXT\",\n",
+            "        creator: *b\"fuzz\",\n",
+            "        flags: 0,\n",
+            "        data: input.to_vec(),\n",
+            "        resource: Vec::new(),\n",
+            "    };\n",
+            "    let encoded = archive::encoding::binhex::encode(&entry);\n",
+            "    let decoded = archive::encoding::binhex::decode(&encoded).unwrap();\n",
+            "    assert_eq!(decoded.data, input);",
+        )
+        .to_string(),
         Algorithm::Crx3 => concat!(
             "    let mut enc = archive::archive::zip::encode::ZipEncoder::new();\n",
             "    enc.add_file(\"fuzz_test\", input);\n",

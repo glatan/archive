@@ -70,6 +70,8 @@ impl Filter {
 
     /// Distance 1 is a byte-wise scan. Other SIMD distances are multiples
     /// of the 16-byte vector width, so each lane stays on its own chain.
+    /// An `x86-64-v3` build uses 32-byte chunks only when the distance is
+    /// 1 or a multiple of 32. Distance 16 stays on 16-byte chunks.
     fn simd_distance(&self) -> bool {
         #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
         {
@@ -83,32 +85,18 @@ impl Filter {
     }
 
     fn encode_simd(&mut self, buffer: &mut [u8]) {
-        #[cfg(all(feature = "std", target_arch = "x86_64"))]
-        if self.distance.is_multiple_of(32) && std::is_x86_feature_detected!("avx2") {
-            let prefix = (((self.pos & 0xFF) + 1) & 31).min(buffer.len());
-            self.encode_scalar(&mut buffer[..prefix]);
-            let mut off = prefix;
-            while off + 32 <= buffer.len() {
-                unsafe { self.encode_chunk32(&mut buffer[off..off + 32]) };
-                off += 32;
-            }
-            self.encode_width16(&mut buffer[off..], true);
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+        if self.distance == 1 || self.distance.is_multiple_of(32) {
+            self.encode_width32(buffer, true);
             return;
         }
         self.encode_width16(buffer, true);
     }
 
     fn decode_simd(&mut self, buffer: &mut [u8]) {
-        #[cfg(all(feature = "std", target_arch = "x86_64"))]
-        if self.distance.is_multiple_of(32) && std::is_x86_feature_detected!("avx2") {
-            let prefix = (((self.pos & 0xFF) + 1) & 31).min(buffer.len());
-            self.decode_scalar(&mut buffer[..prefix]);
-            let mut off = prefix;
-            while off + 32 <= buffer.len() {
-                unsafe { self.decode_chunk32(&mut buffer[off..off + 32]) };
-                off += 32;
-            }
-            self.encode_width16(&mut buffer[off..], false);
+        #[cfg(all(target_arch = "x86_64", target_feature = "avx2"))]
+        if self.distance == 1 || self.distance.is_multiple_of(32) {
+            self.encode_width32(buffer, false);
             return;
         }
         self.encode_width16(buffer, false);
@@ -169,6 +157,38 @@ impl Filter {
         #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
         {
             let _ = (buffer, encode);
+        }
+    }
+
+    /// 32-byte chunks once `pos` is 31 modulo 32, then a scalar tail.
+    ///
+    /// The ring store is contiguous only when the distance is 1 or a
+    /// multiple of 32. Callers keep every other SIMD distance on
+    /// [`Self::encode_width16`].
+    #[cfg(target_arch = "x86_64")]
+    #[cfg_attr(not(target_feature = "avx2"), allow(dead_code))]
+    fn encode_width32(&mut self, buffer: &mut [u8], encode: bool) {
+        let prefix = (((self.pos & 0xFF) + 1) & 31).min(buffer.len());
+        if encode {
+            self.encode_scalar(&mut buffer[..prefix]);
+        } else {
+            self.decode_scalar(&mut buffer[..prefix]);
+        }
+        let mut off = prefix;
+        while off + 32 <= buffer.len() {
+            unsafe {
+                if encode {
+                    self.encode_chunk32(&mut buffer[off..off + 32]);
+                } else {
+                    self.decode_chunk32(&mut buffer[off..off + 32]);
+                }
+            }
+            off += 32;
+        }
+        if encode {
+            self.encode_scalar(&mut buffer[off..]);
+        } else {
+            self.decode_scalar(&mut buffer[off..]);
         }
     }
 
@@ -261,35 +281,54 @@ impl Filter {
         self.pos = self.pos.wrapping_sub(16);
     }
 
-    #[cfg(all(feature = "std", target_arch = "x86_64"))]
-    #[target_feature(enable = "avx2,sse2")]
+    #[cfg(target_arch = "x86_64")]
+    #[cfg_attr(not(target_feature = "avx2"), allow(dead_code))]
+    #[target_feature(enable = "avx2")]
     unsafe fn encode_chunk32(&mut self, chunk: &mut [u8]) {
         use core::arch::x86_64::{
-            __m256i, _mm256_loadu_si256, _mm256_storeu_si256, _mm256_sub_epi8,
+            __m256i, _mm_cvtsi32_si128, _mm_or_si128, _mm_slli_si128, _mm_srli_si128, _mm_sub_epi8,
+            _mm256_castsi256_si128, _mm256_extracti128_si256, _mm256_loadu_si256, _mm256_set_m128i,
+            _mm256_storeu_si256, _mm256_sub_epi8,
         };
 
         let p = self.pos & 0xFF;
-        let r = (p + self.distance) & 0xFF;
         let input = unsafe { _mm256_loadu_si256(chunk.as_ptr().cast::<__m256i>()) };
-        let prev = unsafe { load_reversed32(self.history.as_ptr().add(r - 31)) };
-        let out = _mm256_sub_epi8(input, prev);
+        let out = if self.distance == 1 {
+            let carry = i32::from(self.history[(p + 1) & 0xFF]);
+            let low = _mm256_castsi256_si128(input);
+            let high = _mm256_extracti128_si256(input, 1);
+            let prev_low = _mm_or_si128(_mm_slli_si128(low, 1), _mm_cvtsi32_si128(carry));
+            let prev_high = _mm_or_si128(_mm_slli_si128(high, 1), _mm_srli_si128(low, 15));
+            _mm256_set_m128i(_mm_sub_epi8(high, prev_high), _mm_sub_epi8(low, prev_low))
+        } else {
+            let r = (p + self.distance) & 0xFF;
+            let prev = unsafe { load_reversed32(self.history.as_ptr().add(r - 31)) };
+            _mm256_sub_epi8(input, prev)
+        };
         unsafe { _mm256_storeu_si256(chunk.as_mut_ptr().cast::<__m256i>(), out) };
         unsafe { store_reversed32(self.history.as_mut_ptr().add(p - 31), input) };
         self.pos = self.pos.wrapping_sub(32);
     }
 
-    #[cfg(all(feature = "std", target_arch = "x86_64"))]
-    #[target_feature(enable = "avx2,sse2")]
+    #[cfg(target_arch = "x86_64")]
+    #[cfg_attr(not(target_feature = "avx2"), allow(dead_code))]
+    #[target_feature(enable = "avx2")]
     unsafe fn decode_chunk32(&mut self, chunk: &mut [u8]) {
         use core::arch::x86_64::{
-            __m256i, _mm256_add_epi8, _mm256_loadu_si256, _mm256_storeu_si256,
+            __m256i, _mm256_add_epi8, _mm256_loadu_si256, _mm256_set1_epi8, _mm256_storeu_si256,
         };
 
         let p = self.pos & 0xFF;
-        let r = (p + self.distance) & 0xFF;
         let input = unsafe { _mm256_loadu_si256(chunk.as_ptr().cast::<__m256i>()) };
-        let prev = unsafe { load_reversed32(self.history.as_ptr().add(r - 31)) };
-        let decoded = _mm256_add_epi8(input, prev);
+        let decoded = if self.distance == 1 {
+            let carry = self.history[(p + 1) & 0xFF] as i8;
+            let sum = unsafe { prefix_sum32(input) };
+            _mm256_add_epi8(sum, _mm256_set1_epi8(carry))
+        } else {
+            let r = (p + self.distance) & 0xFF;
+            let prev = unsafe { load_reversed32(self.history.as_ptr().add(r - 31)) };
+            _mm256_add_epi8(input, prev)
+        };
         unsafe { _mm256_storeu_si256(chunk.as_mut_ptr().cast::<__m256i>(), decoded) };
         unsafe { store_reversed32(self.history.as_mut_ptr().add(p - 31), decoded) };
         self.pos = self.pos.wrapping_sub(32);
@@ -340,20 +379,23 @@ unsafe fn prefix_sum16(v: core::arch::x86_64::__m128i) -> core::arch::x86_64::__
     _mm_add_epi8(v, _mm_slli_si128(v, 8))
 }
 
-#[cfg(all(feature = "std", target_arch = "x86_64"))]
-#[target_feature(enable = "avx2,sse2")]
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(target_feature = "avx2"), allow(dead_code))]
+#[target_feature(enable = "avx2")]
 unsafe fn reverse32(v: core::arch::x86_64::__m256i) -> core::arch::x86_64::__m256i {
-    use core::arch::x86_64::{_mm256_castsi256_si128, _mm256_extracti128_si256, _mm256_set_m128i};
+    use core::arch::x86_64::{_mm256_permute2x128_si256, _mm256_setr_epi8, _mm256_shuffle_epi8};
 
-    let lo = _mm256_castsi256_si128(v);
-    let hi = _mm256_extracti128_si256(v, 1);
-    let lo_r = unsafe { reverse16(lo) };
-    let hi_r = unsafe { reverse16(hi) };
-    _mm256_set_m128i(lo_r, hi_r)
+    let swapped = _mm256_permute2x128_si256(v, v, 0x01);
+    let index = _mm256_setr_epi8(
+        15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6,
+        5, 4, 3, 2, 1, 0,
+    );
+    _mm256_shuffle_epi8(swapped, index)
 }
 
-#[cfg(all(feature = "std", target_arch = "x86_64"))]
-#[target_feature(enable = "avx2,sse2")]
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(target_feature = "avx2"), allow(dead_code))]
+#[target_feature(enable = "avx2")]
 unsafe fn load_reversed32(ptr: *const u8) -> core::arch::x86_64::__m256i {
     use core::arch::x86_64::{__m256i, _mm256_loadu_si256};
 
@@ -361,13 +403,30 @@ unsafe fn load_reversed32(ptr: *const u8) -> core::arch::x86_64::__m256i {
     unsafe { reverse32(mem) }
 }
 
-#[cfg(all(feature = "std", target_arch = "x86_64"))]
-#[target_feature(enable = "avx2,sse2")]
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(target_feature = "avx2"), allow(dead_code))]
+#[target_feature(enable = "avx2")]
 unsafe fn store_reversed32(ptr: *mut u8, buf_order: core::arch::x86_64::__m256i) {
     use core::arch::x86_64::{__m256i, _mm256_storeu_si256};
 
     let mem = unsafe { reverse32(buf_order) };
     unsafe { _mm256_storeu_si256(ptr.cast::<__m256i>(), mem) };
+}
+
+#[cfg(target_arch = "x86_64")]
+#[cfg_attr(not(target_feature = "avx2"), allow(dead_code))]
+#[target_feature(enable = "avx2")]
+unsafe fn prefix_sum32(v: core::arch::x86_64::__m256i) -> core::arch::x86_64::__m256i {
+    use core::arch::x86_64::{
+        _mm_add_epi8, _mm_cvtsi128_si32, _mm_set1_epi8, _mm_srli_si128, _mm256_castsi256_si128,
+        _mm256_extracti128_si256, _mm256_set_m128i,
+    };
+
+    let low = unsafe { prefix_sum16(_mm256_castsi256_si128(v)) };
+    let mut high = unsafe { prefix_sum16(_mm256_extracti128_si256(v, 1)) };
+    let lane_total = _mm_cvtsi128_si32(_mm_srli_si128(low, 15)) as i8;
+    high = _mm_add_epi8(high, _mm_set1_epi8(lane_total));
+    _mm256_set_m128i(high, low)
 }
 
 #[cfg(target_arch = "aarch64")]

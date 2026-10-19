@@ -18,7 +18,7 @@ pub(super) fn pattern_bits(chunk: &[u8], mask: &[u8; 16], expect: &[u8; 16]) -> 
     }
 }
 
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+#[cfg(any(test, not(any(target_arch = "x86_64", target_arch = "aarch64"))))]
 fn pattern_bits_scalar(chunk: &[u8], mask: &[u8; 16], expect: &[u8; 16]) -> u32 {
     let mut bits = 0u32;
     for (i, byte) in chunk.iter().take(16).enumerate() {
@@ -63,4 +63,39 @@ unsafe fn pattern_bits_neon(chunk: &[u8], mask: &[u8; 16], expect: &[u8; 16]) ->
     let expect_v = unsafe { vld1q_u8(expect.as_ptr()) };
     let got = vandq_u8(raw, mask_v);
     unsafe { crate::compress::scan::neon_movemask(vceqq_u8(got, expect_v)) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> ([u8; 16], [u8; 16], [u8; 16]) {
+        let mut chunk = [0u8; 16];
+        let mut mask = [0xFFu8; 16];
+        let mut expect = [0u8; 16];
+        for i in 0..16 {
+            chunk[i] = (i as u8).wrapping_mul(17).wrapping_add(3);
+            expect[i] = chunk[i];
+        }
+        chunk[5] ^= 0x01;
+        mask[7] = 0x0F;
+        expect[7] &= 0x0F;
+        (chunk, mask, expect)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn pattern_bits_sse2_matches_scalar() {
+        let (chunk, mask, expect) = sample();
+        let sse2 = unsafe { pattern_bits_sse2(&chunk, &mask, &expect) };
+        assert_eq!(sse2, pattern_bits_scalar(&chunk, &mask, &expect));
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn pattern_bits_neon_matches_scalar() {
+        let (chunk, mask, expect) = sample();
+        let neon = unsafe { pattern_bits_neon(&chunk, &mask, &expect) };
+        assert_eq!(neon, pattern_bits_scalar(&chunk, &mask, &expect));
+    }
 }

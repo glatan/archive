@@ -28,7 +28,9 @@ const VERSION_MINOR: u8 = 1;
 
 const NUM_STREAMS: usize = 2;
 const CHUNK_MULTIPLE: usize = 100 * 1024 * 1024;
+#[cfg_attr(not(feature = "zlib"), allow(dead_code))]
 const CTYPE_GZIP: u8 = 1;
+#[cfg_attr(not(feature = "lzo"), allow(dead_code))]
 const CTYPE_LZO: u8 = 2;
 const CTYPE_NONE: u8 = 3;
 const CTYPE_BZIP2: u8 = 4;

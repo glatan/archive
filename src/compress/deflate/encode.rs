@@ -69,6 +69,7 @@ pub fn encode_into(input: &[u8], output: &mut Vec<u8>, level: Level) {
 /// the stream free of code 285, so the output is a valid Deflate64
 /// stream (32 KB distances are likewise a subset of the 64 KB
 /// Deflate64 window).
+#[cfg_attr(not(any(feature = "zip", feature = "sevenz")), allow(dead_code))]
 pub(crate) fn encode_max_match(input: &[u8], level: Level, max_match: usize) -> Vec<u8> {
     match level {
         Level::NoCompression => encode_stored(input),
@@ -84,6 +85,7 @@ pub(crate) fn encode_max_match(input: &[u8], level: Level, max_match: usize) -> 
 /// The dictionary itself is not included in the output stream.
 ///
 /// Always uses `Level::Default` compression.
+#[cfg_attr(not(any(feature = "zlib", feature = "mscab")), allow(dead_code))]
 pub(crate) fn encode_with_dict(input: &[u8], dict: &[u8]) -> Vec<u8> {
     encode_lz77_blocks(input, dict, Level::Default, MAX_MATCH_LEN, false)
 }

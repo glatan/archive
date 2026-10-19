@@ -11,7 +11,7 @@
   - `cargo fmt`
   - `make build-container.test && make test`
   - `cargo clippy --all-features --all-targets -- -D warnings`
-- `no_std` / feature gating / `std` 依存境界に関わる変更をした場合は、追加で `cargo test --no-default-features` も確認する。
+- `no_std` / feature gating / `std` 依存境界に関わる変更をした場合は、追加で `make check-features` を通す。
 - `clippy` は現状ホスト側実行を基本とするが、container で再現が必要な failure は debug/test image を使って確認する。
 - fuzz / system tool interop は、通常の修正では毎回必須ではない。必要な変更をしたときだけ既存フローに従って追加で確認する。
 - ドキュメントのみの変更では、コードの挙動が変わらない限りテスト / clippy の再実行は必須ではない。

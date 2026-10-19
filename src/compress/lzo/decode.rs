@@ -278,7 +278,11 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
 /// M3: `((offset - 1) << 2) | S`, M4: `(base << 2) | S` where base is
 /// the reduced offset within the M4 range.
 pub(crate) fn decompress_lzo1x(src: &[u8], expected_len: usize) -> Result<Vec<u8>, Error> {
-    let mut dst = Vec::with_capacity(expected_len);
+    let mut dst = Vec::new();
+    // A corrupt member can declare a multi-gigabyte length. `with_capacity`
+    // aborts when that reservation is refused.
+    dst.try_reserve_exact(expected_len)
+        .map_err(|_| Error::InvalidData("lzo: uncompressed size too large"))?;
     let mut sp = 0usize;
     #[allow(unused_assignments)]
     let mut state: usize = 0;
@@ -609,6 +613,11 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
 mod tests {
     use super::*;
     extern crate alloc;
+
+    #[test]
+    fn decompress_lzo1x_rejects_unreservable_length() {
+        assert!(decompress_lzo1x(&[0], isize::MAX as usize).is_err());
+    }
 
     fn rebuild_header_with_options(
         original: &[u8],

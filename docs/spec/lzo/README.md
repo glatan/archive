@@ -76,6 +76,7 @@
 | 37 | lzop header: optional name field (name_length + name bytes) | lzop source | ✅ | `test_decode_filename_header` |
 | 38 | F_CRC32_D / F_CRC32_C と F_ADLER32_D / F_ADLER32_C は排他 | lzop source | ✅ | デコーダーで対応 |
 | 39 | Decompressed output size 検証 (uncompressed_len と一致) | lzop block structure | ✅ | デコーダーで検証 |
+| 39a | declared uncompressed length が確保できないときは `InvalidData` で拒否する | crate | ✅ | `decompress_lzo1x_rejects_unreservable_length` |
 | 40 | 命令形式 `0 0 0 0 D D S S` の state==4 形式 (offset 2049-3072, len 3) | Linux kernel lzo.rst: Instruction encoding | ✅ | `test_m1_long_offset_state_4` (hand-built。エンコーダは M1 を発行しない intentional scope) |
 | 41 | lzop `version < 0x0940` の拒否 | lzop source | ✅ | `decode.rs:93-96`、`test_old_version_rejected` |
 | 42 | bitstream version byte 17 (v1 / LZO-RLE) と v1 専用ゼロラン命令 | Linux kernel lzo.rst | ✅ | 先頭 17 + version byte (0/1) の versioned bitstream を受理 (version > 1 は `Error::Unsupported`)。v1 では M4 distance 0xbfff のゼロラン命令 (LZO-RLE) を decode。5 バイト未満の入力は先頭 17 を v0 命令バイトとして解釈。`test_v1_bitstream_version_byte`, `test_v1_zero_run_decode`, `test_v1_bitstream_short_stream_is_v0` |

@@ -335,7 +335,37 @@ fn run_iteration(
     stats: &Mutex<Stats>,
 ) {
     maybe_record_observation(state, algo, data, case_label);
-    let patterns = get_patterns(algo, state.config.pattern, state.available_tools);
+    let patterns = match get_patterns(algo, state.config.pattern, state.available_tools) {
+        Ok(patterns) => patterns,
+        Err(error) => {
+            let elapsed = state.start.elapsed().as_secs();
+            let pattern = match state.config.pattern {
+                PatternFilter::OriginalCompress => TestPattern::OriginalCompress,
+                _ => TestPattern::OriginalDecompress,
+            };
+            let fingerprint = checksum::fingerprint(data);
+            let info = FailureInfo {
+                algo,
+                pattern,
+                seed: state.config.seed,
+                iteration,
+                data,
+                original_size: data.len(),
+                fingerprint: &fingerprint,
+                error: &error,
+                case_label: case_label.map(ToOwned::to_owned),
+                signature: report::failure_signature(algo, pattern, &error),
+                mutated_stream: None,
+                mutation: None,
+            };
+            stats
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .record_failure(pattern);
+            handle_failure_artifact(state, stats, elapsed, &info, false);
+            return;
+        }
+    };
 
     for pattern in patterns {
         let elapsed = state.start.elapsed().as_secs();
@@ -1001,30 +1031,32 @@ fn get_patterns(
     algo: Algorithm,
     filter: PatternFilter,
     available_tools: &HashSet<Algorithm>,
-) -> Vec<TestPattern> {
+) -> Result<Vec<TestPattern>, String> {
     let has_tool = available_tools.contains(&algo);
 
     match filter {
         PatternFilter::All => {
-            // Level aliases share the base encode/decode path; only the
-            // external tool spec differs (e.g. `zstd -1` vs `zstd -19`), so
-            // running self/corrupt on them would duplicate the base variant.
-            let mut patterns = if algorithms::is_level_alias(algo) {
-                Vec::new()
-            } else {
-                vec![TestPattern::Self_, TestPattern::Corrupt]
-            };
+            // Every algorithm runs self and corrupt, including level aliases.
+            // original-* is added when that algorithm's tool is installed.
+            // An explicit original-* pattern still fails if the tool is absent.
+            let mut patterns = vec![TestPattern::Self_, TestPattern::Corrupt];
             if has_tool {
                 patterns.push(TestPattern::OriginalCompress);
                 patterns.push(TestPattern::OriginalDecompress);
             }
-            patterns
+            Ok(patterns)
         }
-        PatternFilter::Self_ => vec![TestPattern::Self_],
-        PatternFilter::Corrupt => vec![TestPattern::Corrupt],
-        PatternFilter::OriginalCompress if has_tool => vec![TestPattern::OriginalCompress],
-        PatternFilter::OriginalDecompress if has_tool => vec![TestPattern::OriginalDecompress],
-        _ => Vec::new(),
+        PatternFilter::Self_ => Ok(vec![TestPattern::Self_]),
+        PatternFilter::Corrupt => Ok(vec![TestPattern::Corrupt]),
+        PatternFilter::OriginalCompress | PatternFilter::OriginalDecompress if has_tool => {
+            Ok(vec![match filter {
+                PatternFilter::OriginalCompress => TestPattern::OriginalCompress,
+                _ => TestPattern::OriginalDecompress,
+            }])
+        }
+        PatternFilter::OriginalCompress | PatternFilter::OriginalDecompress => {
+            Err(format!("external tool for {algo} is not available"))
+        }
     }
 }
 
@@ -1046,8 +1078,12 @@ fn run_single_test(
                     .map_err(|e| CaseError::simple(format!("{e}")))
             } else {
                 algorithms::decode_with(algo, &encoded)
-                    .map(|decoded| (decoded, encoded_size))
                     .map_err(|e| CaseError::simple(format!("{e}")))
+                    .and_then(|decoded| {
+                        algorithms::check_prefixed_decode_into(algo, &encoded, None)
+                            .map_err(CaseError::simple)?;
+                        Ok((decoded, encoded_size))
+                    })
             }
         }
         TestPattern::OriginalCompress => {
@@ -1138,11 +1174,20 @@ fn run_corrupt_case(algo: Algorithm, data: &[u8]) -> Result<(Vec<u8>, usize), Ca
     };
 
     sweep(&mut rng, &encoded, "self", mutated_cap, decoded_limit)?;
+    for (index, base) in algorithms::extra_corrupt_bases(algo).iter().enumerate() {
+        let origin = format!("extra#{index}");
+        let cap = base.len().saturating_add(256).clamp(1, 16 << 20);
+        sweep(&mut rng, base, &origin, cap, decoded_limit)?;
+    }
 
     // A real tool-produced fixture exercises decoder paths a self-encoded
     // stream never reaches (vendor extensions, unusual flags, real
     // multi-entry layouts). Rotate deterministically through the corpus.
-    let fixture_list = fixtures::load(algo);
+    let fixture_list = fixtures::load(algo).map_err(|message| CaseError {
+        message,
+        mutated_stream: None,
+        mutation: Some("fixtures".to_string()),
+    })?;
     if !fixture_list.is_empty() {
         let index = rng.random_range(0..fixture_list.len());
         let fixture = fixture_list[index].clone();
@@ -1257,13 +1302,20 @@ fn decode_outcome(algo: Algorithm, candidate: &[u8]) -> Result<DecodeOutcome, St
 fn corrupt_probe(algo: Algorithm, candidate: &[u8], decoded_limit: usize) -> Result<(), String> {
     watchdog::note_data(candidate);
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        algorithms::decode_bounded_with(algo, candidate, decoded_limit)
+        let decoded = algorithms::decode_bounded_with(algo, candidate, decoded_limit);
+        if let Ok(decoded) = &decoded
+            && decoded.len() > decoded_limit
+        {
+            return Err(format!(
+                "resource oracle: corrupt decode produced {} bytes > {decoded_limit}",
+                decoded.len()
+            ));
+        }
+        algorithms::check_prefixed_decode_into(algo, candidate, Some(decoded_limit))?;
+        Ok(())
     })) {
-        Ok(Ok(decoded)) if decoded.len() > decoded_limit => Err(format!(
-            "resource oracle: corrupt decode produced {} bytes > {decoded_limit}",
-            decoded.len()
-        )),
-        Ok(_) => Ok(()),
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(message)) => Err(message),
         Err(panic_info) => Err(format!("PANIC: {}", panic_message(&panic_info))),
     }
 }
@@ -1643,14 +1695,39 @@ mod tests {
         ]
         .into_iter()
         .collect();
+        let with_tools = get_patterns(Algorithm::Zip, PatternFilter::All, &available).unwrap();
+        let without_tools =
+            get_patterns(Algorithm::Zip, PatternFilter::All, &HashSet::new()).unwrap();
         assert_eq!(
-            get_patterns(Algorithm::Zip, PatternFilter::All, &available),
+            with_tools,
             vec![
                 TestPattern::Self_,
                 TestPattern::Corrupt,
                 TestPattern::OriginalCompress,
                 TestPattern::OriginalDecompress,
             ]
+        );
+        assert_eq!(
+            without_tools,
+            vec![TestPattern::Self_, TestPattern::Corrupt]
+        );
+        let alias_tools: HashSet<_> = [Algorithm::ZstdFast].into_iter().collect();
+        assert!(crate::algorithms::is_level_alias(Algorithm::ZstdFast));
+        assert_eq!(
+            get_patterns(Algorithm::ZstdFast, PatternFilter::All, &alias_tools).unwrap(),
+            with_tools
+        );
+        assert_eq!(
+            get_patterns(Algorithm::ZstdFast, PatternFilter::All, &HashSet::new()).unwrap(),
+            without_tools
+        );
+        assert!(
+            get_patterns(
+                Algorithm::Zip,
+                PatternFilter::OriginalCompress,
+                &HashSet::new()
+            )
+            .is_err()
         );
     }
 

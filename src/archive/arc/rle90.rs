@@ -23,7 +23,11 @@ const FLAG: u8 = 0x90;
 /// Decode an RLE90 stream that must expand to exactly
 /// original_size bytes.
 pub(crate) fn decode(input: &[u8], original_size: usize) -> Result<Vec<u8>, Error> {
-    let mut out = Vec::with_capacity(original_size);
+    let mut out = Vec::new();
+    // A corrupt header can declare a multi-gigabyte size. `with_capacity`
+    // aborts when the address space refuses that reservation.
+    out.try_reserve_exact(original_size)
+        .map_err(|_| Error::InvalidData("arc: uncompressed size too large"))?;
     let mut i = 0usize;
     while i < input.len() {
         let b = input[i];
@@ -134,6 +138,11 @@ mod tests {
         roundtrip(&data);
         // All byte values.
         roundtrip(&(0u8..=255).collect::<Vec<u8>>());
+    }
+
+    #[test]
+    fn rle90_rejects_unreservable_size() {
+        assert!(decode(b"", isize::MAX as usize).is_err());
     }
 
     #[test]

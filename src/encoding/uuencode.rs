@@ -319,6 +319,29 @@ fn decode_base64_body(
 mod tests {
     use super::*;
     use alloc::vec;
+    use alloc::vec::Vec;
+
+    fn scalar_map(vals: &[u8]) -> Vec<u8> {
+        vals.iter().copied().map(enc_char).collect()
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn map16_sse2_matches_scalar() {
+        let vals: Vec<u8> = (0..16).collect();
+        let mut simd = Vec::new();
+        unsafe { map16_sse2(&vals, &mut simd) };
+        assert_eq!(simd, scalar_map(&vals));
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    #[test]
+    fn map16_neon_matches_scalar() {
+        let vals: Vec<u8> = (0..16).collect();
+        let mut simd = Vec::new();
+        unsafe { map16_neon(&vals, &mut simd) };
+        assert_eq!(simd, scalar_map(&vals));
+    }
 
     #[test]
     fn vector_matches_scalar_lengths() {

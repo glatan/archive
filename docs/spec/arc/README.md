@@ -51,6 +51,7 @@
 | 15a | method 20-29 (informational items)・30-39 (control items): 通常 member と同一ヘッダを parse して payload `length` バイトを skip、entry は生成しない (SEA memo: orig file size・name は無視可能と規定) | ARC spec (SEA technical memo、ARC 6.0) | ✅ | `skips_info_control_items`, `rejects_truncated_info_item`, `test_arc_skips_info_control_items` |
 | 16 | method 1 以上の CRC-16 (CRC-16/ARC、poly 0x8005 reflected) を検証、不一致は reject | ARC spec | ✅ | `rejects_bad_crc`, `method1_rejects_bad_crc`, `method3_rejects_bad_crc`, `test_arc_method1_rejects_bad_crc` |
 | 17 | method 1 member は orig-length を持たず `size` は stored size と同値。`crc16`/`date`/`time` は通常通り検証・返却される | ARC spec (Arcinfo bytes 26-29 注記) | ✅ | `method1_member`, `method1_rejects_bad_crc` |
+| 17a | method 3/4 の declared original size が確保できないときは `InvalidData` で拒否する | crate | ✅ | `rle90_rejects_unreservable_size`, `squeeze_rejects_unreservable_size` |
 
 ### encode
 

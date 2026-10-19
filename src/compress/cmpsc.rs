@@ -25,6 +25,7 @@
 //!   compress; like the LZXD uncompressed-block encoder it exists for
 //!   round-trip and interoperability testing.
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::Error;

@@ -1,8 +1,8 @@
-//! LSB-first bit reader for DEFLATE and zstd streams.
+//! LSB-first bit reader for DEFLATE and Brotli streams.
 
 use crate::error::Error;
 
-/// LSB-first bit reader for DEFLATE and zstd streams.
+/// LSB-first bit reader for DEFLATE and Brotli streams.
 ///
 /// Reads bits from a byte slice, consuming bits from the least significant
 /// bit of each byte first. No method on this type panics (debug assertions
@@ -241,6 +241,7 @@ impl<'a> BitReader<'a> {
     /// let mut r = BitReader::new(&[0x34, 0x12]);
     /// assert_eq!(r.read_u16_le().unwrap(), 0x1234);
     /// ```
+    #[cfg_attr(not(feature = "deflate"), allow(dead_code))]
     pub fn read_u16_le(&mut self) -> Result<u16, Error> {
         let bytes = self.read_bytes(2)?;
         Ok(u16::from_le_bytes([bytes[0], bytes[1]]))

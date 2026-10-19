@@ -21,7 +21,7 @@
 | 1 | 出力 = (入力 + 42) mod 256 | draft "Encoding Technique" step 2 | ✅ | 全 roundtrip |
 | 2 | 出力バイトが NUL(00h)/LF(0Ah)/CR(0Dh)/`=`(3Dh) の場合 `=` + (値+64) でエスケープ | draft "critical characters" + step 3 | ✅ | `escapes_critical` |
 | 3 | TAB(09h) は v1.2 で critical から削除 | draft §critical characters 注記 | ✅ | `escapes_critical` (対象外を確認) |
-| 4 | 行頭・行末の SP/TAB をエスケープ (1.2 推奨) | draft "(1.2) Careful writers ... encode TAB SPACES if they would appear in the first or last column" | ✅ | `first_col_space_tab_dot_escaped` |
+| 4 | 行頭・行末の SP/TAB をエスケープ (1.2 推奨) | draft "(1.2) Careful writers ... encode TAB SPACES if they would appear in the first or last column" | ✅ | `first_col_space_tab_dot_escaped`、`short_line_trailing_space_or_tab_roundtrips`（短い最終行の末尾列も対象） |
 | 5 | 行頭の `.` をエスケープ (NNTP 二重化対策、選択的推奨) | draft "or also encode a DOT in the first column" | ✅ | `first_col_space_tab_dot_escaped` |
 | 6 | エスケープ後は任意文字を受理 (`=` に続くバイトを -64-42 復号) | draft "yDecoder implementations should be capable of decoding any character following an escape sequence" | ✅ | `escapes_critical` 系 + python 参照 decoder interop |
 | 7 | 行は最大 n=128 文字。critical が n 番目に来た場合エスケープ対ごと同じ行に置き n+1 文字になる | draft "a line cannot end with an escape character, and a line with n+1 characters must end with an encoded critical character" | ✅ | `line_length_rule` |

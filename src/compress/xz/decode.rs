@@ -767,8 +767,10 @@ mod tests {
     use crate::compress::xz::filters::Filter;
     use crate::compress::xz::registry::FilterRegistry;
 
+    #[cfg(feature = "std")]
     struct XorCodec;
 
+    #[cfg(feature = "std")]
     impl crate::compress::xz::registry::FilterCodec for XorCodec {
         fn filter_id(&self) -> u64 {
             0x1234

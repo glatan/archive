@@ -45,7 +45,7 @@
 //! | `lzw` (default) | LZW / Unix compress (`.Z`) format |
 //! | `lz4` (default) | LZ4 frame format and raw block codec |
 //! | `lzo` (default) | LZO / lzop format |
-//! | `rzip` (default) | rzip long-range redundancy reduction |
+//! | `rzip` (default) | rzip long-range redundancy reduction (auto-enables `bzip2`) |
 //! | `zlib` (default) | zlib format (auto-enables `deflate`) |
 //! | `brotli` | Brotli format |
 //! | `zpaq` (default) | ZPAQ context-mixing compression |
@@ -457,7 +457,7 @@
 //! # }
 //! ```
 
-#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(not(any(feature = "std", test)), no_std)]
 
 extern crate alloc;
 
@@ -512,7 +512,8 @@ pub(crate) mod util;
     feature = "cmpsc",
     feature = "packbits",
     feature = "lha",
-    feature = "arj"
+    feature = "arj",
+    feature = "erofs"
 ))]
 pub mod compress;
 

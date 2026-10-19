@@ -21,9 +21,10 @@ static ROOT: OnceLock<PathBuf> = OnceLock::new();
 static CACHE: LazyLock<Mutex<HashMap<Algorithm, Vec<Vec<u8>>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Point the loader at a fixtures root (e.g. `tests/fixtures/`). Missing
-/// directories are simply skipped, so a repo checkout without fixtures still
-/// runs normally.
+/// Point the loader at a fixtures root (e.g. `tests/fixtures/`).
+///
+/// Algorithms with an empty directory list have no fixture phase. An
+/// algorithm whose directory is listed and missing fails when loaded.
 pub fn init(root: &Path) {
     let _ = ROOT.set(root.to_path_buf());
 }
@@ -100,41 +101,47 @@ const fn dirs_for(algo: Algorithm) -> &'static [&'static str] {
 }
 
 /// Load (and cache) the fixture streams usable as corrupt bases for `algo`.
-pub fn load(algo: Algorithm) -> Vec<Vec<u8>> {
+pub fn load(algo: Algorithm) -> Result<Vec<Vec<u8>>, String> {
     if let Some(cached) = CACHE
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .get(&algo)
         .cloned()
     {
-        return cached;
+        return Ok(cached);
     }
+    let dirs = dirs_for(algo);
+    if dirs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let Some(root) = ROOT.get() else {
+        return Err(format!(
+            "fixture directory for {algo} is missing: fixtures root is not set"
+        ));
+    };
     let mut fixtures = Vec::new();
-    if let Some(root) = ROOT.get() {
-        for dir in dirs_for(algo) {
-            let dir = root.join(dir);
-            let Ok(read_dir) = fs::read_dir(&dir) else {
+    for dir_name in dirs {
+        let dir = root.join(dir_name);
+        let read_dir = fs::read_dir(&dir)
+            .map_err(|_| format!("fixture directory for {algo} is missing: {}", dir.display()))?;
+        let mut paths: Vec<PathBuf> = read_dir
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.is_file())
+            .collect();
+        paths.sort();
+        for path in paths {
+            if fixtures.len() >= FIXTURE_COUNT_CAP {
+                break;
+            }
+            let Ok(meta) = fs::metadata(&path) else {
                 continue;
             };
-            let mut paths: Vec<PathBuf> = read_dir
-                .filter_map(Result::ok)
-                .map(|e| e.path())
-                .filter(|p| p.is_file())
-                .collect();
-            paths.sort();
-            for path in paths {
-                if fixtures.len() >= FIXTURE_COUNT_CAP {
-                    break;
-                }
-                let Ok(meta) = fs::metadata(&path) else {
-                    continue;
-                };
-                if meta.len() > FIXTURE_SIZE_CAP {
-                    continue;
-                }
-                if let Ok(bytes) = fs::read(&path) {
-                    fixtures.push(bytes);
-                }
+            if meta.len() > FIXTURE_SIZE_CAP {
+                continue;
+            }
+            if let Ok(bytes) = fs::read(&path) {
+                fixtures.push(bytes);
             }
         }
     }
@@ -142,7 +149,7 @@ pub fn load(algo: Algorithm) -> Vec<Vec<u8>> {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .insert(algo, fixtures.clone());
-    fixtures
+    Ok(fixtures)
 }
 
 #[cfg(test)]

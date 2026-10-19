@@ -33,7 +33,7 @@ cargo run --profile fuzz -p archive-fuzz -- run --pattern corrupt
 cargo run --profile fuzz -p archive-fuzz -- run --pattern original-decompress
 ```
 
-外部ツールが見つからない場合、該当パターンを自動的にスキップする。
+`--pattern all` は、全アルゴリズムで `self` と `corrupt` を実行する。ツールがインストールされているアルゴリズムは、同じ起動で `original-compress` と `original-decompress` も実行する。deflate、zlib、gzip-store、ascii85 の外部側は python3 である。接頭辞付き `decode_into` は全アルゴリズムで実行し、専用 API が無い形式は通常の decode を呼び出し元バッファへ足す。ツールが無いアルゴリズムは `original-*` を足さない。`original-*` を明示してツールが無いときは失敗する。
 
 ### corrupt パターンの詳細
 
@@ -58,7 +58,7 @@ hard cap を 1 MiB (`ZPAQ_CORRUPT_LIMIT`) に絞っている。上限超過は g
 
 fixture はコミット済みの静的ファイルであり、self-encoded ストリームでは到達しない
 vendor 拡張や実際のマルチエントリレイアウトを decoder 経路として網羅する。
-fixture が存在しない環境では fixture フェーズのみスキップする。
+アルゴリズムに fixture ディレクトリが定義されていて、そのディレクトリが無いときは失敗する。定義が空のアルゴリズムは fixture フェーズを持たない。
 
 失敗した場合、失敗を起こした **変異後ストリームそのもの** が `.mut.bin` sidecar として保存され、
 `mut_file` / `mutation` (例: `fixture#19/truncate@226589`) が `.json` に記録される。
@@ -69,8 +69,7 @@ replay は fixture の有無や encode 経路に依存しない。
 
 `*-fast` / `*-best` 系バリアント (`zstd-fast`, `lz4-best` 等) は内部 encode/decode が
 ベースバリアントと同一であり、外部ツールの圧縮レベル違い (`zstd -1` vs `-19` 等) を
-original-* パターンで検証するためのものである。`--pattern all` では self/corrupt を
-スキップして外部ツールパターンのみを実行する (明示指定時は従来どおり実行される)。
+`original-*` で検証する。`--pattern all` でも `self` と `corrupt` を実行し、ツールがあれば `original-*` も実行する。
 
 ## 外部ツール一覧
 
@@ -130,8 +129,15 @@ cargo run --profile fuzz -p archive-fuzz -- run \
 ```
 
 新規に観測された入力（novel observation）は `fuzz/corpus/<algorithm>/` に収集する。
-`make fuzz`（コンテナ実行）でも `fuzz/corpus/` をマウントするため、収集したコーパスはホスト側に保持される。
-`make fuzz` は `FUZZ_JOBS` でアルゴリズムの並列度を指定できる (既定 1)。
+コンテナの `make fuzz` は 3 本を起動する。`make -j3 fuzz` で同時に走る。`-j` を付けないときは順に実行する。
+
+| ターゲット | バイナリ | 公開経路 | ホスト側の成果物 |
+|---|---|---|---|
+| `fuzz-x86_64` | `archive-fuzz-x86_64` | x86_64 の SSE2 | `fuzz/failures/x86_64/`、`fuzz/corpus/x86_64/` |
+| `fuzz-avx2` | `archive-fuzz-avx2` | x86-64-v3 の AVX2 | `fuzz/failures/avx2/`、`fuzz/corpus/avx2/` |
+| `fuzz-aarch64` | `archive-fuzz-aarch64`（qemu-user） | aarch64 の NEON | `fuzz/failures/aarch64/`、`fuzz/corpus/aarch64/` |
+
+3 本は `FUZZ_ALGORITHM`、`FUZZ_DURATION`、`FUZZ_PATTERN`、`FUZZ_JOBS` を共有する。`FUZZ_JOBS` は 1 本の中でアルゴリズムを分ける並列度で、既定は 1 である。各プロセスのソフトアドレス空間は `FUZZ_AS_KB`（既定 2097152、2GiB）に制限する。ハード上限は変えない。corrupt な zpaq が 2^32 要素のモデルを確保しようとしたとき、overcommit 下の OOM killer ではなくデコーダの確保失敗として返すためである。外部ツールの子プロセスはソフト上限を 4GiB に上げる。`lrzip` は `LRZIP=NOCONFIG` で起動する。圧縮は `-w 1`（100MB ウィンドウ）、`-p 1`、`-m 18`（名目 RAM 1.8GB）を付け、伸長は `-p 1 -m 18` を付ける。検出した RAM や CPU 数に比例したバッファは取らない。AVX2 は実行時の CPUID では切り替えない。ホストに AVX2 が無いときは `fuzz-avx2` が SIGILL で失敗する。`make test-avx2` は同じターゲットで lib テストを実行する。
 
 ### コーパスの上限
 
@@ -311,6 +317,14 @@ cargo run --profile fuzz -p archive-fuzz -- summary fuzz/failures/run-...
 | lzsa | `lzsa`, `lzsa2` |
 | xca | `xpress`, `xpress-huff`, `lznt1` |
 | その他 | `lzf`, `fastlz`, `packbits`, `vcdiff`, `vcdiff-source`, `mppc`, `mppc-rdp4`, `mppc-rdp5`, `lzs`, `lzxd`, `cmpsc`, `snappy`, `rzip`, `zlib`, `zpaq`, `zpaq-level2`, `zpaq-level3` |
+
+### テキストエンコーディング
+
+| グループ | アルゴリズム名 |
+|---------|------------|
+| エンコーディング | `ascii85`, `yenc`, `uuencode`, `binhex` |
+
+`ascii85` は python3 の `a85encode` / `a85decode`（`adobe=True`）と比較する。`yenc`、`uuencode`、`binhex` は `self` と `corrupt` だけを実行する。
 
 ### アーカイブ
 

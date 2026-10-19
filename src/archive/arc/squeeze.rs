@@ -77,7 +77,9 @@ pub(crate) fn decode(packed: &[u8], original_size: usize) -> Result<Vec<u8>, Err
     // Walk the Huffman tree over the LSB-first bitstream and feed each
     // decoded byte through the RLE90 stage, capped at original_size.
     let bits = &packed[2 + 4 * numnodes..];
-    let mut out = Vec::with_capacity(original_size);
+    let mut out = Vec::new();
+    out.try_reserve_exact(original_size)
+        .map_err(|_| Error::InvalidData("arc: uncompressed size too large"))?;
     let mut rle_last: Option<u8> = None;
     let mut rle_pending = false;
     let mut emit = |out: &mut Vec<u8>, b: u8| -> Result<(), Error> {
@@ -282,6 +284,12 @@ mod tests {
             let out = decode(&packed, data.len()).unwrap();
             assert_eq!(out, data);
         }
+    }
+
+    #[test]
+    fn squeeze_rejects_unreservable_size() {
+        // numnodes == 0 takes the RLE90 path, which reserves `original_size`.
+        assert!(decode(&[0, 0], isize::MAX as usize).is_err());
     }
 
     #[test]

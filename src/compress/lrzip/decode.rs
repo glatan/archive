@@ -523,6 +523,7 @@ pub fn decode_to_writer<R: std::io::Read, W: std::io::Write>(
     Ok(())
 }
 
+#[cfg_attr(not(feature = "std"), allow(dead_code))]
 fn parse_header(header: &[u8; 24]) -> Result<u64, Error> {
     if &header[0..4] != MAGIC {
         return Err(Error::InvalidData("lrzip: invalid magic number"));
@@ -673,6 +674,7 @@ mod tests {
             input[5] = minor;
             assert!(matches!(decode(&input), Err(Error::Unsupported(_))));
             // reader path must apply the same version gate
+            #[cfg(feature = "std")]
             assert!(decode_reader(&input[..]).is_err());
         }
     }

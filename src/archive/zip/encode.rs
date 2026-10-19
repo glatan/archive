@@ -6,6 +6,7 @@
 //! `std::io::Write` sink without a final assembly buffer.
 
 use alloc::string::{String, ToString};
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::compress::deflate;
@@ -1139,6 +1140,7 @@ fn compress_data(data: &[u8], compression: ZipCompression) -> Result<(u16, Vec<u
 }
 
 /// Return the ZIP method ID for a compression variant.
+#[cfg_attr(not(feature = "std"), allow(dead_code))]
 const fn compression_method_id(compression: ZipCompression) -> u16 {
     match compression {
         ZipCompression::Store => 0,

@@ -19,6 +19,7 @@
 //! The stream ends when input is exhausted (level 1 tolerates one trailing
 //! byte as in the reference decoder).
 
+use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::error::Error;
