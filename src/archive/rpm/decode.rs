@@ -685,22 +685,36 @@ impl RpmPackage {
         let mut pos = 0usize;
         loop {
             pos = align4(pos);
-            if pos + STRIPPED_ENTRY_SIZE > payload.len() {
+            let entry_end = pos
+                .checked_add(STRIPPED_ENTRY_SIZE)
+                .ok_or(Error::UnexpectedEof)?;
+            if entry_end > payload.len() {
                 return Err(Error::UnexpectedEof);
             }
-            let magic = &payload[pos..pos + 6];
+            let magic_end = pos.checked_add(6).ok_or(Error::UnexpectedEof)?;
+            let magic = &payload[pos..magic_end];
             if magic == NEWC_MAGIC || magic == NEWCRC_MAGIC {
                 // rpm terminates stripped archives with a regular newc
-                // "TRAILER!!!" entry; reject anything else.
-                let name_len = parse_hex_u32(&payload[pos + 94..pos + 102])? as usize;
-                let name_start = pos + 110;
+                // "TRAILER!!!" entry; reject anything else. The newc
+                // header is longer than the stripped entry, so validate
+                // its own range first.
+                let newc_end = pos.checked_add(110).ok_or(Error::UnexpectedEof)?;
+                if newc_end > payload.len() {
+                    return Err(Error::UnexpectedEof);
+                }
+                let name_len_pos = pos.checked_add(94).ok_or(Error::UnexpectedEof)?;
+                let name_len = parse_hex_u32(&payload[name_len_pos..name_len_pos + 8])? as usize;
+                let name_start = pos.checked_add(110).ok_or(Error::UnexpectedEof)?;
                 let name_end = name_start
                     .checked_add(name_len)
                     .ok_or(Error::InvalidData("rpm: name length overflow"))?;
                 if name_end > payload.len() {
                     return Err(Error::UnexpectedEof);
                 }
-                let name = String::from_utf8_lossy(&payload[name_start..name_end - 1]);
+                let name_text_end = name_end
+                    .checked_sub(1)
+                    .ok_or(Error::InvalidData("rpm: empty newc entry name"))?;
+                let name = String::from_utf8_lossy(&payload[name_start..name_text_end]);
                 if name == CPIO_TRAILER {
                     break;
                 }
@@ -711,8 +725,9 @@ impl RpmPackage {
             if magic != STRIPPED_MAGIC {
                 return Err(Error::InvalidData("rpm: bad stripped cpio magic"));
             }
-            let fx = parse_hex_u32(&payload[pos + 6..pos + 14])?;
-            pos = align4(pos + STRIPPED_ENTRY_SIZE);
+            let fx_pos = pos.checked_add(6).ok_or(Error::UnexpectedEof)?;
+            let fx = parse_hex_u32(&payload[fx_pos..fx_pos + 8])?;
+            pos = align4(entry_end);
             if fx == STRIPPED_TRAILER {
                 break;
             }
@@ -722,11 +737,12 @@ impl RpmPackage {
                 .ok_or(Error::InvalidData("rpm: file index out of range"))?;
             let size =
                 usize::try_from(size).map_err(|_| Error::InvalidData("rpm: negative file size"))?;
-            if pos + size > payload.len() {
+            let data_end = pos.checked_add(size).ok_or(Error::UnexpectedEof)?;
+            if data_end > payload.len() {
                 return Err(Error::UnexpectedEof);
             }
-            let data = payload[pos..pos + size].to_vec();
-            pos += size;
+            let data = payload[pos..data_end].to_vec();
+            pos = data_end;
             entries.push(RpmPayloadEntry {
                 name: resolve_stripped_name(
                     fx,

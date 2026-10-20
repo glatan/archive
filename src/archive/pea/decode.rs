@@ -399,8 +399,8 @@ fn decode_impl(input: &[u8], volume_tag: bool, password: Option<&[u8]>) -> Resul
                     pos: 0,
                 };
                 let next = read_objects(&mut pr, &props, &mut entries)?;
-                let ct_end = ct_start + pr.pos;
-                let tag_end = ct_end + 16;
+                let ct_end = ct_start.checked_add(pr.pos).ok_or(Error::UnexpectedEof)?;
+                let tag_end = ct_end.checked_add(16).ok_or(Error::UnexpectedEof)?;
                 let stag = input.get(ct_end..tag_end).ok_or(Error::UnexpectedEof)?;
                 crypto.verify(&input[ct_start..ct_end], stag)?;
                 r.pos = tag_end;

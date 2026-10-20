@@ -344,8 +344,14 @@ fn decode_state(input: &[u8], metadata_only: bool) -> Result<JidacState, Error> 
                     }
                     let mut off = 0usize;
                     for s in sizes {
-                        frags.push(payload[off..off + s].to_vec());
-                        off += s;
+                        let frag_end = off
+                            .checked_add(s)
+                            .ok_or(Error::InvalidData("zpaq jidac: fragment data overflow"))?;
+                        let frag = payload
+                            .get(off..frag_end)
+                            .ok_or(Error::InvalidData("zpaq jidac: fragment data out of range"))?;
+                        frags.push(frag.to_vec());
+                        off = frag_end;
                     }
                 }
                 b'h' => {
@@ -366,8 +372,14 @@ fn decode_state(input: &[u8], metadata_only: bool) -> Result<JidacState, Error> 
                         }
                         let id = id64 as u32;
                         let mut sum = [0u8; 20];
-                        sum.copy_from_slice(&payload[s..s + 20]);
-                        let recorded = btoi(&payload[s + 20..s + 24])?;
+                        let sum_end = s
+                            .checked_add(20)
+                            .ok_or(Error::InvalidData("zpaq jidac: bad fragment record"))?;
+                        let rec_end = s
+                            .checked_add(24)
+                            .ok_or(Error::InvalidData("zpaq jidac: bad fragment record"))?;
+                        sum.copy_from_slice(&payload[s..sum_end]);
+                        let recorded = btoi(&payload[sum_end..rec_end])?;
                         ht.insert(
                             id,
                             JidacFragment {
