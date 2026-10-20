@@ -89,8 +89,9 @@ fn decode_deflate_payload(input: &[u8], dict: Option<&[u8]>) -> Result<(Vec<u8>,
 /// Bytes after the trailer are ignored: per RFC 1950 §2.2 the zlib stream
 /// ends at ADLER32 and trailing data is not part of the stream.
 fn verify_adler32(input: &[u8], trailer_start: usize, decompressed: &[u8]) -> Result<(), Error> {
+    let trailer_end = trailer_start.checked_add(4).ok_or(Error::UnexpectedEof)?;
     let trailer = input
-        .get(trailer_start..trailer_start + 4)
+        .get(trailer_start..trailer_end)
         .ok_or(Error::UnexpectedEof)?;
     let expected_adler = u32::from_be_bytes([trailer[0], trailer[1], trailer[2], trailer[3]]);
     let actual_adler = adler32::adler32(decompressed);
@@ -270,6 +271,11 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adler_trailer_offset_does_not_overflow() {
+        assert!(verify_adler32(&[], usize::MAX, &[]).is_err());
+    }
 
     #[test]
     fn test_too_short() {

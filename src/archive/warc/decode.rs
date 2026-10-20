@@ -625,7 +625,11 @@ pub fn decode(input: &[u8]) -> Result<Vec<WarcEntry>, Error> {
             .ok_or(Error::InvalidData("warc: missing/bad Content-Length"))?;
 
         let block = input
-            .get(cur..cur + content_length)
+            .get(
+                cur..cur
+                    .checked_add(content_length)
+                    .ok_or(Error::InvalidData("warc: truncated block"))?,
+            )
             .ok_or(Error::InvalidData("warc: truncated block"))?
             .to_vec();
         cur += content_length;
@@ -817,6 +821,19 @@ mod tests {
         assert_eq!(entries[0].record_type, "resource");
         assert_eq!(entries[0].record_id, "<urn:uuid:test-1>");
         assert_eq!(entries[0].date.as_deref(), Some("2024-01-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn rejects_oversized_content_length_without_overflow() {
+        // `cur + content_length` must not wrap before the bounds check.
+        let mut data = Vec::new();
+        data.extend_from_slice(b"WARC/1.1\r\n");
+        data.extend_from_slice(b"WARC-Type: resource\r\n");
+        data.extend_from_slice(b"WARC-Record-ID: <urn:x>\r\n");
+        data.extend_from_slice(b"WARC-Date: 2024-01-01T00:00:00Z\r\n");
+        data.extend_from_slice(b"WARC-Target-URI: http://e/\r\n");
+        data.extend_from_slice(b"Content-Length: 4294967295\r\n\r\n");
+        assert!(matches!(decode(&data), Err(Error::InvalidData(_))));
     }
 
     #[test]

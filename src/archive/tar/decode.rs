@@ -155,7 +155,8 @@ where
             let mut buf = Vec::with_capacity(tape_data_size);
             for &(_, len) in &header.sparse_map {
                 let len = len as usize;
-                let seg = input.get(pos..pos + len).ok_or(Error::UnexpectedEof)?;
+                let seg_end = pos.checked_add(len).ok_or(Error::UnexpectedEof)?;
+                let seg = input.get(pos..seg_end).ok_or(Error::UnexpectedEof)?;
                 buf.extend_from_slice(seg);
                 pos += round_up_to_block(len);
             }
@@ -163,8 +164,9 @@ where
         } else {
             let data_size = tape_data_size;
             let data = if data_size > 0 {
+                let data_end = pos.checked_add(data_size).ok_or(Error::UnexpectedEof)?;
                 input
-                    .get(pos..pos + data_size)
+                    .get(pos..data_end)
                     .ok_or(Error::UnexpectedEof)?
                     .to_vec()
             } else {
