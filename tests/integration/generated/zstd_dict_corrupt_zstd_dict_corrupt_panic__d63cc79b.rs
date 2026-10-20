@@ -1,16 +1,22 @@
 #[cfg(feature = "zstd")]
-#[ignore = "fill in corrupt-input regression: re-encode this fixture and mutate the encoded stream"]
 #[test]
 fn test_fuzz_regression_zstd_dict_corrupt() {
     let input = include_bytes!(
         "../../fixtures/fuzz/generated/zstd-dict_corrupt_zstd-dict-corrupt-panic-_d63cc79b.mut.bin"
     );
-    // Exported from fuzz failure for zstd-dict / corrupt.
-    // The fixture holds the original input; the corrupt pattern derives
-    // mutated encoded streams inside the fuzz harness (datagen::mutate),
-    // which library tests cannot re-derive. Reproduce the failure by
-    // replaying the artifact, then hand-write a decode-robustness test
-    // around the offending mutated stream.
-    let _ = input;
-    panic!("fill in corrupt-pattern regression using this fixture");
+    // Reproduce the fixed dictionary used by the fuzz target.
+    let samples: Vec<Vec<u8>> = (0..16u32)
+        .map(|s| {
+            (0..2048u32)
+                .map(|i| ((i * 13 + s * 97) % 251) as u8)
+                .collect()
+        })
+        .collect();
+    let refs: Vec<&[u8]> = samples.iter().map(Vec::as_slice).collect();
+    let dict = archive::compress::zstd::train::train_dictionary(
+        &refs,
+        &archive::compress::zstd::train::TrainOptions::default(),
+    )
+    .unwrap();
+    let _ = archive::compress::zstd::decode::decode_with_dict(input, &dict);
 }

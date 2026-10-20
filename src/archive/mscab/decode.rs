@@ -574,6 +574,12 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
 
+    #[test]
+    fn le_helpers_reject_offset_overflow() {
+        assert!(le_u16(&[], usize::MAX).is_err());
+        assert!(le_u32(&[], usize::MAX).is_err());
+    }
+
     /// Minimal cabinet builder for tests: stored or MSZIP single folder.
     struct CabBuilder {
         set_id: u16,

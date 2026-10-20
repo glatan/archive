@@ -1241,6 +1241,12 @@ fn corrupt_body_for(algo: Algorithm, limit: usize) -> Option<String> {
             Vec_("archive::compress::zstd::decode::decode(input)")
         }
         Algorithm::ZstdSeekable => Vec_("archive::compress::zstd::seekable::decode(input)"),
+        Algorithm::ZstdDict => {
+            return Some(
+                "    // Reproduce the fixed dictionary used by the fuzz target.\n    let samples: Vec<Vec<u8>> = (0..16u32)\n        .map(|s| (0..2048u32).map(|i| ((i * 13 + s * 97) % 251) as u8).collect())\n        .collect();\n    let refs: Vec<&[u8]> = samples.iter().map(Vec::as_slice).collect();\n    let dict = archive::compress::zstd::train::train_dictionary(\n        &refs,\n        &archive::compress::zstd::train::TrainOptions::default(),\n    )\n    .unwrap();\n    let _ = archive::compress::zstd::decode::decode_with_dict(input, &dict);"
+                    .to_string(),
+            );
+        }
         Algorithm::Bzip2 | Algorithm::Bzip2Fast | Algorithm::Bzip2Best => {
             Vec_("archive::compress::bzip2::decode::decode(input)")
         }

@@ -365,11 +365,10 @@ impl XattrTable {
                     return Err(Error::InvalidData("squashfs: unknown xattr prefix"));
                 }
             };
-            let name_bytes = block
-                .get(pos..pos + name_size)
-                .ok_or(Error::UnexpectedEof)?;
+            let name_end = pos.checked_add(name_size).ok_or(Error::UnexpectedEof)?;
+            let name_bytes = block.get(pos..name_end).ok_or(Error::UnexpectedEof)?;
             let name = alloc::format!("{prefix}{}", String::from_utf8_lossy(name_bytes));
-            pos += name_size;
+            pos = name_end;
             let value_size = le32(block, pos)? as usize;
             pos += 4;
             let value = if raw_type & XATTR_OOL_FLAG != 0 {
@@ -380,11 +379,12 @@ impl XattrTable {
                 pos += 8;
                 self.ool_value(value_ref, 0)?
             } else {
+                let value_end = pos.checked_add(value_size).ok_or(Error::UnexpectedEof)?;
                 let value = block
-                    .get(pos..pos + value_size)
+                    .get(pos..value_end)
                     .ok_or(Error::UnexpectedEof)?
                     .to_vec();
-                pos += value_size;
+                pos = value_end;
                 value
             };
             out.push(SquashfsXattr { name, value });
@@ -469,12 +469,22 @@ impl Reader<'_> {
         let list_len = block_count
             .checked_mul(8)
             .ok_or(Error::InvalidData("squashfs: table size overflow"))?;
-        if list_start + list_len > self.input.len() {
+        let list_end = list_start
+            .checked_add(list_len)
+            .ok_or(Error::UnexpectedEof)?;
+        if list_end > self.input.len() {
             return Err(Error::UnexpectedEof);
         }
-        let mut table = Vec::with_capacity(block_count * META_BLOCK_SIZE);
+        let table_capacity = block_count
+            .checked_mul(META_BLOCK_SIZE)
+            .ok_or(Error::InvalidData("squashfs: table size overflow"))?;
+        let mut table = Vec::new();
+        table
+            .try_reserve(table_capacity)
+            .map_err(|_| Error::InvalidData("squashfs: table too large"))?;
         for i in 0..block_count {
-            let pos = le64(self.input, list_start + i * 8)? as usize;
+            let entry_off = list_start.checked_add(i * 8).ok_or(Error::UnexpectedEof)?;
+            let pos = le64(self.input, entry_off)? as usize;
             let (block, _) = self.read_metadata_block(pos)?;
             table.extend_from_slice(&block);
         }
@@ -514,10 +524,8 @@ impl Reader<'_> {
         if size == 0 {
             return Ok(alloc::vec![0u8; expected]);
         }
-        let raw = self
-            .input
-            .get(pos..pos + size)
-            .ok_or(Error::UnexpectedEof)?;
+        let raw_end = pos.checked_add(size).ok_or(Error::UnexpectedEof)?;
+        let raw = self.input.get(pos..raw_end).ok_or(Error::UnexpectedEof)?;
         if size_field & BLOCK_UNCOMPRESSED != 0 {
             if raw.len() > expected {
                 return Err(Error::InvalidData("squashfs: data block size mismatch"));
@@ -1164,6 +1172,13 @@ mod tests {
     use super::*;
     use crate::compress::{lzma, zlib};
     use alloc::vec;
+
+    #[test]
+    fn le_helpers_reject_offset_overflow() {
+        assert!(le16(&[], usize::MAX).is_err());
+        assert!(le32(&[], usize::MAX).is_err());
+        assert!(le64(&[], usize::MAX).is_err());
+    }
 
     const COMPRESS_ID: u16 = 1; // zlib ("gzip" upstream)
     const COMPRESS_ID_LZMA: u16 = 2;

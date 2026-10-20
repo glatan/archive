@@ -107,10 +107,13 @@ fn decode_lz5(input: &[u8], expected: usize) -> Result<Vec<u8>, Error> {
                 ring[w] = b;
                 w = (w + 1) % N;
             } else {
-                let c = input
-                    .get(pos..pos + 2)
+                let pair_end = pos
+                    .checked_add(2)
                     .ok_or(Error::InvalidData("lha: truncated lz5 stream"))?;
-                pos += 2;
+                let c = input
+                    .get(pos..pair_end)
+                    .ok_or(Error::InvalidData("lha: truncated lz5 stream"))?;
+                pos = pair_end;
                 let start = (usize::from(c[1] & 0xf0) << 4) | usize::from(c[0]);
                 let len = usize::from(c[1] & 0x0f) + 3;
                 for i in 0..len {
