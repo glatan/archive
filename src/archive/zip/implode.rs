@@ -69,7 +69,10 @@ pub(super) fn implode(input: &[u8], flags: u16, expected_size: usize) -> Result<
     let len_code = read_code_table(&mut reader, MATCH_SYMS)?;
     let dist_code = read_code_table(&mut reader, MATCH_SYMS)?;
 
-    let mut output = Vec::with_capacity(expected_size);
+    let mut output = Vec::new();
+    output
+        .try_reserve(expected_size)
+        .map_err(|_| Error::InvalidData("zip implode: output too large"))?;
     while output.len() < expected_size {
         let bit = reader
             .try_read_bits(1)

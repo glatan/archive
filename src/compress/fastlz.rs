@@ -96,7 +96,7 @@ fn decode_level(input: &[u8], max_output: usize, level: Level) -> Result<Vec<u8>
             let mut distance = (ofs_hi | low as usize) + 1;
             if level == Level::Two && low == 255 && ofs_hi == 31 << 8 {
                 // Level-2 far match: 16-bit distance extension.
-                if pos + 2 > input.len() {
+                if input.len().saturating_sub(pos) < 2 {
                     return Err(Error::InvalidData("fastlz: truncated far distance"));
                 }
                 let ext = u16::from_be_bytes(input[pos..pos + 2].try_into().unwrap());
@@ -106,17 +106,17 @@ fn decode_level(input: &[u8], max_output: usize, level: Level) -> Result<Vec<u8>
             if distance > out.len() {
                 return Err(Error::InvalidData("fastlz: match offset before start"));
             }
-            if out.len() + len > max_output {
+            if len > max_output.saturating_sub(out.len()) {
                 return Err(Error::OutputLimitExceeded { limit: max_output });
             }
             crate::compress::match_ops::copy_match(&mut out, distance, len)
                 .map_err(|_| Error::InvalidData("fastlz: match offset before start"))?;
         } else {
             let n = ctrl + 1;
-            if pos + n > input.len() {
+            if n > input.len().saturating_sub(pos) {
                 return Err(Error::InvalidData("fastlz: truncated literal run"));
             }
-            if out.len() + n > max_output {
+            if n > max_output.saturating_sub(out.len()) {
                 return Err(Error::OutputLimitExceeded { limit: max_output });
             }
             out.extend_from_slice(&input[pos..pos + n]);

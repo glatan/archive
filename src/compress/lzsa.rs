@@ -97,7 +97,7 @@ fn decode_impl(input: &[u8], prefix: &[u8], max_output: usize) -> Result<Vec<u8>
         if dsz == 0 {
             break;
         }
-        if pos + dsz > input.len() {
+        if dsz > input.len() - pos {
             return Err(Error::InvalidData("lzsa: truncated block data"));
         }
         let block = &input[pos..pos + dsz];
@@ -279,10 +279,10 @@ fn decode_lzsa1_commands(
                 _ => 7 + b as usize,
             };
         }
-        if pos + lit_len > input.len() {
+        if lit_len > input.len() - pos {
             return Err(Error::InvalidData("lzsa1: truncated literals"));
         }
-        if out.len() + lit_len > max_output {
+        if lit_len > max_output.saturating_sub(out.len()) {
             return Err(Error::OutputLimitExceeded { limit: max_output });
         }
         out.extend_from_slice(&input[pos..pos + lit_len]);
@@ -428,10 +428,10 @@ fn decode_lzsa2_commands(
                 };
             }
         }
-        if r.pos + lit_len > input.len() {
+        if lit_len > input.len() - r.pos {
             return Err(Error::InvalidData("lzsa2: truncated literals"));
         }
-        if out.len() + lit_len > max_output {
+        if lit_len > max_output.saturating_sub(out.len()) {
             return Err(Error::OutputLimitExceeded { limit: max_output });
         }
         out.extend_from_slice(&input[r.pos..r.pos + lit_len]);

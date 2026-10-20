@@ -104,7 +104,10 @@ pub(super) fn expand(input: &[u8], factor: u8, expected_size: usize) -> Result<V
     }
 
     let v_len_bits = 8 - factor as u32;
-    let mut output = Vec::with_capacity(expected_size);
+    let mut output = Vec::new();
+    output
+        .try_reserve(expected_size)
+        .map_err(|_| Error::InvalidData("zip expand: output too large"))?;
     let mut prev = 0u8; // The first "previous byte" is implicitly zero.
 
     while output.len() < expected_size {

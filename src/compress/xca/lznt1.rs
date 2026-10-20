@@ -57,7 +57,7 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
         if pos == input.len() {
             break; // buffer without an End_of_buffer marker
         }
-        if pos + 2 > input.len() {
+        if input.len().saturating_sub(pos) < 2 {
             return Err(Error::InvalidData("lznt1: truncated chunk header"));
         }
         let header = u16::from_le_bytes(input[pos..pos + 2].try_into().unwrap());
@@ -97,7 +97,7 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
                     pos += 1;
                     u += 1;
                 } else {
-                    if pos + 2 > end {
+                    if end.saturating_sub(pos) < 2 {
                         return Err(Error::InvalidData("lznt1: truncated compressed word"));
                     }
                     let word = u16::from_le_bytes(input[pos..pos + 2].try_into().unwrap()) as usize;
@@ -109,7 +109,7 @@ pub fn decode_bounded(input: &[u8], max_output: usize) -> Result<Vec<u8>, Error>
                     if disp > u || disp > out.len() {
                         return Err(Error::InvalidData("lznt1: displacement before start"));
                     }
-                    if out.len() + len > max_output {
+                    if len > max_output.saturating_sub(out.len()) {
                         return Err(Error::OutputLimitExceeded { limit: max_output });
                     }
                     crate::compress::match_ops::copy_match(&mut out, disp, len)

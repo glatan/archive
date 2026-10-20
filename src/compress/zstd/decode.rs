@@ -441,7 +441,7 @@ fn decode_frame(
 
         match bh.block_type {
             BlockType::Raw => {
-                if pos + bh.block_size as usize > input.len() {
+                if bh.block_size as usize > input.len().saturating_sub(pos) {
                     return Err(Error::UnexpectedEof);
                 }
                 ensure_output_room(output.len(), bh.block_size as usize, limit)?;
@@ -449,7 +449,7 @@ fn decode_frame(
                 pos += bh.block_size as usize;
             }
             BlockType::Rle => {
-                if pos + 1 > input.len() {
+                if pos >= input.len() {
                     return Err(Error::UnexpectedEof);
                 }
                 let byte = input[pos];
@@ -458,7 +458,7 @@ fn decode_frame(
                 output.resize(output.len() + bh.block_size as usize, byte);
             }
             BlockType::Compressed => {
-                if pos + bh.block_size as usize > input.len() {
+                if bh.block_size as usize > input.len().saturating_sub(pos) {
                     return Err(Error::UnexpectedEof);
                 }
                 let block_data = &input[pos..pos + bh.block_size as usize];
