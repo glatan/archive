@@ -338,7 +338,9 @@ impl CpioHeader {
 
         // Total consumed: header + filename, plus name padding.
         let name_offset = format.header_size();
-        let name_end = name_offset + header.namesize as usize;
+        let name_end = name_offset
+            .checked_add(header.namesize as usize)
+            .ok_or(Error::InvalidData("cpio: header size overflow"))?;
         let total = align_to(name_end, format.alignment());
 
         Ok((header, total))
@@ -361,7 +363,10 @@ fn parse_octal_field(field: &[u8]) -> Result<u32, Error> {
 
 /// Round up to the next `boundary`-byte boundary.
 pub(crate) const fn align_to(n: usize, boundary: usize) -> usize {
-    (n + boundary - 1) & !(boundary - 1)
+    // `n` may come from an unvalidated on-disk size on a 32-bit target.
+    // Saturate instead of overflowing; the caller's bounds checks then
+    // reject the truncated record.
+    n.saturating_add(boundary - 1) & !(boundary - 1)
 }
 
 #[cfg(test)]

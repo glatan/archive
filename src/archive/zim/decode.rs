@@ -308,14 +308,20 @@ pub fn decode(input: &[u8]) -> Result<Vec<ZimEntry>, Error> {
     let mime_type_of =
         |idx: u16| -> String { mime_list.get(idx as usize).cloned().unwrap_or_default() };
 
+    let cluster_ptr_len = cluster_count
+        .checked_mul(8)
+        .ok_or(Error::InvalidData("zim: cluster pointer overflow"))?;
     let cluster_ptr_end = cluster_ptr_pos
-        .checked_add(cluster_count * 8)
+        .checked_add(cluster_ptr_len)
         .ok_or(Error::InvalidData("zim: cluster pointer overflow"))?;
     if cluster_ptr_end > input.len() {
         return Err(Error::InvalidData("zim: truncated cluster pointer list"));
     }
+    let path_ptr_len = entry_count
+        .checked_mul(8)
+        .ok_or(Error::InvalidData("zim: path pointer overflow"))?;
     let path_ptr_end = path_ptr_pos
-        .checked_add(entry_count * 8)
+        .checked_add(path_ptr_len)
         .ok_or(Error::InvalidData("zim: path pointer overflow"))?;
     if path_ptr_end > input.len() {
         return Err(Error::InvalidData("zim: truncated path pointer list"));
@@ -394,7 +400,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<ZimEntry>, Error> {
     // over all preceding bytes. Verify it when present; archives without
     // the trailing digest (checksumPos not at end - 16) are tolerated.
     if checksum_pos != 0
-        && checksum_pos + 16 == input.len()
+        && checksum_pos.checked_add(16) == Some(input.len())
         && md5(&input[..checksum_pos]) != input[checksum_pos..]
     {
         return Err(Error::InvalidData("zim: archive checksum mismatch"));

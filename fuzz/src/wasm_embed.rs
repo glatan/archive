@@ -1,8 +1,10 @@
 //! Native host that runs `archive-fuzz.wasm`.
 //!
-//! The guest is `wasm32-wasip1-threads` with simd128. WASI cannot exec a host
-//! binary or put it in a process group, so `fuzz_host::exec` lands here and
-//! reuses the Unix `ulimit` / process-group path.
+//! The guest is `wasm32-wasip1-threads` with simd128 and `-C panic=unwind`.
+//! WASI cannot exec a host binary or put it in a process group, so
+//! `fuzz_host::exec` lands here and reuses the Unix `ulimit` / process-group
+//! path. Unwind is enabled so `catch_unwind` records a library panic as a
+//! failure instead of aborting the process.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -51,6 +53,16 @@ pub fn run() -> Result<(), wasmtime::Error> {
     config.wasm_threads(true);
     config.wasm_bulk_memory(true);
     config.shared_memory(true);
+    // The guest is built with `-C panic=unwind`. Overflow and other library
+    // panics must be catchable by `catch_unwind`, matching the native targets.
+    // The default wasm panic strategy aborts the process on the first panic.
+    config.wasm_exceptions(true);
+    // Exception objects live on the GC heap. An unset GC reservation copies
+    // the 2GiB linear-memory reservation, and that second mapping does not
+    // fit in fuzz-wasm's 4GiB address-space cap.
+    config.gc_heap_reservation(1 << 20);
+    config.gc_heap_guard_size(64 * 1024);
+    config.gc_heap_reservation_for_growth(1 << 20);
     // The default reservation is 4GiB plus a guard, and `ulimit -v` counts
     // that mapping. The guest maximum is 2GiB. `fuzz-wasm` raises this
     // process to 4GiB so the 2GiB reservation has a contiguous hole. The

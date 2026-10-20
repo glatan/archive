@@ -151,11 +151,14 @@ pub fn decode(input: &[u8]) -> Result<Vec<ArcEntry>, Error> {
             pos += 10;
             (date, time, Some(crc), size)
         };
-        if pos + length > input.len() {
+        let member_end = pos
+            .checked_add(length)
+            .ok_or(Error::InvalidData("arc: truncated member data"))?;
+        if member_end > input.len() {
             return Err(Error::InvalidData("arc: truncated member data"));
         }
-        let packed = &input[pos..pos + length];
-        pos += length;
+        let packed = &input[pos..member_end];
+        pos = member_end;
         let data = match method {
             3 => {
                 // Packed member: RLE90-expand; output must match the

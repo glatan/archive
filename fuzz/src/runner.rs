@@ -630,7 +630,7 @@ fn execute_case(
         Ok(Err(err)) => Err(err),
         Err(panic_info) => Err(CaseError::simple(format!(
             "PANIC: {}",
-            panic_message(&panic_info)
+            panic_message(panic_info.as_ref())
         ))),
     }
 }
@@ -699,7 +699,7 @@ fn run_special_cases(state: &RunState, stats: &Mutex<Stats>, iteration: &mut u64
             let case_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 algorithms::run_special_case(algo, label, payload)
             }))
-            .unwrap_or_else(|panic| Err(format!("PANIC: {}", panic_message(&panic))));
+            .unwrap_or_else(|panic| Err(format!("PANIC: {}", panic_message(panic.as_ref()))));
             match case_result {
                 Ok(decoded) if decoded == payload => {
                     report::log_progress_status(
@@ -1290,7 +1290,7 @@ fn decode_outcome(algo: Algorithm, candidate: &[u8]) -> Result<DecodeOutcome, St
     })) {
         Ok(Ok(decoded)) => Ok(DecodeOutcome::Decoded(decoded.len())),
         Ok(Err(_)) => Ok(DecodeOutcome::Rejected),
-        Err(panic_info) => Err(format!("PANIC: {}", panic_message(&panic_info))),
+        Err(panic_info) => Err(format!("PANIC: {}", panic_message(panic_info.as_ref()))),
     }
 }
 
@@ -1316,7 +1316,7 @@ fn corrupt_probe(algo: Algorithm, candidate: &[u8], decoded_limit: usize) -> Res
     })) {
         Ok(Ok(())) => Ok(()),
         Ok(Err(message)) => Err(message),
-        Err(panic_info) => Err(format!("PANIC: {}", panic_message(&panic_info))),
+        Err(panic_info) => Err(format!("PANIC: {}", panic_message(panic_info.as_ref()))),
     }
 }
 
@@ -1676,6 +1676,7 @@ mod tests {
     use super::{
         PatternFilter, RunConfig, RunMode, RunState, ZPAQ_CORRUPT_LIMIT, corrupt_decoded_limit,
         corrupt_output_hard_cap, get_patterns, handle_failure_artifact, observation_signature,
+        panic_message,
     };
     use crate::algorithms::Algorithm;
     use crate::checksum;
@@ -1684,6 +1685,17 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn panic_message_uses_the_payload_text() {
+        let payload = std::panic::catch_unwind(|| panic!("attempt to add with overflow"))
+            .expect_err("closure must panic");
+        let message = panic_message(payload.as_ref());
+        assert!(
+            message.starts_with("attempt to add with overflow"),
+            "panic payload was lost: {message}"
+        );
+    }
 
     #[test]
     fn new_archive_targets_get_external_patterns_when_tools_exist() {

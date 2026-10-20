@@ -140,7 +140,7 @@ cargo run --profile fuzz -p archive-fuzz -- run \
 | `fuzz-aarch64` | `archive-fuzz-aarch64`（qemu-user） | aarch64 の NEON | `fuzz/failures/aarch64/`、`fuzz/corpus/aarch64/` |
 | `fuzz-wasm` | `archive-fuzz-wasm`（wasmtime） | wasm32 の simd128 | `fuzz/failures/wasm/`、`fuzz/corpus/wasm/` |
 
-6 本は `FUZZ_ALGORITHM`、`FUZZ_DURATION`、`FUZZ_PATTERN`、`FUZZ_JOBS` を共有する。`FUZZ_JOBS` は 1 本の中でアルゴリズムを分ける並列度で、既定は 1 である。各プロセスのソフトアドレス空間は `FUZZ_AS_KB`（既定 2097152、2GiB）に制限する。ハード上限は変えない。corrupt な zpaq が 2^32 要素のモデルを確保しようとしたとき、overcommit 下の OOM killer ではなくデコーダの確保失敗として返すためである。外部ツールの子プロセスはソフト上限を 4GiB に上げる。`lrzip` は `LRZIP=NOCONFIG` で起動する。圧縮は `-w 1`（100MB ウィンドウ）、`-p 1`、`-m 18`（名目 RAM 1.8GB）を付け、伸長は `-p 1 -m 18` を付ける。検出した RAM や CPU 数に比例したバッファは取らない。AVX2 と AVX-512 は実行時の CPUID では切り替えない。ホストに AVX2 が無いときは `fuzz-avx2` が、AVX-512 が無いときは `fuzz-avx512` が SIGILL で失敗する。`make test-avx2` と `make test-avx512` はテストイメージで同じターゲットの lib テストを実行する。i686 はイメージ内の 32-bit ローダで SSE2 を実行する。wasm32 は `wasm32-wasip1-threads` に `simd128` を付け、wasmtime 46 で実行する。ゲストの `thread::spawn` は wasip1-threads が受ける。外部ツールはゲストから `fuzz_host::exec` を呼び、ホストの `archive-fuzz-wasm` が Unix のプロセスグループと `ulimit` で起動する。ゲストの受け取りバッファが結果より短いときは、ホストがその結果を保持し、同じ引数の続きの呼び出しに返す。コマンドは一度だけ実行する。終了状態の表示は Unix の `ExitStatus` と同じで、シグナルで終了したときは `signal: 15 (SIGTERM)` のようになる。共有メモリは 2GiB を起動時に予約する。2GiB のソフト上限ではその連続領域が取れないため、`fuzz-wasm` のプロセスだけソフト上限を 4GiB にする。ゲストの線形メモリ上限は 2GiB で、他の本と同じ確保失敗の境界になる。
+6 本は `FUZZ_ALGORITHM`、`FUZZ_DURATION`、`FUZZ_PATTERN`、`FUZZ_JOBS` を共有する。`FUZZ_JOBS` は 1 本の中でアルゴリズムを分ける並列度で、既定は 1 である。各プロセスのソフトアドレス空間は `FUZZ_AS_KB`（既定 2097152、2GiB）に制限する。ハード上限は変えない。corrupt な zpaq が 2^32 要素のモデルを確保しようとしたとき、overcommit 下の OOM killer ではなくデコーダの確保失敗として返すためである。外部ツールの子プロセスはソフト上限を 4GiB に上げる。`lrzip` は `LRZIP=NOCONFIG` で起動する。圧縮は `-w 1`（100MB ウィンドウ）、`-p 1`、`-m 18`（名目 RAM 1.8GB）を付け、伸長は `-p 1 -m 18` を付ける。検出した RAM や CPU 数に比例したバッファは取らない。AVX2 と AVX-512 は実行時の CPUID では切り替えない。ホストに AVX2 が無いときは `fuzz-avx2` が、AVX-512 が無いときは `fuzz-avx512` が SIGILL で失敗する。`make test-avx2` と `make test-avx512` はテストイメージで同じターゲットの lib テストを実行する。i686 はイメージ内の 32-bit ローダで SSE2 を実行する。wasm32 は `wasm32-wasip1-threads` に `simd128` を付け、wasmtime 46 の exception-handling で実行する。配布の標準ライブラリは abort なので、ゲストだけ `RUSTC_BOOTSTRAP=1 cargo build -Z build-std=std,panic_unwind` と `-C panic=unwind` で組み直す。`catch_unwind` がライブラリの panic を失敗として記録し、プロセスは落ちない。ゲストの `thread::spawn` は wasip1-threads が受ける。外部ツールはゲストから `fuzz_host::exec` を呼び、ホストの `archive-fuzz-wasm` が Unix のプロセスグループと `ulimit` で起動する。ゲストの受け取りバッファが結果より短いときは、ホストがその結果を保持し、同じ引数の続きの呼び出しに返す。コマンドは一度だけ実行する。終了状態の表示は Unix の `ExitStatus` と同じで、シグナルで終了したときは `signal: 15 (SIGTERM)` のようになる。共有メモリは 2GiB を起動時に予約する。2GiB のソフト上限ではその連続領域が取れないため、`fuzz-wasm` のプロセスだけソフト上限を 4GiB にする。ゲストの線形メモリ上限は 2GiB で、他の本と同じ確保失敗の境界になる。
 
 ### コーパスの上限
 
@@ -203,7 +203,8 @@ abort された痕跡)。別の run が同じ failures ディレクトリで同�
 各失敗ケースは最小化および重複排除の後、`.json` と `.bin` のペアとして保存する。
 `corrupt` パターンの失敗では、失敗を起こした変異後ストリームが `.mut.bin` sidecar として
 追加保存される (`.json` の `mut_file` / `mutation` フィールド参照)。
-panic の signature には panic 発生位置 (`@ file:line`) が含まれ、独立した panic サイトが
+panic の signature には panic 発生位置 (`@ file:line`) とペイロードのメッセージ
+(例: `attempt to add with overflow`) が含まれ、独立した panic サイトが
 別々のバケットとして重複排除される。
 
 ```
@@ -247,6 +248,14 @@ cargo run --profile fuzz -p archive-fuzz -- import-regression fuzz/failures/run-
 外部ツールを要するパターンは `#[ignore]` 属性付きのプレースホルダーとして生成する。
 `corrupt` artifact は `.mut.bin` があれば実際の decoder 耐性テスト
 (「decode が panic せず終了すること」を検証) として生成される。
+生成テストは無制限の `decode()` を呼ぶため、長さ escape が巨大な出力を要求する
+ケースは artifact をそのまま取り込まず、`decode_bounded` を使う unit test で
+上限付きの回帰にする。zpaq 系は decode 前にヘッダ由来のモデルを確保するため、
+corrupt artifact の import は行わず、i686 / wasm32 の replay で確認する。
+
+32-bit の `usize` に由来する panic (`attempt to add with overflow` など) は
+x86_64 では再現しない。i686 / wasm32 で見つかった artifact は、修正後に
+`archive-fuzz-i686` と `archive-fuzz-wasm` で replay して再発しないことを確認する。
 
 ## 成果物のクリーンアップ
 

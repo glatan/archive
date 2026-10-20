@@ -1652,9 +1652,14 @@ fn parse_el_torito(input: &[u8], sec: &[u8]) -> Result<Option<ElTorito>, Error> 
         return Ok(None);
     }
     let catalog_lba = u32le(sec, 71);
-    let cat_start = catalog_lba as usize * SECTOR;
+    let cat_start = (catalog_lba as usize)
+        .checked_mul(SECTOR)
+        .ok_or(Error::InvalidData("iso9660 el torito catalog out of range"))?;
+    let cat_end = cat_start
+        .checked_add(SECTOR)
+        .ok_or(Error::InvalidData("iso9660 el torito catalog out of range"))?;
     let cat = input
-        .get(cat_start..cat_start + SECTOR)
+        .get(cat_start..cat_end)
         .ok_or(Error::InvalidData("iso9660 el torito catalog out of range"))?;
 
     // Validation entry (§2.4): header 1, key bytes 0x55/0xAA, and
@@ -1687,10 +1692,17 @@ fn parse_el_torito(input: &[u8], sec: &[u8]) -> Result<Option<ElTorito>, Error> 
             0x88 | 0x00 => {
                 let load_lba = u32le(e, 8);
                 let sector_count = u16le(e, 6);
-                let img_start = load_lba as usize * SECTOR;
-                let img_len = sector_count as usize * 512;
+                let img_start = (load_lba as usize)
+                    .checked_mul(SECTOR)
+                    .ok_or(Error::InvalidData("iso9660 el torito image out of range"))?;
+                let img_len = (sector_count as usize)
+                    .checked_mul(512)
+                    .ok_or(Error::InvalidData("iso9660 el torito image out of range"))?;
+                let img_end = img_start
+                    .checked_add(img_len)
+                    .ok_or(Error::InvalidData("iso9660 el torito image out of range"))?;
                 let image = input
-                    .get(img_start..img_start + img_len)
+                    .get(img_start..img_end)
                     .ok_or(Error::InvalidData("iso9660 el torito image out of range"))?
                     .to_vec();
                 entries.push(ElToritoEntry {
@@ -3060,6 +3072,14 @@ mod tests {
         let mut img = el_torito_iso();
         // Point the catalog LBA past the end of the image.
         img[17 * SECTOR + 71..17 * SECTOR + 75].copy_from_slice(&999u32.to_le_bytes());
+        assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
+    }
+
+    #[test]
+    fn rejects_out_of_range_el_torito_image_lba() {
+        let mut img = el_torito_iso();
+        // The default boot entry's Load RBA at catalog offset 32 + 8.
+        img[20 * SECTOR + 32 + 8..20 * SECTOR + 32 + 12].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(matches!(decode(&img), Err(Error::InvalidData(_))));
     }
 

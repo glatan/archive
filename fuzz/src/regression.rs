@@ -1200,7 +1200,7 @@ fn pea_body(encoder_expr: &str) -> String {
 
 fn corrupt_pattern_body(algo: Algorithm, pattern: TestPattern) -> String {
     format!(
-        "    // Exported from fuzz failure for {algo} / {pattern}.\n    // The fixture holds the original input; the corrupt pattern derives\n    // mutated encoded streams inside the fuzz harness (datagen::mutate),\n    // which library tests cannot re-derive. Reproduce the failure by\n    // replaying the artifact, then hand-write a decode-robustness test\n    // around the offending mutated stream.\n    panic!(\"fill in corrupt-pattern regression using this fixture\");"
+        "    let _ = input;\n    // Exported from fuzz failure for {algo} / {pattern}.\n    // The fixture holds the original input; the corrupt pattern derives\n    // mutated encoded streams inside the fuzz harness (datagen::mutate),\n    // which library tests cannot re-derive. Reproduce the failure by\n    // replaying the artifact, then hand-write a decode-robustness test\n    // around the offending mutated stream.\n    panic!(\"fill in corrupt-pattern regression using this fixture\");"
     )
 }
 
@@ -1404,7 +1404,7 @@ fn corrupt_body_for(algo: Algorithm, limit: usize) -> Option<String> {
 
 fn integration_pattern_body(algo: Algorithm, pattern: TestPattern) -> String {
     format!(
-        "    // Exported from fuzz failure for {algo} / {pattern}.\n    // This pattern needs a system tool or integration helper.\n    // Suggested next step: replace this placeholder with a direct external-tool regression.\n    panic!(\"fill in external-tool regression using this fixture\");"
+        "    let _ = input;\n    // Exported from fuzz failure for {algo} / {pattern}.\n    // This pattern needs a system tool or integration helper.\n    // Suggested next step: replace this placeholder with a direct external-tool regression.\n    panic!(\"fill in external-tool regression using this fixture\");"
     )
 }
 

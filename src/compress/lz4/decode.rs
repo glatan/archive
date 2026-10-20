@@ -379,12 +379,13 @@ fn decode_legacy_frame(input: &[u8], pos: &mut usize, output: &mut Vec<u8>) -> R
             break;
         }
 
-        if *pos + block_size > input.len() {
+        let block_end = pos.checked_add(block_size).ok_or(Error::UnexpectedEof)?;
+        if block_end > input.len() {
             return Err(Error::UnexpectedEof);
         }
 
-        let block_data = &input[*pos..*pos + block_size];
-        *pos += block_size;
+        let block_data = &input[*pos..block_end];
+        *pos = block_end;
 
         decompress_block(block_data, output, &[], usize::MAX)?;
     }
