@@ -1172,7 +1172,9 @@ impl<'a> Tree<'a> {
         }
         let unit = usize::from(rec.unit_size) * self.blksz;
         let stride = (usize::from(rec.unit_size) + usize::from(rec.gap_size)) * self.blksz;
-        let mut out = Vec::with_capacity(rec.size as usize);
+        let mut out = Vec::new();
+        out.try_reserve(rec.size as usize)
+            .map_err(|_| Error::InvalidData("iso9660 extent too large"))?;
         // An extended attribute record fills the whole first File
         // Unit (ECMA-119 6.4.4: ext_attr_len == unit_size), so the
         // data begins with the second File Unit, past the gap.
@@ -1354,7 +1356,9 @@ fn zisofs_inflate(data: &[u8], zf: ZfParams) -> Result<Vec<u8>, Error> {
         "iso9660 zisofs pointer table out of range",
     ))?;
 
-    let mut out = Vec::with_capacity(usize_);
+    let mut out = Vec::new();
+    out.try_reserve(usize_)
+        .map_err(|_| Error::InvalidData("iso9660 zisofs output too large"))?;
     let mut remaining = usize_;
     for i in 0..nblocks {
         let cstart = u32le(pt, i * 4) as usize;

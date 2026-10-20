@@ -59,6 +59,12 @@ test-i686:
 	podman run --rm --entrypoint cargo $(TEST_IMAGE) \
 		test --lib --all-features --target i686-unknown-linux-gnu
 
+# generated artifact 回帰を 32-bit で実行する。zpaq 系は import していない。
+.PHONY: test-i686-generated
+test-i686-generated:
+	podman run --rm --entrypoint cargo $(TEST_IMAGE) \
+		test --test integration --all-features --target i686-unknown-linux-gnu generated_tests::
+
 # wasm32 の既定ターゲットに simd128 は無い。テストイメージで `+simd128` の check を実行する。
 # `scripts/archive-features.py` は std を除く。既定の `make test` には入れない。
 .PHONY: test-wasm
@@ -110,8 +116,11 @@ fuzz-wasm:
 		-c "ulimit -S -v 4194304 && exec /usr/local/bin/archive-fuzz-wasm run --algorithm '$(FUZZ_ALGORITHM)' --duration '$(FUZZ_DURATION)' --pattern '$(FUZZ_PATTERN)' --jobs '$(FUZZ_JOBS)'"
 
 # aarch64 の公開経路は NEON。qemu-user で実行する。
+# zpaq-level3 の encode が 2GiB のソフト上限内で allocation failure になるため、
+# FUZZ_JOBS > 1 は推奨しない。
 .PHONY: fuzz-aarch64
 fuzz-aarch64:
+	@if [ "$(FUZZ_JOBS)" -gt 1 ]; then echo "warning: fuzz-aarch64 with FUZZ_JOBS=$(FUZZ_JOBS) can exhaust the 2GiB limit (see fuzz/README.md)"; fi
 	mkdir -p fuzz/failures/aarch64 fuzz/corpus/aarch64
 	podman run --rm --entrypoint /bin/sh \
 		-v ./fuzz/failures/aarch64:/workspace/fuzz/failures \
