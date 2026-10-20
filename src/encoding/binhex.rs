@@ -528,11 +528,12 @@ fn be32(b: &[u8]) -> u32 {
 }
 
 fn take<'a>(data: &'a [u8], pos: &mut usize, n: usize) -> Result<&'a [u8], Error> {
-    if *pos + n > data.len() {
+    if n > data.len().saturating_sub(*pos) {
         return Err(Error::UnexpectedEof);
     }
-    let s = &data[*pos..*pos + n];
-    *pos += n;
+    let end = *pos + n;
+    let s = &data[*pos..end];
+    *pos = end;
     Ok(s)
 }
 

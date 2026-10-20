@@ -450,10 +450,10 @@ fn decompress_block(
         }
 
         // Copy literals
-        if sp + lit_len > src.len() {
+        if lit_len > src.len().saturating_sub(sp) {
             return Err(Error::UnexpectedEof);
         }
-        if dst.len() + lit_len > limit {
+        if lit_len > limit.saturating_sub(dst.len()) {
             return Err(Error::OutputLimitExceeded {
                 limit: max_block_output,
             });
@@ -467,7 +467,7 @@ fn decompress_block(
         }
 
         // Match offset (2 bytes LE)
-        if sp + 2 > src.len() {
+        if src.len().saturating_sub(sp) < 2 {
             return Err(Error::UnexpectedEof);
         }
         let offset = (src[sp] as usize) | ((src[sp + 1] as usize) << 8);
@@ -496,7 +496,7 @@ fn decompress_block(
             }
         }
         match_len += MIN_MATCH;
-        if dst.len() + match_len > limit {
+        if match_len > limit.saturating_sub(dst.len()) {
             return Err(Error::OutputLimitExceeded {
                 limit: max_block_output,
             });
