@@ -199,11 +199,14 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
             };
 
             // Block data
-            if pos + compressed_len > input.len() {
+            let block_end = pos
+                .checked_add(compressed_len)
+                .ok_or(Error::UnexpectedEof)?;
+            if block_end > input.len() {
                 return Err(Error::UnexpectedEof);
             }
-            let block_data = &input[pos..pos + compressed_len];
-            pos += compressed_len;
+            let block_data = &input[pos..block_end];
+            pos = block_end;
 
             // Verify CRC-32 of compressed data
             if let Some(expected) = expected_crc32_c {

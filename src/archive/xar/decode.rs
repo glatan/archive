@@ -121,12 +121,15 @@ pub fn decode(input: &[u8]) -> Result<Vec<XarEntry>, Error> {
         }
         _ => return Err(Error::Unsupported("xar: unsupported checksum algorithm")),
     };
-    if input.len() < hdr_size + toc_comp {
+    let toc_end = hdr_size
+        .checked_add(toc_comp)
+        .ok_or_else(|| invalid("xar: truncated table of contents"))?;
+    if input.len() < toc_end {
         return Err(invalid("xar: truncated table of contents"));
     }
 
     // --- table of contents ---
-    let toc_packed = &input[hdr_size..hdr_size + toc_comp];
+    let toc_packed = &input[hdr_size..toc_end];
     let toc_bytes = crate::compress::zlib::decode::decode(toc_packed)
         .map_err(|_| invalid("xar: corrupt zlib table of contents"))?;
     if toc_bytes.len() != toc_raw {

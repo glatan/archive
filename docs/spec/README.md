@@ -48,6 +48,18 @@
 | `archive-fuzz` watchdog | `catch_unwind` が捕捉できない無限ループ / OOM abort の検出 | 全パターンの全 case (case 入口で `inflight-<worker>` breadcrumb を永続化、probe 単位で予算リセット) | 予算超過時に `hang-*` artifact を書き exit code 3 で abort。breadcrumb はプロセスが先に死んでも残るためランが静かに止まることを防ぐ。`hang-*.json` は `archive-fuzz replay` で再現確認できる |
 | `archive-fuzz` artifact 管理 | 蓄積した failures/corpus 成果物のライフサイクル管理 | `clean` (内容のみ削除、`.gitkeep` と dir は温存、`--keep-latest N` で直近 `run-*` 保持、`--failures-only` / `--corpus-only` で片側選択) と `summary` (run dir または summary.json の集計表示、read-only) | `run` 起動時に残存 `inflight-*.json` breadcrumb を警告 (同時実行中は false positive になり得る) |
 
+### 32-bit ターゲットの境界
+
+`usize` が 32 bit の i686 / wasm32 では、on-disk の u32 長・オフセット・件数を
+`usize` に変換した後の加算・乗算が overflow し得る。decoder は `checked_add` /
+`checked_mul` / `checked_shl` を使い、overflow を `Error` として返す
+(panic させない)。増分は長さ・件数に比例しており、u32 の全範囲を表現できない
+32-bit では確保前に拒否する。`fuzz-i686` と `fuzz-wasm` がこの境界を継続検証し、
+見つかった artifact は `tests/integration/generated/` に回帰として取り込む。
+境界 escape が巨大な出力を要求するケースは、無制限 `decode()` ではなく
+上限付き decoder の unit test で回帰にする。zpaq 系は decode 前にヘッダ由来の
+モデルを確保するため import せず、i686 / wasm32 の replay で確認する。
+
 ---
 
 ## 実装対象外フォーマット

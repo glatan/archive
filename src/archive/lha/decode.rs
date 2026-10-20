@@ -423,11 +423,14 @@ fn decode_level01(
     // otherwise a non-conformant packed>0 dir entry would desync
     // the following header scan.
     let take = packed;
-    if data_start + take > input.len() {
+    let data_end = data_start
+        .checked_add(take)
+        .ok_or(Error::InvalidData("lha: truncated entry data"))?;
+    if data_end > input.len() {
         return Err(Error::InvalidData("lha: truncated entry data"));
     }
     check_orig_budget(orig, max_output, *emitted)?;
-    let data = decode_member_data(method, &input[data_start..data_start + take], orig)?;
+    let data = decode_member_data(method, &input[data_start..data_end], orig)?;
     *emitted = emitted.saturating_add(data.len());
     if let Some(c) = crc16
         && !is_dir
@@ -456,7 +459,7 @@ fn decode_level01(
         span: ext.span,
         data,
     });
-    Ok(data_start + take)
+    Ok(data_end)
 }
 
 fn decode_level2(
@@ -508,11 +511,14 @@ fn decode_level2(
     // otherwise a non-conformant packed>0 dir entry would desync
     // the following header scan.
     let take = packed;
-    if data_start + take > input.len() {
+    let data_end = data_start
+        .checked_add(take)
+        .ok_or(Error::InvalidData("lha: truncated entry data"))?;
+    if data_end > input.len() {
         return Err(Error::InvalidData("lha: truncated entry data"));
     }
     check_orig_budget(orig, max_output, *emitted)?;
-    let data = decode_member_data(method, &input[data_start..data_start + take], orig)?;
+    let data = decode_member_data(method, &input[data_start..data_end], orig)?;
     *emitted = emitted.saturating_add(data.len());
     if !is_dir && crate::util::crc16::crc16(&data) != crc {
         return Err(Error::InvalidData("lha: CRC-16 mismatch"));
@@ -536,7 +542,7 @@ fn decode_level2(
         span: ext.span,
         data,
     });
-    Ok(data_start + take)
+    Ok(data_end)
 }
 
 /// Level-3 base header (32 bytes):
@@ -600,11 +606,14 @@ fn decode_level3(
     // otherwise a non-conformant packed>0 dir entry would desync
     // the following header scan.
     let take = packed;
-    if data_start + take > input.len() {
+    let data_end = data_start
+        .checked_add(take)
+        .ok_or(Error::InvalidData("lha: truncated entry data"))?;
+    if data_end > input.len() {
         return Err(Error::InvalidData("lha: truncated entry data"));
     }
     check_orig_budget(orig, max_output, *emitted)?;
-    let data = decode_member_data(method, &input[data_start..data_start + take], orig)?;
+    let data = decode_member_data(method, &input[data_start..data_end], orig)?;
     *emitted = emitted.saturating_add(data.len());
     if !is_dir && crate::util::crc16::crc16(&data) != crc {
         return Err(Error::InvalidData("lha: CRC-16 mismatch"));
@@ -628,7 +637,7 @@ fn decode_level3(
         span: ext.span,
         data,
     });
-    Ok(data_start + take)
+    Ok(data_end)
 }
 
 #[cfg(test)]

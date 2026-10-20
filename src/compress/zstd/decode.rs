@@ -1110,7 +1110,13 @@ fn decode_compressed_literals(
     // Decode literals from compressed stream(s)
     // compressed_size covers everything after the header (weights + stream),
     // so the stream data ends at header_size + compressed_size.
-    let stream_end = (header_size + compressed_size).min(data.len());
+    let stream_end = header_size
+        .checked_add(compressed_size)
+        .map(|end| end.min(data.len()))
+        .ok_or(Error::InvalidData("zstd: literal stream size overflow"))?;
+    if pos > stream_end {
+        return Err(Error::InvalidData("zstd: literal stream too short"));
+    }
     let compressed_data = &data[pos..stream_end];
     let mut literals = Vec::with_capacity(regen_size);
 

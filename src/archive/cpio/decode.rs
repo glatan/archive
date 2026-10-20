@@ -173,16 +173,19 @@ pub fn decode(input: &[u8]) -> Result<Vec<CpioEntry>, Error> {
         // Extract filename (namesize includes null terminator)
         let name_start = pos + header.format.header_size();
         let name_len = header.namesize as usize;
-        if name_start + name_len > input.len() {
+        let name_end_exclusive = name_start
+            .checked_add(name_len)
+            .ok_or(Error::UnexpectedEof)?;
+        if name_end_exclusive > input.len() {
             return Err(Error::UnexpectedEof);
         }
-        if input[name_start + name_len - 1] != 0 {
+        if input[name_end_exclusive - 1] != 0 {
             return Err(Error::InvalidData(
                 "cpio namesize must include a trailing null terminator",
             ));
         }
         // Strip null terminator
-        let name_end = name_start + name_len - 1;
+        let name_end = name_end_exclusive - 1;
         let name = String::from_utf8_lossy(&input[name_start..name_end]).into_owned();
 
         // Check for trailer
@@ -194,10 +197,13 @@ pub fn decode(input: &[u8]) -> Result<Vec<CpioEntry>, Error> {
         // File data starts after header + name (aligned to 4 bytes)
         let data_start = pos + header_total;
         let data_size = header.filesize as usize;
-        if data_start + data_size > input.len() {
+        let data_end = data_start
+            .checked_add(data_size)
+            .ok_or(Error::UnexpectedEof)?;
+        if data_end > input.len() {
             return Err(Error::UnexpectedEof);
         }
-        let data = input[data_start..data_start + data_size].to_vec();
+        let data = input[data_start..data_end].to_vec();
 
         // Verify CRC for newcrc (070702) format
         if header.is_crc {
@@ -214,7 +220,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<CpioEntry>, Error> {
 
         // Next entry starts after data + per-format padding
         // (odc: none, bin: 2-byte, newc/newcrc: 4-byte).
-        pos = align_to(data_start + data_size, header.format.alignment());
+        pos = align_to(data_end, header.format.alignment());
 
         entries.push(CpioEntry { header, name, data });
     }

@@ -112,6 +112,15 @@ fn try_alloc_u8s(size: usize) -> Result<Vec<u8>, Error> {
     Ok(v)
 }
 
+/// Size of a model table: `unit << sizebits` entries times `multiplier`.
+///
+/// `checked_shl` only rejects a shift count at or above the bit width; it
+/// still truncates the value. On a 32-bit target `64usize << 26` silently
+/// becomes 0, so the multiplication has to be checked as well.
+fn table_size(sizebits: usize, unit: usize, multiplier: usize) -> Option<usize> {
+    unit.checked_shl(sizebits as u32)?.checked_mul(multiplier)
+}
+
 /// The ZPAQ context-mixing predictor.
 pub(crate) struct Predictor {
     z: Zpaql,
@@ -220,7 +229,9 @@ impl Predictor {
                     if s > 32 {
                         return Err(Error::InvalidData("zpaq: max size for CM is 32"));
                     }
-                    let size = 1usize << s;
+                    let size = 1usize
+                        .checked_shl(s as u32)
+                        .ok_or(Error::InvalidData("zpaq: memory size too big"))?;
                     cr.cm = try_alloc_u32s(size)?;
                     cr.cm.resize(size, 0x8000_0000);
                     cr.limit = rec[2] as usize * 4;
@@ -236,8 +247,10 @@ impl Predictor {
                     for j in 0..256usize {
                         cr.cm.push(cminit(j as u8) as u32);
                     }
-                    cr.ht = try_alloc_u8s(64usize << s)?;
-                    cr.ht.resize(64usize << s, 0);
+                    let ht_size = table_size(s, 1, 64)
+                        .ok_or(Error::InvalidData("zpaq: memory size too big"))?;
+                    cr.ht = try_alloc_u8s(ht_size)?;
+                    cr.ht.resize(ht_size, 0);
                 }
                 MATCH => {
                     // sizebits bufbits
@@ -246,10 +259,16 @@ impl Predictor {
                     if s > 32 || b > 32 {
                         return Err(Error::InvalidData("zpaq: max size for MATCH is 32 32"));
                     }
-                    cr.cm = try_alloc_u32s(1usize << s)?; // index
-                    cr.cm.resize(1usize << s, 0);
-                    cr.ht = try_alloc_u8s(1usize << b)?; // buf
-                    cr.ht.resize(1usize << b, 0);
+                    let cm_size = 1usize
+                        .checked_shl(s as u32)
+                        .ok_or(Error::InvalidData("zpaq: memory size too big"))?;
+                    let buf_size = 1usize
+                        .checked_shl(b as u32)
+                        .ok_or(Error::InvalidData("zpaq: memory size too big"))?;
+                    cr.cm = try_alloc_u32s(cm_size)?; // index
+                    cr.cm.resize(cm_size, 0);
+                    cr.ht = try_alloc_u8s(buf_size)?; // buf
+                    cr.ht.resize(buf_size, 0);
                     cr.ht[0] = 1;
                 }
                 AVG => {
@@ -267,7 +286,9 @@ impl Predictor {
                     if rec[2] as usize >= i || rec[3] as usize >= i {
                         return Err(Error::InvalidData("zpaq: MIX2 j/k >= i"));
                     }
-                    cr.c = 1usize << s;
+                    cr.c = 1usize
+                        .checked_shl(s as u32)
+                        .ok_or(Error::InvalidData("zpaq: memory size too big"))?;
                     let size = cr.c;
                     let mut w = Vec::new();
                     w.try_reserve(size)
@@ -289,9 +310,14 @@ impl Predictor {
                     if m < 1 || m > i - j {
                         return Err(Error::InvalidData("zpaq: MIX m not in 1..i-j"));
                     }
-                    cr.c = 1usize << s;
-                    cr.cm = try_alloc_u32s(cr.c * m)?;
-                    cr.cm.resize(cr.c * m, 65536 / m as u32);
+                    cr.c = 1usize
+                        .checked_shl(s as u32)
+                        .ok_or(Error::InvalidData("zpaq: memory size too big"))?;
+                    let cm_size =
+                        cr.c.checked_mul(m)
+                            .ok_or(Error::InvalidData("zpaq: memory size too big"))?;
+                    cr.cm = try_alloc_u32s(cm_size)?;
+                    cr.cm.resize(cm_size, 65536 / m as u32);
                 }
                 ISSE => {
                     // sizebits j
@@ -302,8 +328,10 @@ impl Predictor {
                     if rec[2] as usize >= i {
                         return Err(Error::InvalidData("zpaq: ISSE j >= i"));
                     }
-                    cr.ht = try_alloc_u8s(64usize << s)?;
-                    cr.ht.resize(64usize << s, 0);
+                    let ht_size = table_size(s, 1, 64)
+                        .ok_or(Error::InvalidData("zpaq: memory size too big"))?;
+                    cr.ht = try_alloc_u8s(ht_size)?;
+                    cr.ht.resize(ht_size, 0);
                     cr.cm = try_alloc_u32s(512)?;
                     for j in 0..256usize {
                         cr.cm.push(1 << 15);
@@ -325,8 +353,10 @@ impl Predictor {
                     if rec[3] as usize > rec[4] as usize * 4 {
                         return Err(Error::InvalidData("zpaq: SSE start > limit*4"));
                     }
-                    cr.cm = try_alloc_u32s(32usize << s)?;
-                    for j in 0..(32usize << s) {
+                    let cm_size = table_size(s, 1, 32)
+                        .ok_or(Error::InvalidData("zpaq: memory size too big"))?;
+                    cr.cm = try_alloc_u32s(cm_size)?;
+                    for j in 0..cm_size {
                         cr.cm
                             .push(((squash((j as i32 & 31) * 64 - 992) as u32) << 17) | start);
                     }
@@ -485,18 +515,18 @@ impl Predictor {
     fn predict_sse(&mut self, i: usize) {
         let params = self.comp[i].params;
         let cr = &mut self.comp[i];
-        cr.cxt = (self.h[i].wrapping_add(self.c8) as usize) * 32;
+        cr.cxt = (self.h[i].wrapping_add(self.c8) as usize).wrapping_mul(32);
         let mut pq = self.p[params[2] as usize] + 992;
         pq = pq.clamp(0, 1983);
         let wt = (pq & 63) as u32;
         pq >>= 6;
-        cr.cxt += pq as usize;
+        cr.cxt = cr.cxt.wrapping_add(pq as usize);
         let cxt = cr.cxt;
         let v = ((cr.cm[cxt & (cr.cm.len() - 1)] >> 10) * (64 - wt)
             + (cr.cm[(cxt + 1) & (cr.cm.len() - 1)] >> 10) * wt)
             >> 13;
         self.p[i] = stretch(v as i32);
-        cr.cxt += (wt >> 5) as usize;
+        cr.cxt = cr.cxt.wrapping_add((wt >> 5) as usize);
     }
 
     /// Update the model after bit `y` (0 or 1) has been coded.
@@ -700,7 +730,11 @@ impl Predictor {
     fn find(&mut self, sizebits: usize, cxt: u32, i: usize) -> usize {
         let chk = ((cxt >> sizebits) & 255) as u8;
         // Upstream computes cxt*16 in 32 bits; keep the wrap.
-        let h0 = (cxt.wrapping_mul(16) as usize) & (self.comp[i].ht.len() - 16);
+        // Component init rejects sizes that do not fit `usize`, so the
+        // table always has at least one 16-byte row here.
+        debug_assert!(self.comp[i].ht.len() >= 16);
+        let mask = self.comp[i].ht.len().saturating_sub(16);
+        let h0 = (cxt.wrapping_mul(16) as usize) & mask;
         if self.comp[i].ht[h0] == chk {
             return h0;
         }
@@ -726,5 +760,27 @@ impl Predictor {
         }
         self.comp[i].ht[evict] = chk;
         evict
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::table_size;
+
+    #[test]
+    fn table_size_computes_normal_sizes() {
+        assert_eq!(table_size(0, 1, 64), Some(64));
+        assert_eq!(table_size(10, 1, 32), Some(32 << 10));
+        assert_eq!(table_size(0, 1, 1), Some(1));
+    }
+
+    /// `checked_shl` alone returns `Some(0)` for `64 << 26` on a 32-bit
+    /// target. The multiplication check has to reject it.
+    #[test]
+    #[cfg(target_pointer_width = "32")]
+    fn table_size_rejects_32_bit_wraparound() {
+        assert_eq!(table_size(25, 1, 64), Some(1 << 31));
+        assert_eq!(table_size(26, 1, 64), None);
+        assert_eq!(table_size(27, 1, 32), None);
     }
 }

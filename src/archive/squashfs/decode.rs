@@ -269,17 +269,20 @@ pub struct SquashfsImage {
 }
 
 fn le16(input: &[u8], pos: usize) -> Result<u16, Error> {
-    let bytes = input.get(pos..pos + 2).ok_or(Error::UnexpectedEof)?;
+    let end = pos.checked_add(2).ok_or(Error::UnexpectedEof)?;
+    let bytes = input.get(pos..end).ok_or(Error::UnexpectedEof)?;
     Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
 }
 
 fn le32(input: &[u8], pos: usize) -> Result<u32, Error> {
-    let bytes = input.get(pos..pos + 4).ok_or(Error::UnexpectedEof)?;
+    let end = pos.checked_add(4).ok_or(Error::UnexpectedEof)?;
+    let bytes = input.get(pos..end).ok_or(Error::UnexpectedEof)?;
     Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
 fn le64(input: &[u8], pos: usize) -> Result<u64, Error> {
-    let bytes = input.get(pos..pos + 8).ok_or(Error::UnexpectedEof)?;
+    let end = pos.checked_add(8).ok_or(Error::UnexpectedEof)?;
+    let bytes = input.get(pos..end).ok_or(Error::UnexpectedEof)?;
     Ok(u64::from_le_bytes(bytes.try_into().unwrap()))
 }
 
@@ -601,16 +604,20 @@ fn parse_inode_body(
             let mut index = Vec::with_capacity(index_count);
             let mut ipos = pos + 24;
             for _ in 0..index_count {
-                let name_size = le32(data, ipos + 8)? as usize + 1;
-                let name = data
-                    .get(ipos + 12..ipos + 12 + name_size)
+                let name_size = (le32(data, ipos + 8)? as usize)
+                    .checked_add(1)
                     .ok_or(Error::UnexpectedEof)?;
+                let name_start = ipos.checked_add(12).ok_or(Error::UnexpectedEof)?;
+                let name_end = name_start
+                    .checked_add(name_size)
+                    .ok_or(Error::UnexpectedEof)?;
+                let name = data.get(name_start..name_end).ok_or(Error::UnexpectedEof)?;
                 index.push(SquashfsDirIndex {
                     index: le32(data, ipos)?,
                     start: le32(data, ipos + 4)?,
                     name: String::from_utf8_lossy(name).into_owned(),
                 });
-                ipos += 12 + name_size;
+                ipos = name_end;
             }
             Ok((
                 InodeBody::Dir(DirListing {
@@ -1068,7 +1075,12 @@ fn read_dir_listing(
     let mut entries = Vec::new();
     while pos < end {
         // Header: count(u32, off-by-one), start(u32), inode_number(u32).
-        let count = le32(&dir_run.data, pos)? as usize + 1;
+        let count =
+            (le32(&dir_run.data, pos)? as usize)
+                .checked_add(1)
+                .ok_or(Error::InvalidData(
+                    "squashfs: directory entry count overflow",
+                ))?;
         let block_start = le32(&dir_run.data, pos + 4)?;
         let base_inode = le32(&dir_run.data, pos + 8)? as i64;
         pos += 12;
@@ -1078,11 +1090,12 @@ fn read_dir_listing(
             let entry_type = le16(&dir_run.data, pos + 4)?;
             let name_len = usize::from(le16(&dir_run.data, pos + 6)?) + 1;
             pos += 8;
-            if pos + name_len > dir_run.data.len() {
-                return Err(Error::UnexpectedEof);
-            }
-            let name = String::from_utf8_lossy(&dir_run.data[pos..pos + name_len]).into_owned();
-            pos += name_len;
+            let name_end = pos
+                .checked_add(name_len)
+                .filter(|&e| e <= dir_run.data.len())
+                .ok_or(Error::UnexpectedEof)?;
+            let name = String::from_utf8_lossy(&dir_run.data[pos..name_end]).into_owned();
+            pos = name_end;
             let _inode_number = base_inode + inode_diff;
             let child_ref = (u64::from(block_start) << 16) | u64::from(offset);
             entries.push((child_ref, entry_type, name));
@@ -1119,9 +1132,14 @@ fn read_file(
     }
     let tail = file_size % block_size;
     if frag_index != NO_INDEX && tail > 0 {
-        let base = frag_index as usize * 16;
+        let base = (frag_index as usize)
+            .checked_mul(16)
+            .ok_or(Error::InvalidData("squashfs: fragment index out of range"))?;
         let frag_start = le64(frag_table, base)? as usize;
-        let frag_size = le32(frag_table, base + 8)?;
+        let frag_size_pos = base
+            .checked_add(8)
+            .ok_or(Error::InvalidData("squashfs: fragment index out of range"))?;
+        let frag_size = le32(frag_table, frag_size_pos)?;
         let key = (frag_start, frag_size);
         if let Entry::Vacant(slot) = frag_cache.entry(key) {
             let decoded = reader.read_data_block(frag_start, frag_size, reader.block_size)?;

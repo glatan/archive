@@ -85,15 +85,21 @@ struct FileRec {
 }
 
 fn le_u16(data: &[u8], off: usize) -> Result<u16, Error> {
+    let end = off
+        .checked_add(2)
+        .ok_or(Error::InvalidData("mscab: truncated header"))?;
     let bytes = data
-        .get(off..off + 2)
+        .get(off..end)
         .ok_or(Error::InvalidData("mscab: truncated header"))?;
     Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
 }
 
 fn le_u32(data: &[u8], off: usize) -> Result<u32, Error> {
+    let end = off
+        .checked_add(4)
+        .ok_or(Error::InvalidData("mscab: truncated header"))?;
     let bytes = data
-        .get(off..off + 4)
+        .get(off..end)
         .ok_or(Error::InvalidData("mscab: truncated header"))?;
     Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
@@ -537,8 +543,12 @@ fn extract_cabs(cabs: &[&ParsedCab<'_>]) -> Result<Vec<MscabEntry>, Error> {
                     let base = folder_base[k]
                         .get(frag)
                         .ok_or(Error::InvalidData("mscab: folder index out of range"))?;
-                    let pos = base + f.uoff_folder_start;
-                    let end = pos + f.cb_file;
+                    let pos = base
+                        .checked_add(f.uoff_folder_start)
+                        .ok_or(Error::InvalidData("mscab: file data overruns folders"))?;
+                    let end = pos
+                        .checked_add(f.cb_file)
+                        .ok_or(Error::InvalidData("mscab: file data overruns folders"))?;
                     if end > stream.len() {
                         return Err(Error::InvalidData("mscab: file data overruns folders"));
                     }

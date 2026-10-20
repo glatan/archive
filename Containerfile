@@ -147,13 +147,14 @@ RUN --mount=type=cache,id=cargo-registry,target=/root/.cargo/registry \
     --mount=type=cache,id=fuzz-target,target=/workspace/target \
     rustup show >/dev/null && \
     rustup target add aarch64-unknown-linux-gnu i686-unknown-linux-gnu wasm32-wasip1-threads && \
+    rustup component add rust-src && \
     cargo clean -p archive -p archive-fuzz && \
     cargo build --profile fuzz -p archive-fuzz && \
     RUSTFLAGS="-C target-cpu=x86-64-v3" cargo build --profile fuzz -p archive-fuzz --target-dir target/avx2 && \
     RUSTFLAGS="-C target-cpu=x86-64-v4" cargo build --profile fuzz -p archive-fuzz --target-dir target/avx512 && \
     cargo build --profile fuzz -p archive-fuzz --target i686-unknown-linux-gnu && \
     cargo build --profile fuzz -p archive-fuzz --target aarch64-unknown-linux-gnu && \
-    RUSTFLAGS="-C target-feature=+simd128 -C link-arg=--max-memory=2147483648" cargo build --profile fuzz -p archive-fuzz --target wasm32-wasip1-threads && \
+    RUSTC_BOOTSTRAP=1 RUSTFLAGS="-C target-feature=+simd128 -C link-arg=--max-memory=2147483648 -C panic=unwind" cargo build -Z build-std=std,panic_unwind --profile fuzz -p archive-fuzz --target wasm32-wasip1-threads && \
     cargo build --profile fuzz -p archive-fuzz --features wasm-host --bin archive-fuzz-wasm && \
     cp target/fuzz/archive-fuzz /usr/local/bin/archive-fuzz-x86_64 && \
     cp target/avx2/fuzz/archive-fuzz /usr/local/bin/archive-fuzz-avx2 && \

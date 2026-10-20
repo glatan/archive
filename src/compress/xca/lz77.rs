@@ -121,15 +121,25 @@ fn decode_internal(
                         }
                         len -= 15 + 7;
                     }
-                    len += 15;
+                    len = len
+                        .checked_add(15)
+                        .ok_or(Error::InvalidData("xpress: match length overflow"))?;
                 }
-                len += 7;
+                len = len
+                    .checked_add(7)
+                    .ok_or(Error::InvalidData("xpress: match length overflow"))?;
             }
-            len += 3;
+            len = len
+                .checked_add(3)
+                .ok_or(Error::InvalidData("xpress: match length overflow"))?;
             if offset > out.len() {
                 return Err(Error::InvalidData("xpress: match offset before start"));
             }
-            if out.len() + len > max_output {
+            if out
+                .len()
+                .checked_add(len)
+                .is_none_or(|total| total > max_output)
+            {
                 return Err(Error::OutputLimitExceeded { limit: max_output });
             }
             crate::compress::match_ops::copy_match(&mut out, offset, len)
@@ -354,6 +364,23 @@ mod tests {
             }
         }
         assert!(decode(&[0xff]).is_err() || decode(&[0xff]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn rejects_u32_length_escape_overflow() {
+        // Literal 'A', then a match with the extended length path:
+        // len=7 -> nibble 15 -> byte 255 -> u16 0 -> u32 0xFFFF_FFFF.
+        // On a 32-bit target the post-escape `len += 3` used to overflow;
+        // the decoder must reject the stream instead.
+        let input = [
+            0x00, 0x00, 0x00, 0x40, // flags: literal, then match
+            b'A', 0x07, 0x00, // literal, match word (offset 1, len 7)
+            0x0f, // nibble 15
+            0xff, // byte 255
+            0x00, 0x00, // u16 0 -> read u32 escape
+            0xff, 0xff, 0xff, 0xff, // length 0xffff_ffff
+        ];
+        assert!(decode_bounded(&input, 1024).is_err());
     }
 
     #[test]

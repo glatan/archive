@@ -87,15 +87,16 @@ fn read_stream_chain(chunk: &[u8], mut head: u32, consumed: &mut usize) -> Resul
             return Err(Error::InvalidData("rzip: stream chain cycle detected"));
         }
         let pos = head as usize;
-        if pos + 13 > chunk.len() {
+        let header_end = pos.checked_add(13).ok_or(Error::UnexpectedEof)?;
+        if header_end > chunk.len() {
             return Err(Error::UnexpectedEof);
         }
         let ctype = chunk[pos];
         let c_len = read_u32_le(&chunk[pos + 1..pos + 5])? as usize;
         let u_len = read_u32_le(&chunk[pos + 5..pos + 9])? as usize;
         let next = read_u32_le(&chunk[pos + 9..pos + 13])?;
-        let data_start = pos + 13;
-        let data_end = data_start + c_len;
+        let data_start = header_end;
+        let data_end = data_start.checked_add(c_len).ok_or(Error::UnexpectedEof)?;
         if data_end > chunk.len() {
             return Err(Error::UnexpectedEof);
         }

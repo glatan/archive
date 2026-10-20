@@ -370,8 +370,14 @@ impl Zpaql {
         if hbits > 32 || mbits > 32 {
             return Err(Error::InvalidData("zpaq: memory size too big"));
         }
-        let hsize = 1usize << hbits;
-        let msize = 1usize << mbits;
+        // `1 << 32` does not fit a 32-bit `usize`. Reject it there instead of
+        // panicking; the same size already fails allocation on 64-bit.
+        let hsize = 1usize
+            .checked_shl(hbits as u32)
+            .ok_or(Error::InvalidData("zpaq: memory size too big"))?;
+        let msize = 1usize
+            .checked_shl(mbits as u32)
+            .ok_or(Error::InvalidData("zpaq: memory size too big"))?;
         self.h
             .try_reserve(hsize)
             .map_err(|_| Error::InvalidData("zpaq: memory allocation failed"))?;

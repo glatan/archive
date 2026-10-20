@@ -106,9 +106,10 @@ impl<'a> File<'a> {
         let off = (n as usize + 1)
             .checked_mul(self.sector_size)
             .ok_or(Error::UnexpectedEof)?;
-        self.input
-            .get(off..off + self.sector_size)
-            .ok_or(Error::UnexpectedEof)
+        let end = off
+            .checked_add(self.sector_size)
+            .ok_or(Error::UnexpectedEof)?;
+        self.input.get(off..end).ok_or(Error::UnexpectedEof)
     }
 
     /// Follow a regular-sector chain through the FAT.
@@ -135,12 +136,9 @@ impl<'a> File<'a> {
             if cur > MAXREGSECT || !seen.insert(cur) {
                 return Err(Error::InvalidData("mscfb"));
             }
-            let off = cur as usize * 64;
-            out.extend_from_slice(
-                self.mini_stream
-                    .get(off..off + 64)
-                    .ok_or(Error::UnexpectedEof)?,
-            );
+            let off = (cur as usize).checked_mul(64).ok_or(Error::UnexpectedEof)?;
+            let end = off.checked_add(64).ok_or(Error::UnexpectedEof)?;
+            out.extend_from_slice(self.mini_stream.get(off..end).ok_or(Error::UnexpectedEof)?);
             cur = *self
                 .mini_fat
                 .get(cur as usize)
@@ -415,7 +413,7 @@ fn parse(input: &[u8]) -> Result<File<'_>, Error> {
             .checked_mul(sector_size)
             .ok_or(Error::UnexpectedEof)?;
         let sec = input
-            .get(off..off + sector_size)
+            .get(off..off.checked_add(sector_size).ok_or(Error::UnexpectedEof)?)
             .ok_or(Error::UnexpectedEof)?;
         for i in 0..(sector_size / 4 - 1) {
             let v = u32le(sec, 4 * i);

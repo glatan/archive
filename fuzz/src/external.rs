@@ -1141,13 +1141,27 @@ fn temp_base() -> PathBuf {
     }
 }
 
+fn temp_dir_owner() -> u32 {
+    // `std::process::id` aborts on wasm32 (`no pids on this platform`).
+    // The guest is one process; the nanosecond stamp and the attempt
+    // counter keep the directory name unique.
+    #[cfg(target_arch = "wasm32")]
+    {
+        0
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::process::id()
+    }
+}
+
 impl TempDir {
     fn new(prefix: &str) -> Result<Self, String> {
         let base = temp_base();
         for attempt in 0..1000u32 {
             let path = base.join(format!(
                 "{prefix}-{}-{}-{}",
-                std::process::id(),
+                temp_dir_owner(),
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
