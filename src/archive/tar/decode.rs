@@ -152,13 +152,16 @@ where
         // tar's old-sparse layout; a file with no map falls back to
         // the contiguous 'size' interpretation.
         let data = if header.file_type == FileType::GnuSparse && !header.sparse_map.is_empty() {
-            let mut buf = Vec::with_capacity(tape_data_size);
+            let mut buf = Vec::new();
+            buf.try_reserve(tape_data_size)
+                .map_err(|_| Error::InvalidData("tar: sparse buffer too large"))?;
             for &(_, len) in &header.sparse_map {
                 let len = len as usize;
                 let seg_end = pos.checked_add(len).ok_or(Error::UnexpectedEof)?;
                 let seg = input.get(pos..seg_end).ok_or(Error::UnexpectedEof)?;
                 buf.extend_from_slice(seg);
-                pos += round_up_to_block(len);
+                let padded = round_up_to_block_checked(len).ok_or(Error::UnexpectedEof)?;
+                pos = pos.checked_add(padded).ok_or(Error::UnexpectedEof)?;
             }
             buf
         } else {
@@ -172,7 +175,8 @@ where
             } else {
                 Vec::new()
             };
-            pos += round_up_to_block(data_size);
+            let padded = round_up_to_block_checked(data_size).ok_or(Error::UnexpectedEof)?;
+            pos = pos.checked_add(padded).ok_or(Error::UnexpectedEof)?;
             data
         };
 
@@ -470,12 +474,14 @@ fn parse_pax_attributes(data: &[u8]) -> Vec<(String, String)> {
     attrs
 }
 
-/// Round up a byte count to the next 512-byte block boundary.
-const fn round_up_to_block(size: usize) -> usize {
+/// Round up a decoder-driven byte count to the next 512-byte block
+/// boundary, rejecting inputs whose `size + BLOCK_SIZE - 1` overflows.
+fn round_up_to_block_checked(size: usize) -> Option<usize> {
     if size == 0 {
-        0
+        Some(0)
     } else {
-        size.div_ceil(BLOCK_SIZE) * BLOCK_SIZE
+        size.checked_add(BLOCK_SIZE - 1)
+            .map(|n| n & !(BLOCK_SIZE - 1))
     }
 }
 
@@ -569,14 +575,15 @@ mod tests {
         }
     }
 
-    /// Verifies that `round_up_to_block` maps 0→0, non-zero sizes to the
-    /// next 512-byte boundary.
+    /// Verifies that `round_up_to_block_checked` maps 0→0, non-zero sizes
+    /// to the next 512-byte boundary, and rejects overflow.
     #[test]
     fn test_round_up_to_block() {
-        assert_eq!(round_up_to_block(0), 0);
-        assert_eq!(round_up_to_block(1), 512);
-        assert_eq!(round_up_to_block(512), 512);
-        assert_eq!(round_up_to_block(513), 1024);
+        assert_eq!(round_up_to_block_checked(0), Some(0));
+        assert_eq!(round_up_to_block_checked(1), Some(512));
+        assert_eq!(round_up_to_block_checked(512), Some(512));
+        assert_eq!(round_up_to_block_checked(513), Some(1024));
+        assert_eq!(round_up_to_block_checked(usize::MAX), None);
     }
 
     /// `decode_reader` produces the same entries as `decode` when reading

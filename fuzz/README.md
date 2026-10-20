@@ -196,6 +196,11 @@ abort 時点で実行中だった外部ツールの子プロセスは孤児と�
 wasm32 では wasmtime のスレッド実行の影響で、`FUZZ_JOBS` を 1 より大きくすると
 watchdog が 60 秒超過を誤検知することがある。記録された `hang-*` artifact は
 `replay` では再現しない。`fuzz-wasm` は既定の `FUZZ_JOBS=1` で実行する。
+ホストの `archive-fuzz-wasm` は `--jobs` が 1 より大きい場合に警告を出す。
+
+aarch64 の qemu-user でも `FUZZ_JOBS` を 1 より大きくすると、zpaq-level3 の encode が
+2GiB のソフト上限内で allocation failure になることがある。同じ artifact は
+`replay` や `FUZZ_JOBS=1` では再現しない。`fuzz-aarch64` は既定の 1 を使う。
 
 `run` は起動時に failures ディレクトリ配下の `run-*` に残った `inflight-*.json`
 breadcrumb を数え、見つかれば警告を出す (前回の run / replay がケース途中で
@@ -256,6 +261,8 @@ cargo run --profile fuzz -p archive-fuzz -- import-regression fuzz/failures/run-
 ケースは artifact をそのまま取り込まず、`decode_bounded` を使う unit test で
 上限付きの回帰にする。zpaq 系は decode 前にヘッダ由来のモデルを確保するため、
 corrupt artifact の import は行わず、i686 / wasm32 の replay で確認する。
+`decode_bounded` は出力を制限するがモデルサイズは制限しないため、テストプロセスで
+OOM abort になり得る点が import しない理由である。
 
 32-bit の `usize` に由来する panic (`attempt to add with overflow` など) は
 x86_64 では再現しない。i686 / wasm32 で見つかった artifact は、修正後に

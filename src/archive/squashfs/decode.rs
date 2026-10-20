@@ -686,9 +686,13 @@ fn le_block_sizes(
     };
     let count =
         usize::try_from(count).map_err(|_| Error::InvalidData("squashfs: too many blocks"))?;
-    let mut sizes = Vec::with_capacity(count);
+    let mut sizes = Vec::new();
+    sizes
+        .try_reserve(count)
+        .map_err(|_| Error::InvalidData("squashfs: block size table too large"))?;
     for i in 0..count {
-        sizes.push(le32(data, pos + i * 4)?);
+        let entry = pos.checked_add(i * 4).ok_or(Error::UnexpectedEof)?;
+        sizes.push(le32(data, entry)?);
     }
     Ok(sizes)
 }
@@ -1428,7 +1432,11 @@ mod tests {
                 (content.len().div_ceil(bs), 0)
             };
             for i in 0..block_count {
-                let chunk = &content[i * bs..(i * bs + bs).min(content.len())];
+                let start = i * bs;
+                let end = start
+                    .checked_add(bs)
+                    .map_or(content.len(), |e| e.min(content.len()));
+                let chunk = &content[start..end];
                 let (packed, raw_flag) = self.pack_flag(chunk);
                 let (body_bytes, flag) = if packed.len() < chunk.len() {
                     (packed, 0u32)

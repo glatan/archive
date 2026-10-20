@@ -117,7 +117,10 @@ pub fn seek_table(input: &[u8]) -> Result<SeekTable, Error> {
         ));
     }
 
-    let mut entries = Vec::with_capacity(num_frames);
+    let mut entries = Vec::new();
+    entries
+        .try_reserve(num_frames)
+        .map_err(|_| Error::InvalidData("zstd-seekable: table too large"))?;
     let mut offset = table_offset + 8;
     for _ in 0..num_frames {
         let entry = SeekEntry {

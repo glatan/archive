@@ -47,6 +47,12 @@ pub fn run() -> Result<(), wasmtime::Error> {
     let root = std::env::var("ARCHIVE_FUZZ_ROOT").unwrap_or_else(|_| "/workspace".to_string());
     let mut args = vec!["archive-fuzz".to_string()];
     args.extend(std::env::args().skip(1));
+    if let Some(pos) = args.iter().position(|a| a == "--jobs" || a == "-j")
+        && let Some(n) = args.get(pos + 1).and_then(|v| v.parse::<usize>().ok())
+        && n > 1
+    {
+        eprintln!("[wasm] warning: --jobs {n} can trigger watchdog false positives; use --jobs 1");
+    }
 
     let mut config = Config::new();
     config.wasm_simd(true);
