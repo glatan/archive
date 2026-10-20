@@ -483,7 +483,8 @@ fn parse(input: &[u8]) -> Result<File<'_>, Error> {
         return Err(Error::InvalidData("mscfb"));
     }
     for off in (0..dir_raw.len()).step_by(128) {
-        let e = &dir_raw[off..off + 128];
+        let entry_end = off.checked_add(128).ok_or(Error::UnexpectedEof)?;
+        let e = dir_raw.get(off..entry_end).ok_or(Error::UnexpectedEof)?;
         let obj_type = e[66];
         if obj_type > 5 || obj_type == 3 || obj_type == 4 {
             return Err(Error::InvalidData("mscfb"));

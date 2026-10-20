@@ -529,7 +529,10 @@ fn emit_fragment(
     let la = usize::try_from(la).map_err(|_| Error::InvalidData("erofs extent offset"))?;
     let fo = usize::try_from(frag_off).map_err(|_| Error::InvalidData("erofs fragment offset"))?;
     let ll = llen as usize;
-    if la + ll > out.len() {
+    let la_end = la
+        .checked_add(ll)
+        .ok_or(Error::InvalidData("erofs extent out of range"))?;
+    if la_end > out.len() {
         return Err(Error::InvalidData("erofs extent out of range"));
     }
     let fend = fo
@@ -538,7 +541,7 @@ fn emit_fragment(
     let frag = packed
         .get(fo..fend)
         .ok_or(Error::InvalidData("erofs fragment out of range"))?;
-    out[la..la + ll].copy_from_slice(frag);
+    out[la..la_end].copy_from_slice(frag);
     Ok(())
 }
 
@@ -573,14 +576,17 @@ fn emit_inline(
         .ok_or(Error::InvalidData("erofs inline data out of range"))?;
     let la = usize::try_from(p.la).map_err(|_| Error::InvalidData("erofs extent offset"))?;
     let ll = llen as usize;
-    if la + ll > out.len() {
+    let la_end = la
+        .checked_add(ll)
+        .ok_or(Error::InvalidData("erofs extent out of range"))?;
+    if la_end > out.len() {
         return Err(Error::InvalidData("erofs extent out of range"));
     }
     if p.htype == LCLUSTER_PLAIN {
         if ll > usize::from(idata_size) {
             return Err(Error::InvalidData("erofs plain extent too small"));
         }
-        out[la..la + ll].copy_from_slice(&region[..ll]);
+        out[la..la_end].copy_from_slice(&region[..ll]);
         return Ok(());
     }
     let alg = if p.htype == LCLUSTER_HEAD2 {
@@ -592,7 +598,7 @@ fn emit_inline(
         return Err(Error::InvalidData("erofs inconsistent algorithmtype"));
     }
     let data = inflate(img, alg, region, ll)?;
-    out[la..la + ll].copy_from_slice(&data);
+    out[la..la_end].copy_from_slice(&data);
     Ok(())
 }
 
@@ -617,18 +623,24 @@ fn emit_raw(
         .data
         .get(pa..pa.saturating_add(plen as usize))
         .ok_or(Error::InvalidData("erofs plain extent out of range"))?;
-    if la + ll > out.len() {
+    let la_end = la
+        .checked_add(ll)
+        .ok_or(Error::InvalidData("erofs extent out of range"))?;
+    if la_end > out.len() {
         return Err(Error::InvalidData("erofs extent out of range"));
     }
     if interlaced {
         // Raw data ends block-aligned inside the pcluster: the head
         // of this extent shares a block with the previous one.
         let cur = (blksz - (la as u64 & (blksz - 1))).min(llen) as usize;
+        let cur_end = la
+            .checked_add(cur)
+            .ok_or(Error::InvalidData("erofs extent out of range"))?;
         let start = plen as usize - cur;
-        out[la..la + cur].copy_from_slice(&region[start..start + cur]);
-        out[la + cur..la + ll].copy_from_slice(&region[..ll - cur]);
+        out[la..cur_end].copy_from_slice(&region[start..start + cur]);
+        out[cur_end..la_end].copy_from_slice(&region[..ll - cur]);
     } else {
-        out[la..la + ll].copy_from_slice(&region[..ll]);
+        out[la..la_end].copy_from_slice(&region[..ll]);
     }
     Ok(())
 }
@@ -721,7 +733,10 @@ fn emit(
     }
     let la = usize::try_from(p.la).map_err(|_| Error::InvalidData("erofs extent offset"))?;
     let ll = llen as usize;
-    if la + ll > out.len() {
+    let la_end = la
+        .checked_add(ll)
+        .ok_or(Error::InvalidData("erofs extent out of range"))?;
+    if la_end > out.len() {
         return Err(Error::InvalidData("erofs extent out of range"));
     }
     // The compressed stream may be shorter than `plen`; trailing
@@ -733,7 +748,7 @@ fn emit(
         .get(pa..end_off)
         .ok_or(Error::InvalidData("erofs pcluster out of range"))?;
     let data = inflate(img, alg, region, ll)?;
-    out[la..la + ll].copy_from_slice(&data);
+    out[la..la_end].copy_from_slice(&data);
     Ok(())
 }
 

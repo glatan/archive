@@ -566,10 +566,11 @@ fn parse_dirents<'a>(
             pos = blk_end;
             continue;
         }
-        if len < 34 || pos + len > avail {
+        let rec_end = pos.checked_add(len).ok_or(Error::UnexpectedEof)?;
+        if len < 34 || rec_end > avail {
             return Err(Error::InvalidData("iso9660 truncated directory record"));
         }
-        let r = &data[pos..pos + len];
+        let r = &data[pos..rec_end];
         let name_len = r[32] as usize;
         if 33 + name_len > len {
             return Err(Error::InvalidData("iso9660 dirent name overflow"));

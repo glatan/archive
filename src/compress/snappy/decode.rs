@@ -23,11 +23,12 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
     while pos < input.len() {
         let chunk_type = read_byte(input, &mut pos)?;
         let chunk_len = read_u24_le(input, &mut pos)? as usize;
-        if pos + chunk_len > input.len() {
+        let chunk_end = pos.checked_add(chunk_len).ok_or(Error::UnexpectedEof)?;
+        if chunk_end > input.len() {
             return Err(Error::UnexpectedEof);
         }
-        let chunk = &input[pos..pos + chunk_len];
-        pos += chunk_len;
+        let chunk = &input[pos..chunk_end];
+        pos = chunk_end;
 
         match chunk_type {
             STREAM_IDENTIFIER_TYPE => {
@@ -119,11 +120,12 @@ pub fn decode_raw(input: &[u8]) -> Result<Vec<u8>, Error> {
         match tag & 0x03 {
             0x00 => {
                 let len = read_literal_len(input, &mut pos, tag)?;
-                if pos + len > input.len() {
+                let literal_end = pos.checked_add(len).ok_or(Error::UnexpectedEof)?;
+                if literal_end > input.len() {
                     return Err(Error::UnexpectedEof);
                 }
-                output.extend_from_slice(&input[pos..pos + len]);
-                pos += len;
+                output.extend_from_slice(&input[pos..literal_end]);
+                pos = literal_end;
             }
             0x01 => {
                 let len = 4 + ((tag >> 2) & 0x07) as usize;
@@ -169,14 +171,15 @@ fn read_literal_len(input: &[u8], pos: &mut usize, tag: u8) -> Result<usize, Err
         return Ok(len_code + 1);
     }
     let extra = len_code - 59;
-    if *pos + extra > input.len() {
+    let extra_end = pos.checked_add(extra).ok_or(Error::UnexpectedEof)?;
+    if extra_end > input.len() {
         return Err(Error::UnexpectedEof);
     }
     let mut len_minus_one = 0usize;
     for i in 0..extra {
         len_minus_one |= (input[*pos + i] as usize) << (8 * i);
     }
-    *pos += extra;
+    *pos = extra_end;
     Ok(len_minus_one + 1)
 }
 
@@ -211,26 +214,29 @@ fn read_byte(input: &[u8], pos: &mut usize) -> Result<u8, Error> {
 }
 
 fn read_u16_le(input: &[u8], pos: &mut usize) -> Result<u16, Error> {
-    if *pos + 2 > input.len() {
+    let end = pos.checked_add(2).ok_or(Error::UnexpectedEof)?;
+    if end > input.len() {
         return Err(Error::UnexpectedEof);
     }
     let value = u16::from_le_bytes([input[*pos], input[*pos + 1]]);
-    *pos += 2;
+    *pos = end;
     Ok(value)
 }
 
 fn read_u24_le(input: &[u8], pos: &mut usize) -> Result<u32, Error> {
-    if *pos + 3 > input.len() {
+    let end = pos.checked_add(3).ok_or(Error::UnexpectedEof)?;
+    if end > input.len() {
         return Err(Error::UnexpectedEof);
     }
     let value =
         input[*pos] as u32 | ((input[*pos + 1] as u32) << 8) | ((input[*pos + 2] as u32) << 16);
-    *pos += 3;
+    *pos = end;
     Ok(value)
 }
 
 fn read_u32_le(input: &[u8], pos: &mut usize) -> Result<u32, Error> {
-    if *pos + 4 > input.len() {
+    let end = pos.checked_add(4).ok_or(Error::UnexpectedEof)?;
+    if end > input.len() {
         return Err(Error::UnexpectedEof);
     }
     let value = u32::from_le_bytes([
@@ -239,7 +245,7 @@ fn read_u32_le(input: &[u8], pos: &mut usize) -> Result<u32, Error> {
         input[*pos + 2],
         input[*pos + 3],
     ]);
-    *pos += 4;
+    *pos = end;
     Ok(value)
 }
 
@@ -445,6 +451,16 @@ mod tests {
         raw.extend_from_slice(&299u16.to_le_bytes()); // len - 1 = 299
         raw.extend_from_slice(&[b'b'; 300]);
         assert_eq!(decode_raw(&raw).unwrap(), vec![b'b'; 300]);
+    }
+
+    #[test]
+    fn read_helpers_reject_position_overflow() {
+        let mut pos = usize::MAX;
+        assert!(read_u16_le(&[], &mut pos).is_err());
+        let mut pos = usize::MAX;
+        assert!(read_u24_le(&[], &mut pos).is_err());
+        let mut pos = usize::MAX;
+        assert!(read_u32_le(&[], &mut pos).is_err());
     }
 
     #[test]

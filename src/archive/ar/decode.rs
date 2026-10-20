@@ -68,12 +68,13 @@ pub fn decode(input: &[u8]) -> Result<Vec<ArEntry>, Error> {
     let mut gnu_string_table: Option<Vec<u8>> = None;
 
     while pos < input.len() {
-        if pos + HEADER_LEN > input.len() {
+        let header_end = pos.checked_add(HEADER_LEN).ok_or(Error::UnexpectedEof)?;
+        if header_end > input.len() {
             return Err(Error::UnexpectedEof);
         }
 
-        let header = &input[pos..pos + HEADER_LEN];
-        pos += HEADER_LEN;
+        let header = &input[pos..header_end];
+        pos = header_end;
 
         if &header[58..60] != b"`\n" {
             return Err(Error::InvalidData("ar: invalid file header trailer"));
@@ -97,11 +98,12 @@ pub fn decode(input: &[u8]) -> Result<Vec<ArEntry>, Error> {
         // as the `//` string table and `/` symbol table still carry data.
         let stored_size = if is_thin && !special { 0 } else { raw_size };
 
-        if pos + stored_size > input.len() {
+        let payload_end = pos.checked_add(stored_size).ok_or(Error::UnexpectedEof)?;
+        if payload_end > input.len() {
             return Err(Error::UnexpectedEof);
         }
-        let payload = &input[pos..pos + stored_size];
-        pos += stored_size;
+        let payload = &input[pos..payload_end];
+        pos = payload_end;
 
         if stored_size % 2 == 1 {
             if pos >= input.len() {
@@ -267,6 +269,15 @@ fn trim_ascii_spaces(field: &[u8]) -> &[u8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejects_payload_size_that_overflows_position() {
+        // On 32-bit, `pos + size` must not wrap before the bounds check.
+        let mut data = Vec::new();
+        data.extend_from_slice(GLOBAL_MAGIC);
+        push_header(&mut data, "x/", u32::MAX as usize);
+        assert!(decode(&data).is_err());
+    }
 
     fn push_header(buf: &mut Vec<u8>, name: &str, size: usize) {
         let mut field = [b' '; HEADER_LEN];

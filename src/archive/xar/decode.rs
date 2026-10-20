@@ -159,10 +159,11 @@ pub fn decode(input: &[u8]) -> Result<Vec<XarEntry>, Error> {
         if expected.len() != size {
             return Err(invalid("xar: checksum size mismatch"));
         }
-        if heap.len() < offset + size {
-            return Err(invalid("xar: truncated heap checksum"));
-        }
-        if heap[offset..offset + size] != expected[..] {
+        let end = offset
+            .checked_add(size)
+            .filter(|&end| end <= heap.len())
+            .ok_or_else(|| invalid("xar: truncated heap checksum"))?;
+        if heap[offset..end] != expected[..] {
             return Err(invalid("xar: TOC checksum mismatch"));
         }
     }
