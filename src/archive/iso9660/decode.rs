@@ -441,7 +441,7 @@ fn dec_str(raw: &[u8]) -> String {
 /// byte in 15-minute units. Returns `None` when the field is
 /// unspecified (all digits `'0'` and tz 0) or not parseable.
 fn dec_vd_datetime(b: &[u8], o: usize) -> Option<i64> {
-    let f = b.get(o..o + 17)?;
+    let f = b.get(o..o.checked_add(17)?)?;
     if f[..16].iter().all(|&c| c == b'0') && f[16] == 0 {
         return None;
     }

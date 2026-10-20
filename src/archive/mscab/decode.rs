@@ -209,17 +209,31 @@ fn decompress_folder(
     let mut off = folder.coff_cab_start;
     for _ in 0..folder.c_cfdata {
         let csum = le_u32(input, off)?;
-        let cb_data = le_u16(input, off + 4)? as usize;
-        let cb_uncomp = le_u16(input, off + 6)? as usize;
-        let data_start = off + 8 + cb_cfdata_reserve;
+        let cb_data_pos = off
+            .checked_add(4)
+            .ok_or(Error::InvalidData("mscab: truncated CFDATA"))?;
+        let cb_uncomp_pos = off
+            .checked_add(6)
+            .ok_or(Error::InvalidData("mscab: truncated CFDATA"))?;
+        let cb_data = le_u16(input, cb_data_pos)? as usize;
+        let cb_uncomp = le_u16(input, cb_uncomp_pos)? as usize;
+        let header_end = off
+            .checked_add(8)
+            .ok_or(Error::InvalidData("mscab: truncated CFDATA"))?;
+        let data_start = header_end
+            .checked_add(cb_cfdata_reserve)
+            .ok_or(Error::InvalidData("mscab: truncated CFDATA"))?;
+        let data_end = data_start
+            .checked_add(cb_data)
+            .ok_or(Error::InvalidData("mscab: truncated CFDATA"))?;
         let block = input
-            .get(data_start..data_start + cb_data)
+            .get(data_start..data_end)
             .ok_or(Error::InvalidData("mscab: truncated CFDATA"))?;
         if csum != 0 {
             // The checksum covers cbData, cbUncomp, the abReserve area, and
             // the data itself; the two u16 fields pack into the seed.
             let seed = (cb_uncomp as u32) << 16 | cb_data as u32;
-            let covered = &input[off + 8..data_start + cb_data];
+            let covered = &input[header_end..data_end];
             if checksum(covered, seed) != csum {
                 return Err(Error::InvalidData("mscab: CFDATA checksum mismatch"));
             }
@@ -229,7 +243,7 @@ fn decompress_folder(
             // Split block: buffer the compressed prefix; the matching
             // tail arrives in the next cabinet's fragment.
             pending.extend_from_slice(block);
-            off = data_start + cb_data;
+            off = data_end;
             continue;
         } else if pending.is_empty() {
             alloc::borrow::Cow::Borrowed(block)
@@ -273,7 +287,7 @@ fn decompress_folder(
             }
             _ => unreachable!(),
         }
-        off = data_start + cb_data;
+        off = data_end;
     }
     if comp_type == COMPRESS_LZX && pending.is_empty() {
         // Logical folder complete: decode the contiguous LZX stream.

@@ -193,6 +193,10 @@ probe 毎にリセットされるため、多数の高速 probe を走らせる�
 ネストした `enter` (minimizer 等) も in-memory 更新のみで、外側の breadcrumb を保つ。
 abort 時点で実行中だった外部ツールの子プロセスは孤児として残り得る点に注意。
 
+wasm32 では wasmtime のスレッド実行の影響で、`FUZZ_JOBS` を 1 より大きくすると
+watchdog が 60 秒超過を誤検知することがある。記録された `hang-*` artifact は
+`replay` では再現しない。`fuzz-wasm` は既定の `FUZZ_JOBS=1` で実行する。
+
 `run` は起動時に failures ディレクトリ配下の `run-*` に残った `inflight-*.json`
 breadcrumb を数え、見つかれば警告を出す (前回の run / replay がケース途中で
 abort された痕跡)。別の run が同じ failures ディレクトリで同時実行中の場合は

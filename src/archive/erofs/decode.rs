@@ -694,13 +694,15 @@ impl Img<'_> {
             if !(1..=256).contains(&len) {
                 return None;
             }
-            let item = src.get(pos + 2..pos + 2 + len)?;
+            let item_start = pos.checked_add(2)?;
+            let item_end = item_start.checked_add(len)?;
+            let item = src.get(item_start..item_end)?;
             if i == usize::from(idx) {
                 let mut name = String::from(Self::short_prefix(item[0])?);
                 name.push_str(&String::from_utf8_lossy(&item[1..]));
                 return Some(name);
             }
-            pos += 2 + len;
+            pos = item_end;
         }
         None
     }
@@ -713,11 +715,18 @@ impl Img<'_> {
         let name_len = usize::from(e[0]);
         let index = e[1];
         let value_len = usize::from(u16le(e, 2));
+        let name_start = 4usize;
+        let name_end = name_start
+            .checked_add(name_len)
+            .ok_or(Error::InvalidData("erofs truncated xattr name"))?;
+        let value_end = name_end
+            .checked_add(value_len)
+            .ok_or(Error::InvalidData("erofs truncated xattr value"))?;
         let name = e
-            .get(4..4 + name_len)
+            .get(name_start..name_end)
             .ok_or(Error::InvalidData("erofs truncated xattr name"))?;
         let value = e
-            .get(4 + name_len..4 + name_len + value_len)
+            .get(name_end..value_end)
             .ok_or(Error::InvalidData("erofs truncated xattr value"))?;
         let prefix: Option<String> = if index & 0x80 != 0 {
             // EROFS_XATTR_LONG_PREFIX: an out-of-range prefix id is
@@ -784,7 +793,8 @@ impl Img<'_> {
         let mut pos = header_sz;
         let mut remaining = isize - header_sz;
         while remaining > 0 {
-            let hdr = body.get(pos..pos + 4).ok_or(Error::UnexpectedEof)?;
+            let hdr_end = pos.checked_add(4).ok_or(Error::UnexpectedEof)?;
+            let hdr = body.get(pos..hdr_end).ok_or(Error::UnexpectedEof)?;
             let raw = 4 + usize::from(hdr[0]) + usize::from(u16le(hdr, 2));
             let esz = raw
                 .checked_add(3)
@@ -793,10 +803,13 @@ impl Img<'_> {
             if esz > remaining {
                 return Err(Error::InvalidData("erofs xattr entry beyond ibody"));
             }
-            if let Some(x) = self.xattr_entry(&body[pos..pos + esz])? {
+            let entry_end = pos
+                .checked_add(esz)
+                .ok_or(Error::InvalidData("erofs xattr entry size"))?;
+            if let Some(x) = self.xattr_entry(&body[pos..entry_end])? {
                 out.push(x);
             }
-            pos += esz;
+            pos = entry_end;
             remaining -= esz;
         }
         // Shared entries (erofs_xattr_iter_shared): each id selects a
@@ -1038,14 +1051,16 @@ fn decode_limited(input: &[u8], max_output: usize) -> Result<ErofsImage, Error> 
         let mut alg = 0u8;
         while bits != 0 {
             if bits & 1 != 0 {
-                off = (off + 3) & !3;
-                let hdr = input.get(off..off + 2).ok_or(Error::UnexpectedEof)?;
+                off = off.checked_add(3).ok_or(Error::UnexpectedEof)? & !3;
+                let hdr_end = off.checked_add(2).ok_or(Error::UnexpectedEof)?;
+                let hdr = input.get(off..hdr_end).ok_or(Error::UnexpectedEof)?;
                 let len = match usize::from(u16le(hdr, 0)) {
                     0 => 1 << 16, // a zero size encodes 65536
                     v => v,
                 };
-                off += 2;
-                let cfg = input.get(off..off + len).ok_or(Error::UnexpectedEof)?;
+                off = hdr_end;
+                let cfg_end = off.checked_add(len).ok_or(Error::UnexpectedEof)?;
+                let cfg = input.get(off..cfg_end).ok_or(Error::UnexpectedEof)?;
                 match alg {
                     1 => {
                         // z_erofs_lzma_cfgs { dict_size, format }
@@ -1070,7 +1085,7 @@ fn decode_limited(input: &[u8], max_output: usize) -> Result<ErofsImage, Error> 
                     }
                     _ => {}
                 }
-                off += len;
+                off = cfg_end;
             }
             bits >>= 1;
             alg += 1;

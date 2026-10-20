@@ -273,16 +273,14 @@ pub(super) fn decode(
         }
 
         let source = if opcode == 0xE8 {
-            let bytes = call
-                .get(call_pos..call_pos + 4)
-                .ok_or(Error::UnexpectedEof)?;
-            call_pos += 4;
+            let call_end = call_pos.checked_add(4).ok_or(Error::UnexpectedEof)?;
+            let bytes = call.get(call_pos..call_end).ok_or(Error::UnexpectedEof)?;
+            call_pos = call_end;
             bytes
         } else {
-            let bytes = jump
-                .get(jump_pos..jump_pos + 4)
-                .ok_or(Error::UnexpectedEof)?;
-            jump_pos += 4;
+            let jump_end = jump_pos.checked_add(4).ok_or(Error::UnexpectedEof)?;
+            let bytes = jump.get(jump_pos..jump_end).ok_or(Error::UnexpectedEof)?;
+            jump_pos = jump_end;
             bytes
         };
 

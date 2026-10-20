@@ -328,7 +328,7 @@ fn unpack_compacted(
     let packsz = vcnt << shift;
     let pack = img
         .mdata(zm.mh)?
-        .get(pack_off..pack_off + packsz)
+        .get(pack_off..pack_off.checked_add(packsz).ok_or(Error::UnexpectedEof)?)
         .ok_or(Error::UnexpectedEof)?;
     // ilog2(Z_EROFS_LI_D0_CBLKCNT) + 1 = 12
     let lobits = zm.lclusterbits.max(12);
@@ -410,7 +410,7 @@ fn load_index(img: &Img<'_>, zm: &ZMap, lcn: u64) -> Result<LcIndex, Error> {
             .ok_or(Error::InvalidData("erofs index overflow"))?;
         let d = img
             .mdata(zm.mh)?
-            .get(pos..pos + 8)
+            .get(pos..pos.checked_add(8).ok_or(Error::UnexpectedEof)?)
             .ok_or(Error::UnexpectedEof)?;
         let advise = u16le(d, 0);
         let ty = (advise & LCLUSTER_TYPE_MASK) as u8;
@@ -858,15 +858,21 @@ fn apply_extent(
     let pa_us = usize::try_from(pa).map_err(|_| Error::InvalidData("erofs extent offset"))?;
     let la_us = usize::try_from(la).map_err(|_| Error::InvalidData("erofs extent offset"))?;
     let ll = llen as usize;
-    if la_us + ll > out.len() {
+    let la_end = la_us
+        .checked_add(ll)
+        .ok_or(Error::InvalidData("erofs extent out of range"))?;
+    if la_end > out.len() {
         return Err(Error::InvalidData("erofs extent out of range"));
     }
+    let pa_end = pa_us
+        .checked_add(plen as usize)
+        .ok_or(Error::InvalidData("erofs extent out of range"))?;
     let region = img
         .data
-        .get(pa_us..pa_us + plen as usize)
+        .get(pa_us..pa_end)
         .ok_or(Error::InvalidData("erofs extent out of range"))?;
     let data = inflate(img, alg, region, ll)?;
-    out[la_us..la_us + ll].copy_from_slice(&data);
+    out[la_us..la_end].copy_from_slice(&data);
     Ok(())
 }
 
@@ -883,7 +889,15 @@ fn read_extents(
     let mut out = alloc::vec![0u8; size as usize];
     let interlaced = zm.advise & ADVISE_INTERLACED_PCLUSTER != 0;
     let fragment = zm.advise & ADVISE_FRAGMENT_PCLUSTER != 0;
-    let mut pos = (hpos + 8).div_ceil(recsz) * recsz;
+    if recsz == 0 {
+        return Err(Error::InvalidData("erofs zero extent record size"));
+    }
+    let mut pos = hpos
+        .checked_add(8)
+        .ok_or(Error::InvalidData("erofs extent offset overflow"))?
+        .div_ceil(recsz)
+        .checked_mul(recsz)
+        .ok_or(Error::InvalidData("erofs extent offset overflow"))?;
     let lsz = 1u64 << zm.lclusterbits;
     if recsz <= 8 {
         // Fixed `1 << lclusterbits` extents; record i covers logical
@@ -893,17 +907,18 @@ fn read_extents(
         if recsz == 4 {
             let base = img
                 .mdata(zm.mh)?
-                .get(pos..pos + 8)
+                .get(pos..pos.checked_add(8).ok_or(Error::UnexpectedEof)?)
                 .ok_or(Error::UnexpectedEof)?;
             pa_acc = u64le(base, 0);
-            pos += 8;
+            pos = pos.checked_add(8).ok_or(Error::UnexpectedEof)?;
         }
         for i in 0..nrec {
+            let rec_end = pos.checked_add(recsz).ok_or(Error::UnexpectedEof)?;
             let rec = img
                 .mdata(zm.mh)?
-                .get(pos..pos + recsz)
+                .get(pos..rec_end)
                 .ok_or(Error::UnexpectedEof)?;
-            pos += recsz;
+            pos = rec_end;
             if fragment && i + 1 == nrec {
                 // The last record is a packed-inode fragment:
                 // plen carries the low 32 offset bits and (for
@@ -942,11 +957,12 @@ fn read_extents(
     let mut pend: Option<(u64, u64, u32)> = None; // (lstart, pa, plen_raw)
     for i in 0..=nrec {
         let (lstart, pa, plen_raw) = if i < nrec {
+            let rec_end = pos.checked_add(recsz).ok_or(Error::UnexpectedEof)?;
             let rec = img
                 .mdata(zm.mh)?
-                .get(pos..pos + recsz)
+                .get(pos..rec_end)
                 .ok_or(Error::UnexpectedEof)?;
-            pos += recsz;
+            pos = rec_end;
             let plen_raw = u32le(rec, 0);
             let pa = u64::from(u32le(rec, 4)) | (u64::from(u32le(rec, 8)) << 32);
             let lstart = u64::from(u32le(rec, 12))
@@ -999,7 +1015,7 @@ pub(crate) fn read_compressed(
         .ok_or(Error::InvalidData("erofs map header overflow"))?;
     let h = img
         .mdata(ino.mh)?
-        .get(hpos..hpos + 8)
+        .get(hpos..hpos.checked_add(8).ok_or(Error::UnexpectedEof)?)
         .ok_or(Error::UnexpectedEof)?;
     if h[7] >> 7 != 0 {
         // Z_EROFS_FRAGMENT_INODE_BIT: the file lives inside the

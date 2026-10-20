@@ -423,9 +423,11 @@ impl Reader<'_> {
     fn read_metadata_block(&self, pos: usize) -> Result<(Vec<u8>, usize), Error> {
         let header = le16(self.input, pos)?;
         let size = usize::from(header & META_SIZE_MASK);
+        let raw_start = pos.checked_add(2).ok_or(Error::UnexpectedEof)?;
+        let raw_end = raw_start.checked_add(size).ok_or(Error::UnexpectedEof)?;
         let raw = self
             .input
-            .get(pos + 2..pos + 2 + size)
+            .get(raw_start..raw_end)
             .ok_or(Error::UnexpectedEof)?;
         let data = if header & META_UNCOMPRESSED != 0 {
             raw.to_vec()
@@ -435,7 +437,7 @@ impl Reader<'_> {
         if data.len() > META_BLOCK_SIZE {
             return Err(Error::InvalidData("squashfs: metadata block overflow"));
         }
-        Ok((data, pos + 2 + size))
+        Ok((data, raw_end))
     }
 
     /// Decompress a contiguous run of metadata blocks in `[start, end)`.
@@ -639,13 +641,17 @@ fn parse_inode_body(
         }
         TYPE_BASIC_SYMLINK | TYPE_EXT_SYMLINK => {
             let target_size = le32(data, pos + 4)? as usize;
+            let target_start = pos.checked_add(8).ok_or(Error::UnexpectedEof)?;
+            let target_end = target_start
+                .checked_add(target_size)
+                .ok_or(Error::UnexpectedEof)?;
             let target = data
-                .get(pos + 8..pos + 8 + target_size)
+                .get(target_start..target_end)
                 .ok_or(Error::UnexpectedEof)?
                 .to_vec();
             // Extended symlinks append an xattr index after the target.
             let xattr = if header.inode_type == TYPE_EXT_SYMLINK {
-                le32(data, pos + 8 + target_size)?
+                le32(data, target_end)?
             } else {
                 NO_INDEX
             };

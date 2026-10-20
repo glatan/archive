@@ -129,20 +129,39 @@ struct Hdr {
 }
 
 fn parse_hdr(input: &[u8], off: usize) -> Result<Hdr, Error> {
-    if !off.is_multiple_of(ALIGN) || input.len() < off + ROMFH_SIZE {
+    let header_end = off
+        .checked_add(ROMFH_SIZE)
+        .ok_or(Error::InvalidData("romfs unaligned/truncated header"))?;
+    if !off.is_multiple_of(ALIGN) || input.len() < header_end {
         return Err(Error::InvalidData("romfs unaligned/truncated header"));
     }
     let next = u32be(input, off);
-    let spec = u32be(input, off + 4);
-    let size = u32be(input, off + 8);
+    let spec = u32be(
+        input,
+        off.checked_add(4)
+            .ok_or(Error::InvalidData("romfs unaligned/truncated header"))?,
+    );
+    let size = u32be(
+        input,
+        off.checked_add(8)
+            .ok_or(Error::InvalidData("romfs unaligned/truncated header"))?,
+    );
     // Name: NUL-terminated starting at off+16, padded to 16.
-    let name_start = off + ROMFH_SIZE;
-    let scan_end = (off + 512).min(input.len());
-    let hay = &input[name_start..scan_end];
+    let name_start = header_end;
+    let scan_end = off
+        .checked_add(512)
+        .map_or(input.len(), |end| end.min(input.len()));
+    let hay = input
+        .get(name_start..scan_end)
+        .ok_or(Error::InvalidData("romfs unterminated name"))?;
     let nlen = hay
         .iter()
         .position(|&c| c == 0)
         .ok_or(Error::InvalidData("romfs unterminated name"))?;
+    let name_pad = align16(nlen + 1);
+    let data_off = name_start
+        .checked_add(name_pad)
+        .ok_or(Error::InvalidData("romfs name padding overflow"))?;
     let hdr = Hdr {
         next: next & !0xF,
         ty: next & 0x7,
@@ -151,11 +170,11 @@ fn parse_hdr(input: &[u8], off: usize) -> Result<Hdr, Error> {
         size,
         name_off: name_start,
         name_len: nlen,
-        data_off: name_start + align16(nlen + 1),
+        data_off,
     };
     // Metadata checksum covers the 16-byte header plus the padded
     // name; the checksum field makes the longword sum zero.
-    let meta_end = name_start + align16(nlen + 1);
+    let meta_end = data_off;
     if meta_end <= input.len() && checksum(&input[off..meta_end]) != 0 {
         return Err(Error::InvalidData("romfs bad header checksum"));
     }
@@ -210,8 +229,9 @@ impl<'a> Image<'a> {
         if size == 0 {
             return Ok(Vec::new());
         }
+        let data_end = h.data_off.checked_add(size).ok_or(Error::UnexpectedEof)?;
         self.input
-            .get(h.data_off..h.data_off + size)
+            .get(h.data_off..data_end)
             .map(|s| s.to_vec())
             .ok_or(Error::UnexpectedEof)
     }
@@ -364,6 +384,12 @@ pub fn decode(input: &[u8]) -> Result<RomfsImage, Error> {
 mod tests {
     use super::*;
     use crate::traits::ArchiveEntry;
+
+    #[test]
+    fn parse_hdr_rejects_offset_overflow() {
+        // `off + ROMFH_SIZE` must not wrap before the bounds check.
+        assert!(parse_hdr(&[], usize::MAX - 8).is_err());
+    }
 
     /// One fixture row for `build_typed`:
     /// (path, explicit type, exec, spec.info, data).
