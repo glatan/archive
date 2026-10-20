@@ -74,22 +74,31 @@ struct Dirent {
 }
 
 fn le_u16(data: &[u8], off: usize) -> Result<u16, Error> {
+    let end = off
+        .checked_add(2)
+        .ok_or(Error::InvalidData("zim: truncated"))?;
     let bytes = data
-        .get(off..off + 2)
+        .get(off..end)
         .ok_or(Error::InvalidData("zim: truncated"))?;
     Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
 }
 
 fn le_u32(data: &[u8], off: usize) -> Result<u32, Error> {
+    let end = off
+        .checked_add(4)
+        .ok_or(Error::InvalidData("zim: truncated"))?;
     let bytes = data
-        .get(off..off + 4)
+        .get(off..end)
         .ok_or(Error::InvalidData("zim: truncated"))?;
     Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
 fn le_u64(data: &[u8], off: usize) -> Result<u64, Error> {
+    let end = off
+        .checked_add(8)
+        .ok_or(Error::InvalidData("zim: truncated"))?;
     let bytes = data
-        .get(off..off + 8)
+        .get(off..end)
         .ok_or(Error::InvalidData("zim: truncated"))?;
     Ok(u64::from_le_bytes([
         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
@@ -464,6 +473,15 @@ mod tests {
     use crate::traits::ArchiveEntry;
     use alloc::vec;
     use alloc::vec::Vec;
+
+    #[test]
+    fn le_helpers_reject_offset_overflow() {
+        // `usize::MAX + N` overflows on every pointer width; the helpers
+        // must return an error rather than panic before `get`.
+        assert!(le_u16(&[], usize::MAX).is_err());
+        assert!(le_u32(&[], usize::MAX).is_err());
+        assert!(le_u64(&[], usize::MAX).is_err());
+    }
 
     /// Minimal ZIM builder: single mime list, dirents, one stored/xz cluster.
     struct ZimBuilder {

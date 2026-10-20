@@ -342,6 +342,12 @@ impl CpioHeader {
             .checked_add(header.namesize as usize)
             .ok_or(Error::InvalidData("cpio: header size overflow"))?;
         let total = align_to(name_end, format.alignment());
+        if total < name_end {
+            // `align_to` saturates on a 32-bit target; a wrapped-down total
+            // would make the public "bytes consumed" result smaller than
+            // the name it is supposed to include.
+            return Err(Error::InvalidData("cpio: header size overflow"));
+        }
 
         Ok((header, total))
     }
@@ -385,6 +391,20 @@ mod tests {
         assert_eq!(parse_octal_field(b"000000").unwrap(), 0);
         assert_eq!(parse_octal_field(b"000377").unwrap(), 255);
         assert_eq!(parse_octal_field(b"777777").unwrap(), 0o777777);
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "32")]
+    fn test_parse_rejects_total_wraparound() {
+        // namesize makes `name_end` land on usize::MAX, so the alignment
+        // round-up cannot be represented on a 32-bit target.
+        let mut data = [b'0'; HEADER_SIZE];
+        data[0..6].copy_from_slice(b"070701");
+        data[94..102].copy_from_slice(b"ffffff91");
+        assert!(matches!(
+            CpioHeader::parse(&data),
+            Err(Error::InvalidData("cpio: header size overflow"))
+        ));
     }
 
     #[test]

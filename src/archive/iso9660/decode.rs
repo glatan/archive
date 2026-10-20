@@ -1765,7 +1765,10 @@ pub fn decode(input: &[u8]) -> Result<IsoImage, Error> {
     let mut el_torito = Vec::new();
     let mut off = VD_START;
     loop {
-        let sec = input.get(off..off + SECTOR).ok_or(Error::InvalidData(
+        let sec_end = off.checked_add(SECTOR).ok_or(Error::InvalidData(
+            "iso9660 missing volume descriptor terminator",
+        ))?;
+        let sec = input.get(off..sec_end).ok_or(Error::InvalidData(
             "iso9660 missing volume descriptor terminator",
         ))?;
         if &sec[1..6] != VD_ID {
@@ -1797,7 +1800,9 @@ pub fn decode(input: &[u8]) -> Result<IsoImage, Error> {
             VD_TYPE_TERMINATOR => break,
             _ => {} // partition descriptor
         }
-        off += SECTOR;
+        off = off.checked_add(SECTOR).ok_or(Error::InvalidData(
+            "iso9660 missing volume descriptor terminator",
+        ))?;
     }
     let pvd = pvd.ok_or(Error::InvalidData("iso9660 missing PVD"))?;
     // Type-L path table (ECMA-119 §9.4). Contents are redundant
