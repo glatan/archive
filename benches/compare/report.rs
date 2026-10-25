@@ -359,10 +359,15 @@ fn cv(ours: Option<&Measurement>, reference: Option<&Measurement>) -> String {
     let Some(ours) = ours else {
         return "—".to_owned();
     };
+    if ours.samples_ns.len() < 2 {
+        return "—".to_owned();
+    }
     let value = cv_percent(ours);
-    let ref_value = reference.map(cv_percent);
-    match ref_value {
-        Some(ref_value) => format!("{value:.1}/{ref_value:.1}%"),
+    match reference {
+        Some(reference) if reference.samples_ns.len() >= 2 => {
+            format!("{value:.1}/{:.1}%", cv_percent(reference))
+        }
+        Some(_) => format!("{value:.1}/—"),
         None => format!("{value:.1}%"),
     }
 }
