@@ -191,9 +191,10 @@ bench-refs:
 # snapshot matches the working tree.
 .PHONY: bench-compare-container
 bench-compare-container: build-container.test
-	mkdir -p $(BENCH_OUT)
+	mkdir -p $(BENCH_OUT) target/bench/refs
 	podman run --rm \
 		-v "$(CURDIR)/$(BENCH_OUT):/workspace/bench-out:Z" \
+		-v "$(CURDIR)/target/bench/refs:/workspace/target/bench/refs:Z" \
 		--entrypoint /bin/sh $(TEST_IMAGE) \
 		-c 'cargo build --release -p archive-cli --bin archive --bin archive-bench-helper && \
 		    cargo bench --all-features --bench compare -- --full \
