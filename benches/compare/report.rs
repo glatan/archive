@@ -352,7 +352,11 @@ fn throughput(measurement: Option<&Measurement>, input_len: usize, encode: bool)
         input_len
     };
     let mb_s = bytes as f64 / (median as f64 / 1e9) / 1e6;
-    format!("{mb_s:.1}")
+    if mb_s < 10.0 {
+        format!("{mb_s:.2}")
+    } else {
+        format!("{mb_s:.1}")
+    }
 }
 
 fn cv(ours: Option<&Measurement>, reference: Option<&Measurement>) -> String {
