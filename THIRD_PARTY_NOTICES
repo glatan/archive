@@ -10,8 +10,8 @@ This document is informational and does not replace the repository LICENSE
 file. It is intended to make maintenance and downstream auditing easier.
 
 
-1. Benchmark reference invocations
-----------------------------------
+1a. Benchmark reference invocations
+-----------------------------------
 
 The performance comparison harness in `docs/bench/` executes reference
 tools as subprocesses. It never links reference implementations into the
