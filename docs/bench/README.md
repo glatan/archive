@@ -105,7 +105,8 @@ cargo bench --all-features --bench compare -- \
 `make bench-refs` は `docs/bench/refs/build.py` を実行し、
 `target/bench/refs/bin/` に参照バイナリを置く。ハーネスは PATH より
 `target/bench/refs/bin/` を優先する。ビルド記録は
-`target/bench/refs/build-info.json` に残す。
+`target/bench/refs/build-info.json` に残す。ピン留めした revision と
+フラグの一覧は [refs/README.md](refs/README.md) を参照。
 
 ### ビルドフラグの表示
 
