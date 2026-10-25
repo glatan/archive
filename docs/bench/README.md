@@ -89,7 +89,7 @@ cargo bench --all-features --bench compare -- \
 ## コーパス
 
 - codec: `text` / `run` / `random` / `periodic`（`--corpus all` で全種）
-- archive: 固定メタデータのファイルツリー（quick 24 files、full 120 files）
+- archive: 固定メタデータのファイルツリー（quick 64 files、full 200 files）
 - 大容量ファイルは `target/bench` に生成し、リポジトリにはコミットしない
 - `--size` でサイズを上書きできる
 
