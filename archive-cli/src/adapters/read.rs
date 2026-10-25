@@ -112,6 +112,40 @@ pub fn analyze_bytes(
     })
 }
 
+/// Decoded payload bytes keyed by entry name.
+///
+/// Compression formats produce one payload (the decompressed file).
+/// Archive formats produce one payload per regular file. Metadata-only
+/// formats such as mtree return an empty payload list.
+#[derive(Debug, Clone)]
+pub struct DecodedPayload {
+    pub name: String,
+    pub data: Vec<u8>,
+}
+
+/// Decode every payload with the same dispatch as `archive list`.
+///
+/// This is used by the benchmark helper to time library-level decoding
+/// without extracting files to disk.
+pub fn decode_payloads(
+    path: &Path,
+    input: &[u8],
+    format: Format,
+    password: Option<&str>,
+) -> Result<(ContentKind, Vec<DecodedPayload>), CliError> {
+    let (kind, items) = decode_items(path, input, format, password)?;
+    let payloads = items
+        .into_iter()
+        .filter_map(|item| {
+            item.payload.map(|data| DecodedPayload {
+                name: item.summary.path,
+                data,
+            })
+        })
+        .collect();
+    Ok((kind, payloads))
+}
+
 fn decode_items(
     path: &Path,
     input: &[u8],

@@ -16,28 +16,41 @@ pub fn pack_inputs(command: PackCommand) -> Result<(), CliError> {
     ensure_output_policy(&command.output, command.overwrite)?;
 
     let entries = collect_entries(&command.input, command.base_dir.as_deref())?;
-    let encoded = match command.format {
-        ArchiveFormat::Tar => pack_tar(&entries),
-        ArchiveFormat::Cpio => pack_cpio(&entries),
-        ArchiveFormat::Ar => pack_ar(&entries),
-        ArchiveFormat::Zpaq => pack_zpaq(&entries),
-        ArchiveFormat::Zip => pack_zip(&entries, command.password.as_deref()),
-        ArchiveFormat::SevenZ => pack_sevenz(&entries, command.password.as_deref()),
-        ArchiveFormat::Lha => pack_lha(&entries),
-        ArchiveFormat::Arj => pack_arj(&entries),
-        ArchiveFormat::Arc => pack_arc(&entries),
-        ArchiveFormat::GitPack => pack_git_pack(&entries),
-        ArchiveFormat::Xar => pack_xar(&entries),
-    }?;
+    let encoded = pack_entries(command.format, &entries, command.password.as_deref())?;
     fs::write(&command.output, encoded)?;
     Ok(())
 }
 
+/// Pack already-collected entries with the same dispatch as `archive pack`.
+///
+/// Tree walking is deliberately outside this function so the benchmark
+/// helper can separate library encode time from filesystem I/O.
+pub fn pack_entries(
+    format: ArchiveFormat,
+    entries: &[PackedEntry],
+    password: Option<&str>,
+) -> Result<Vec<u8>, CliError> {
+    match format {
+        ArchiveFormat::Tar => pack_tar(entries),
+        ArchiveFormat::Cpio => pack_cpio(entries),
+        ArchiveFormat::Ar => pack_ar(entries),
+        ArchiveFormat::Zpaq => pack_zpaq(entries),
+        ArchiveFormat::Zip => pack_zip(entries, password),
+        ArchiveFormat::SevenZ => pack_sevenz(entries, password),
+        ArchiveFormat::Lha => pack_lha(entries),
+        ArchiveFormat::Arj => pack_arj(entries),
+        ArchiveFormat::Arc => pack_arc(entries),
+        ArchiveFormat::GitPack => pack_git_pack(entries),
+        ArchiveFormat::Xar => pack_xar(entries),
+    }
+}
+
+/// One file or directory collected for archive writing.
 #[derive(Debug, Clone)]
-struct PackedEntry {
-    archive_path: String,
-    data: Option<Vec<u8>>,
-    is_dir: bool,
+pub struct PackedEntry {
+    pub archive_path: String,
+    pub data: Option<Vec<u8>>,
+    pub is_dir: bool,
 }
 
 fn pack_tar(entries: &[PackedEntry]) -> Result<Vec<u8>, CliError> {
@@ -198,7 +211,7 @@ fn pack_sevenz(entries: &[PackedEntry], password: Option<&str>) -> Result<Vec<u8
         .map_err(|error| CliError::from_archive_error(error, password.is_some()))
 }
 
-fn collect_entries(
+pub fn collect_entries(
     inputs: &[PathBuf],
     base_dir: Option<&Path>,
 ) -> Result<Vec<PackedEntry>, CliError> {
