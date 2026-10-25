@@ -511,6 +511,12 @@ fn build_info() -> String {
     );
     let _ = writeln!(
         out,
+        "target: {} (compile-time target features: {})",
+        std::env::consts::ARCH,
+        option_env!("CARGO_CFG_TARGET_FEATURE").unwrap_or("<unknown>")
+    );
+    let _ = writeln!(
+        out,
         "RUSTFLAGS: {}",
         std::env::var("RUSTFLAGS").unwrap_or_else(|_| "<unset>".to_owned())
     );
