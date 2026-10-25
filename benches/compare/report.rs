@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::{Value, json};
@@ -147,11 +147,11 @@ fn build_markdown(results: &[CaseResult], cases: &[Case], cfg: &Config, json: &V
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "| format | corpus | size | ours-lib enc MB/s | ref enc MB/s | ref/ours enc | ours-lib dec MB/s | ref dec MB/s | ref/ours dec | ours ratio | ref ratio | status / note |"
+        "| format | corpus | size | ours-lib enc MB/s | ours-cli enc MB/s | ref enc MB/s | lib/ref enc | cli/ref enc | ours-lib dec MB/s | ours-cli dec MB/s | ref dec MB/s | lib/ref dec | cli/ref dec | ours ratio | ref ratio | CV | status / note |"
     );
     let _ = writeln!(
         out,
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"
     );
     for result in results
         .iter()
@@ -160,8 +160,10 @@ fn build_markdown(results: &[CaseResult], cases: &[Case], cfg: &Config, json: &V
         let encode = result.encode.as_ref();
         let decode = result.decode.as_ref();
         let ours_enc = encode.and_then(|op| op.ours_lib.as_ref());
+        let cli_enc = encode.and_then(|op| op.ours_cli.as_ref());
         let ref_enc = encode.and_then(|op| op.reference.as_ref());
         let ours_dec = decode.and_then(|op| op.ours_lib.as_ref());
+        let cli_dec = decode.and_then(|op| op.ours_cli.as_ref());
         let ref_dec = decode.and_then(|op| op.reference.as_ref());
         let ours_ratio =
             ours_enc.map(|measurement| ratio(measurement.output_len, result.input_len));
@@ -175,18 +177,23 @@ fn build_markdown(results: &[CaseResult], cases: &[Case], cfg: &Config, json: &V
             .unwrap_or("");
         let _ = writeln!(
             out,
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
             esc(result.case.label),
             esc(&result.corpus),
             bytes(result.input_len),
             throughput(ours_enc, result.input_len, true),
+            throughput(cli_enc, result.input_len, true),
             throughput(ref_enc, result.input_len, true),
             speed_ratio(ours_enc, ref_enc, result.input_len, true),
+            speed_ratio(cli_enc, ref_enc, result.input_len, true),
             throughput(ours_dec, result.input_len, false),
+            throughput(cli_dec, result.input_len, false),
             throughput(ref_dec, result.input_len, false),
             speed_ratio(ours_dec, ref_dec, result.input_len, false),
+            speed_ratio(cli_dec, ref_dec, result.input_len, false),
             ours_ratio.map_or("—".to_owned(), |value| format!("{value:.3}")),
             ref_ratio.map_or("—".to_owned(), |value| format!("{value:.3}")),
+            cv(ours_enc, ref_enc),
             esc(note),
         );
     }
@@ -196,11 +203,11 @@ fn build_markdown(results: &[CaseResult], cases: &[Case], cfg: &Config, json: &V
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "| format | size | ours-lib pack MB/s | ref pack MB/s | ref/ours pack | ours-lib extract MB/s | ref extract MB/s | ref/ours extract | ours ratio | ref ratio | status / note |"
+        "| format | size | ours-lib pack MB/s | ours-cli pack MB/s | ref pack MB/s | lib/ref pack | cli/ref pack | ours-lib extract MB/s | ours-cli extract MB/s | ref extract MB/s | lib/ref extract | cli/ref extract | ours ratio | ref ratio | status / note |"
     );
     let _ = writeln!(
         out,
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|"
     );
     for result in results
         .iter()
@@ -209,8 +216,10 @@ fn build_markdown(results: &[CaseResult], cases: &[Case], cfg: &Config, json: &V
         let encode = result.encode.as_ref();
         let decode = result.decode.as_ref();
         let ours_enc = encode.and_then(|op| op.ours_lib.as_ref());
+        let cli_enc = encode.and_then(|op| op.ours_cli.as_ref());
         let ref_enc = encode.and_then(|op| op.reference.as_ref());
         let ours_dec = decode.and_then(|op| op.ours_lib.as_ref());
+        let cli_dec = decode.and_then(|op| op.ours_cli.as_ref());
         let ref_dec = decode.and_then(|op| op.reference.as_ref());
         let ours_ratio =
             ours_enc.map(|measurement| ratio(measurement.output_len, result.input_len));
@@ -224,18 +233,62 @@ fn build_markdown(results: &[CaseResult], cases: &[Case], cfg: &Config, json: &V
             .unwrap_or("");
         let _ = writeln!(
             out,
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
             esc(result.case.label),
             bytes(result.input_len),
             throughput(ours_enc, result.input_len, true),
+            throughput(cli_enc, result.input_len, true),
             throughput(ref_enc, result.input_len, true),
             speed_ratio(ours_enc, ref_enc, result.input_len, true),
+            speed_ratio(cli_enc, ref_enc, result.input_len, true),
             throughput(ours_dec, result.input_len, false),
+            throughput(cli_dec, result.input_len, false),
             throughput(ref_dec, result.input_len, false),
             speed_ratio(ours_dec, ref_dec, result.input_len, false),
+            speed_ratio(cli_dec, ref_dec, result.input_len, false),
             ours_ratio.map_or("—".to_owned(), |value| format!("{value:.3}")),
             ref_ratio.map_or("—".to_owned(), |value| format!("{value:.3}")),
             esc(note),
+        );
+    }
+    let _ = writeln!(out);
+
+    let _ = writeln!(out, "## Reference build provenance");
+    let _ = writeln!(out);
+    let _ = writeln!(
+        out,
+        "| reference | binary | package / version | compiler / build flags |"
+    );
+    let _ = writeln!(out, "|---|---|---|---|");
+    let mut seen = std::collections::BTreeSet::new();
+    for case in cases {
+        let Some(reference) = case.reference else {
+            continue;
+        };
+        if !seen.insert(reference.binary_id) {
+            continue;
+        }
+        let path = ref_binary_path(cfg, reference.binary_id);
+        let package = path
+            .as_deref()
+            .map(package_version)
+            .unwrap_or_else(|| "<not found>".to_owned());
+        let compiler = path
+            .as_deref()
+            .map(|path| command_line("readelf", &["-p", ".comment", &path.display().to_string()]))
+            .map(|value| value.replace('\n', " "))
+            .unwrap_or_default();
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} | {} |",
+            esc(reference.name),
+            esc(path
+                .as_deref()
+                .map(|path| path.display().to_string())
+                .as_deref()
+                .unwrap_or("—")),
+            esc(&package),
+            esc(&format!("{}; {}", reference.build, compiler.trim())),
         );
     }
     let _ = writeln!(out);
@@ -302,6 +355,43 @@ fn throughput(measurement: Option<&Measurement>, input_len: usize, encode: bool)
     format!("{mb_s:.1}")
 }
 
+fn cv(ours: Option<&Measurement>, reference: Option<&Measurement>) -> String {
+    let Some(ours) = ours else {
+        return "—".to_owned();
+    };
+    let value = cv_percent(ours);
+    let ref_value = reference.map(cv_percent);
+    match ref_value {
+        Some(ref_value) => format!("{value:.1}/{ref_value:.1}%"),
+        None => format!("{value:.1}%"),
+    }
+}
+
+fn cv_percent(measurement: &Measurement) -> f64 {
+    if measurement.samples_ns.len() < 2 {
+        return 0.0;
+    }
+    let mean = measurement
+        .samples_ns
+        .iter()
+        .map(|&value| value as f64)
+        .sum::<f64>()
+        / measurement.samples_ns.len() as f64;
+    if mean == 0.0 {
+        return 0.0;
+    }
+    let variance = measurement
+        .samples_ns
+        .iter()
+        .map(|&value| {
+            let delta = value as f64 - mean;
+            delta * delta
+        })
+        .sum::<f64>()
+        / (measurement.samples_ns.len() - 1) as f64;
+    variance.sqrt() / mean * 100.0
+}
+
 fn speed_ratio(
     ours: Option<&Measurement>,
     reference: Option<&Measurement>,
@@ -357,6 +447,37 @@ fn bytes(value: usize) -> String {
 
 fn esc(value: &str) -> String {
     value.replace('|', "\\|").replace('\n', " ")
+}
+
+fn ref_binary_path(cfg: &Config, binary_id: &str) -> Option<PathBuf> {
+    let built = cfg.refs_dir.join("bin").join(binary_id);
+    if built.exists() {
+        return Some(built);
+    }
+    let output = Command::new("sh")
+        .args(["-c", &format!("command -v {binary_id}")])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    (!path.is_empty()).then(|| PathBuf::from(path))
+}
+
+fn package_version(path: &Path) -> String {
+    for (program, args) in [
+        ("pacman", vec!["-Qo", &path.display().to_string()]),
+        ("dpkg", vec!["-S", &path.display().to_string()]),
+    ] {
+        let output = Command::new(program).args(args).output();
+        if let Ok(output) = output
+            && output.status.success()
+        {
+            return String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        }
+    }
+    "<unknown package>".to_owned()
 }
 
 fn environment() -> String {

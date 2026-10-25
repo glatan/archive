@@ -42,6 +42,10 @@ fn main() {
         print_list(&cases);
         return;
     }
+    if args.iter().any(|arg| arg == "--list-markdown") {
+        print_markdown(&cases);
+        return;
+    }
 
     let selected = select_cases(&cases, &config);
     if selected.is_empty() {
@@ -152,6 +156,7 @@ usage: cargo bench --all-features --bench compare -- [options]
   --skip-cli              do not run our CLI
   --skip-ref              do not run reference tools
   --list                  list catalog cases
+  --list-markdown         print the catalog as a Markdown coverage matrix
 ";
 
 fn parse_args(args: &[String]) -> Result<Args, String> {
@@ -259,7 +264,7 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
             }
             "--skip-cli" => parsed.skip_cli = true,
             "--skip-ref" => parsed.skip_ref = true,
-            "--list" | "--bench" => {}
+            "--list" | "--list-markdown" | "--bench" => {}
             other => return Err(format!("unknown argument `{other}`")),
         }
         i += 1;
@@ -312,6 +317,39 @@ fn select_cases(cases: &[Case], args: &Args) -> Vec<Case> {
         })
         .cloned()
         .collect()
+}
+
+fn print_markdown(cases: &[Case]) {
+    println!("# Benchmark reference matrix");
+    println!();
+    println!("Generated from the benchmark catalog. Regenerate with:");
+    println!();
+    println!("```sh");
+    println!(
+        "cargo bench --all-features --bench compare -- --list-markdown > docs/bench/reference-matrix.md"
+    );
+    println!("```");
+    println!();
+    println!(
+        "| id | format | kind | status | reference | version | build flags / provenance | note |"
+    );
+    println!("|---|---|---|---|---|---|---|---|");
+    for case in cases {
+        println!(
+            "| {} | {} | {} | {} | {} | {} | {} | {} |",
+            case.id,
+            case.label,
+            match case.kind {
+                Kind::Codec => "codec",
+                Kind::Archive => "archive",
+            },
+            case.status(),
+            case.reference.map_or("—", |reference| reference.name),
+            case.reference.map_or("—", |reference| reference.version),
+            case.reference.map_or("—", |reference| reference.build),
+            case.note.unwrap_or(""),
+        );
+    }
 }
 
 fn print_list(cases: &[Case]) {

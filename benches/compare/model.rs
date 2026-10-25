@@ -23,6 +23,22 @@ pub const TINY: SizeClass = SizeClass {
     quick: 256 * 1024,
     full: 4 * 1024 * 1024,
 };
+pub const SMALL: SizeClass = SizeClass {
+    quick: 64 * 1024,
+    full: 512 * 1024,
+};
+pub const PACKET: SizeClass = SizeClass {
+    quick: 8 * 1024,
+    full: 8 * 1024,
+};
+pub const XCA: SizeClass = SizeClass {
+    quick: 32 * 1024,
+    full: 32 * 1024,
+};
+pub const ZX: SizeClass = SizeClass {
+    quick: 32 * 1024,
+    full: 128 * 1024,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -75,11 +91,15 @@ pub struct Case {
     pub cli_format: Option<&'static str>,
     pub ours_lib: bool,
     pub ours_cli: bool,
+    /// Use the helper's raw library dispatch instead of the CLI dispatch.
+    pub raw: bool,
     pub encode: bool,
     pub decode: bool,
     pub level: Option<u8>,
     pub backend: Option<&'static str>,
     pub reference: Option<RefSpec>,
+    /// Optional checked-in fixture for read-only formats.
+    pub fixture: Option<&'static str>,
     /// Why no reference is available, or other scope note.
     pub note: Option<&'static str>,
     pub size: SizeClass,

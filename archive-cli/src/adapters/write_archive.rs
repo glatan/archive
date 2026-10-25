@@ -246,11 +246,13 @@ fn collect_one(
     }
     let relative = archive_relative_path(input, base_dir)?;
     if metadata.is_dir() {
-        out.push(PackedEntry {
-            archive_path: relative.clone(),
-            data: None,
-            is_dir: true,
-        });
+        if !relative.is_empty() {
+            out.push(PackedEntry {
+                archive_path: relative.clone(),
+                data: None,
+                is_dir: true,
+            });
+        }
         let mut children = fs::read_dir(input)?
             .map(|entry| entry.map(|e| e.path()))
             .collect::<Result<Vec<_>, _>>()?;
@@ -290,6 +292,9 @@ fn archive_relative_path(input: &Path, base_dir: Option<&Path>) -> Result<String
             ))
         })?
     };
+    if relative.as_os_str().is_empty() {
+        return Ok(String::new());
+    }
     sanitize_archive_path(relative)
 }
 

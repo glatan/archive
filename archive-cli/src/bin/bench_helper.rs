@@ -33,6 +33,11 @@ enum Command {
     Archive(ArchiveArgs),
     /// Time a decode through the full CLI format dispatch.
     Read(ReadArgs),
+    /// Time formats that are not exposed through the CLI surface yet.
+    Raw {
+        #[command(subcommand)]
+        op: RawOp,
+    },
     /// Print the supported helper format names.
     List,
 }
@@ -47,6 +52,61 @@ enum CodecOp {
 enum ArchiveOp {
     Encode,
     Decode,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum RawCodec {
+    Packbits,
+    Uuencode,
+    Ascii85,
+    Yenc,
+    Macbinary,
+    Binhex,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum RawArchive {
+    Cramfs,
+    Romfs,
+    Erofs,
+    #[value(name = "iso9660")]
+    Iso9660,
+    Crx3,
+    Pea,
+    Mscfb,
+    Squashfs,
+}
+
+#[derive(Debug, Subcommand)]
+enum RawOp {
+    Codec(RawCodecArgs),
+    Archive(RawArchiveArgs),
+}
+
+#[derive(Debug, Parser)]
+struct RawCodecArgs {
+    #[arg(value_enum)]
+    op: CodecOp,
+    #[arg(long)]
+    format: RawCodec,
+    #[arg(long)]
+    input: PathBuf,
+    #[arg(long)]
+    output: PathBuf,
+    #[command(flatten)]
+    timing: TimingArgs,
+}
+
+#[derive(Debug, Parser)]
+struct RawArchiveArgs {
+    #[arg(long)]
+    format: RawArchive,
+    #[arg(long)]
+    input: PathBuf,
+    #[arg(long)]
+    output: PathBuf,
+    #[command(flatten)]
+    timing: TimingArgs,
 }
 
 #[derive(Debug, Parser)]
@@ -121,6 +181,10 @@ fn run() -> Result<(), CliError> {
         Command::Codec(args) => run_codec(args),
         Command::Archive(args) => run_archive(args),
         Command::Read(args) => run_read(args),
+        Command::Raw { op } => match op {
+            RawOp::Codec(args) => run_raw_codec(args),
+            RawOp::Archive(args) => run_raw_archive(args),
+        },
         Command::List => {
             println!("{}", supported_formats_json());
             Ok(())
@@ -186,20 +250,233 @@ fn run_codec(args: CodecArgs) -> Result<(), CliError> {
     }
 }
 
-fn run_read(args: ReadArgs) -> Result<(), CliError> {
+fn run_raw_codec(args: RawCodecArgs) -> Result<(), CliError> {
     let input = fs::read(&args.input)?;
-    let path = Path::new(&args.input);
     let mut last = Vec::new();
     for _ in 0..args.timing.warmup {
-        let (_, payloads) = read::decode_payloads(path, &input, args.format, None)?;
-        last = payloads;
+        last = raw_codec(args.format, args.op, &input)?;
         std::hint::black_box(&last);
     }
     let mut samples_ns = Vec::with_capacity(args.timing.iterations);
     for _ in 0..args.timing.iterations {
         let start = Instant::now();
-        let (_, payloads) = read::decode_payloads(path, &input, args.format, None)?;
-        last = payloads;
+        last = raw_codec(args.format, args.op, &input)?;
+        samples_ns.push(start.elapsed().as_nanos() as u64);
+    }
+    fs::write(&args.output, &last)?;
+    print_json(json!({
+        "mode": "raw-codec",
+        "op": match args.op { CodecOp::Encode => "encode", CodecOp::Decode => "decode" },
+        "format": format_name_raw_codec(args.format),
+        "input_len": input.len(),
+        "output_len": last.len(),
+        "warmup": args.timing.warmup,
+        "samples_ns": samples_ns,
+        "output_hash": fnv1a64(&last),
+    }));
+    Ok(())
+}
+
+fn run_raw_archive(args: RawArchiveArgs) -> Result<(), CliError> {
+    let input = fs::read(&args.input)?;
+    let mut last: Vec<(String, Vec<u8>)> = Vec::new();
+    for _ in 0..args.timing.warmup {
+        last = raw_archive(args.format, &input)?;
+        std::hint::black_box(&last);
+    }
+    let mut samples_ns = Vec::with_capacity(args.timing.iterations);
+    for _ in 0..args.timing.iterations {
+        let start = Instant::now();
+        last = raw_archive(args.format, &input)?;
+        samples_ns.push(start.elapsed().as_nanos() as u64);
+    }
+    let manifest = json!({
+        "entries": last.iter().map(|(name, data)| json!({
+            "name": name,
+            "len": data.len(),
+            "hash": fnv1a64(data),
+        })).collect::<Vec<_>>()
+    });
+    fs::write(&args.output, serde_json::to_vec_pretty(&manifest).unwrap())?;
+    print_json(json!({
+        "mode": "raw-archive",
+        "op": "decode",
+        "format": format_name_raw_archive(args.format),
+        "input_len": input.len(),
+        "output_len": last.iter().map(|(_, data)| data.len()).sum::<usize>(),
+        "entry_count": last.len(),
+        "warmup": args.timing.warmup,
+        "samples_ns": samples_ns,
+        "output_hash": manifest_hash(&manifest),
+    }));
+    Ok(())
+}
+
+fn raw_codec(format: RawCodec, op: CodecOp, input: &[u8]) -> Result<Vec<u8>, CliError> {
+    use ::archive::compress;
+    use ::archive::encoding;
+    match (format, op) {
+        (RawCodec::Packbits, CodecOp::Encode) => Ok(compress::packbits::encode(input)),
+        (RawCodec::Packbits, CodecOp::Decode) => compress::packbits::decode(input)
+            .map_err(|error| CliError::from_archive_error(error, false)),
+        (RawCodec::Uuencode, CodecOp::Encode) => {
+            Ok(encoding::uuencode::encode("file", 0o644, input))
+        }
+        (RawCodec::Uuencode, CodecOp::Decode) => encoding::uuencode::decode(input)
+            .map(|entry| entry.data)
+            .map_err(|error| CliError::from_archive_error(error, false)),
+        (RawCodec::Ascii85, CodecOp::Encode) => Ok(encoding::ascii85::encode(input)),
+        (RawCodec::Ascii85, CodecOp::Decode) => encoding::ascii85::decode(input)
+            .map_err(|error| CliError::from_archive_error(error, false)),
+        (RawCodec::Yenc, CodecOp::Encode) => Ok(encoding::yenc::encode("file", input)),
+        (RawCodec::Yenc, CodecOp::Decode) => encoding::yenc::decode(input)
+            .map(|entry| entry.data)
+            .map_err(|error| CliError::from_archive_error(error, false)),
+        (RawCodec::Macbinary, CodecOp::Encode) => Ok(encoding::macbinary::encode(
+            &encoding::macbinary::MacBinaryEntry {
+                name: "file".to_owned(),
+                file_type: *b"TEXT",
+                creator: *b"ttxt",
+                finder_flags: 0,
+                protected: false,
+                data: input.to_vec(),
+                resource: Vec::new(),
+                creation_date: 0,
+                modification_date: 0,
+                macbinary2: true,
+            },
+        )),
+        (RawCodec::Macbinary, CodecOp::Decode) => encoding::macbinary::decode(input)
+            .map(|entry| entry.data)
+            .map_err(|error| CliError::from_archive_error(error, false)),
+        (RawCodec::Binhex, CodecOp::Encode) => {
+            Ok(encoding::binhex::encode(&encoding::binhex::BinHexEntry {
+                name: "file".to_owned(),
+                file_type: *b"TEXT",
+                creator: *b"ttxt",
+                flags: 0,
+                data: input.to_vec(),
+                resource: Vec::new(),
+            }))
+        }
+        (RawCodec::Binhex, CodecOp::Decode) => encoding::binhex::decode(input)
+            .map(|entry| entry.data)
+            .map_err(|error| CliError::from_archive_error(error, false)),
+    }
+}
+
+fn map_archive_error(error: ::archive::error::Error) -> CliError {
+    CliError::from_archive_error(error, false)
+}
+
+fn raw_archive(format: RawArchive, input: &[u8]) -> Result<Vec<(String, Vec<u8>)>, CliError> {
+    use ::archive::archive;
+    let entries = match format {
+        RawArchive::Cramfs => archive::cramfs::decode::decode(input)
+            .map(|image| image.entries)
+            .map_err(map_archive_error)?
+            .into_iter()
+            .map(|entry| (entry.name, entry.data))
+            .collect(),
+        RawArchive::Romfs => archive::romfs::decode::decode(input)
+            .map(|image| image.entries)
+            .map_err(map_archive_error)?
+            .into_iter()
+            .map(|entry| (entry.name, entry.data))
+            .collect(),
+        RawArchive::Erofs => archive::erofs::decode::decode(input)
+            .map(|image| image.entries)
+            .map_err(map_archive_error)?
+            .into_iter()
+            .map(|entry| (entry.name, entry.data))
+            .collect(),
+        RawArchive::Iso9660 => archive::iso9660::decode::decode(input)
+            .map(|image| image.entries)
+            .map_err(map_archive_error)?
+            .into_iter()
+            .map(|entry| (entry.name, entry.data))
+            .collect(),
+        RawArchive::Crx3 => archive::crx3::decode::decode(input)
+            .map(|image| image.entries)
+            .map_err(map_archive_error)?
+            .into_iter()
+            .map(|entry| (entry.name, entry.data))
+            .collect(),
+        RawArchive::Pea => archive::pea::decode::decode(input)
+            .map(|image| image.entries)
+            .map_err(map_archive_error)?
+            .into_iter()
+            .map(|entry| (entry.name, entry.data))
+            .collect(),
+        RawArchive::Mscfb => archive::mscfb::decode::decode(input)
+            .map_err(map_archive_error)?
+            .into_iter()
+            .map(|entry| (entry.name, entry.data))
+            .collect(),
+        RawArchive::Squashfs => archive::squashfs::decode::decode(input)
+            .map(|image| image.entries)
+            .map_err(map_archive_error)?
+            .into_iter()
+            .map(|entry| (entry.name, entry.data))
+            .collect(),
+    };
+    Ok(entries)
+}
+
+fn format_name_raw_codec(format: RawCodec) -> String {
+    format.to_possible_value().unwrap().get_name().to_owned()
+}
+
+fn format_name_raw_archive(format: RawArchive) -> String {
+    format.to_possible_value().unwrap().get_name().to_owned()
+}
+
+fn read_payloads(
+    path: &Path,
+    input: &[u8],
+    format: Format,
+) -> Result<Vec<read::DecodedPayload>, CliError> {
+    if matches!(format, Format::Zpaq) {
+        // The reference zpaq CLI emits an upstream JIDAC archive. The
+        // generic archive decoder exposes the raw transaction blocks; the
+        // public CLI surface is conservative, but the benchmark needs the
+        // reconstructed files for a comparable decode.
+        if let Ok(journal) = ::archive::archive::zpaq::jidac::decode_jidac(input) {
+            return Ok(journal
+                .files
+                .into_iter()
+                .map(|entry| read::DecodedPayload {
+                    name: String::from_utf8_lossy(&entry.filename).into_owned(),
+                    data: entry.data,
+                })
+                .collect());
+        }
+        if let Ok(entries) = ::archive::archive::zpaq::decode::decode_journal_latest(input) {
+            return Ok(entries
+                .into_iter()
+                .map(|entry| read::DecodedPayload {
+                    name: String::from_utf8_lossy(&entry.filename).into_owned(),
+                    data: entry.data,
+                })
+                .collect());
+        }
+    }
+    let (_, payloads) = read::decode_payloads(path, input, format, None)?;
+    Ok(payloads)
+}
+
+fn run_read(args: ReadArgs) -> Result<(), CliError> {
+    let input = fs::read(&args.input)?;
+    let path = Path::new(&args.input);
+    let mut last = Vec::new();
+    for _ in 0..args.timing.warmup {
+        last = read_payloads(path, &input, args.format)?;
+        std::hint::black_box(&last);
+    }
+    let mut samples_ns = Vec::with_capacity(args.timing.iterations);
+    for _ in 0..args.timing.iterations {
+        let start = Instant::now();
+        last = read_payloads(path, &input, args.format)?;
         samples_ns.push(start.elapsed().as_nanos() as u64);
     }
     let manifest = payload_manifest(&last);

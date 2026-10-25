@@ -6,7 +6,8 @@
 //! reference column as N/A with the reason from `note`.
 
 use crate::model::{
-    Case, FAST, Kind, MEDIUM, OutputMode, RefCommand, RefSpec, SLOW, SizeClass, TINY,
+    Case, FAST, Kind, MEDIUM, OutputMode, PACKET, RefCommand, RefSpec, SLOW, SMALL, SizeClass,
+    TINY, XCA, ZX,
 };
 
 const DISTRO: &str = "distro package (exact distro build flags not exposed)";
@@ -34,13 +35,15 @@ import sys, binascii
 mode, inp, out = sys.argv[1], sys.argv[2], sys.argv[3]
 data = open(inp, 'rb').read()
 if mode == 'encode':
-    result = bytearray()
+    result = bytearray(b'begin 644 file\n')
     for i in range(0, len(data), 45):
         result += binascii.b2a_uu(data[i:i+45])
-    result += b'`\n'
+    result += b'`\nend\n'
 else:
     result = bytearray()
     for line in data.splitlines():
+        if line.startswith(b'begin ') or line == b'end':
+            continue
         if line in (b'`', b'`\r'):
             break
         result += binascii.a2b_uu(line)
@@ -52,7 +55,10 @@ const PY_ASCII85: &str = r#"
 import sys, base64
 mode, inp, out = sys.argv[1], sys.argv[2], sys.argv[3]
 data = open(inp, 'rb').read()
-result = base64.a85encode(data) if mode == 'encode' else base64.a85decode(data)
+if mode == 'encode':
+    result = base64.a85encode(data, adobe=True)
+else:
+    result = base64.a85decode(data, adobe=data.startswith(b'<~'))
 open(out, 'wb').write(result)
 "#;
 
@@ -233,12 +239,12 @@ fn rzip_ref() -> RefSpec {
         build: DISTRO,
         encode: Some(cmd(
             "rzip",
-            &["-6", "-o", "{output}", "{input}"],
+            &["-6", "-k", "-o", "{output}", "{input}"],
             OutputMode::None,
         )),
         decode: Some(cmd(
             "rzip",
-            &["-d", "-o", "{output}", "{input}"],
+            &["-d", "-k", "-o", "{output}", "{input}"],
             OutputMode::None,
         )),
     }
@@ -273,6 +279,116 @@ const PY_ZLIB_ENC_DEFLATE: &[&str] = &[
 const PY_ZLIB_DEC_DEFLATE: &[&str] = &[
     "-c", PY_ZLIB, "decode", "deflate", "6", "{input}", "{output}",
 ];
+
+fn lzf_ref() -> RefSpec {
+    RefSpec {
+        name: "liblzf",
+        version: "3.6",
+        binary_id: "lzf_ref",
+        build: "source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0",
+        encode: Some(cmd(
+            "lzf_ref",
+            &["encode", "{input}", "{output}"],
+            OutputMode::Arg,
+        )),
+        decode: Some(cmd(
+            "lzf_ref",
+            &["decode", "{input}", "{output}"],
+            OutputMode::Arg,
+        )),
+    }
+}
+
+fn fastlz_ref() -> RefSpec {
+    RefSpec {
+        name: "FastLZ",
+        version: "0.5.0",
+        binary_id: "fastlz_ref",
+        build: "source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0",
+        encode: Some(cmd(
+            "fastlz_ref",
+            &["encode", "{input}", "{output}"],
+            OutputMode::Arg,
+        )),
+        decode: Some(cmd(
+            "fastlz_ref",
+            &["decode", "{input}", "{output}"],
+            OutputMode::Arg,
+        )),
+    }
+}
+
+fn lzsa_ref(format: u8) -> RefSpec {
+    let encode_args: &'static [&'static str] = if format == 1 {
+        &["-f", "1", "--prefer-speed", "{input}", "{output}"]
+    } else {
+        &["-f", "2", "--prefer-speed", "{input}", "{output}"]
+    };
+    RefSpec {
+        name: "lzsa",
+        version: "1.4.1",
+        binary_id: "lzsa",
+        build: "source build: gcc -O2 -fomit-frame-pointer -Isrc/libdivsufsort/include -Isrc",
+        encode: Some(cmd("lzsa", encode_args, OutputMode::Arg)),
+        decode: Some(cmd("lzsa", &["-d", "{input}", "{output}"], OutputMode::Arg)),
+    }
+}
+
+fn zx0_ref() -> RefSpec {
+    RefSpec {
+        name: "ZX0",
+        version: "2.2",
+        binary_id: "zx0",
+        build: "source build: gcc -O2 (zx0.c optimize.c compress.c memory.c)",
+        encode: Some(cmd(
+            "zx0",
+            &["-q", "-f", "{input}", "{output}"],
+            OutputMode::Arg,
+        )),
+        decode: Some(cmd("dzx0", &["{input}", "{output}"], OutputMode::Arg)),
+    }
+}
+
+fn zx1_ref() -> RefSpec {
+    RefSpec {
+        name: "ZX1",
+        version: "1.5",
+        binary_id: "zx1",
+        build: "source build: gcc -O2 (zx1.c optimize.c compress.c memory.c)",
+        encode: Some(cmd(
+            "zx1",
+            &["-q", "-f", "{input}", "{output}"],
+            OutputMode::Arg,
+        )),
+        decode: Some(cmd("dzx1", &["{input}", "{output}"], OutputMode::Arg)),
+    }
+}
+
+fn zx2_ref() -> RefSpec {
+    RefSpec {
+        name: "ZX2",
+        version: "1.1",
+        binary_id: "zx2",
+        build: "source build: gcc -O2 (zx2.c optimize.c compress.c memory.c)",
+        encode: Some(cmd("zx2", &["-f", "{input}", "{output}"], OutputMode::Arg)),
+        decode: Some(cmd("dzx2", &["{input}", "{output}"], OutputMode::Arg)),
+    }
+}
+
+fn zx5_ref() -> RefSpec {
+    RefSpec {
+        name: "ZX5",
+        version: "2.0",
+        binary_id: "zx5",
+        build: "source build: gcc -O2 (zx5.c optimize.c compress.c memory.c)",
+        encode: Some(cmd(
+            "zx5",
+            &["-q", "-f", "{input}", "{output}"],
+            OutputMode::Arg,
+        )),
+        decode: Some(cmd("dzx5", &["{input}", "{output}"], OutputMode::Arg)),
+    }
+}
 
 fn zlib_ref(kind: &'static str) -> RefSpec {
     RefSpec {
@@ -473,7 +589,7 @@ fn sevenz_ref() -> RefSpec {
             "bash",
             &[
                 "-c",
-                "cd \"$(dirname \"$1\")\" && 7z a -t7z -m0=lzma2:d=8m -mx=5 -mmt=1 -bso0 -bsp0 \"$2\" \"$(basename \"$1\")\"",
+                "cd \"$(dirname \"$1\")\" && find \"$(basename \"$1\")\" -type f -print0 | xargs -0 7z a -t7z -m0=lzma2:d=8m -mx=5 -mmt=1 -bso0 -bsp0 \"$2\"",
                 "_",
                 "{input}",
                 "{output}",
@@ -498,7 +614,7 @@ fn zpaq_ref() -> RefSpec {
             "bash",
             &[
                 "-c",
-                "cd \"$(dirname \"$1\")\" && zpaq add \"$2\" \"$(basename \"$1\")\" -method 2 -threads 1 >/dev/null",
+                "cd \"$(dirname \"$1\")\" && files=(); while IFS= read -r -d '' f; do files+=(\"$f\"); done < <(find \"$(basename \"$1\")\" -type f -print0); zpaq add \"$2\" \"${files[@]}\" -method 2 -threads 1 >/dev/null",
                 "_",
                 "{input}",
                 "{output}",
@@ -537,11 +653,13 @@ fn codec(
         cli_format,
         ours_lib: true,
         ours_cli: cli_format.is_some(),
+        raw: false,
         encode: true,
         decode: true,
         level,
         backend,
         reference,
+        fixture: None,
         note,
         size,
     }
@@ -567,22 +685,58 @@ fn codec_ours_only(
     )
 }
 
-fn codec_unavailable(id: &'static str, label: &'static str, note: &'static str) -> Case {
+fn codec_raw(
+    id: &'static str,
+    label: &'static str,
+    format: &'static str,
+    size: SizeClass,
+    note: &'static str,
+) -> Case {
     Case {
         id,
         label,
         kind: Kind::Codec,
-        format: "",
+        format,
         cli_format: None,
-        ours_lib: false,
+        ours_lib: true,
         ours_cli: false,
-        encode: false,
-        decode: false,
+        raw: true,
+        encode: true,
+        decode: true,
         level: None,
         backend: None,
         reference: None,
+        fixture: None,
         note: Some(note),
-        size: TINY,
+        size,
+    }
+}
+
+fn codec_raw_with_ref(
+    id: &'static str,
+    label: &'static str,
+    format: &'static str,
+    size: SizeClass,
+    reference: RefSpec,
+    note: &'static str,
+) -> Case {
+    Case {
+        id,
+        label,
+        kind: Kind::Codec,
+        format,
+        cli_format: None,
+        ours_lib: true,
+        ours_cli: false,
+        raw: true,
+        encode: true,
+        decode: true,
+        level: None,
+        backend: None,
+        reference: Some(reference),
+        fixture: None,
+        note: Some(note),
+        size,
     }
 }
 
@@ -602,12 +756,41 @@ fn archive(
         cli_format: Some(format),
         ours_lib: true,
         ours_cli: true,
+        raw: false,
         encode,
         decode: true,
         level: None,
         backend: None,
         reference,
+        fixture: None,
         note,
+        size: MEDIUM,
+    }
+}
+
+fn archive_fixture(
+    id: &'static str,
+    label: &'static str,
+    format: &'static str,
+    fixture: &'static str,
+    note: &'static str,
+) -> Case {
+    Case {
+        id,
+        label,
+        kind: Kind::Archive,
+        format,
+        cli_format: Some(format),
+        ours_lib: true,
+        ours_cli: true,
+        raw: false,
+        encode: false,
+        decode: true,
+        level: None,
+        backend: None,
+        reference: None,
+        fixture: Some(fixture),
+        note: Some(note),
         size: MEDIUM,
     }
 }
@@ -621,11 +804,13 @@ fn archive_unsupported(id: &'static str, label: &'static str, note: &'static str
         cli_format: None,
         ours_lib: false,
         ours_cli: false,
+        raw: false,
         encode: false,
         decode: false,
         level: None,
         backend: None,
         reference: None,
+        fixture: None,
         note: Some(note),
         size: MEDIUM,
     }
@@ -818,13 +1003,27 @@ pub fn cases() -> Vec<Case> {
             FAST,
             "No packaged reference CLI",
         ),
-        codec_ours_only("lzf", "LZF", "lzf", FAST, "Reference CLI not packaged"),
-        codec_ours_only(
+        codec(
+            "lzf",
+            "LZF",
+            "lzf",
+            Some("lzf"),
+            None,
+            None,
+            FAST,
+            Some(lzf_ref()),
+            Some("Cross-validated against liblzf 3.6"),
+        ),
+        codec(
             "fastlz",
             "FastLZ",
             "fastlz",
+            Some("fastlz"),
+            None,
+            None,
             FAST,
-            "Reference CLI not packaged",
+            Some(fastlz_ref()),
+            Some("Cross-validated against FastLZ 0.5.0"),
         ),
         codec_ours_only("lzrw1", "LZRW1", "lzrw1", FAST, "No packaged reference CLI"),
         codec_ours_only(
@@ -843,47 +1042,71 @@ pub fn cases() -> Vec<Case> {
             FAST,
             "No packaged reference CLI",
         ),
-        codec_ours_only(
+        codec(
             "lzsa",
             "LZSA v1",
             "lzsa",
-            FAST,
-            "Reference CLI not built in baseline image",
+            Some("lzsa"),
+            None,
+            None,
+            SMALL,
+            Some(lzsa_ref(1)),
+            Some("LZSA v1 reference CLI from upstream source build"),
         ),
-        codec_ours_only(
+        codec(
             "lzsa2",
             "LZSA v2",
             "lzsa2",
-            FAST,
-            "Reference CLI not built in baseline image",
+            Some("lzsa2"),
+            None,
+            None,
+            SMALL,
+            Some(lzsa_ref(2)),
+            Some("LZSA v2 reference CLI from upstream source build"),
         ),
-        codec_ours_only(
+        codec(
             "zx0",
             "ZX0",
             "zx0",
-            FAST,
-            "Reference CLI not built in baseline image",
+            Some("zx0"),
+            None,
+            None,
+            ZX,
+            Some(zx0_ref()),
+            Some("ZX0 reference CLI from upstream source build"),
         ),
-        codec_ours_only(
+        codec(
             "zx1",
             "ZX1",
             "zx1",
-            FAST,
-            "Reference CLI not built in baseline image",
+            Some("zx1"),
+            None,
+            None,
+            ZX,
+            Some(zx1_ref()),
+            Some("ZX1 reference CLI from upstream source build"),
         ),
-        codec_ours_only(
+        codec(
             "zx2",
             "ZX2",
             "zx2",
-            FAST,
-            "Reference CLI not built in baseline image",
+            Some("zx2"),
+            None,
+            None,
+            ZX,
+            Some(zx2_ref()),
+            Some("ZX2 reference CLI from upstream source build"),
         ),
-        codec_ours_only(
+        codec(
             "zx5",
             "ZX5",
             "zx5",
-            FAST,
-            "Reference CLI not built in baseline image",
+            Some("zx5"),
+            None,
+            None,
+            ZX,
+            Some(zx5_ref()),
+            Some("ZX5 reference CLI from upstream source build"),
         ),
         codec_ours_only(
             "zx0b",
@@ -924,7 +1147,7 @@ pub fn cases() -> Vec<Case> {
             "mppc",
             "MPPC",
             "mppc",
-            MEDIUM,
+            PACKET,
             "No packaged MPPC reference CLI",
         ),
         codec_ours_only(
@@ -952,52 +1175,66 @@ pub fn cases() -> Vec<Case> {
             "xpress",
             "MS-XCA Xpress",
             "xpress",
-            FAST,
+            XCA,
             "No Linux reference implementation",
         ),
         codec_ours_only(
             "xpress-huff",
             "MS-XCA Xpress Huffman",
             "xpress-huff",
-            FAST,
+            XCA,
             "No Linux reference implementation",
         ),
         codec_ours_only(
             "lznt1",
             "MS-XCA LZNT1",
             "lznt1",
-            FAST,
+            XCA,
             "No Linux reference implementation",
         ),
-        codec_unavailable(
+        codec_raw(
             "packbits",
             "PackBits",
-            "CLI/helper dispatch does not expose this transform",
+            "packbits",
+            FAST,
+            "Measured through the raw library helper; no packaged reference CLI",
         ),
-        codec_unavailable(
+        codec_raw(
             "yenc",
             "yEnc",
-            "CLI/helper dispatch does not expose this transform",
+            "yenc",
+            FAST,
+            "Measured through the raw library helper; no external reference",
         ),
-        codec_unavailable(
+        codec_raw(
             "macbinary",
             "MacBinary",
-            "CLI/helper dispatch does not expose this transform",
+            "macbinary",
+            TINY,
+            "Measured through the raw library helper; no external reference",
         ),
-        codec_unavailable(
+        codec_raw_with_ref(
             "uuencode",
             "uuencode",
-            "CLI/helper dispatch does not expose this transform",
+            "uuencode",
+            FAST,
+            uuencode_ref(),
+            "Measured through the raw library helper; CPython is the reference",
         ),
-        codec_unavailable(
+        codec_raw_with_ref(
             "ascii85",
             "Ascii85",
-            "CLI/helper dispatch does not expose this transform",
+            "ascii85",
+            FAST,
+            ascii85_ref(),
+            "Measured through the raw library helper; CPython is the reference",
         ),
-        codec_unavailable(
+        codec_raw(
             "binhex",
             "BinHex",
-            "CLI/helper dispatch does not expose this transform",
+            "binhex",
+            TINY,
+            "Measured through the raw library helper; no stable external reference",
         ),
         // Archives with write support and a packaged reference.
         archive("tar", "tar", "tar", true, Some(tar_ref()), None),
@@ -1030,13 +1267,10 @@ pub fn cases() -> Vec<Case> {
             None,
             Some("No packaged ARJ reference writer"),
         ),
-        archive(
+        archive_unsupported(
             "arc",
             "ARC",
-            "arc",
-            true,
-            None,
-            Some("No packaged ARC reference writer"),
+            "ARC writer requires 8.3 names; benchmark tree not adapted",
         ),
         archive(
             "git-pack",
@@ -1055,53 +1289,37 @@ pub fn cases() -> Vec<Case> {
             Some("xar reference tool not installed"),
         ),
         // Read-only archive formats exposed by the CLI.
-        archive(
-            "deb",
-            "deb",
-            "deb",
-            false,
-            None,
-            Some("read-only format; reference decode via ar+tar pending"),
-        ),
-        archive(
-            "rpm",
-            "rpm",
-            "rpm",
-            false,
-            None,
-            Some("read-only format; reference decode via rpm/bsdtar pending"),
-        ),
-        archive(
+        archive_fixture(
             "mscab",
             "CAB",
             "mscab",
-            false,
-            None,
-            Some("reference decode via cabextract pending"),
+            "tests/fixtures/mscab/lzx_mixed.cab",
+            "Checked-in CAB fixture; decode-only",
         ),
-        archive(
+        archive_unsupported(
+            "deb",
+            "deb",
+            "decode benchmark needs a deb fixture; pending",
+        ),
+        archive_unsupported(
+            "rpm",
+            "rpm",
+            "decode benchmark needs an rpm fixture; pending",
+        ),
+        archive_unsupported(
             "zim",
             "ZIM",
-            "zim",
-            false,
-            None,
-            Some("reference decode via zimtools pending"),
+            "decode benchmark needs a ZIM fixture; pending",
         ),
-        archive(
+        archive_unsupported(
             "mtree",
             "mtree",
-            "mtree",
-            false,
-            None,
-            Some("read-only metadata format"),
+            "decode benchmark needs an mtree fixture; pending",
         ),
-        archive(
+        archive_unsupported(
             "warc",
             "WARC",
-            "warc",
-            false,
-            None,
-            Some("read-only format; no baseline reference"),
+            "decode benchmark needs a WARC fixture; pending",
         ),
         archive_unsupported(
             "squashfs",
