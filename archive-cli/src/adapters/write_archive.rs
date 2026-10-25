@@ -16,28 +16,41 @@ pub fn pack_inputs(command: PackCommand) -> Result<(), CliError> {
     ensure_output_policy(&command.output, command.overwrite)?;
 
     let entries = collect_entries(&command.input, command.base_dir.as_deref())?;
-    let encoded = match command.format {
-        ArchiveFormat::Tar => pack_tar(&entries),
-        ArchiveFormat::Cpio => pack_cpio(&entries),
-        ArchiveFormat::Ar => pack_ar(&entries),
-        ArchiveFormat::Zpaq => pack_zpaq(&entries),
-        ArchiveFormat::Zip => pack_zip(&entries, command.password.as_deref()),
-        ArchiveFormat::SevenZ => pack_sevenz(&entries, command.password.as_deref()),
-        ArchiveFormat::Lha => pack_lha(&entries),
-        ArchiveFormat::Arj => pack_arj(&entries),
-        ArchiveFormat::Arc => pack_arc(&entries),
-        ArchiveFormat::GitPack => pack_git_pack(&entries),
-        ArchiveFormat::Xar => pack_xar(&entries),
-    }?;
+    let encoded = pack_entries(command.format, &entries, command.password.as_deref())?;
     fs::write(&command.output, encoded)?;
     Ok(())
 }
 
+/// Pack already-collected entries with the same dispatch as `archive pack`.
+///
+/// Tree walking is deliberately outside this function so the benchmark
+/// helper can separate library encode time from filesystem I/O.
+pub fn pack_entries(
+    format: ArchiveFormat,
+    entries: &[PackedEntry],
+    password: Option<&str>,
+) -> Result<Vec<u8>, CliError> {
+    match format {
+        ArchiveFormat::Tar => pack_tar(entries),
+        ArchiveFormat::Cpio => pack_cpio(entries),
+        ArchiveFormat::Ar => pack_ar(entries),
+        ArchiveFormat::Zpaq => pack_zpaq(entries),
+        ArchiveFormat::Zip => pack_zip(entries, password),
+        ArchiveFormat::SevenZ => pack_sevenz(entries, password),
+        ArchiveFormat::Lha => pack_lha(entries),
+        ArchiveFormat::Arj => pack_arj(entries),
+        ArchiveFormat::Arc => pack_arc(entries),
+        ArchiveFormat::GitPack => pack_git_pack(entries),
+        ArchiveFormat::Xar => pack_xar(entries),
+    }
+}
+
+/// One file or directory collected for archive writing.
 #[derive(Debug, Clone)]
-struct PackedEntry {
-    archive_path: String,
-    data: Option<Vec<u8>>,
-    is_dir: bool,
+pub struct PackedEntry {
+    pub archive_path: String,
+    pub data: Option<Vec<u8>>,
+    pub is_dir: bool,
 }
 
 fn pack_tar(entries: &[PackedEntry]) -> Result<Vec<u8>, CliError> {
@@ -198,7 +211,7 @@ fn pack_sevenz(entries: &[PackedEntry], password: Option<&str>) -> Result<Vec<u8
         .map_err(|error| CliError::from_archive_error(error, password.is_some()))
 }
 
-fn collect_entries(
+pub fn collect_entries(
     inputs: &[PathBuf],
     base_dir: Option<&Path>,
 ) -> Result<Vec<PackedEntry>, CliError> {
@@ -233,11 +246,13 @@ fn collect_one(
     }
     let relative = archive_relative_path(input, base_dir)?;
     if metadata.is_dir() {
-        out.push(PackedEntry {
-            archive_path: relative.clone(),
-            data: None,
-            is_dir: true,
-        });
+        if !relative.is_empty() {
+            out.push(PackedEntry {
+                archive_path: relative.clone(),
+                data: None,
+                is_dir: true,
+            });
+        }
         let mut children = fs::read_dir(input)?
             .map(|entry| entry.map(|e| e.path()))
             .collect::<Result<Vec<_>, _>>()?;
@@ -246,6 +261,12 @@ fn collect_one(
             collect_one(&child, base_dir, out)?;
         }
     } else if metadata.is_file() {
+        if relative.is_empty() {
+            return Err(CliError::Detect(format!(
+                "refusing to encode empty archive path for {}; --base-dir must be a directory",
+                input.display()
+            )));
+        }
         out.push(PackedEntry {
             archive_path: relative,
             data: Some(fs::read(input)?),
@@ -277,6 +298,9 @@ fn archive_relative_path(input: &Path, base_dir: Option<&Path>) -> Result<String
             ))
         })?
     };
+    if relative.as_os_str().is_empty() {
+        return Ok(String::new());
+    }
     sanitize_archive_path(relative)
 }
 
@@ -353,5 +377,18 @@ mod tests {
     #[test]
     fn ensure_dir_suffix_adds_trailing_slash() {
         assert_eq!(ensure_dir_suffix("dir"), "dir/");
+    }
+
+    #[test]
+    fn collect_entries_rejects_file_base_dir() {
+        let root =
+            std::env::temp_dir().join(format!("archive-cli-base-dir-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("payload.bin");
+        std::fs::write(&file, b"payload").unwrap();
+        let result = super::collect_entries(std::slice::from_ref(&file), Some(&file));
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

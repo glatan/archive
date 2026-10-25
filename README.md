@@ -144,6 +144,7 @@ failure は最小化・重複排除後に `.json` + `.bin` ペアとして保存
 | `THIRD_PARTY_NOTICES` | 参照実装・bundled asset の provenance |
 | [`archive-cli/README.md`](archive-cli/README.md) | CLI コマンド詳細・オプション一覧 |
 | [`fuzz/README.md`](fuzz/README.md) | Fuzz ハーネスの使い方・artifact 構造 |
+| [`docs/bench/README.md`](docs/bench/README.md) | 参照実装との性能比較の方法・ビルドフラグ・制約 |
 
 ## 状態の読み方
 

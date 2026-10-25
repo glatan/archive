@@ -157,3 +157,45 @@ build-container.debug:
 build-container.fuzz:
 	podman build --target fuzz -t $(FUZZ_IMAGE) -f Containerfile .
 	podman image prune -f
+
+# ── performance comparison ──────────────────────────────────────
+# `make bench` keeps the existing Criterion microbenchmarks.
+# `make bench-compare` runs the reference comparison harness on the host.
+# Missing reference tools are reported as N/A in the generated report.
+BENCH_OUT ?= target/bench/container
+
+.PHONY: bench
+bench:
+	cargo bench --all-features --bench compress --bench archive
+
+.PHONY: bench-compare
+bench-compare:
+	cargo build --release -p archive-cli --bin archive --bin archive-bench-helper
+	cargo bench --all-features --bench compare -- --full
+
+.PHONY: bench-compare-quick
+bench-compare-quick:
+	cargo build --release -p archive-cli --bin archive --bin archive-bench-helper
+	cargo bench --all-features --bench compare -- --quick
+
+.PHONY: bench-baseline
+bench-baseline:
+	cargo build --release -p archive-cli --bin archive --bin archive-bench-helper
+	cargo bench --all-features --bench compare -- --full --output-dir target/bench/baseline
+
+.PHONY: bench-refs
+bench-refs:
+	bash docs/bench/refs/build.sh
+
+# Referenced tools live in the test image. Build it first so the source
+# snapshot matches the working tree.
+.PHONY: bench-compare-container
+bench-compare-container: build-container.test
+	mkdir -p $(BENCH_OUT) target/bench/refs
+	podman run --rm \
+		-v "$(CURDIR)/$(BENCH_OUT):/workspace/bench-out:Z" \
+		-v "$(CURDIR)/target/bench/refs:/workspace/target/bench/refs:Z" \
+		--entrypoint /bin/sh $(TEST_IMAGE) \
+		-c 'cargo build --release -p archive-cli --bin archive --bin archive-bench-helper && \
+		    cargo bench --all-features --bench compare -- --full \
+		      --output-dir /workspace/bench-out/run-$$(date +%s%N)'

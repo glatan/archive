@@ -4,7 +4,7 @@
 |------|------|
 | 形式概要 | Linux 向け read-only ファイルシステムイメージ。1024B オフセットのスーパーブロック + `meta_blkaddr` 起点の inode メタデータ領域 (32B スロット) + ブロックアラインされたデータ領域 |
 | 基準仕様 | Linux kernel `Documentation/filesystems/erofs.rst` + **canonical on-disk 定義** erofs-utils `include/erofs_fs.h` (MIT、userspace 正本) — いずれも `docs/spec/sources/` にスナップショット。kernel `fs/erofs/erofs_fs.h` も MIT SPDX で pin 済み (`Z_EROFS_LI_HOLE` は kernel 版のみに存在するため併用)。以下 `erofs_fs.h` 引用は erofs-utils `include/erofs_fs.h` を指す |
-| 参照実装 | erofs-utils `mkfs.erofs`/`fsck.erofs` (GPL-2.0+、fixture 生成・交差検証・encoder 出力検証 oracle + encoder layout の behavioral reference)。個別 kernel .c (super.c/inode.c/data.c/zmap.c、`docs/spec/sources/` に pin) は metabox・chunk map 等の動作確認のみに使用 (コード取り込みなし)。詳細: THIRD_PARTY_NOTICES erofs 項 |
+| 参照実装 | erofs-utils `mkfs.erofs`/`fsck.erofs` (GPL-2.0+、fixture 生成・交差検証・encoder 出力検証 oracle + encoder layout の behavioral reference)。個別 kernel .c (super.c/inode.c/data.c/zmap.c、`docs/spec/sources/` に pin) は metabox・chunk map 等の動作確認のみに使用 (コード取り込みなし)。性能比較 (`docs/bench/`) では `tests/fixtures/erofs/mkfs.erofs.img` の decode に使用。詳細: THIRD_PARTY_NOTICES erofs 項 |
 | 実装 | `archive::archive::erofs::{decode, encode::ErofsEncoder, ErofsArchiveEncoder}` (read/write。write は非圧縮 flat layout のみ)。`erofs` feature 配下 |
 
 ## スーパーブロック層

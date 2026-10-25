@@ -10,6 +10,30 @@ This document is informational and does not replace the repository LICENSE
 file. It is intended to make maintenance and downstream auditing easier.
 
 
+1a. Benchmark reference invocations
+-----------------------------------
+
+The performance comparison harness in `docs/bench/` executes reference
+tools as subprocesses. It never links reference implementations into the
+crate and never redistributes their sources or binaries.
+
+- Distribution-provided tools (gzip, zstd, xz, bzip2, lzip, lz4, lzop,
+  lrzip, rzip, brotli, ncompress, zpaq, 7-Zip, tar, cpio, ar, zip,
+  and the Python standard library) are invoked only for measurement. Their package version and, where
+  available, compiler comment are recorded in the generated report.
+- Pinned source builds under `docs/bench/refs/build.py`:
+  - ZX0/ZX1/ZX2/ZX5 (Einar Saukas, BSD-3-Clause)
+  - lzsa (Emmanuel Marty et al., zlib license; src/matchfinder.c is CC0)
+  - liblzf (Marc Alexander Lehmann, BSD-2-Clause OR GPL-2.0-or-later)
+  - FastLZ (Ariya Hidayat, MIT)
+  These sources are fetched into `target/bench/refs/src/` and are not
+  committed. The exact CFLAGS, compiler, source revision, and binary
+  sha256 are written to `target/bench/refs/build-info.json`.
+- Existing "test-time oracle" statements in this file include the
+  benchmark use when the same tool is listed. GPL/LGPL reference tools
+  remain execution-only; no conversion path or code incorporation is
+  created by benchmarking.
+
 1. Specification-driven implementations
 ---------------------------------------
 

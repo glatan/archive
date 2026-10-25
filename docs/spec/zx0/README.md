@@ -4,7 +4,7 @@
 |------|------|
 | 形式概要 | Einar Saukas の ZX0 v2 が使用する raw LZ77 ストリーム。制御ビット列とデータバイトがインターリーブする形式で、8bit CPU での高速伸張に最適化されている。magic・コンテナヘッダ・チェックサムは持たない |
 | 基準仕様 | [ZX0 README](https://github.com/einar-saukas/ZX0) "File Format" (ローカルスナップショット: `docs/spec/sources/zx0_README_v2.2.md`) + 参照実装 `dzx0.c` / `compress.c` (Einar Saukas, BSD 3-Clause) |
-| 参照実装 | ZX0 参照実装 `dzx0.c`/`compress.c` (Einar Saukas、BSD 3-Clause。動作参照、既知解答ベクタは参照コンプレッサ ZX0 v2.2 で生成)。詳細: THIRD_PARTY_NOTICES ZX0 項 |
+| 参照実装 (性能比較 `docs/bench/` でも使用) | ZX0 参照実装 `dzx0.c`/`compress.c` (Einar Saukas、BSD 3-Clause。動作参照、既知解答ベクタは参照コンプレッサ ZX0 v2.2 で生成)。詳細: THIRD_PARTY_NOTICES ZX0 項 |
 | 実装 | `archive::compress::zx0` (decode / decode_bounded / decode_classic / decode_with_prefix / decode_classic_with_prefix / decode_backwards / decode_backwards_bounded / decode_backwards_with_suffix / encode / encode_classic / encode_backwards / encode_backwards_with_suffix)。pure-Rust 実装 |
 
 ## 対応バリアント・仕様版

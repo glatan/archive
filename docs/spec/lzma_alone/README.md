@@ -4,7 +4,7 @@
 |------|------|
 | 形式概要 | 13バイトヘッダー (properties byte + 辞書サイズ + 非圧縮サイズ) + 生 LZMA ストリーム |
 | 基準仕様 | [`lzma-file-format.txt`](https://raw.githubusercontent.com/tukaani-project/xz/master/doc/lzma-file-format.txt) (tukaani-project/xz `doc/`、2022-07-13 版、public domain。ローカルスナップショット: `docs/spec/sources/lzma-file-format-20220713.txt`) |
-| 参照実装 | system `xz` (liblzma、public domain、oracle)。詳細: THIRD_PARTY_NOTICES LZMA-Alone 項 |
+| 参照実装 | system `xz` (liblzma、public domain、oracle・性能比較 `docs/bench/`)。詳細: THIRD_PARTY_NOTICES LZMA-Alone 項 |
 
 ### ヘッダーフォーマット
 

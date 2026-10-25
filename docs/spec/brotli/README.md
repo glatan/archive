@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [RFC 7932](https://www.rfc-editor.org/rfc/rfc7932.txt) (2016) — Brotli Compressed Data Format (ローカルスナップショット: `docs/spec/sources/rfc7932.txt`) |
-| 参照実装 | upstream Brotli 参照実装 (MIT、static dictionary テーブル構造の動作参照のみ。コード取り込みなし)、system `brotli` (interop oracle)。詳細: THIRD_PARTY_NOTICES Brotli 項・4 節 |
+| 参照実装 | upstream Brotli 参照実装 (MIT、static dictionary テーブル構造の動作参照のみ。コード取り込みなし)、system `brotli` (interop oracle・性能比較 `docs/bench/`)。詳細: THIRD_PARTY_NOTICES Brotli 項・4 節 |
 | decoder scope | §3-§10 の全必須デコードパス (prefix codes, distances, insert/copy lengths, context modeling, static dictionary, sliding window) を実装 |
 | public encoder scope | §9.1 stream header + §9.2 の uncompressed metablock / metadata metablock / LZ77 compressed metablock (insert+copy command, complex/simple prefix codes, distance encoding, context modeling, static dictionary usage, multi-block-type) を提供。圧縮戦略は固定順 (literal-only → context-modeling LZ77 → multi-block LZ77 → single-block LZ77) で、非圧縮表現より小さい最初の戦略を採用する first-match-wins (大域最小探索ではない) |
 

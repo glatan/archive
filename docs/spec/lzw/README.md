@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [`ncompress`](https://github.com/vapier/ncompress) ([`compress42.c` @ ncompress-4.2.4](https://github.com/vapier/ncompress/blob/ncompress-4.2.4/compress42.c)、Unlicense、ローカルスナップショット: `docs/spec/sources/ncompress_4.2.4_compress42.c`) のデファクト標準に準拠 |
-| 参照実装 | ncompress `compress42.c` (public domain、de facto 標準。encoder の block-mode adaptive reset は `cl_block()` の設計を動作参照として踏襲)。system `compress`/`uncompress`/`gzip` は統合テストの oracle、`tests/fixtures/lzw/hello.Z` は system `compress` 生成 fixture。詳細: THIRD_PARTY_NOTICES LZW 項 |
+| 参照実装 | ncompress `compress42.c` (public domain、de facto 標準。encoder の block-mode adaptive reset は `cl_block()` の設計を動作参照として踏襲)。system `compress`/`uncompress`/`gzip` は統合テストの oracle および性能比較 (`docs/bench/`)、`tests/fixtures/lzw/hello.Z` は system `compress` 生成 fixture。詳細: THIRD_PARTY_NOTICES LZW 項 |
 
 ### テスト対象要件と網羅状況
 

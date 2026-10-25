@@ -4,7 +4,7 @@
 |------|------|
 | 形式概要 | バイナリファイルを `begin <mode> <name>` / `end` で囲み、データを最大 45 octet ごとの行に分割して 3 octet → 4 文字 (6bit + 0x20) でエンコードする歴史的テキスト形式 |
 | 基準仕様 | [IEEE Std 1003.1-2017 `uuencode`](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/uuencode.html) (ローカルスナップショット: `docs/spec/sources/posix_uuencode_9699919799.html`) |
-| 参照実装 | CPython `binascii` (PSF License、テスト時 interop oracle のみ・非配布)。詳細: THIRD_PARTY_NOTICES uuencode 項 |
+| 参照実装 | CPython `binascii` (PSF License、テスト時 interop oracle のみ・非配布)。性能比較 (`docs/bench/`) でも使用。詳細: THIRD_PARTY_NOTICES uuencode 項 |
 | 実装 | `archive::encoding::uuencode` (encode / decode)。`uuencode` feature 配下 |
 
 ## 対応バリアント・仕様版

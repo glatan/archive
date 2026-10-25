@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [[MS-CAB]](https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/%5Bms-cab%5D.pdf) Cabinet File Format (Microsoft Open Specifications、2011-03-04 版 PDF。HTML 版: <https://learn.microsoft.com/en-us/previous-versions/bb417343(v=msdn.10)>、ローカルスナップショット: `docs/spec/sources/ms-cab_20110304.pdf`) |
-| 参照実装 | libmspack / cabextract (LGPL-2.1、Quantum `qtmd.c` の移植元・LZX `lzx.c` errata と checksum の動作参照・fixture 由来)、compcol (MIT、Quantum 移植の中間参照)。`bsdtar`/`cabextract` は統合テストの oracle。詳細: THIRD_PARTY_NOTICES mscab 項 |
+| 参照実装 | libmspack / cabextract (LGPL-2.1、Quantum `qtmd.c` の移植元・LZX `lzx.c` errata と checksum の動作参照・fixture 由来)、compcol (MIT、Quantum 移植の中間参照)。`bsdtar`/`cabextract` は統合テストの oracle。性能比較 (`docs/bench/`) では `tests/fixtures/mscab/lzx_mixed.cab` の decode に使用。詳細: THIRD_PARTY_NOTICES mscab 項 |
 | 形式概要 | CFHEADER + CFFOLDER 配列 + CFFILE 配列 + CFDATA ブロック列。フォルダ単位で圧縮 |
 | 実装範囲 | read/write (単一 cabinet・単一 folder の NONE/MSZIP) + LZX/Quantum folder の read + `decode_parts` による multi-cabinet set read。LZX/Quantum write / multi-cabinet write は intentional scope 外 |
 

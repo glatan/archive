@@ -75,6 +75,7 @@ sevenz = ["deflate", "lzip", "bzip2", "xz", "brotli"]
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
+serde_json = "1.0.149"
 
 [[bench]]
 name = "compress"
@@ -82,6 +83,10 @@ harness = false
 
 [[bench]]
 name = "archive"
+harness = false
+
+[[bench]]
+name = "compare"
 harness = false
 
 [workspace]

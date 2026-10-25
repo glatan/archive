@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [RFC 1951](https://www.rfc-editor.org/rfc/rfc1951.txt) — DEFLATE Compressed Data Format Specification version 1.3 (ローカルスナップショット: `docs/spec/sources/rfc1951.txt`) |
-| 参照実装 | zlib (zlib license、`inflate_table`/`gen_bitlen` の動作参照)。詳細: THIRD_PARTY_NOTICES DEFLATE 項 |
+| 参照実装 | zlib (zlib license、`inflate_table`/`gen_bitlen` の動作参照)、CPython `zlib` (性能比較 `docs/bench/`)。詳細: THIRD_PARTY_NOTICES DEFLATE 項 |
 | 仕様メモ | 仕様にテストベクターは含まれず、ハフマン符号構築例 (bit lengths `[3,3,3,3,3,2,4,4]`) が主要な具体例 |
 
 ### テスト対象要件と網羅状況

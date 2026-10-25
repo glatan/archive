@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [IEEE Std 1003.1-2017 (Issue 7)](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/ar.html) (POSIX) ar 形式 / [GNU ar](https://sourceware.org/binutils/docs/binutils/ar.html) 拡張 / [BSD ar](https://man.freebsd.org/cgi/man.cgi?ar(5)) 拡張 (ローカルスナップショット: `docs/spec/sources/posix_ar_9699919799.html` / `ar_5_freebsd.html` / `gnu_ar_binutils.html`)。注意: POSIX Issue 8 (1003.1-2024) では ar ページが "The archive format is not described" に改訂されフォーマット記述が削除されたため、wire format の正本は Issue 7 + BSD/GNU 実装文書を維持する |
-| 参照実装 | GNU binutils ar (GPL-3.0-or-later、thin fixture 生成および system `ar` による oracle)、bsdtar (oracle)。詳細: THIRD_PARTY_NOTICES ar 項 |
+| 参照実装 | GNU binutils ar (GPL-3.0-or-later、thin fixture 生成および system `ar` による oracle・性能比較 `docs/bench/`)、bsdtar (oracle)。詳細: THIRD_PARTY_NOTICES ar 項 |
 | 形式概要 | 8B グローバルヘッダー + 60B 固定長メンバーヘッダー × N。圧縮なし、チェックサムなし |
 
 ## 対応バリアント・仕様版
