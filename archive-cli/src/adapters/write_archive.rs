@@ -261,6 +261,12 @@ fn collect_one(
             collect_one(&child, base_dir, out)?;
         }
     } else if metadata.is_file() {
+        if relative.is_empty() {
+            return Err(CliError::Detect(format!(
+                "refusing to encode empty archive path for {}; --base-dir must be a directory",
+                input.display()
+            )));
+        }
         out.push(PackedEntry {
             archive_path: relative,
             data: Some(fs::read(input)?),
@@ -371,5 +377,18 @@ mod tests {
     #[test]
     fn ensure_dir_suffix_adds_trailing_slash() {
         assert_eq!(ensure_dir_suffix("dir"), "dir/");
+    }
+
+    #[test]
+    fn collect_entries_rejects_file_base_dir() {
+        let root =
+            std::env::temp_dir().join(format!("archive-cli-base-dir-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("payload.bin");
+        std::fs::write(&file, b"payload").unwrap();
+        let result = super::collect_entries(std::slice::from_ref(&file), Some(&file));
+        assert!(result.is_err());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -17,6 +17,7 @@ doc = false
 name = "archive-bench-helper"
 path = "src/bin/bench_helper.rs"
 doc = false
+required-features = ["json"]
 
 [dependencies]
 archive = { path = "..", default-features = false, features = ["std", "tar", "cpio", "ar", "deb", "rpm", "squashfs", "cramfs", "romfs", "erofs", "iso9660", "crx3", "pea", "mscab", "mscfb", "zim", "mtree", "warc", "lha", "arj", "arc", "git-pack", "xar", "xca", "lzf", "fastlz", "lzrw1", "lzrw1a", "lzrw2", "lzrw3", "lzrw3a", "lzsa", "zx0", "zx1", "zx2", "zx5", "vcdiff", "mppc", "lzs", "lzxd", "cmpsc", "uuencode", "ascii85", "yenc", "macbinary", "binhex", "packbits", "gzip", "zstd", "bzip2", "lzip", "lzma-alone", "lzw", "lz4", "lzo", "lrzip", "xz", "zlib", "zpaq", "rzip", "snappy", "brotli", "zip", "sevenz"] }
