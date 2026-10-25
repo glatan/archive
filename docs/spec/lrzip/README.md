@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | upstream [`ckolivas/lrzip`](https://github.com/ckolivas/lrzip) の [`doc/magic.header.txt`](https://github.com/ckolivas/lrzip/blob/master/doc/magic.header.txt) + ソースコード (0.6x 系、ローカルスナップショット: `docs/spec/sources/lrzip_magic.header.txt`)。本 crate は crate-local subset のため完全互換は保証しない |
-| 参照実装 | upstream `lrzip` (Con Kolivas 他、GPL-2.0-or-later、動作参照 — format facts のみ、コード取り込みなし。GPL-2.0+→GPL-3→AGPL-13 の変換パスあり)。system `lrzip` は oracle (下記「相互運用の確認範囲」行参照)。詳細: THIRD_PARTY_NOTICES lrzip / rzip 項 |
+| 参照実装 | upstream `lrzip` (Con Kolivas 他、GPL-2.0-or-later、動作参照 — format facts のみ、コード取り込みなし。GPL-2.0+→GPL-3→AGPL-13 の変換パスあり)。system `lrzip` は oracle (下記「相互運用の確認範囲」行参照) および性能比較 (`docs/bench/`)。詳細: THIRD_PARTY_NOTICES lrzip / rzip 項 |
 | 形式概要 | crate-local な `.lrz` framing を持ち、shared long-range match finder の上に lrzip-specific variable-width match offset token を載せる。system `lrzip` との完全互換 reimplementation は目標外 |
 | 内部構成 | crate-local shared `rzip`-style token/chunk logic を再利用し、その上に `LZMA` / `bzip2` / `LZO` / `gzip` / `ZPAQ` / `none` バックエンドを重ねる |
 | `magic.header.txt` でカバーしない残余の de facto 事実 | ctype 数値写像 (none/bzip2/lzo/lzma/gzip/zpaq)、stream header は CTYPE_NONE プレースホルダで実 ctype は block header 側にだけ置く layout、empty stream0 = CRC + 0-length literal token、stream-0 の token エンコーディング、可変幅 match offset、chunk sizing (~100MiB)、生データフォールバック方針、system `lrzip` の LZMA block は EOS marker を持たず block header `u_len` で終端する raw stream、stdin/pipe 出力は header `dict_size == 0` — いずれも upstream ソース由来の format fact であり、書面仕様が存在しないため例外として記録する |

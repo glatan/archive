@@ -4,7 +4,7 @@
 |------|------|
 | 形式概要 | LZMA アルゴリズムに固定パラメータ (`lc=3`, `lp=0`, `pb=2`) を使用し、6バイトヘッダー + LZMA ストリーム + 20バイトトレーラーで構成される |
 | 基準仕様 | [lzip manual 1.26](https://www.nongnu.org/lzip/manual/lzip_manual.html) "File format" (ローカルスナップショット: `docs/spec/sources/lzip_manual_1.26.html`) |
-| 参照実装 | なし (書面仕様のみに基づいて実装)。system `lzip` (GNU lzip、GPL-2.0-or-later) はテスト時の oracle としてのみ使用 |
+| 参照実装 | なし (書面仕様のみに基づいて実装)。system `lzip` (GNU lzip、GPL-2.0-or-later) はテスト時の oracle および性能比較 (`docs/bench/`) に使用 |
 
 ### ストリームフォーマット
 

@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [`7zFormat.txt`](https://raw.githubusercontent.com/ip7z/7zip/main/DOC/7zFormat.txt) / [`Methods.txt`](https://raw.githubusercontent.com/ip7z/7zip/main/DOC/Methods.txt) ([LZMA SDK](https://www.7-zip.org/sdk.html) 26.00 同梱文書、GitHub mirror: ip7z/7zip。ローカルスナップショット: `docs/spec/sources/7zformat.txt` / `7z_methods.txt`) |
-| 参照実装 | LZMA SDK / liblzma (public domain、`7zIn.c` は UINT64 varint の動作参照、BCJ/Delta/BCJ2 フィルタの移植元)、ppmd-rust (CC0-1.0 OR MIT-0、PPMd 移植元)、system `7z` (oracle)。詳細: THIRD_PARTY_NOTICES (7z baseline container・BCJ・BCJ2・Delta・PPMd 各項) |
+| 参照実装 | LZMA SDK / liblzma (public domain、`7zIn.c` は UINT64 varint の動作参照、BCJ/Delta/BCJ2 フィルタの移植元)、ppmd-rust (CC0-1.0 OR MIT-0、PPMd 移植元)、system `7z` (oracle・性能比較 `docs/bench/`)。詳細: THIRD_PARTY_NOTICES (7z baseline container・BCJ・BCJ2・Delta・PPMd 各項) |
 | current scope | multi-folder decode (supported single-output DAG subset)、multi-folder linear writer (arbitrary split points)、supported codec/filter chain (LZMA2, LZMA, PPMdH, Copy, Deflate, Deflate64, BZip2 + x86/PowerPC/ARM/ARM-Thumb/SPARC/ARM64/RISC-V BCJ, Delta, BCJ2, Brotli) + 7zAES file-content / encoded-header encrypt + timestamp metadata (ctime/atime/mtime) |
 | intentional exclusion | folder 間で stream を共有する non-linear DAG writer、empty-stream/directory/anti-item entries、external stream/folder lists、Deflate64 拡張域 encode (code 285 / 64KB distance)。Methods.txt で定義済みの未対応 method ID 群 (Swap2/Swap4、Alpha、M68、Zip 系 Shrink/Implode/Imploding/LZMA-zip、ZSTD `04 01 5D`、xz `04 01 5F`、Jpeg/WavPack/PPMd-zip/wzAES、Rar1-5、Arj、NSIS、LZHAM、LZ4/LZ5/LIZARD、AES-128/192/ECB/CFB/OFB/CTR `06 F0 01 xx`、ZipCrypto、Rar29AES 等) は #69/#70 の generic reject でカバー。BCJ short-form ID (`04`-`09`) も未受理 (long-form `03 03 xx yy` + `0A`/`0B` のみ) |
 

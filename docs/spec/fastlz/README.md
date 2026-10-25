@@ -4,7 +4,7 @@
 |------|------|
 | 形式概要 | Ariya Hidayat の FastLZ が使用する raw LZ77 ストリーム。コンテナヘッダ・magic・チェックサムを持たない制御バイト列。ストリームは level 1 / level 2 の 2 バリアントを持ち、先頭バイトの bit5 が level-2 マーカーとして機能する |
 | 基準仕様 | 参照実装 [`fastlz.c`](https://github.com/ariya/FastLZ) (Ariya Hidayat, MIT license) のフォーマット動作。実装が事実上の規範 (ローカルスナップショット: `docs/spec/sources/fastlz.c`) |
-| 参照実装 | `fastlz.c` (MIT、de facto 仕様かつ動作参照。known-answer decode fixture は参照エンコーダで生成)。詳細: THIRD_PARTY_NOTICES FastLZ 項 |
+| 参照実装 | `fastlz.c` (MIT、de facto 仕様かつ動作参照。known-answer decode fixture は参照エンコーダで生成)。性能比較 (`docs/bench/`) では固定ソースビルドを使用。詳細: THIRD_PARTY_NOTICES FastLZ 項 |
 | 実装 | `archive::compress::fastlz` (decode / decode_bounded / encode / encode_level1 / encode_level2)。pure-Rust 実装 |
 
 ## 対応バリアント・仕様版

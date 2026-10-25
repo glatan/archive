@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [RFC 1950](https://www.rfc-editor.org/rfc/rfc1950.txt) — ZLIB Compressed Data Format Specification version 3.3 (ローカルスナップショット: `docs/spec/sources/rfc1950.txt`) |
-| 参照実装 | zlib (zlib license、共有 DEFLATE codec が `gen_bitlen`/`inflate_table` を動作参照)、CPython `zlib` モジュール (テスト時 oracle)。詳細: THIRD_PARTY_NOTICES zlib/DEFLATE 項 |
+| 参照実装 | zlib (zlib license、共有 DEFLATE codec が `gen_bitlen`/`inflate_table` を動作参照)、CPython `zlib` モジュール (テスト時 oracle・性能比較 `docs/bench/`)。詳細: THIRD_PARTY_NOTICES zlib/DEFLATE 項 |
 | current scope | RFC 1950 の zlib wrapper として、2-byte header (`CMF`/`FLG`)・raw DEFLATE payload・big-endian Adler-32 trailer を対象にする |
 
 ### テスト対象要件と網羅状況

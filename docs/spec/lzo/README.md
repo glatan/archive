@@ -4,7 +4,7 @@
 |------|------|
 | LZO1X 基準仕様 | [Linux kernel `Documentation/staging/lzo.rst`](https://docs.kernel.org/staging/lzo.html) (ローカルスナップショット: `docs/spec/sources/linux_lzo.rst`) |
 | lzop 基準仕様 | [lzop](https://www.lzop.org/) ソースコード (`lzop.h` / `p_lzo.c`) をデファクト仕様として扱う |
-| 参照実装 | lzop (Markus Oberhumer、GPL-2.0-or-later、format facts のみの動作参照 — コード取り込みなし。GPL-2.0+→GPL-3→AGPL-13 の変換パスあり + fixture 生成: `tests/fixtures/lzo/hello.lzo` + oracle)。詳細: THIRD_PARTY_NOTICES LZO / lzop 項 |
+| 参照実装 | lzop (Markus Oberhumer、GPL-2.0-or-later、format facts のみの動作参照 — コード取り込みなし。GPL-2.0+→GPL-3→AGPL-13 の変換パスあり + fixture 生成: `tests/fixtures/lzo/hello.lzo` + oracle・性能比較 `docs/bench/`)。詳細: THIRD_PARTY_NOTICES LZO / lzop 項 |
 
 ## 対応バリアント・仕様版
 

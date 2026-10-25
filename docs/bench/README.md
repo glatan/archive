@@ -1,0 +1,157 @@
+# Benchmark comparison
+
+`archive` の性能を、同じ入力・同じ実効パラメータで参照実装と比較するための
+補助レーン。仕様準拠や fuzz の代替ではなく、最適化の判断材料と回帰検出に
+使う。
+
+## 実行
+
+```sh
+# ホスト上で quick（参照ツールが無い形式は N/A）
+make bench-compare-quick
+
+# ホスト上で full
+make bench-compare
+
+# 参照ツールが揃ったテストコンテナ内で full
+make bench-compare-container
+
+# 参照実装を固定ソースからビルド（ZX0/1/2/5、LZSA、liblzf、FastLZ）
+make bench-refs
+
+# 既存 Criterion ベンチ
+make bench
+```
+
+レポートは `target/bench/compare/run-<unix-time>/` に出力される。
+
+- `report.md`: 人間向けの比較表とカバレッジ
+- `result.json`: 生サンプル、環境情報、ビルド情報、git commit
+
+`--output-dir` で出力先を変更できる。
+
+```sh
+cargo build --release -p archive-cli --bin archive --bin archive-bench-helper
+cargo bench --all-features --bench compare -- \
+  --quick --format gzip,zstd --corpus text --iterations 3
+```
+
+## 測定モデル
+
+| 列 | 内容 |
+|---|---|
+| `ours-lib` | `archive-bench-helper` がライブラリ呼び出しの前後だけを計測する。プロセス起動・引数解析・入力ファイル読み込みは計測区間外 |
+| `ours-cli` | `archive compress` / `archive test` をサブプロセスとして実行。起動とファイル I/O を含む |
+| `ref-cli` | 参照ツールをサブプロセスとして実行。起動とファイル I/O を含む |
+
+`ours-lib` は実装ポテンシャル、`ours-cli` と `ref-cli` は end-to-end の比較に使う。
+参照側の decode は `/dev/null` または一時ディレクトリへ出力し、検証時だけ
+実ファイルへ出力する。
+
+- warmup 1 回 + 3〜5 回のサンプル中央値
+- スループットは decimal MB/s（1e6 bytes/s）
+- `lib/ref` と `cli/ref` は参照側スループット ÷ 我々のスループット。
+  1 より大きいほど参照が速い
+- `CV` は我々 / 参照の変動係数。10% を超える場合はノイズを疑う
+- 同一マシン内の相対比を使う。絶対値をマシン間で比較しない
+
+### パラメータ正規化
+
+形式ごとに辞書・window・block・checksum・level を可能な限り合わせる。
+
+| 形式 | 我々の既定 | 参照側 |
+|---|---|---|
+| gzip | level 6 | `gzip -6 -n` |
+| zlib / deflate | level 6 | CPython zlib level 6 |
+| zstd | 32 KiB window / 128 KiB block / checksum | `zstd -3 --zstd=wlog=15 --check -T1` |
+| bzip2 | level 9 | `bzip2 -9` |
+| lzip | 4 KiB 辞書 | `lzip -6 -s 4096` |
+| lzma-alone | 8 MiB 辞書 | `xz --format=lzma --lzma1=dict=8MiB -T1` |
+| xz | 4 KiB 辞書 / CRC32 | `xz --lzma2=dict=4KiB -T1` |
+| lz4 | 4 MiB block / block+content checksum / content size | `lz4 -B7 -BX --content-size` |
+| lzo | LZO1X-1 | `lzop -1` |
+| brotli | 既定エンコーダ | `brotli -q 5`（直接対応する level がないため注記） |
+| zx0/1/2/5 | 既定 | 参照 CLI の `-q` |
+| lzsa v1/v2 | 既定 | `lzsa -f 1/2 --prefer-speed` |
+
+参照側の level を複数測る場合は `catalog.rs` にケースを追加する。
+
+### 相互デコード
+
+測定ペアごとに次を確認する。
+
+1. 参照実装の出力を我々が decode し、元データとハッシュ一致
+2. 我々の出力を参照実装が decode し、元データとハッシュ一致
+
+失敗は性能値ではなく `cross_decode_ok=false` として記録する。形式の variant が
+異なる場合は N/A と理由を記録する。
+
+## コーパス
+
+- codec: `text` / `run` / `random` / `periodic`（`--corpus all` で全種）
+- archive: 固定メタデータのファイルツリー（quick 24 files、full 120 files）
+- 大容量ファイルは `target/bench` に生成し、リポジトリにはコミットしない
+- `--size` でサイズを上書きできる
+
+## 参照実装
+
+| 入手方法 | 例 |
+|---|---|
+| ディストリ配布バイナリ | gzip, zstd, xz, bzip2, lzip, lz4, lzop, brotli, ncompress, rzip, lrzip, 7z, tar, cpio, ar, zip |
+| 固定ソースビルド | ZX0/1/2/5, LZSA, liblzf, FastLZ |
+| Python stdlib | zlib, deflate, uuencode, Ascii85 |
+| 参照なし（N/A） | snappy, lzrw*, vcdiff, mppc, lzs, lzxd, cmpsc, xca, packbits, yenc, macbinary, binhex, 一部アーカイブ |
+
+`make bench-refs` は `docs/bench/refs/build.py` を実行し、
+`target/bench/refs/bin/` に参照バイナリを置く。ハーネスは PATH より
+`target/bench/refs/bin/` を優先する。ビルド記録は
+`target/bench/refs/build-info.json` に残す。
+
+### ビルドフラグの表示
+
+レポートの `Reference build provenance` 表に次を出す。
+
+- 参照名、バイナリパス
+- distro package の version（取得できる場合）
+- ソースビルドの `CFLAGS` / `CXXFLAGS` / `LDFLAGS` / compiler
+- 我々の Rust 側の profile、`RUSTFLAGS`、rustc version、CPU、git commit
+
+ソースビルドの既定フラグは
+`-O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0`。参照の最適化を
+変えた場合は `docs/bench/refs/build.py` の `CFLAGS` を変更し、レポートを
+再生成する。distro package は実際の `-O` フラグまで公開されないため
+`distro package (exact distro build flags not exposed)` と明記する。
+
+### ライセンス
+
+参照実装は **実行のみ**。GPL/LGPL の参照をリンク・同梱しない。
+参照ソースは `target/bench/refs/src/` に取得し、リポジトリには置かない。
+`THIRD_PARTY_NOTICES` と各形式の `docs/spec/<format>/README.md` の
+「参照実装」行に性能比較での用途を記録する。
+
+## カバレッジ
+
+`docs/spec/` にある全形式をカタログに載せる。参照実装があるものは比較し、
+ないものは `ours-only` または `unavailable` として理由を表示する。
+全形式の一覧は [reference-matrix.md](reference-matrix.md) を参照。
+
+### 制約
+
+- アーカイブのメタデータ（時刻・パーミッション・拡張フィールド）は
+  writer 間で異なる。サイズ比較はその差を含む
+- distro package の最適化フラグは不明な場合がある
+- 小型入力では参照プロセスの起動時間が支配的になる。codec は可能な限り
+  1 MiB 以上、速い codec は 4 MiB 以上で測る
+- WSL2 などでは CPU 周波数・スケジューリングのノイズが大きい。CV を確認し、
+  必要ならネイティブ Linux で再測定する
+- `ours-lib` は CLI の production dispatch を経由するため、純粋な free
+  function 呼び出しより少し重い。実装ポテンシャルの下限として読む
+
+## 形式の追加
+
+1. `benches/compare/catalog.rs` に `Case` を追加
+2. 必要な参照コマンドを `RefCommand` で定義
+3. 参照がソースビルドなら `docs/bench/refs/build.py` に取得・ビルドを追加
+4. `cargo bench --all-features --bench compare -- --format <id>` で確認
+5. `--list-markdown` で `docs/bench/reference-matrix.md` を再生成
+6. `THIRD_PARTY_NOTICES` と該当 `docs/spec/<format>/README.md` を更新

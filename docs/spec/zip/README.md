@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [APPNOTE.TXT 6.3.10](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) (PKWARE, 2024、ローカルスナップショット: `docs/spec/sources/APPNOTE_6.3.10.txt`) |
-| 参照実装 | hwzip 2.4 (public domain、method 1-6 の移植元・fixture 生成)、Info-ZIP `unshrink.c`/`unreduce.c`/`explode.c` (decode 動作参照)、blast.c (zlib license、method 10 decode の移植元)、CPython `zipfile` (PSF、SFX 検出 heuristic の動作参照)、system `zip`/`unzip`/`unar`/`7z` (テスト時 oracle — multi-disk 分割物は `unzip -Z1` が listing、`7z` が抽出 oracle)。詳細: THIRD_PARTY_NOTICES zip 項 |
+| 参照実装 | hwzip 2.4 (public domain、method 1-6 の移植元・fixture 生成)、Info-ZIP `unshrink.c`/`unreduce.c`/`explode.c` (decode 動作参照)、blast.c (zlib license、method 10 decode の移植元)、CPython `zipfile` (PSF、SFX 検出 heuristic の動作参照)、system `zip`/`unzip`/`unar`/`7z` (テスト時 oracle — multi-disk 分割物は `unzip -Z1` が listing、`7z` が抽出 oracle。性能比較 `docs/bench/` でも使用)。詳細: THIRD_PARTY_NOTICES zip 項 |
 | current scope | split/spanned (multi-disk) の読み取り・`finish_parts` による分割 emit、compression method 0 (Store) / 1 (Shrunk) / 2-5 (Reduced) / 6 (Implode) / 8 (Deflate) / 9 (Deflate64) / 10 (DCL Implode、decode + literal-only encode) / 12 (BZIP2) / 14 (LZMA) / 93 (Zstd) / 95 (XZ) / 98 (PPMd) / 16 (IBM z/OS CMPSC、`cmpsc` feature で decode/encode — encode は alphabet-only 非圧縮 emit)、Traditional PKZIP encryption、WinZip AES-128/192/256、extra field 0x000a/0x000d/0x5455/0x6375/0x7075、Archive Extra Data Record / Digital Signature / ZIP64 extensible data sector スキップ |
 | intentional exclusion | Certificate-based encryption (§7.2.4)、Method 7 (Tokenizing、仕様未公開)、IBM z/OS CMPSC Entropy Encoding 拡張 (Method 16 の拡張要素、特許状況未確認 — basic method の decode は対応済み)、JPEG (Method 96、WinZip 独自の JPEG 再圧縮で非公式文書のみ)、WavPack (Method 97、可逆圧縮コアの bit-level 仕様なし) |
 

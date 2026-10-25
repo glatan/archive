@@ -24,6 +24,8 @@
 //!   spec-to-test mapping, intentional unsupported features, and future candidates
 //! - `archive-cli`: terminal entry point for inspect/list/extract/pack/compress flows
 //! - `archive-fuzz`: auxiliary validation lane for roundtrip, interop, and regression export
+//! - `docs/bench/`: reference-implementation performance comparison, including
+//!   measurement methodology, build provenance, and N/A coverage
 //!
 //! Quick status guide:
 //! - Known bugs: none are currently listed as open

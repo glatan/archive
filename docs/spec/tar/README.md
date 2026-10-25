@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [POSIX.1-2017 / IEEE Std 1003.1](https://pubs.opengroup.org/onlinepubs/9699919799/utilities/pax.html) の tar ヘッダー仕様および [GNU tar manual "Formats"](https://www.gnu.org/software/tar/manual/html_node/Formats.html) に準拠 (ローカルスナップショット: `docs/spec/sources/posix_pax_9699919799.html` / `gnu_tar_formats.html` / `gnu_tar_basic.html` / `gnu_tar_extensions.html` / `gnu_tar_sparse_formats.html`) |
-| 参照実装 | GNU tar (GNU sparse は `sparse.c` 実測準拠の動作参照)、system `tar` (oracle — `test_tar_*_system_compat`、`test_tar_gnu_sparse_oracle` 等)。詳細: THIRD_PARTY_NOTICES tar 項・test-fixture provenance 記述 |
+| 参照実装 | GNU tar (GNU sparse は `sparse.c` 実測準拠の動作参照)、system `tar` (oracle — `test_tar_*_system_compat`、`test_tar_gnu_sparse_oracle` 等。性能比較 `docs/bench/` でも使用)。詳細: THIRD_PARTY_NOTICES tar 項・test-fixture provenance 記述 |
 | current scope | decoder は UStar / GNU 拡張 / PAX 拡張を自動認識し、encoder は GNU モード (デフォルト) と PAX モードを選択可能 |
 
 ## 対応バリアント・仕様版
