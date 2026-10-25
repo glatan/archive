@@ -533,5 +533,14 @@ fn now_string() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0);
-    format!("unix:{seconds}")
+    Command::new("date")
+        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            let timestamp = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            format!("{timestamp} (unix:{seconds})")
+        })
+        .unwrap_or_else(|| format!("unix:{seconds}"))
 }
