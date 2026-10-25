@@ -11,6 +11,10 @@ FUZZ_JOBS ?= 1
 # 既定 2GiB のソフト上限で確保をデコーダのエラーとして返す。
 # -S だけを変える。ハード上限を下げると外部ツールが 4GiB へ戻せない。
 FUZZ_AS_KB ?= 2097152
+# zpaq-level3 の encode は 2GiB を超える。qemu-user のオーバーヘッドも
+# あるため、aarch64 だけ 4GiB を既定にする。FUZZ_JOBS > 1 は 4GiB でも
+# 不足しうる。
+FUZZ_AS_KB_AARCH64 ?= 4194304
 
 # イメージ内で x86_64（SSE2）の全テスト、aarch64（NEON）の lib テスト、
 # x86-64-v3（AVX2）の lib テストを順に実行する。
@@ -116,17 +120,17 @@ fuzz-wasm:
 		-c "ulimit -S -v 4194304 && exec /usr/local/bin/archive-fuzz-wasm run --algorithm '$(FUZZ_ALGORITHM)' --duration '$(FUZZ_DURATION)' --pattern '$(FUZZ_PATTERN)' --jobs '$(FUZZ_JOBS)'"
 
 # aarch64 の公開経路は NEON。qemu-user で実行する。
-# zpaq-level3 の encode が 2GiB のソフト上限内で allocation failure になるため、
-# FUZZ_JOBS > 1 は推奨しない。
+# zpaq-level3 の encode は 2GiB を超えるため、このターゲットだけ
+# ソフト上限を 4GiB にする。FUZZ_JOBS > 1 は 4GiB でも不足しうる。
 .PHONY: fuzz-aarch64
 fuzz-aarch64:
-	@if [ "$(FUZZ_JOBS)" -gt 1 ]; then echo "warning: fuzz-aarch64 with FUZZ_JOBS=$(FUZZ_JOBS) can exhaust the 2GiB limit (see fuzz/README.md)"; fi
+	@if [ "$(FUZZ_JOBS)" -gt 1 ]; then echo "warning: fuzz-aarch64 with FUZZ_JOBS=$(FUZZ_JOBS) can exhaust the 4GiB limit (see fuzz/README.md)"; fi
 	mkdir -p fuzz/failures/aarch64 fuzz/corpus/aarch64
 	podman run --rm --entrypoint /bin/sh \
 		-v ./fuzz/failures/aarch64:/workspace/fuzz/failures \
 		-v ./fuzz/corpus/aarch64:/workspace/fuzz/corpus \
 		$(FUZZ_IMAGE) \
-		-c "ulimit -S -v $(FUZZ_AS_KB) && exec qemu-aarch64 -L /usr/aarch64-linux-gnu /usr/local/bin/archive-fuzz-aarch64 run --algorithm '$(FUZZ_ALGORITHM)' --duration '$(FUZZ_DURATION)' --pattern '$(FUZZ_PATTERN)' --jobs '$(FUZZ_JOBS)'"
+		-c "ulimit -S -v $(FUZZ_AS_KB_AARCH64) && exec qemu-aarch64 -L /usr/aarch64-linux-gnu /usr/local/bin/archive-fuzz-aarch64 run --algorithm '$(FUZZ_ALGORITHM)' --duration '$(FUZZ_DURATION)' --pattern '$(FUZZ_PATTERN)' --jobs '$(FUZZ_JOBS)'"
 
 .PHONY: debug-shell
 debug-shell:

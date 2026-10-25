@@ -247,6 +247,21 @@ pub fn decode_with_dict(input: &[u8], dict: &ZstdDict) -> Result<Vec<u8>, Error>
     decode_internal(input, Some(dict), None)
 }
 
+/// Decode a zstd frame using a dictionary, rejecting output larger than
+/// `max_output`.
+///
+/// # Errors
+///
+/// Returns [`Error::OutputLimitExceeded`] when the decoded output would
+/// exceed `max_output`, and the same errors as [`decode_with_dict`].
+pub fn decode_with_dict_bounded(
+    input: &[u8],
+    dict: &ZstdDict,
+    max_output: usize,
+) -> Result<Vec<u8>, Error> {
+    decode_internal(input, Some(dict), Some(max_output))
+}
+
 fn decode_internal(
     input: &[u8],
     dict: Option<&ZstdDict>,
@@ -566,8 +581,9 @@ fn decode_compressed_block(
         return Ok(());
     }
 
-    // Decode sequence compression modes
-    let mode_byte = data[pos];
+    // Decode sequence compression modes. A corrupt sequence header can
+    // consume the rest of the block, leaving no room for the mode byte.
+    let mode_byte = *data.get(pos).ok_or(Error::UnexpectedEof)?;
     pos += 1;
 
     let ll_mode = (mode_byte >> 6) & 0x03;
@@ -2214,6 +2230,40 @@ mod tests {
         assert_eq!(table.entries.as_ptr(), stored);
         assert_eq!(table.entries.len(), 1);
         assert_eq!(table.entries[0].symbol, 7);
+    }
+
+    #[test]
+    fn test_fuzz_regression_zstd_missing_sequence_mode_byte() {
+        // Raw literals section (one byte), then a sequence header that
+        // consumes the rest of the block. `data[pos]` used to index one past
+        // the end when the mode byte was missing.
+        let block = vec![
+            0x08, // raw literals section, size=1
+            b'X', // one raw literal byte
+            0x01, // num_sequences=1, no mode byte follows
+        ];
+
+        let mut output = Vec::new();
+        let mut rep_offsets = [1u32, 4, 8];
+        let mut huff_table = None;
+        let mut prev_ll_table = None;
+        let mut prev_of_table = None;
+        let mut prev_ml_table = None;
+
+        let result = decode_compressed_block(
+            &block,
+            &mut output,
+            &mut rep_offsets,
+            &mut huff_table,
+            &mut prev_ll_table,
+            &mut prev_of_table,
+            &mut prev_ml_table,
+            &[],
+            1024,
+            None,
+        );
+
+        assert!(matches!(result, Err(Error::UnexpectedEof)));
     }
 
     #[test]

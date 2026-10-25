@@ -1545,17 +1545,21 @@ fn parse_unicode_comment_extra(extra: &[u8]) -> Option<String> {
 // header IDs, so archives containing 0x0007 or 0x0008 entries are handled
 // correctly without any special-case code.
 
-fn read_u16_at(input: &[u8], offset: usize) -> Result<u16, Error> {
-    if offset + 2 > input.len() {
+fn checked_end(offset: usize, len: usize, input: &[u8]) -> Result<usize, Error> {
+    let end = offset.checked_add(len).ok_or(Error::UnexpectedEof)?;
+    if end > input.len() {
         return Err(Error::UnexpectedEof);
     }
+    Ok(end)
+}
+
+fn read_u16_at(input: &[u8], offset: usize) -> Result<u16, Error> {
+    checked_end(offset, 2, input)?;
     Ok(u16::from_le_bytes([input[offset], input[offset + 1]]))
 }
 
 fn read_u32_at(input: &[u8], offset: usize) -> Result<u32, Error> {
-    if offset + 4 > input.len() {
-        return Err(Error::UnexpectedEof);
-    }
+    checked_end(offset, 4, input)?;
     Ok(u32::from_le_bytes([
         input[offset],
         input[offset + 1],
@@ -1565,9 +1569,7 @@ fn read_u32_at(input: &[u8], offset: usize) -> Result<u32, Error> {
 }
 
 fn read_u64_at(input: &[u8], offset: usize) -> Result<u64, Error> {
-    if offset + 8 > input.len() {
-        return Err(Error::UnexpectedEof);
-    }
+    checked_end(offset, 8, input)?;
     Ok(u64::from_le_bytes([
         input[offset],
         input[offset + 1],
@@ -3018,6 +3020,26 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].name, "disk.txt");
         assert_eq!(entries[0].data, b"payload");
+    }
+
+    #[test]
+    fn test_read_at_rejects_offset_overflow() {
+        // A corrupt EOCD field can name an offset near usize::MAX. The
+        // bounds check must not add to it and wrap on 32-bit targets.
+        assert!(read_u16_at(&[], usize::MAX).is_err());
+        assert!(read_u32_at(&[], usize::MAX).is_err());
+        assert!(read_u64_at(&[], usize::MAX).is_err());
+    }
+
+    #[test]
+    fn test_fuzz_regression_zip_bzip2_eocd_offset_overflow() {
+        // run-1792712029: a corrupt EOCD record with central-directory
+        // fields set to 0xfffffffe. On i686 the unchecked offset + 4 wrapped.
+        let input = [
+            0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0xfe, 0xff, 0xff, 0xff, 0x00, 0x00,
+        ];
+        assert!(decode(&input).is_err());
     }
 
     #[test]

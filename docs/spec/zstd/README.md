@@ -207,6 +207,8 @@
 | 138 | Dictionary_ID = 0 は dictionary magic 形式で無効 (`parse` 経路) | RFC 8878 §5 | ✅ | `ZstdDict::parse` で `id == 0` を reject。`test_dict_parse_zero_dictionary_id` |
 | 139 | decoder はメモリ要求を制限すべき (FCS に基づく無制限 reserve の禁止) | RFC 8878 §3.1.1.1.1.2 / §8 | ✅ | `decode_frame` は `try_reserve(min(FCS, 128 MiB))` にクランプ (MAX_WINDOW_SIZE と同値)、失敗は非致命で通常伸長にフォールバック。`test_decode_frame_huge_fcs_no_panic` |
 | 140 | reserved Dictionary_ID 範囲 (≤32767, ≥2^31) を参照する payload は error | RFC 8878 §3.1.1.1.3 | ✅ | `is_reserved_dictionary_id` で [1,32767] ∪ [2^31,2^32-1] を検出、dict 未提供なら reject。dict 提供で ID 一致なら受理。`test_decode_reserved_dictionary_id_no_dict` `test_decode_nonreserved_dictionary_id_boundaries` `test_decode_reserved_dictionary_id_with_matching_dict` |
+| 141 | FSE テーブルの `-1` 記号数がテーブルサイズを超える場合は corruption エラー | RFC 8878 §4.1.1 | ✅ | `FseTable::from_probabilities` で `high_threshold == 0` の追加 `-1` を InvalidData で拒否。`test_too_many_negative_one_symbols` |
+| 142 | Sequence compression modes byte が block 末尾で欠けている場合は UnexpectedEof | RFC 8878 §3.1.1.3.2 | ✅ | `decode_compressed_block` で `data.get(pos)` により境界検査。`test_fuzz_regression_zstd_missing_sequence_mode_byte` |
 
 ---
 
@@ -214,7 +216,7 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 140 |
+| ✅ 実装+テスト済み  | 142 |
 | ❌ 未実装  | 0 |
-| **合計** | **140** |
+| **合計** | **142** |
 
