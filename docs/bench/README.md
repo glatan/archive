@@ -23,7 +23,9 @@ make bench-refs
 make bench
 ```
 
-レポートは `target/bench/compare/run-<unix-time>/` に出力される。
+レポートはホスト実行では `target/bench/compare/run-<unix-time>/`、
+コンテナ実行では `target/bench/container/run-<unix-time>/` に出力される
+（`BENCH_OUT` で変更可能）。
 
 - `report.md`: 人間向けの比較表とカバレッジ
 - `result.json`: 生サンプル、環境情報、ビルド情報、git commit
