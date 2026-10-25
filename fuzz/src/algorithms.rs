@@ -1336,6 +1336,15 @@ pub fn decode_bounded_with(
     max_output: usize,
 ) -> Result<Vec<u8>, Error> {
     match algo {
+        // A corrupt zstd stream can chain RLE blocks and emit unbounded
+        // output. The unbounded `decode` path made the probe allocate until
+        // the fuzz process hit its 2 GiB address-space limit (run-1792712029).
+        Algorithm::Zstd | Algorithm::ZstdFast | Algorithm::ZstdBest | Algorithm::ZstdNoChecksum => {
+            zstd::decode::decode_bounded(data, max_output)
+        }
+        Algorithm::ZstdDict => {
+            zstd::decode::decode_with_dict_bounded(data, zstd_dict(), max_output)
+        }
         Algorithm::Xpress => xca::lz77::decode_bounded(data, max_output),
         Algorithm::XpressHuff => xca::huffman::decode_bounded(data, max_output),
         Algorithm::Lznt1 => xca::lznt1::decode_bounded(data, max_output),
@@ -2669,6 +2678,20 @@ mod tests {
     /// Regression (fuzz run-1791677246): a corrupt `-pm1-` member header
     /// declaring a ~4 GiB original size must fail early through the
     /// bounded probe instead of materializing the output.
+    #[test]
+    fn zstd_bounded_probe_rejects_oversized_rle_output() {
+        let mut frame = vec![
+            0x28, 0xb5, 0x2f, 0xfd, // magic
+            0x20, // single segment, 1-byte FCS, no checksum/dict
+            0x00, // FCS = 0
+        ];
+        // Last block, RLE, 2048 bytes of the same byte.
+        let block_header = (2048u32 << 3) | (1 << 1) | 1;
+        frame.extend_from_slice(&block_header.to_le_bytes()[..3]);
+        frame.push(0x0A);
+        assert!(decode_bounded_with(Algorithm::Zstd, &frame, 1024).is_err());
+    }
+
     #[test]
     fn lha_bounded_probe_rejects_oversized_orig() {
         let mut a = Vec::new();

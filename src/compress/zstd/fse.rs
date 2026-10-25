@@ -35,6 +35,11 @@ impl FseTable {
         let mut symbol_next = vec![0u32; norm_probs.len()];
         for (symbol, &prob) in norm_probs.iter().enumerate() {
             if prob == -1 {
+                if high_threshold == 0 {
+                    return Err(Error::InvalidData(
+                        "FSE table has more -1 symbols than entries",
+                    ));
+                }
                 entries[high_threshold].symbol = symbol as u8;
                 high_threshold -= 1;
                 symbol_next[symbol] = 1;
@@ -406,6 +411,14 @@ mod tests {
             "expected InvalidData for 1-symbol FSE description, got: {:?}",
             result.map(|(t, _)| t.entries.len())
         );
+    }
+
+    #[test]
+    fn test_too_many_negative_one_symbols() {
+        // 36 symbols with probability -1 do not fit in a 32-entry table.
+        // The old code decremented `high_threshold` past zero.
+        let probs = vec![-1i16; 36];
+        assert!(FseTable::from_probabilities(&probs, 5).is_err());
     }
 
     #[test]

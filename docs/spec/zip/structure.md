@@ -187,5 +187,6 @@
 | 146 | crate Traditional encrypt → system `unzip -P` | interop | ✅ | `test_zip_encode_traditional_system_unzip_compat` |
 | 147 | system Traditional encrypt → crate decode | interop | ✅ | `test_zip_decode_system_traditional_encrypted_archive` |
 | 148 | crate StreamWriter → system `unzip` | interop | ✅ | `test_zip_stream_writer_system_unzip_compat` |
+| 162 | EOCD / ZIP64 の offset/size フィールド読取は `checked_add` で境界検査し、32-bit の整数 wrap を拒否 | §4.3.16 / crate contract | ✅ | `checked_end` を `read_u16_at`/`read_u32_at`/`read_u64_at` で使用。`test_read_at_rejects_offset_overflow`, `test_fuzz_regression_zip_bzip2_eocd_offset_overflow` |
 
 ---

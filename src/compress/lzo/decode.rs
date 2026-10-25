@@ -120,10 +120,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
         // Extra field (only if flag set)
         if flags & F_H_EXTRA != 0 {
             let extra_len = read_u32_be(input, &mut pos)? as usize;
-            if pos + extra_len > input.len() {
-                return Err(Error::UnexpectedEof);
-            }
-            pos += extra_len;
+            pos = checked_field_end(pos, extra_len, input.len())?;
         }
 
         // Mode, mtime
@@ -136,10 +133,7 @@ pub fn decode(input: &[u8]) -> Result<Vec<u8>, Error> {
         // Filename
         let name_len = read_byte(input, &mut pos)? as usize;
         if name_len > 0 {
-            if pos + name_len > input.len() {
-                return Err(Error::UnexpectedEof);
-            }
-            pos += name_len;
+            pos = checked_field_end(pos, name_len, input.len())?;
         }
 
         // Header checksum: CRC-32 when F_H_CRC32 is set (lzop --crc32),
@@ -560,6 +554,18 @@ fn read_u32_be(data: &[u8], pos: &mut usize) -> Result<u32, Error> {
     Ok(v)
 }
 
+/// Add an attacker-controlled header field length to `pos` without wrapping
+/// on 32-bit targets.
+fn checked_field_end(pos: usize, len: usize, input_len: usize) -> Result<usize, Error> {
+    let end = pos
+        .checked_add(len)
+        .ok_or(Error::InvalidData("lzo: header field size overflow"))?;
+    if end > input_len {
+        return Err(Error::UnexpectedEof);
+    }
+    Ok(end)
+}
+
 /// Decode lzop format data from a reader.
 ///
 /// # Errors
@@ -620,6 +626,22 @@ mod tests {
     #[test]
     fn decompress_lzo1x_rejects_unreservable_length() {
         assert!(decompress_lzo1x(&[0], isize::MAX as usize).is_err());
+    }
+
+    #[test]
+    fn test_checked_field_end_rejects_overflow() {
+        // run-1792712035: a corrupt lzop extra-field length made `pos + len`
+        // wrap on wasm32.
+        assert!(checked_field_end(usize::MAX, 1, 0).is_err());
+    }
+
+    #[test]
+    fn test_fuzz_regression_lzo_extra_field_overflow() {
+        let input = [
+            0x89, 0x4c, 0x5a, 0x4f, 0x00, 0x0d, 0x0a, 0x1a, 0x0a, 0x10, 0x00, 0x00, 0x00, 0x01,
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x40, 0xff, 0xff, 0xff, 0xff, 0xff,
+        ];
+        assert!(decode(&input).is_err());
     }
 
     fn rebuild_header_with_options(

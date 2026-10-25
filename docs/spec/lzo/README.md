@@ -83,6 +83,7 @@
 | 43 | F_MULTIPART (0x0400): メンバー連結 (各メンバーが magic + header + block list を持つ) | lzop source (`lzop.c` write_header が magic を part 毎に書く) | ✅ | メンバー境界で magic が続く限り逐次 decode、非 magic の trailing data は無視 (従来動作)。`test_decode_multipart_members` |
 | 44 | `decode_bounded` は出力上限を `Error::OutputLimitExceeded` で強制 (完全 decode 後の post-hoc 判定) | crate contract | ✅ | `test_decode_bounded_*` |
 | 45 | v1 ambiguity 回避 (compressor 制約: v1 ストリームで `(distance & 0x803f) == 0x803f` かつ len 261-264 の M4 は発行禁止) | Linux kernel lzo.rst | ✅ | N/A — 制約は v1 バイトコードにのみ適用。エンコーダは v0 のみ発行 (先頭バイト 17 を生成しないため versioned bitstream にもならない) |
+| 46 | lzop header の extra field / filename 長の加算は overflow を拒否 | lzop source | ✅ | `checked_field_end` が `checked_add` で 32-bit の wrap を防ぎ、範囲外は `UnexpectedEof`。`test_checked_field_end_rejects_overflow`, `test_fuzz_regression_lzo_extra_field_overflow` |
 
 
 ---
@@ -91,5 +92,5 @@
 
 | 状態 | 件数 |
 |------|------|
-| ✅ 実装+テスト済み  | 45 |
-| **合計** | **45** |
+| ✅ 実装+テスト済み  | 46 |
+| **合計** | **46** |
