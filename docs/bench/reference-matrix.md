@@ -43,13 +43,13 @@ cargo bench --all-features --bench compare -- --list-markdown > docs/bench/refer
 | zx2b | ZX2 backwards | codec | ours-only | — | — | — | No standalone backwards reference CLI |
 | zx5b | ZX5 backwards | codec | ours-only | — | — | — | No standalone backwards reference CLI |
 | vcdiff | VCDIFF | codec | ours-only | — | — | — | xdelta3 not installed in baseline image |
-| mppc | MPPC | codec | ours-only | — | — | — | No packaged MPPC reference CLI |
+| mppc | MPPC | codec | ours-only | — | — | — | No packaged MPPC reference CLI; 8 KiB single-packet limit |
 | lzs | Stac LZS | codec | ours-only | — | — | — | No packaged LZS reference CLI |
 | lzxd | LZXD | codec | ours-only | — | — | — | cabextract decodes CAB, not a raw LZXD stream |
 | cmpsc | CMPSC | codec | ours-only | — | — | — | No Linux reference implementation |
-| xpress | MS-XCA Xpress | codec | ours-only | — | — | — | No Linux reference implementation |
-| xpress-huff | MS-XCA Xpress Huffman | codec | ours-only | — | — | — | No Linux reference implementation |
-| lznt1 | MS-XCA LZNT1 | codec | ours-only | — | — | — | No Linux reference implementation |
+| xpress | MS-XCA Xpress | codec | ours-only | — | — | — | No Linux reference implementation; 32 KiB single-block benchmark size |
+| xpress-huff | MS-XCA Xpress Huffman | codec | ours-only | — | — | — | No Linux reference implementation; 32 KiB single-block benchmark size |
+| lznt1 | MS-XCA LZNT1 | codec | ours-only | — | — | — | No Linux reference implementation; 32 KiB single-block benchmark size |
 | packbits | PackBits | codec | ours-only | — | — | — | Measured through the raw library helper; no packaged reference CLI |
 | yenc | yEnc | codec | ours-only | — | — | — | Measured through the raw library helper; no external reference |
 | macbinary | MacBinary | codec | ours-only | — | — | — | Measured through the raw library helper; no external reference |

@@ -1148,7 +1148,7 @@ pub fn cases() -> Vec<Case> {
             "MPPC",
             "mppc",
             PACKET,
-            "No packaged MPPC reference CLI",
+            "No packaged MPPC reference CLI; 8 KiB single-packet limit",
         ),
         codec_ours_only(
             "lzs",
@@ -1176,21 +1176,21 @@ pub fn cases() -> Vec<Case> {
             "MS-XCA Xpress",
             "xpress",
             XCA,
-            "No Linux reference implementation",
+            "No Linux reference implementation; 32 KiB single-block benchmark size",
         ),
         codec_ours_only(
             "xpress-huff",
             "MS-XCA Xpress Huffman",
             "xpress-huff",
             XCA,
-            "No Linux reference implementation",
+            "No Linux reference implementation; 32 KiB single-block benchmark size",
         ),
         codec_ours_only(
             "lznt1",
             "MS-XCA LZNT1",
             "lznt1",
             XCA,
-            "No Linux reference implementation",
+            "No Linux reference implementation; 32 KiB single-block benchmark size",
         ),
         codec_raw(
             "packbits",
