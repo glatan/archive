@@ -166,7 +166,7 @@ BENCH_OUT ?= target/bench/container
 
 .PHONY: bench
 bench:
-	cargo bench --all-features
+	cargo bench --all-features --bench compress --bench archive
 
 .PHONY: bench-compare
 bench-compare:
