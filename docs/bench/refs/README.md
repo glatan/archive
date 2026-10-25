@@ -23,8 +23,9 @@ python3 docs/bench/refs/build.py zx0 lzsa --force
 | `fastlz` | 0.5.0 | sha256 `4bd422...9d580` | MIT | `gcc -O2 ... drivers/fastlz_driver.c fastlz.c` |
 
 The exact commands, compiler version, CFLAGS, and binary sha256 are written
-to `target/bench/refs/build-info.json`. The report includes a build
-provenance table and the same information in `result.json`.
+to `target/bench/refs/build-info.json`. The report's Markdown table shows the
+catalog flags and the binary `.comment`; `result.json` embeds the complete
+`build-info.json` under `refs_build`.
 
 The LZF and FastLZ drivers are benchmark-only adapters around the upstream
 C APIs. They are not part of the `archive` crate and are not distributed as

@@ -198,4 +198,4 @@ bench-compare-container: build-container.test
 		--entrypoint /bin/sh $(TEST_IMAGE) \
 		-c 'cargo build --release -p archive-cli --bin archive --bin archive-bench-helper && \
 		    cargo bench --all-features --bench compare -- --full \
-		      --output-dir /workspace/bench-out/run-$$(date +%s)'
+		      --output-dir /workspace/bench-out/run-$$(date +%s%N)'

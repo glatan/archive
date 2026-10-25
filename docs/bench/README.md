@@ -23,8 +23,8 @@ make bench-refs
 make bench
 ```
 
-レポートはホスト実行では `target/bench/compare/run-<unix-time>/`、
-コンテナ実行では `target/bench/container/run-<unix-time>/` に出力される
+レポートはホスト実行では `target/bench/compare/run-<unix-nanos>-<pid>/`、
+コンテナ実行では `target/bench/container/run-<timestamp>/` に出力される
 （`BENCH_OUT` で変更可能）。
 
 - `report.md`: 人間向けの比較表とカバレッジ
@@ -136,7 +136,7 @@ cargo bench --all-features --bench compare -- \
 ## カバレッジ
 
 `docs/spec/` にある全形式をカタログに載せる。参照実装があるものは比較し、
-ないものは `ours-only` または `unavailable` として理由を表示する。
+ないものは `ours-only` / `partial` / `failed` / `unavailable` として理由を表示する。
 全形式の一覧は [reference-matrix.md](reference-matrix.md) を参照。
 
 ### 制約

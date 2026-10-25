@@ -99,14 +99,14 @@ fn runtime_status(case: &Case, cfg: &Config, result: &CaseResult) -> String {
                         .decode
                         .as_ref()
                         .is_some_and(|op| op.ours_cli.is_none()))));
-    if has_reference {
-        "measured".to_owned()
-    } else if expected_ours_missing {
-        if has_ours {
+    if expected_ours_missing {
+        if has_ours || has_reference {
             "partial".to_owned()
         } else {
             "failed".to_owned()
         }
+    } else if has_reference {
+        "measured".to_owned()
     } else if has_ours {
         "ours-only".to_owned()
     } else if case.ours_lib || case.ours_cli {

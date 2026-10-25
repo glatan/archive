@@ -155,7 +155,7 @@ pub struct CaseResult {
     pub encode: Option<OpResult>,
     pub decode: Option<OpResult>,
     pub error: Option<String>,
-    /// Runtime status: measured, ours-only, or unavailable.
+    /// Runtime status: measured, ours-only, partial, failed, or unavailable.
     pub status: String,
 }
 
