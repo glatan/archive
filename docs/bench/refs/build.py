@@ -182,6 +182,7 @@ def build_driver(name: str, spec: dict, root: Path) -> dict:
 def build_zx(name: str, spec: dict, root: Path) -> dict:
     src = root / "src"
     outputs = []
+    commands = []
     for tool, files in (
         (name, spec["compress"]),
         (name.replace("zx", "dzx"), spec["decompress"]),
@@ -197,6 +198,7 @@ def build_zx(name: str, spec: dict, root: Path) -> dict:
             *[str(src / file) for file in files],
         ]
         run(command)
+        commands.append(" ".join(command))
         outputs.append({"binary": str(out.relative_to(ROOT)), "sha256": sha256(out)})
     return {
         "id": name,
@@ -209,10 +211,7 @@ def build_zx(name: str, spec: dict, root: Path) -> dict:
             "cc_version": compiler_version(),
             "cflags": CFLAGS_TEXT,
             "ldflags": LDFLAGS,
-            "commands": [
-                "gcc <cflags> -I src -o bin/%s <sources>" % name,
-                "gcc <cflags> -I src -o bin/%s <sources>" % name.replace("zx", "dzx"),
-            ],
+            "commands": commands,
         },
         "binaries": outputs,
     }
@@ -236,8 +235,8 @@ def build_lzsa(name: str, spec: dict, root: Path) -> dict:
             "cflags": cflags,
             "ldflags": LDFLAGS,
             "commands": [
-                "make -C src/lzsa clean CC=gcc CFLAGS='...'",
-                "make -C src/lzsa all CC=gcc CFLAGS='...'",
+                f"make -C {root} clean CC=gcc CFLAGS={cflags}",
+                f"make -C {root} all CC=gcc CFLAGS={cflags}",
             ],
         },
         "binaries": [{"binary": str(out.relative_to(ROOT)), "sha256": sha256(out)}],

@@ -303,10 +303,13 @@ fn build_markdown(results: &[CaseResult], cases: &[Case], cfg: &Config, json: &V
         "| case | kind | status | reference | version | build flags / provenance | note |"
     );
     let _ = writeln!(out, "|---|---|---|---|---|---|---|");
-    let runtime: std::collections::BTreeMap<&str, &str> = results
-        .iter()
-        .map(|result| (result.case.id, result.status.as_str()))
-        .collect();
+    let mut runtime: std::collections::BTreeMap<&str, &str> = std::collections::BTreeMap::new();
+    for result in results {
+        let entry = runtime.entry(result.case.id).or_insert("measured");
+        if status_rank(&result.status) > status_rank(entry) {
+            *entry = result.status.as_str();
+        }
+    }
     for case in cases {
         let reference = case.reference;
         let _ = writeln!(
@@ -344,6 +347,17 @@ fn build_markdown(results: &[CaseResult], cases: &[Case], cfg: &Config, json: &V
     );
     let _ = writeln!(out);
     out
+}
+
+fn status_rank(status: &str) -> u8 {
+    match status {
+        "measured" => 0,
+        "ours-only" => 1,
+        "partial" => 2,
+        "failed" => 3,
+        "unavailable" => 4,
+        _ => 4,
+    }
 }
 
 fn throughput(measurement: Option<&Measurement>, input_len: usize, encode: bool) -> String {

@@ -2,7 +2,8 @@
 
 `build.py` fetches pinned upstream sources into `target/bench/refs/src/`
 and builds them into `target/bench/refs/bin/`. The harness prefers these
-binaries over PATH, so they never shadow distro packages.
+binaries over PATH **inside the benchmark child process**; they are not
+installed system-wide and do not replace distro packages.
 
 ```sh
 make bench-refs

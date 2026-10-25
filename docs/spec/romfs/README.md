@@ -4,7 +4,7 @@
 |------|------|
 | 形式概要 | Linux 向け read-only ファイルシステムイメージ。`-rom1fs-` スーパーブロック + 16B アラインのファイルヘッダチェーン。圧縮なし |
 | 基準仕様 | Linux kernel `Documentation/filesystems/romfs.rst` (`docs/spec/sources/romfs.rst` にスナップショット)、`fs/romfs/` の参照実装の動作 (checksum 規則・exec ビット) |
-| 参照実装 | Linux kernel `fs/romfs/` (GPL-2.0、checksum 規則・exec ビットの動作参照)、genromfs 0.5.2 (GPL-2.0+、fixture `tests/fixtures/romfs/genromfs.romfs` 生成 + `fsck.romfs` encoder oracle)。詳細: THIRD_PARTY_NOTICES romfs 項 |
+| 参照実装 | Linux kernel `fs/romfs/` (GPL-2.0、checksum 規則・exec ビットの動作参照)、genromfs 0.5.2 (GPL-2.0+、fixture `tests/fixtures/romfs/genromfs.romfs` 生成 + `fsck.romfs` encoder oracle)。性能比較 (`docs/bench/`) では `tests/fixtures/romfs/genromfs.romfs` の decode に使用。詳細: THIRD_PARTY_NOTICES romfs 項 |
 | 実装 | `archive::archive::romfs::{decode, encode::{RomfsEncoder, encode}}` (read/write)。`romfs` feature 配下 |
 
 ## スーパーブロック層

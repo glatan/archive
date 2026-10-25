@@ -60,10 +60,14 @@ fn main() {
         std::process::exit(2);
     }
 
-    let run_id = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0);
+    let run_id = format!(
+        "{}-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or(0),
+        std::process::id()
+    );
     let out_dir = config
         .output_dir
         .clone()

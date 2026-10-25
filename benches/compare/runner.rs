@@ -54,11 +54,11 @@ pub fn run_case(case: &Case, cfg: &Config, corpus_label: &str) -> CaseResult {
     } else {
         run_codec_case(case, cfg, corpus_label, &mut result);
     }
-    result.status = runtime_status(case, &result);
+    result.status = runtime_status(case, cfg, &result);
     result
 }
 
-fn runtime_status(case: &Case, result: &CaseResult) -> String {
+fn runtime_status(case: &Case, cfg: &Config, result: &CaseResult) -> String {
     let has_reference = result
         .encode
         .as_ref()
@@ -75,8 +75,38 @@ fn runtime_status(case: &Case, result: &CaseResult) -> String {
             .decode
             .as_ref()
             .is_some_and(|op| op.ours_lib.is_some() || op.ours_cli.is_some());
+    let expected_ours_missing = (case.encode
+        && ((case.ours_lib
+            && result
+                .encode
+                .as_ref()
+                .is_some_and(|op| op.ours_lib.is_none()))
+            || (case.ours_cli
+                && !cfg.skip_cli
+                && result
+                    .encode
+                    .as_ref()
+                    .is_some_and(|op| op.ours_cli.is_none()))))
+        || (case.decode
+            && ((case.ours_lib
+                && result
+                    .decode
+                    .as_ref()
+                    .is_some_and(|op| op.ours_lib.is_none()))
+                || (case.ours_cli
+                    && !cfg.skip_cli
+                    && result
+                        .decode
+                        .as_ref()
+                        .is_some_and(|op| op.ours_cli.is_none()))));
     if has_reference {
         "measured".to_owned()
+    } else if expected_ours_missing {
+        if has_ours {
+            "partial".to_owned()
+        } else {
+            "failed".to_owned()
+        }
     } else if has_ours {
         "ours-only".to_owned()
     } else if case.ours_lib || case.ours_cli {
@@ -273,8 +303,10 @@ fn run_archive_fixture_case(case: &Case, cfg: &Config, fixture: &str, result: &m
                 }
             }
         }
-        decode.note =
-            Some("fixture decode; content is not compared with a generated tree".to_owned());
+        append_note(
+            &mut decode,
+            "fixture decode; content is not compared with a generated tree".to_owned(),
+        );
     }
     result.decode = Some(decode);
 }

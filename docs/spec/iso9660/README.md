@@ -4,7 +4,7 @@
 |------|------|
 | 形式概要 | ISO 9660 (= ECMA-119) CD-ROM ファイルシステムイメージ。System Area + Volume Descriptor 列 + Path Table + ディレクトリレコード木。Rock Ridge (IEEE P1282) と Joliet 補足ボリュームを decode |
 | 基準仕様 | ECMA-119 4th ed. (`sources/ecma119.pdf`)、Linux kernel `Documentation/filesystems/isofs.rst` + `include/uapi/linux/iso_fs.h`、SUSP 1.10 (`sources/susp.shar`)、RRIP 1.12 (`sources/rrip112.pdf`)、Joliet spec (`sources/jolspec.html`)、El Torito 1.0 (`sources/eltorito_spec_1.0.pdf`)、zisofs format (`sources/zisofs_format.txt`)、Apple TN FL36 (`sources/apple_iso9660_fl36.html`) — いずれも `docs/spec/sources/` にスナップショット |
-| 参照実装 | bsdtar / libarchive (BSD-2-Clause、oracle + fixture 生成: `tests/fixtures/iso9660/bsdtar-*.iso`)。behavioral reference: Linux kernel `fs/isofs/rock.c` + `compress.c` (GPL、SUSP/RRIP/zisofs)、zisofs-tools `mkzftree` (GPL-2.0)。詳細: THIRD_PARTY_NOTICES iso9660 項 |
+| 参照実装 | bsdtar / libarchive (BSD-2-Clause、oracle + fixture 生成: `tests/fixtures/iso9660/bsdtar-*.iso`)。behavioral reference: Linux kernel `fs/isofs/rock.c` + `compress.c` (GPL、SUSP/RRIP/zisofs)、zisofs-tools `mkzftree` (GPL-2.0)。性能比較 (`docs/bench/`) では `tests/fixtures/iso9660/bsdtar-plain.iso` の decode に使用。詳細: THIRD_PARTY_NOTICES iso9660 項 |
 | 実装 | `archive::archive::iso9660::{decode, encode::{IsoEncoder, encode}}` (read/write)。`iso9660` feature 配下 |
 
 ## Volume Descriptor 層
