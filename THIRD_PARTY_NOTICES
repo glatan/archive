@@ -19,8 +19,7 @@ crate and never redistributes their sources or binaries.
 
 - Distribution-provided tools (gzip, zstd, xz, bzip2, lzip, lz4, lzop,
   lrzip, rzip, brotli, ncompress, zpaq, 7-Zip, tar, cpio, ar, zip,
-  cabextract, squashfs-tools, git, and the Python standard library) are
-  invoked only for measurement. Their package version and, where
+  and the Python standard library) are invoked only for measurement. Their package version and, where
   available, compiler comment are recorded in the generated report.
 - Pinned source builds under `docs/bench/refs/build.py`:
   - ZX0/ZX1/ZX2/ZX5 (Einar Saukas, BSD-3-Clause)
