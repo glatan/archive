@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 
 use ::archive::compress as archive_compress;
 use archive_cli::adapters::{read, write_archive, write_compress};
-use archive_cli::detect::{ArchiveFormat, CompressionFormat};
+use archive_cli::detect::{ArchiveFormat, CompressionFormat, Format};
 use archive_cli::error::CliError;
 
 #[derive(Debug, Parser)]
@@ -31,6 +31,8 @@ enum Command {
     Codec(CodecArgs),
     /// Time an archive pack or decode operation.
     Archive(ArchiveArgs),
+    /// Time a decode through the full CLI format dispatch.
+    Read(ReadArgs),
     /// Print the supported helper format names.
     List,
 }
@@ -78,6 +80,18 @@ struct CodecArgs {
 }
 
 #[derive(Debug, Parser)]
+struct ReadArgs {
+    #[arg(long)]
+    format: Format,
+    #[arg(long)]
+    input: PathBuf,
+    #[arg(long)]
+    output: PathBuf,
+    #[command(flatten)]
+    timing: TimingArgs,
+}
+
+#[derive(Debug, Parser)]
 struct ArchiveArgs {
     #[arg(value_enum)]
     op: ArchiveOp,
@@ -106,6 +120,7 @@ fn run() -> Result<(), CliError> {
     match cli.command {
         Command::Codec(args) => run_codec(args),
         Command::Archive(args) => run_archive(args),
+        Command::Read(args) => run_read(args),
         Command::List => {
             println!("{}", supported_formats_json());
             Ok(())
@@ -169,6 +184,38 @@ fn run_codec(args: CodecArgs) -> Result<(), CliError> {
             Ok(())
         }
     }
+}
+
+fn run_read(args: ReadArgs) -> Result<(), CliError> {
+    let input = fs::read(&args.input)?;
+    let path = Path::new(&args.input);
+    let mut last = Vec::new();
+    for _ in 0..args.timing.warmup {
+        let (_, payloads) = read::decode_payloads(path, &input, args.format, None)?;
+        last = payloads;
+        std::hint::black_box(&last);
+    }
+    let mut samples_ns = Vec::with_capacity(args.timing.iterations);
+    for _ in 0..args.timing.iterations {
+        let start = Instant::now();
+        let (_, payloads) = read::decode_payloads(path, &input, args.format, None)?;
+        last = payloads;
+        samples_ns.push(start.elapsed().as_nanos() as u64);
+    }
+    let manifest = payload_manifest(&last);
+    fs::write(&args.output, serde_json::to_vec_pretty(&manifest).unwrap())?;
+    print_json(json!({
+        "mode": "read",
+        "op": "decode",
+        "format": args.format.to_possible_value().unwrap().get_name(),
+        "input_len": input.len(),
+        "output_len": last.iter().map(|payload| payload.data.len()).sum::<usize>(),
+        "entry_count": last.len(),
+        "warmup": args.timing.warmup,
+        "samples_ns": samples_ns,
+        "output_hash": manifest_hash(&manifest),
+    }));
+    Ok(())
 }
 
 fn run_archive(args: ArchiveArgs) -> Result<(), CliError> {
