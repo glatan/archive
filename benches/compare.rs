@@ -46,6 +46,13 @@ fn main() {
         print_markdown(&cases);
         return;
     }
+    if !config.helper_bin.exists() {
+        eprintln!(
+            "error: benchmark helper not found at {}; build it with `cargo build --release -p archive-cli --bin archive-bench-helper`",
+            config.helper_bin.display()
+        );
+        std::process::exit(2);
+    }
 
     let selected = select_cases(&cases, &config);
     if selected.is_empty() {
@@ -272,11 +279,13 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
     if parsed.iterations == 0 {
         parsed.iterations = if parsed.quick { 2 } else { 5 };
     }
-    if !parsed.helper_bin.exists() {
-        return Err(format!(
-            "benchmark helper not found at {}; build it with `cargo build --release -p archive-cli --bin archive-bench-helper`",
-            parsed.helper_bin.display()
-        ));
+    for label in &parsed.corpora {
+        if !corpus::CORPORA.contains(&label.as_str()) {
+            return Err(format!(
+                "unknown corpus `{label}`; expected one of: {}",
+                corpus::CORPORA.join(", ")
+            ));
+        }
     }
     Ok(parsed)
 }
@@ -329,6 +338,9 @@ fn print_markdown(cases: &[Case]) {
         "cargo bench --all-features --bench compare -- --list-markdown > docs/bench/reference-matrix.md"
     );
     println!("```");
+    println!();
+    println!("Status below is catalog-level. Runtime availability (for example a");
+    println!("missing reference binary) is recorded in the generated report.");
     println!();
     println!(
         "| id | format | kind | status | reference | version | build flags / provenance | note |"

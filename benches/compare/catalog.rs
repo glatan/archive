@@ -146,7 +146,14 @@ fn xz_ref() -> RefSpec {
         build: DISTRO,
         encode: Some(cmd(
             "xz",
-            &["--lzma2=dict=4KiB", "-6", "-T1", "-c", "{input}"],
+            &[
+                "-6",
+                "--lzma2=dict=4KiB",
+                "--check=crc32",
+                "-T1",
+                "-c",
+                "{input}",
+            ],
             OutputMode::Stdout,
         )),
         decode: Some(cmd("xz", &["-dc", "{input}"], OutputMode::Stdout)),
@@ -162,9 +169,9 @@ fn lzma_ref() -> RefSpec {
         encode: Some(cmd(
             "xz",
             &[
+                "-6",
                 "--format=lzma",
                 "--lzma1=dict=8MiB",
-                "-6",
                 "-T1",
                 "-c",
                 "{input}",
@@ -186,7 +193,11 @@ fn lzw_ref() -> RefSpec {
         binary_id: "compress",
         build: DISTRO,
         encode: Some(cmd("compress", &["-c", "{input}"], OutputMode::Stdout)),
-        decode: Some(cmd("uncompress", &["-c", "{input}"], OutputMode::Stdout)),
+        decode: Some(cmd(
+            "compress",
+            &["-d", "-c", "{input}"],
+            OutputMode::Stdout,
+        )),
     }
 }
 
@@ -198,7 +209,7 @@ fn lz4_ref() -> RefSpec {
         build: DISTRO,
         encode: Some(cmd(
             "lz4",
-            &["-1", "-B7", "-BX", "--content-size", "-c", "{input}"],
+            &["-1", "-T1", "-B7", "-BX", "--content-size", "-c", "{input}"],
             OutputMode::Stdout,
         )),
         decode: Some(cmd("lz4", &["-dc", "{input}"], OutputMode::Stdout)),
@@ -328,7 +339,7 @@ fn lzsa_ref(format: u8) -> RefSpec {
         name: "lzsa",
         version: "1.4.1",
         binary_id: "lzsa",
-        build: "source build: gcc -O2 -fomit-frame-pointer -Isrc/libdivsufsort/include -Isrc",
+        build: "source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 -Isrc/libdivsufsort/include -Isrc",
         encode: Some(cmd("lzsa", encode_args, OutputMode::Arg)),
         decode: Some(cmd("lzsa", &["-d", "{input}", "{output}"], OutputMode::Arg)),
     }
@@ -339,7 +350,7 @@ fn zx0_ref() -> RefSpec {
         name: "ZX0",
         version: "2.2",
         binary_id: "zx0",
-        build: "source build: gcc -O2 (zx0.c optimize.c compress.c memory.c)",
+        build: "source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx0.c optimize.c compress.c memory.c)",
         encode: Some(cmd(
             "zx0",
             &["-q", "-f", "{input}", "{output}"],
@@ -354,7 +365,7 @@ fn zx1_ref() -> RefSpec {
         name: "ZX1",
         version: "1.5",
         binary_id: "zx1",
-        build: "source build: gcc -O2 (zx1.c optimize.c compress.c memory.c)",
+        build: "source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx1.c optimize.c compress.c memory.c)",
         encode: Some(cmd(
             "zx1",
             &["-q", "-f", "{input}", "{output}"],
@@ -369,7 +380,7 @@ fn zx2_ref() -> RefSpec {
         name: "ZX2",
         version: "1.1",
         binary_id: "zx2",
-        build: "source build: gcc -O2 (zx2.c optimize.c compress.c memory.c)",
+        build: "source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx2.c optimize.c compress.c memory.c)",
         encode: Some(cmd("zx2", &["-f", "{input}", "{output}"], OutputMode::Arg)),
         decode: Some(cmd("dzx2", &["{input}", "{output}"], OutputMode::Arg)),
     }
@@ -380,7 +391,7 @@ fn zx5_ref() -> RefSpec {
         name: "ZX5",
         version: "2.0",
         binary_id: "zx5",
-        build: "source build: gcc -O2 (zx5.c optimize.c compress.c memory.c)",
+        build: "source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx5.c optimize.c compress.c memory.c)",
         encode: Some(cmd(
             "zx5",
             &["-q", "-f", "{input}", "{output}"],
@@ -598,7 +609,15 @@ fn sevenz_ref() -> RefSpec {
         )),
         decode: Some(cmd(
             "7z",
-            &["x", "-y", "-bso0", "-bsp0", "-o{output}", "{input}"],
+            &[
+                "x",
+                "-y",
+                "-mmt=1",
+                "-bso0",
+                "-bsp0",
+                "-o{output}",
+                "{input}",
+            ],
             OutputMode::Dir,
         )),
     }
@@ -795,6 +814,33 @@ fn archive_fixture(
     }
 }
 
+fn archive_raw_fixture(
+    id: &'static str,
+    label: &'static str,
+    format: &'static str,
+    fixture: &'static str,
+    note: &'static str,
+) -> Case {
+    Case {
+        id,
+        label,
+        kind: Kind::Archive,
+        format,
+        cli_format: None,
+        ours_lib: true,
+        ours_cli: false,
+        raw: true,
+        encode: false,
+        decode: true,
+        level: None,
+        backend: None,
+        reference: None,
+        fixture: Some(fixture),
+        note: Some(note),
+        size: MEDIUM,
+    }
+}
+
 fn archive_unsupported(id: &'static str, label: &'static str, note: &'static str) -> Case {
     Case {
         id,
@@ -832,7 +878,7 @@ pub fn cases() -> Vec<Case> {
             None,
             MEDIUM,
             Some(gzip_ref()),
-            None,
+            Some("Our Default uses max_chain=32; gzip -6 is not parameter-identical"),
         ),
         codec(
             "zlib",
@@ -843,7 +889,9 @@ pub fn cases() -> Vec<Case> {
             None,
             MEDIUM,
             Some(zlib_ref("zlib")),
-            Some("Python reference startup is included; use the full size for stable numbers"),
+            Some(
+                "Python reference startup is included; our Default uses max_chain=32, so zlib level 6 is not parameter-identical",
+            ),
         ),
         codec(
             "deflate",
@@ -854,7 +902,9 @@ pub fn cases() -> Vec<Case> {
             None,
             MEDIUM,
             Some(zlib_ref("deflate")),
-            Some("Python reference startup is included; use the full size for stable numbers"),
+            Some(
+                "Python reference startup is included; our Default uses max_chain=32, so zlib level 6 is not parameter-identical",
+            ),
         ),
         codec(
             "zstd",
@@ -982,7 +1032,9 @@ pub fn cases() -> Vec<Case> {
             Some("lzma"),
             SLOW,
             Some(lrzip_ref()),
-            None,
+            Some(
+                "Our LZMA dictionary is 4 KiB; lrzip -L 7 uses a larger dictionary, so this is a speed/ratio comparison only",
+            ),
         ),
         codec(
             "rzip",
@@ -1278,15 +1330,14 @@ pub fn cases() -> Vec<Case> {
             "git-pack",
             true,
             None,
-            Some("git pack writer needs a repository oracle"),
+            Some("git pack stores object IDs; tree manifest verification is skipped"),
         ),
-        archive(
+        archive_fixture(
             "xar",
             "xar",
             "xar",
-            true,
-            None,
-            Some("xar reference tool not installed"),
+            "tests/fixtures/xar/real.xar",
+            "Checked-in xar fixture; decode-only (our writer/reader roundtrip is not bit-stable)",
         ),
         // Read-only archive formats exposed by the CLI.
         archive_fixture(
@@ -1332,20 +1383,26 @@ pub fn cases() -> Vec<Case> {
             "cramfs",
             "CLI read dispatch not implemented; library decode only",
         ),
-        archive_unsupported(
+        archive_raw_fixture(
             "romfs",
             "romfs",
-            "CLI read dispatch not implemented; library decode only",
+            "romfs",
+            "tests/fixtures/romfs/genromfs.romfs",
+            "Checked-in fixture; raw library decode only",
         ),
-        archive_unsupported(
+        archive_raw_fixture(
             "erofs",
             "erofs",
-            "CLI read dispatch not implemented; library decode only",
+            "erofs",
+            "tests/fixtures/erofs/mkfs.erofs.img",
+            "Checked-in fixture; raw library decode only",
         ),
-        archive_unsupported(
+        archive_raw_fixture(
             "iso9660",
             "ISO 9660",
-            "CLI read dispatch not implemented; library decode only",
+            "iso9660",
+            "tests/fixtures/iso9660/bsdtar-plain.iso",
+            "Checked-in fixture; raw library decode only",
         ),
         archive_unsupported(
             "crx3",

@@ -47,13 +47,43 @@ pub fn run_case(case: &Case, cfg: &Config, corpus_label: &str) -> CaseResult {
         encode: None,
         decode: None,
         error: None,
+        status: case.status().to_owned(),
     };
     if case.kind == Kind::Archive {
         run_archive_case(case, cfg, &mut result);
     } else {
         run_codec_case(case, cfg, corpus_label, &mut result);
     }
+    result.status = runtime_status(case, &result);
     result
+}
+
+fn runtime_status(case: &Case, result: &CaseResult) -> String {
+    let has_reference = result
+        .encode
+        .as_ref()
+        .is_some_and(|op| op.reference.is_some())
+        || result
+            .decode
+            .as_ref()
+            .is_some_and(|op| op.reference.is_some());
+    let has_ours = result
+        .encode
+        .as_ref()
+        .is_some_and(|op| op.ours_lib.is_some() || op.ours_cli.is_some())
+        || result
+            .decode
+            .as_ref()
+            .is_some_and(|op| op.ours_lib.is_some() || op.ours_cli.is_some());
+    if has_reference {
+        "measured".to_owned()
+    } else if has_ours {
+        "ours-only".to_owned()
+    } else if case.ours_lib || case.ours_cli {
+        "failed".to_owned()
+    } else {
+        "unavailable".to_owned()
+    }
 }
 
 fn run_codec_case(case: &Case, cfg: &Config, corpus_label: &str, result: &mut CaseResult) {
@@ -76,20 +106,21 @@ fn run_codec_case(case: &Case, cfg: &Config, corpus_label: &str, result: &mut Ca
     }
     let expected_hash = corpus::fnv1a64(&data);
 
-    let ours_encoded = dir.join("ours.enc");
+    let ours_lib_encoded = dir.join("ours-lib.enc");
+    let ours_cli_encoded = dir.join("ours-cli.enc");
     let ref_encoded = dir.join("ref.enc");
     let mut encode = OpResult::default();
     let mut decode = OpResult::default();
 
     if case.encode {
         if case.ours_lib {
-            match helper_codec(cfg, "encode", case, &input, &ours_encoded) {
+            match helper_codec(cfg, "encode", case, &input, &ours_lib_encoded) {
                 Ok(measurement) => encode.ours_lib = Some(measurement),
                 Err(error) => append_note(&mut encode, format!("ours-lib encode: {error}")),
             }
         }
         if case.ours_cli && !cfg.skip_cli {
-            match cli_codec_encode(cfg, case, &input, &ours_encoded) {
+            match cli_codec_encode(cfg, case, &input, &ours_cli_encoded) {
                 Ok(measurement) => encode.ours_cli = Some(measurement),
                 Err(error) => append_note(&mut encode, format!("ours-cli encode: {error}")),
             }
@@ -110,8 +141,10 @@ fn run_codec_case(case: &Case, cfg: &Config, corpus_label: &str, result: &mut Ca
 
     let common = if ref_encoded.exists() {
         ref_encoded.clone()
-    } else if ours_encoded.exists() {
-        ours_encoded.clone()
+    } else if ours_lib_encoded.exists() {
+        ours_lib_encoded.clone()
+    } else if ours_cli_encoded.exists() {
+        ours_cli_encoded.clone()
     } else {
         result.encode = Some(encode);
         result.error = Some("no encoded stream produced".to_owned());
@@ -159,11 +192,11 @@ fn run_codec_case(case: &Case, cfg: &Config, corpus_label: &str, result: &mut Ca
             }
         }
 
-        if !cfg.skip_ref && case.ours_lib && ours_encoded.exists() {
+        if !cfg.skip_ref && case.ours_lib && ours_lib_encoded.exists() {
             if let Some(reference) = case.reference {
                 if let Some(command) = reference.decode {
                     let cross = dir.join("ref-on-ours.dec");
-                    match run_ref_verify(cfg, &reference, &command, &ours_encoded, &cross) {
+                    match run_ref_verify(cfg, &reference, &command, &ours_lib_encoded, &cross) {
                         Ok(measurement) => {
                             let ok = measurement.hash == expected_hash;
                             decode.reference_on_ours = Some(measurement);
@@ -213,7 +246,12 @@ fn run_archive_fixture_case(case: &Case, cfg: &Config, fixture: &str, result: &m
     if case.decode {
         let ours_manifest = dir.join("ours-manifest.json");
         if case.ours_lib {
-            match helper_read(cfg, case, fixture_path, &ours_manifest) {
+            let read = if case.raw {
+                helper_raw_archive_read(cfg, case, fixture_path, &ours_manifest)
+            } else {
+                helper_read(cfg, case, fixture_path, &ours_manifest)
+            };
+            match read {
                 Ok(measurement) => decode.ours_lib = Some(measurement),
                 Err(error) => append_note(&mut decode, format!("ours-lib decode: {error}")),
             }
@@ -291,20 +329,21 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
     result.input_len = tree.total_bytes();
     let expected = expected_manifest(case, &tree);
 
-    let ours_encoded = dir.join(format!("ours.{}", archive_extension(case.format)));
+    let ours_lib_encoded = dir.join(format!("ours-lib.{}", archive_extension(case.format)));
+    let ours_cli_encoded = dir.join(format!("ours-cli.{}", archive_extension(case.format)));
     let ref_encoded = dir.join(format!("ref.{}", archive_extension(case.format)));
     let mut encode = OpResult::default();
     let mut decode = OpResult::default();
 
     if case.encode {
         if case.ours_lib {
-            match helper_archive_encode(cfg, case, &tree, &ours_encoded) {
+            match helper_archive_encode(cfg, case, &tree, &ours_lib_encoded) {
                 Ok(measurement) => encode.ours_lib = Some(measurement),
                 Err(error) => append_note(&mut encode, format!("ours-lib encode: {error}")),
             }
         }
         if case.ours_cli && !cfg.skip_cli {
-            match cli_archive_encode(cfg, case, &tree, &ours_encoded) {
+            match cli_archive_encode(cfg, case, &tree, &ours_cli_encoded) {
                 Ok(measurement) => encode.ours_cli = Some(measurement),
                 Err(error) => append_note(&mut encode, format!("ours-cli encode: {error}")),
             }
@@ -325,8 +364,10 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
 
     let common = if ref_encoded.exists() {
         ref_encoded.clone()
-    } else if ours_encoded.exists() {
-        ours_encoded.clone()
+    } else if ours_lib_encoded.exists() {
+        ours_lib_encoded.clone()
+    } else if ours_cli_encoded.exists() {
+        ours_cli_encoded.clone()
     } else {
         result.encode = Some(encode);
         result.error = Some("no archive produced".to_owned());
@@ -376,11 +417,11 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
             }
         }
 
-        if !cfg.skip_ref && case.ours_lib && ours_encoded.exists() {
+        if !cfg.skip_ref && case.ours_lib && ours_lib_encoded.exists() {
             if let Some(reference) = case.reference {
                 if let Some(command) = reference.decode {
                     let cross_dir = dir.join("ref-on-ours");
-                    match run_ref_verify(cfg, &reference, &command, &ours_encoded, &cross_dir) {
+                    match run_ref_verify(cfg, &reference, &command, &ours_lib_encoded, &cross_dir) {
                         Ok(measurement) => {
                             let ok = case.format == "git-pack"
                                 || dir_manifest_matches(&cross_dir, &expected);
@@ -486,6 +527,29 @@ fn helper_read(
 ) -> Result<Measurement, String> {
     let args = vec![
         "read".to_owned(),
+        "--format".to_owned(),
+        case.format.to_owned(),
+        "--input".to_owned(),
+        input.display().to_string(),
+        "--output".to_owned(),
+        output.display().to_string(),
+        "--warmup".to_owned(),
+        cfg.warmup.to_string(),
+        "--iterations".to_owned(),
+        cfg.iterations.to_string(),
+    ];
+    run_helper(cfg, &args, output)
+}
+
+fn helper_raw_archive_read(
+    cfg: &Config,
+    case: &Case,
+    input: &Path,
+    output: &Path,
+) -> Result<Measurement, String> {
+    let args = vec![
+        "raw".to_owned(),
+        "archive".to_owned(),
         "--format".to_owned(),
         case.format.to_owned(),
         "--input".to_owned(),
@@ -671,7 +735,7 @@ fn run_ref_encode(
     input: &Path,
     output: &Path,
 ) -> Result<Measurement, String> {
-    require_program(cfg, command)?;
+    require_program(cfg, spec, command)?;
     let mut samples = Vec::with_capacity(cfg.iterations);
     for _ in 0..cfg.warmup {
         run_ref_once(cfg, spec, command, input, output)?;
@@ -696,7 +760,7 @@ fn run_ref_decode(
     input: &Path,
     verify_output: &Path,
 ) -> Result<Measurement, String> {
-    require_program(cfg, command)?;
+    require_program(cfg, spec, command)?;
     let timing_output = timing_output_path(cfg, command.output, verify_output);
     let mut samples = Vec::with_capacity(cfg.iterations);
     for _ in 0..cfg.warmup {
@@ -724,7 +788,7 @@ fn run_ref_verify(
     input: &Path,
     output: &Path,
 ) -> Result<Measurement, String> {
-    require_program(cfg, command)?;
+    require_program(cfg, spec, command)?;
     run_ref_once(cfg, spec, command, input, output)?;
     let (output_len, hash) = measure_output(output, command.output)?;
     Ok(Measurement {
@@ -763,6 +827,16 @@ fn run_ref_once(
     }
 
     let mut process = Command::new(&program);
+    let refs_bin = absolute_path(&cfg.refs_dir.join("bin"));
+    if refs_bin.exists() {
+        if let Some(path) = std::env::var_os("PATH") {
+            let mut paths = vec![refs_bin];
+            paths.extend(std::env::split_paths(&path));
+            if let Ok(joined) = std::env::join_paths(paths) {
+                process.env("PATH", joined);
+            }
+        }
+    }
     for arg in command.args {
         process.arg(
             arg.replace("{input}", &input.display().to_string())
@@ -834,25 +908,33 @@ fn resolve_program(cfg: &Config, _spec: &RefSpec, command: &RefCommand) -> PathB
     }
 }
 
-fn require_program(cfg: &Config, command: &RefCommand) -> Result<(), String> {
-    let built = cfg.refs_dir.join("bin").join(command.program);
-    if built.exists() {
-        return Ok(());
+fn require_program(cfg: &Config, spec: &RefSpec, command: &RefCommand) -> Result<(), String> {
+    if !program_exists(cfg, command.program) {
+        return Err(format!(
+            "reference binary `{}` not found; run `make bench-refs` or install it",
+            command.program
+        ));
     }
-    let status = Command::new("sh")
-        .args(["-c", &format!("command -v {}", command.program)])
+    if command.program == "bash" && !program_exists(cfg, spec.binary_id) {
+        return Err(format!(
+            "reference binary `{}` not found; run `make bench-refs` or install it",
+            spec.binary_id
+        ));
+    }
+    Ok(())
+}
+
+fn program_exists(cfg: &Config, program: &str) -> bool {
+    if cfg.refs_dir.join("bin").join(program).exists() {
+        return true;
+    }
+    Command::new("sh")
+        .args(["-c", &format!("command -v {program}")])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
-        .map_err(|error| error.to_string())?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "reference binary `{}` not found; run `make bench-refs` or install it",
-            command.program
-        ))
-    }
+        .map(|status| status.success())
+        .unwrap_or(false)
 }
 
 fn measure_output(path: &Path, mode: OutputMode) -> Result<(usize, u64), String> {

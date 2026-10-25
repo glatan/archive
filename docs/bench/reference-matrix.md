@@ -6,11 +6,14 @@ Generated from the benchmark catalog. Regenerate with:
 cargo bench --all-features --bench compare -- --list-markdown > docs/bench/reference-matrix.md
 ```
 
+Status below is catalog-level. Runtime availability (for example a
+missing reference binary) is recorded in the generated report.
+
 | id | format | kind | status | reference | version | build flags / provenance | note |
 |---|---|---|---|---|---|---|---|
-| gzip | gzip | codec | measured | GNU gzip | 1.15 | distro package (exact distro build flags not exposed) |  |
-| zlib | zlib | codec | measured | CPython zlib | system Python 3 / zlib | CPython zlib module; zlib C library built by the distribution | Python reference startup is included; use the full size for stable numbers |
-| deflate | raw DEFLATE | codec | measured | CPython zlib | system Python 3 / zlib | CPython zlib module; zlib C library built by the distribution | Python reference startup is included; use the full size for stable numbers |
+| gzip | gzip | codec | measured | GNU gzip | 1.15 | distro package (exact distro build flags not exposed) | Our Default uses max_chain=32; gzip -6 is not parameter-identical |
+| zlib | zlib | codec | measured | CPython zlib | system Python 3 / zlib | CPython zlib module; zlib C library built by the distribution | Python reference startup is included; our Default uses max_chain=32, so zlib level 6 is not parameter-identical |
+| deflate | raw DEFLATE | codec | measured | CPython zlib | system Python 3 / zlib | CPython zlib module; zlib C library built by the distribution | Python reference startup is included; our Default uses max_chain=32, so zlib level 6 is not parameter-identical |
 | zstd | zstd | codec | measured | zstd | 1.5.7 | distro package (exact distro build flags not exposed) |  |
 | zstd-seekable | zstd seekable | codec | ours-only | — | — | — | No standalone seekable-format CLI in the baseline image |
 | bzip2 | bzip2 | codec | measured | bzip2 | 1.0.8 | distro package (exact distro build flags not exposed) |  |
@@ -22,7 +25,7 @@ cargo bench --all-features --bench compare -- --list-markdown > docs/bench/refer
 | lzo | LZO (lzop) | codec | measured | lzop | 1.04 | distro package (exact distro build flags not exposed) |  |
 | brotli | Brotli | codec | measured | brotli | 1.2.0 | distro package (exact distro build flags not exposed) | Reference uses -q 5; our encoder has no public quality knob |
 | zpaq | ZPAQ (raw stream) | codec | ours-only | — | — | — | Reference zpaq CLI writes journaling archives; raw-stream comparison is N/A |
-| lrzip | lrzip | codec | measured | lrzip | 0.660 | distro package (exact distro build flags not exposed) |  |
+| lrzip | lrzip | codec | measured | lrzip | 0.660 | distro package (exact distro build flags not exposed) | Our LZMA dictionary is 4 KiB; lrzip -L 7 uses a larger dictionary, so this is a speed/ratio comparison only |
 | rzip | rzip | codec | measured | rzip | 2.1 | distro package (exact distro build flags not exposed) |  |
 | snappy | Snappy | codec | ours-only | — | — | — | No packaged reference CLI |
 | lzf | LZF | codec | measured | liblzf | 3.6 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | Cross-validated against liblzf 3.6 |
@@ -32,12 +35,12 @@ cargo bench --all-features --bench compare -- --list-markdown > docs/bench/refer
 | lzrw2 | LZRW2 | codec | ours-only | — | — | — | No packaged reference CLI |
 | lzrw3 | LZRW3 | codec | ours-only | — | — | — | No packaged reference CLI |
 | lzrw3a | LZRW3-A | codec | ours-only | — | — | — | No packaged reference CLI |
-| lzsa | LZSA v1 | codec | measured | lzsa | 1.4.1 | source build: gcc -O2 -fomit-frame-pointer -Isrc/libdivsufsort/include -Isrc | LZSA v1 reference CLI from upstream source build |
-| lzsa2 | LZSA v2 | codec | measured | lzsa | 1.4.1 | source build: gcc -O2 -fomit-frame-pointer -Isrc/libdivsufsort/include -Isrc | LZSA v2 reference CLI from upstream source build |
-| zx0 | ZX0 | codec | measured | ZX0 | 2.2 | source build: gcc -O2 (zx0.c optimize.c compress.c memory.c) | ZX0 reference CLI from upstream source build |
-| zx1 | ZX1 | codec | measured | ZX1 | 1.5 | source build: gcc -O2 (zx1.c optimize.c compress.c memory.c) | ZX1 reference CLI from upstream source build |
-| zx2 | ZX2 | codec | measured | ZX2 | 1.1 | source build: gcc -O2 (zx2.c optimize.c compress.c memory.c) | ZX2 reference CLI from upstream source build |
-| zx5 | ZX5 | codec | measured | ZX5 | 2.0 | source build: gcc -O2 (zx5.c optimize.c compress.c memory.c) | ZX5 reference CLI from upstream source build |
+| lzsa | LZSA v1 | codec | measured | lzsa | 1.4.1 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 -Isrc/libdivsufsort/include -Isrc | LZSA v1 reference CLI from upstream source build |
+| lzsa2 | LZSA v2 | codec | measured | lzsa | 1.4.1 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 -Isrc/libdivsufsort/include -Isrc | LZSA v2 reference CLI from upstream source build |
+| zx0 | ZX0 | codec | measured | ZX0 | 2.2 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx0.c optimize.c compress.c memory.c) | ZX0 reference CLI from upstream source build |
+| zx1 | ZX1 | codec | measured | ZX1 | 1.5 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx1.c optimize.c compress.c memory.c) | ZX1 reference CLI from upstream source build |
+| zx2 | ZX2 | codec | measured | ZX2 | 1.1 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx2.c optimize.c compress.c memory.c) | ZX2 reference CLI from upstream source build |
+| zx5 | ZX5 | codec | measured | ZX5 | 2.0 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx5.c optimize.c compress.c memory.c) | ZX5 reference CLI from upstream source build |
 | zx0b | ZX0 backwards | codec | ours-only | — | — | — | No standalone backwards reference CLI |
 | zx1b | ZX1 backwards | codec | ours-only | — | — | — | No standalone backwards reference CLI |
 | zx2b | ZX2 backwards | codec | ours-only | — | — | — | No standalone backwards reference CLI |
@@ -65,8 +68,8 @@ cargo bench --all-features --bench compare -- --list-markdown > docs/bench/refer
 | lha | LHA | archive | ours-only | — | — | — | Lhasa is decode-only; no reference writer |
 | arj | ARJ | archive | ours-only | — | — | — | No packaged ARJ reference writer |
 | arc | ARC | archive | unavailable | — | — | — | ARC writer requires 8.3 names; benchmark tree not adapted |
-| git-pack | git pack | archive | ours-only | — | — | — | git pack writer needs a repository oracle |
-| xar | xar | archive | ours-only | — | — | — | xar reference tool not installed |
+| git-pack | git pack | archive | ours-only | — | — | — | git pack stores object IDs; tree manifest verification is skipped |
+| xar | xar | archive | ours-only | — | — | — | Checked-in xar fixture; decode-only (our writer/reader roundtrip is not bit-stable) |
 | mscab | CAB | archive | ours-only | — | — | — | Checked-in CAB fixture; decode-only |
 | deb | deb | archive | unavailable | — | — | — | decode benchmark needs a deb fixture; pending |
 | rpm | rpm | archive | unavailable | — | — | — | decode benchmark needs an rpm fixture; pending |
@@ -75,9 +78,9 @@ cargo bench --all-features --bench compare -- --list-markdown > docs/bench/refer
 | warc | WARC | archive | unavailable | — | — | — | decode benchmark needs a WARC fixture; pending |
 | squashfs | squashfs | archive | unavailable | — | — | — | CLI read dispatch not implemented; library decode only |
 | cramfs | cramfs | archive | unavailable | — | — | — | CLI read dispatch not implemented; library decode only |
-| romfs | romfs | archive | unavailable | — | — | — | CLI read dispatch not implemented; library decode only |
-| erofs | erofs | archive | unavailable | — | — | — | CLI read dispatch not implemented; library decode only |
-| iso9660 | ISO 9660 | archive | unavailable | — | — | — | CLI read dispatch not implemented; library decode only |
+| romfs | romfs | archive | ours-only | — | — | — | Checked-in fixture; raw library decode only |
+| erofs | erofs | archive | ours-only | — | — | — | Checked-in fixture; raw library decode only |
+| iso9660 | ISO 9660 | archive | ours-only | — | — | — | Checked-in fixture; raw library decode only |
 | crx3 | CRX3 | archive | unavailable | — | — | — | CLI read dispatch not implemented; library decode only |
 | pea | PEA | archive | unavailable | — | — | — | CLI read dispatch not implemented; library decode only |
 | mscfb | MS-CFB | archive | unavailable | — | — | — | CLI read dispatch not implemented; library decode only |

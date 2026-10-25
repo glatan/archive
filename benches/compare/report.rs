@@ -37,7 +37,7 @@ fn build_json(results: &[CaseResult], cases: &[Case], cfg: &Config) -> Value {
                 "case": result.case.id,
                 "label": result.case.label,
                 "kind": match result.case.kind { Kind::Codec => "codec", Kind::Archive => "archive" },
-                "status": result.case.status(),
+                "status": result.status,
                 "corpus": result.corpus,
                 "input_len": result.input_len,
                 "error": result.error,
@@ -51,12 +51,15 @@ fn build_json(results: &[CaseResult], cases: &[Case], cfg: &Config) -> Value {
         "generated_at": now_string(),
         "environment": environment(),
         "build": build_info(),
+        "refs_build": refs_build(cfg),
         "config": {
             "quick": cfg.quick,
             "corpora": cfg.corpora,
             "iterations": cfg.iterations,
             "warmup": cfg.warmup,
             "size_override": cfg.size_override,
+            "skip_cli": cfg.skip_cli,
+            "skip_ref": cfg.skip_ref,
         },
         "cases": cases.iter().map(|case| json!({
             "id": case.id,
@@ -300,6 +303,10 @@ fn build_markdown(results: &[CaseResult], cases: &[Case], cfg: &Config, json: &V
         "| case | kind | status | reference | version | build flags / provenance | note |"
     );
     let _ = writeln!(out, "|---|---|---|---|---|---|---|");
+    let runtime: std::collections::BTreeMap<&str, &str> = results
+        .iter()
+        .map(|result| (result.case.id, result.status.as_str()))
+        .collect();
     for case in cases {
         let reference = case.reference;
         let _ = writeln!(
@@ -310,7 +317,10 @@ fn build_markdown(results: &[CaseResult], cases: &[Case], cfg: &Config, json: &V
                 Kind::Codec => "codec",
                 Kind::Archive => "archive",
             },
-            case.status(),
+            runtime
+                .get(case.id)
+                .copied()
+                .unwrap_or_else(|| case.status()),
             esc(reference.map_or("—", |spec| spec.name)),
             esc(reference.map_or("—", |spec| spec.version)),
             esc(reference.map_or("—", |spec| spec.build)),
@@ -507,18 +517,20 @@ fn environment() -> String {
     out
 }
 
+fn refs_build(cfg: &Config) -> Value {
+    fs::read(cfg.refs_dir.join("build-info.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or(Value::Null)
+}
+
 fn build_info() -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
         "ours: cargo bench profile (release defaults; opt-level=3, lto=false, codegen-units=16 unless overridden)"
     );
-    let _ = writeln!(
-        out,
-        "target: {} (compile-time target features: {})",
-        std::env::consts::ARCH,
-        option_env!("CARGO_CFG_TARGET_FEATURE").unwrap_or("<unknown>")
-    );
+    let _ = writeln!(out, "target: {}", std::env::consts::ARCH);
     let _ = writeln!(
         out,
         "RUSTFLAGS: {}",

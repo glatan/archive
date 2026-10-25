@@ -98,6 +98,11 @@ def run(command: list[str], cwd: Path | None = None, env: dict[str, str] | None 
     subprocess.run(command, cwd=cwd, env=env, check=True)
 
 
+def compiler_version() -> str:
+    output = subprocess.check_output(["gcc", "--version"], text=True)
+    return output.splitlines()[0]
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -165,6 +170,7 @@ def build_driver(name: str, spec: dict, root: Path) -> dict:
         "license": spec["license"],
         "build": {
             "cc": "gcc",
+            "cc_version": compiler_version(),
             "cflags": CFLAGS_TEXT,
             "ldflags": LDFLAGS,
             "commands": [" ".join(command)],
@@ -200,6 +206,7 @@ def build_zx(name: str, spec: dict, root: Path) -> dict:
         "license": spec["license"],
         "build": {
             "cc": "gcc",
+            "cc_version": compiler_version(),
             "cflags": CFLAGS_TEXT,
             "ldflags": LDFLAGS,
             "commands": [
@@ -225,9 +232,13 @@ def build_lzsa(name: str, spec: dict, root: Path) -> dict:
         "license": spec["license"],
         "build": {
             "cc": "gcc",
+            "cc_version": compiler_version(),
             "cflags": cflags,
             "ldflags": LDFLAGS,
-            "commands": ["make -C src/lzsa clean all"],
+            "commands": [
+                "make -C src/lzsa clean CC=gcc CFLAGS='...'",
+                "make -C src/lzsa all CC=gcc CFLAGS='...'",
+            ],
         },
         "binaries": [{"binary": str(out.relative_to(ROOT)), "sha256": sha256(out)}],
     }

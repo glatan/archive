@@ -155,6 +155,8 @@ pub struct CaseResult {
     pub encode: Option<OpResult>,
     pub decode: Option<OpResult>,
     pub error: Option<String>,
+    /// Runtime status: measured, ours-only, or unavailable.
+    pub status: String,
 }
 
 fn median(values: &[u64]) -> u64 {

@@ -51,7 +51,8 @@ int main(int argc, char **argv) {
         if (!output) {
             return 2;
         }
-        int written = fastlz_compress(input, (int)input_size, output);
+        int level = input_size < 65536 ? 1 : 2;
+        int written = fastlz_compress_level(level, input, (int)input_size, output);
         if (written <= 0 && input_size != 0) {
             fprintf(stderr, "fastlz_compress failed\n");
             return 2;

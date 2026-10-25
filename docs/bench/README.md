@@ -50,7 +50,7 @@ cargo bench --all-features --bench compare -- \
 参照側の decode は `/dev/null` または一時ディレクトリへ出力し、検証時だけ
 実ファイルへ出力する。
 
-- warmup 1 回 + 3〜5 回のサンプル中央値
+- warmup 1 回 + quick 2 回 / full 5 回のサンプル中央値
 - スループットは decimal MB/s（1e6 bytes/s）
 - `lib/ref` と `cli/ref` は参照側スループット ÷ 我々のスループット。
   1 より大きいほど参照が速い
@@ -63,15 +63,16 @@ cargo bench --all-features --bench compare -- \
 
 | 形式 | 我々の既定 | 参照側 |
 |---|---|---|
-| gzip | level 6 | `gzip -6 -n` |
-| zlib / deflate | level 6 | CPython zlib level 6 |
+| gzip | level 6 / fixed max_chain=32 | `gzip -6 -n`（実効パラメータは一致しないため注記） |
+| zlib / deflate | level 6 / fixed max_chain=32 | CPython zlib level 6（実効パラメータは一致しないため注記） |
 | zstd | 32 KiB window / 128 KiB block / checksum | `zstd -3 --zstd=wlog=15 --check -T1` |
 | bzip2 | level 9 | `bzip2 -9` |
 | lzip | 4 KiB 辞書 | `lzip -6 -s 4096` |
 | lzma-alone | 8 MiB 辞書 | `xz --format=lzma --lzma1=dict=8MiB -T1` |
-| xz | 4 KiB 辞書 / CRC32 | `xz --lzma2=dict=4KiB -T1` |
-| lz4 | 4 MiB block / block+content checksum / content size | `lz4 -B7 -BX --content-size` |
+| xz | 4 KiB 辞書 / CRC32 | `xz -6 --lzma2=dict=4KiB --check=crc32 -T1` |
+| lz4 | 4 MiB block / block+content checksum / content size | `lz4 -1 -T1 -B7 -BX --content-size` |
 | lzo | LZO1X-1 | `lzop -1` |
+| fastlz | 入力 64 KiB 以上は level 2 | `fastlz_compress_level(2)` |
 | brotli | 既定エンコーダ | `brotli -q 5`（直接対応する level がないため注記） |
 | zx0/1/2/5 | 既定 | 参照 CLI の `-q` |
 | lzsa v1/v2 | 既定 | `lzsa -f 1/2 --prefer-speed` |
@@ -93,7 +94,7 @@ cargo bench --all-features --bench compare -- \
 - codec: `text` / `run` / `random` / `periodic`（`--corpus all` で全種）
 - archive: 固定メタデータのファイルツリー（quick 64 files、full 200 files）
 - 大容量ファイルは `target/bench` に生成し、リポジトリにはコミットしない
-- `--size` でサイズを上書きできる
+- `--size` で codec の入力サイズを上書きできる（archive のツリーサイズは固定）
 
 ## 参照実装
 
