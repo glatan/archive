@@ -7,7 +7,7 @@
 ## 実行
 
 ```sh
-# ホスト上で quick（参照ツールが無い形式は N/A）
+# ホスト上で quick（参照ツールが無い形式は partial / ours-only）
 make bench-compare-quick
 
 # ホスト上で full
@@ -43,7 +43,7 @@ cargo bench --all-features --bench compare -- \
 | 列 | 内容 |
 |---|---|
 | `ours-lib` | `archive-bench-helper` がライブラリ呼び出しの前後だけを計測する。プロセス起動・引数解析・入力の読み込み・出力の書き込みは計測区間外 |
-| `ours-cli` | codec は `archive compress` / `archive test`、archive は `archive compress` / `archive extract` をサブプロセスとして実行。起動とファイル I/O を含む |
+| `ours-cli` | codec は `archive compress` / `archive test`、archive は `archive pack` / `archive extract` をサブプロセスとして実行。起動とファイル I/O を含む |
 | `ref-cli` | 参照ツールをサブプロセスとして実行。起動とファイル I/O を含む |
 
 `ours-lib` は実装ポテンシャル、`ours-cli` と `ref-cli` は end-to-end の比較に使う。
@@ -88,7 +88,7 @@ cargo bench --all-features --bench compare -- \
 2. 我々の出力を参照実装が decode し、元データとハッシュ一致
 
 失敗は性能値ではなく `cross_decode_ok=false` として記録する。形式の variant が
-異なる場合は N/A と理由を記録する。
+異なる場合は N/A または partial と理由を記録する。
 
 ## コーパス
 

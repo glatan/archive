@@ -93,6 +93,15 @@ fn runtime_status(case: &Case, cfg: &Config, result: &CaseResult) -> String {
                     .decode
                     .as_ref()
                     .is_none_or(|op| op.reference.is_none())));
+    let cross_failed = [result.encode.as_ref(), result.decode.as_ref()]
+        .into_iter()
+        .flatten()
+        .any(|op| {
+            op.cross_decode_ok == Some(false)
+                || op.note.as_deref().is_some_and(|note| {
+                    note.contains("manifest mismatch") || note.contains("hash mismatch")
+                })
+        });
     let expected_ours_missing = (case.encode
         && ((case.ours_lib
             && result
@@ -117,7 +126,9 @@ fn runtime_status(case: &Case, cfg: &Config, result: &CaseResult) -> String {
                         .decode
                         .as_ref()
                         .is_some_and(|op| op.ours_cli.is_none()))));
-    if expected_ours_missing || ref_expected_missing {
+    if cross_failed {
+        "failed".to_owned()
+    } else if expected_ours_missing || ref_expected_missing {
         if has_ours || has_reference {
             "partial".to_owned()
         } else {
@@ -286,12 +297,7 @@ fn run_codec_case(case: &Case, cfg: &Config, corpus_label: &str, result: &mut Ca
                     .map(|measurement| measurement.hash == expected_hash)
             };
             match verified {
-                Ok(ok) => {
-                    merge_cross(&mut decode, ok);
-                    if !ok {
-                        append_note(&mut decode, "ours-cli output did not round-trip".to_owned());
-                    }
-                }
+                Ok(ok) => merge_cross(&mut decode, ok),
                 Err(error) => append_note(&mut decode, format!("ours-cli cross-decode: {error}")),
             }
         }
@@ -522,6 +528,46 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
                     }
                 }
             }
+        }
+    }
+
+    if case.decode && case.ours_cli && !cfg.skip_cli && ours_cli_encoded.exists() {
+        let cli_cross = dir.join("cli-cross");
+        let verified = if !cfg.skip_ref {
+            case.reference
+                .and_then(|reference| reference.decode.map(|command| (reference, command)))
+                .map(|(reference, command)| {
+                    run_ref_verify(cfg, &reference, &command, &ours_cli_encoded, &cli_cross).map(
+                        |_| {
+                            case.format == "git-pack" || dir_manifest_matches(&cli_cross, &expected)
+                        },
+                    )
+                })
+                .unwrap_or_else(|| {
+                    helper_read(cfg, case, &ours_cli_encoded, &dir.join("cli-cross.json")).map(
+                        |_| {
+                            case.format == "git-pack"
+                                || manifest_matches(&dir.join("cli-cross.json"), &expected)
+                        },
+                    )
+                })
+        } else {
+            helper_read(cfg, case, &ours_cli_encoded, &dir.join("cli-cross.json")).map(|_| {
+                case.format == "git-pack"
+                    || manifest_matches(&dir.join("cli-cross.json"), &expected)
+            })
+        };
+        match verified {
+            Ok(ok) => {
+                merge_cross(&mut decode, ok);
+                if !ok {
+                    append_note(
+                        &mut decode,
+                        "ours-cli archive did not round-trip".to_owned(),
+                    );
+                }
+            }
+            Err(error) => append_note(&mut decode, format!("ours-cli cross-decode: {error}")),
         }
     }
 

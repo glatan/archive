@@ -134,7 +134,7 @@ fn build_markdown(results: &[CaseResult], cases: &[Case], cfg: &Config, json: &V
     );
     let _ = writeln!(
         out,
-        "- `ours-cli`: codecs use `archive compress` / `archive test`; archives use `archive compress` / `archive extract` to a temporary directory. Process startup and file I/O are included."
+        "- `ours-cli`: codecs use `archive compress` / `archive test`; archives use `archive pack` / `archive extract` to a temporary directory. Process startup and file I/O are included."
     );
     let _ = writeln!(
         out,

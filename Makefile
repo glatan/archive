@@ -165,7 +165,7 @@ build-container.fuzz:
 # ── performance comparison ──────────────────────────────────────
 # `make bench` keeps the existing Criterion microbenchmarks.
 # `make bench-compare` runs the reference comparison harness on the host.
-# Missing reference tools are reported as N/A in the generated report.
+# Missing reference tools are reported as partial / ours-only in the generated report.
 BENCH_OUT ?= target/bench/container
 
 .PHONY: bench
