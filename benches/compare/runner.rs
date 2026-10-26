@@ -267,7 +267,12 @@ fn run_codec_case(case: &Case, cfg: &Config, corpus_label: &str, result: &mut Ca
                                 );
                             }
                         }
-                        Err(error) => append_note(&mut decode, format!("cross-decode: {error}")),
+                        Err(error) => {
+                            append_note(&mut decode, format!("cross-decode: {error}"));
+                            if !error.contains("not found") {
+                                merge_cross(&mut decode, false);
+                            }
+                        }
                     }
                 }
             }
@@ -298,7 +303,12 @@ fn run_codec_case(case: &Case, cfg: &Config, corpus_label: &str, result: &mut Ca
             };
             match verified {
                 Ok(ok) => merge_cross(&mut decode, ok),
-                Err(error) => append_note(&mut decode, format!("ours-cli cross-decode: {error}")),
+                Err(error) => {
+                    append_note(&mut decode, format!("ours-cli cross-decode: {error}"));
+                    if !error.contains("not found") {
+                        merge_cross(&mut decode, false);
+                    }
+                }
             }
         }
     }
@@ -567,7 +577,12 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
                     );
                 }
             }
-            Err(error) => append_note(&mut decode, format!("ours-cli cross-decode: {error}")),
+            Err(error) => {
+                append_note(&mut decode, format!("ours-cli cross-decode: {error}"));
+                if !error.contains("not found") {
+                    merge_cross(&mut decode, false);
+                }
+            }
         }
     }
 
