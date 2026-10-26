@@ -122,6 +122,15 @@ magic bytes からフォーマットを自動検出する。
 lzxd の decode は、ストリーム外パラメータであるウィンドウサイズに仕様上の最大値（32MiB）を仮定してデコードする。小さいウィンドウで生成されたストリームであっても、後方参照距離はそのウィンドウサイズ以下に収まるため正常に展開できる。
 cmpsc は PKWARE APPNOTE method-16 コンテナ（辞書ヘッダ + 展開辞書 + CMPSC データ）を扱う。encode は alphabet-only 辞書を使うためデータは実質非圧縮となる。
 
+## テスト
+
+```sh
+cargo test -p archive-cli
+```
+
+引数解析、format 検出、抽出のパス安全性に加え、`pack` → `list` → `extract` と
+`compress` → `test` → `extract` の end-to-end 経路を `tests/cli.rs` で検証する。
+
 ## ライセンス
 
 AGPL-3.0-only

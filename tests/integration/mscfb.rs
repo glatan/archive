@@ -8,6 +8,10 @@ use super::*;
 fn test_mscfb_roundtrip_via_python_reference() {
     use std::process::{Command, Stdio};
 
+    if !python3_available() {
+        return;
+    }
+
     // Independent reference: a minimal v3 CFB writer written against
     // [MS-CFB] §2 directly (not derived from the crate's builder).
     // Layout: sector 0 = FAT, 1 = directory, 2 = mini FAT,
@@ -90,6 +94,10 @@ fn test_mscfb_roundtrip_via_python_reference() {
 fn test_mscfb_rejects_truncated_fat_chain() {
     use std::process::Command;
 
+    if !python3_available() {
+        return;
+    }
+
     // Same generator as above but truncates the file mid-data so the
     // FAT chain references a missing sector: decode must fail.
     let script = concat!(
@@ -138,6 +146,10 @@ fn test_mscfb_rejects_truncated_fat_chain() {
 #[test]
 fn test_mscfb_encode_python_olefile_oracle() {
     use std::io::Write;
+
+    if !python3_available() {
+        return;
+    }
     use std::process::{Command, Stdio};
 
     // System oracle: Python olefile parses an encoder-produced image.

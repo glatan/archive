@@ -50,6 +50,9 @@ sys.stdout.buffer.write(out)
 
 #[test]
 fn test_crx3_python_oracle() {
+    if !python3_available() {
+        return;
+    }
     let f = generate_crx3();
     let img = crx3::decode::decode(&f).unwrap();
     assert_eq!(
@@ -71,6 +74,9 @@ fn test_crx3_python_oracle() {
 
 #[test]
 fn test_crx3_rejects_non_zip_tail() {
+    if !python3_available() {
+        return;
+    }
     // header parses but the archive tail is not a ZIP
     let f = generate_crx3();
     let mut f2 = f.clone();

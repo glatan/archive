@@ -16,8 +16,8 @@ FUZZ_AS_KB ?= 2097152
 # 不足しうる。
 FUZZ_AS_KB_AARCH64 ?= 4194304
 
-# イメージ内で x86_64（SSE2）の全テスト、aarch64（NEON）の lib テスト、
-# x86-64-v3（AVX2）の lib テストを順に実行する。
+# イメージ内で x86_64（SSE2）の全テスト、archive-cli の end-to-end テスト、
+# aarch64（NEON）の lib テスト、x86-64-v3（AVX2）の lib テストを順に実行する。
 .PHONY: test
 test:
 	podman run --rm $(TEST_IMAGE)

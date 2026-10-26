@@ -1078,6 +1078,7 @@ mod tests {
     /// upstream `zpaq` CLI under /tmp. Run with ZPAQ_DUMP=1.
     #[cfg(feature = "std")]
     #[test]
+    #[ignore = "fixture generation helper; run with ZPAQ_DUMP=1"]
     fn dump_jidac_fixture() {
         if std::env::var_os("ZPAQ_DUMP").is_none() {
             return;
@@ -1091,7 +1092,7 @@ mod tests {
             2,
         )
         .unwrap();
-        std::fs::write("/tmp/rust_jidac.zpaq", &enc).unwrap();
+        std::fs::write(std::env::temp_dir().join("rust_jidac.zpaq"), &enc).unwrap();
         let mut ap = JidacAppender::open(&enc).unwrap();
         let mut bigger = b"delta payload ".to_vec();
         bigger.extend_from_slice(&[9u8; 5000]);
@@ -1099,13 +1100,18 @@ mod tests {
         let suffix = ap.commit(20_250_102_120_000, 1).unwrap();
         let mut appended = enc;
         appended.extend_from_slice(&suffix);
-        std::fs::write("/tmp/rust_jidac_appended.zpaq", &appended).unwrap();
+        std::fs::write(
+            std::env::temp_dir().join("rust_jidac_appended.zpaq"),
+            &appended,
+        )
+        .unwrap();
     }
 
     /// Dev-only interop check: decodes an upstream `zpaq a` archive
     /// given via ZPAQ_JIDAC_IN=<path> and prints the file table.
     #[cfg(feature = "std")]
     #[test]
+    #[ignore = "manual oracle check; set ZPAQ_JIDAC_IN to an upstream archive"]
     fn decode_upstream_jidac_oracle() {
         let Some(path) = std::env::var_os("ZPAQ_JIDAC_IN") else {
             return;

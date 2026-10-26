@@ -37,31 +37,33 @@ fn test_lzo_encode_decoded_by_system() {
     let input = b"The quick brown fox jumps over the lazy dog. Testing LZO interop!";
     let compressed = lzo::encode::encode(input);
 
-    let tmp = "/tmp/test_lzo_interop.lzo";
-    std::fs::write(tmp, &compressed).unwrap();
+    let dir = unique_temp_dir("lzo_interop");
+    let archive_path = dir.join("test.lzo");
+    let output_path = dir.join("test.out");
+    std::fs::write(&archive_path, &compressed).unwrap();
 
     let output = Command::new("lzop")
-        .args(["-d", "-f", "-o", "/tmp/test_lzo_interop.out", tmp])
+        .args(["-d", "-f", "-o"])
+        .arg(&output_path)
+        .arg(&archive_path)
         .output();
 
     match output {
         Ok(result) => {
             assert!(
                 result.status.success(),
-                "lzop -d failed: {}",
+                "system lzop failed: {}",
                 String::from_utf8_lossy(&result.stderr)
             );
-            let decoded = std::fs::read("/tmp/test_lzo_interop.out").unwrap();
-            assert_eq!(decoded, input);
+            assert_eq!(std::fs::read(&output_path).unwrap(), input);
         }
-        Err(_) => {
-            let decoded = lzo::decode::decode(&compressed).unwrap();
-            assert_eq!(decoded, input);
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            assert_eq!(lzo::decode::decode(&compressed).unwrap(), input);
         }
+        Err(error) => panic!("failed to run lzop: {error}"),
     }
 
-    let _ = std::fs::remove_file(tmp);
-    let _ = std::fs::remove_file("/tmp/test_lzo_interop.out");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

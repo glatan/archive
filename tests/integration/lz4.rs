@@ -31,37 +31,39 @@ fn test_lz4_decode_system_fixture() {
 
 #[test]
 fn test_lz4_encode_decoded_by_system() {
-    use std::process::Command;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
 
     let input = b"The quick brown fox jumps over the lazy dog. Testing LZ4 interop!";
     let compressed = lz4::encode::encode(input);
 
-    let tmp = "/tmp/test_lz4_interop.lz4";
-    std::fs::write(tmp, &compressed).unwrap();
-
-    let output = Command::new("lz4")
-        .args(["-d", "-f", tmp, "/tmp/test_lz4_interop.out"])
-        .output();
-
-    match output {
-        Ok(result) => {
-            assert!(
-                result.status.success(),
-                "lz4 -d failed: {}",
-                String::from_utf8_lossy(&result.stderr)
-            );
-            let decoded = std::fs::read("/tmp/test_lz4_interop.out").unwrap();
-            assert_eq!(decoded, input);
+    let mut child = match Command::new("lz4")
+        .args(["-d", "-c"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            assert_eq!(lz4::decode::decode(&compressed).unwrap(), input);
+            return;
         }
-        Err(_) => {
-            // lz4 not installed, just verify self-roundtrip
-            let decoded = lz4::decode::decode(&compressed).unwrap();
-            assert_eq!(decoded, input);
-        }
-    }
-
-    let _ = std::fs::remove_file(tmp);
-    let _ = std::fs::remove_file("/tmp/test_lz4_interop.out");
+        Err(error) => panic!("failed to run lz4: {error}"),
+    };
+    child
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(&compressed)
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "system lz4 failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, input);
 }
 
 #[test]

@@ -1258,7 +1258,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "実際に sleep 9999 を起動して kill するため数秒かかる。CI では cargo test -- --ignored で実行する"]
     fn run_command_in_dir_times_out() {
         // Verify that a hanging command is killed and returns a timeout error.
         // process_group(0) is required: sh may spawn `sleep` as a subprocess

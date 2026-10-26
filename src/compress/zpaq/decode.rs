@@ -621,6 +621,7 @@ mod tests {
     /// for the upstream oracle to decode. Run with ZPAQ_DUMP=1.
     #[cfg(feature = "std")]
     #[test]
+    #[ignore = "fixture generation helper; run with ZPAQ_DUMP=1"]
     fn dump_rust_encoded_fixture() {
         if std::env::var_os("ZPAQ_DUMP").is_none() {
             return;
@@ -628,7 +629,11 @@ mod tests {
         let input = b"Hello, ZPAQ! The quick brown fox jumps over the lazy dog. 0123456789";
         for level in 1..=3u32 {
             let enc = crate::compress::zpaq::encode::encode(input, level);
-            std::fs::write(format!("/tmp/zpaq_rust_l{level}.zpaq"), &enc).unwrap();
+            std::fs::write(
+                std::env::temp_dir().join(format!("zpaq_rust_l{level}.zpaq")),
+                &enc,
+            )
+            .unwrap();
         }
     }
 
@@ -744,13 +749,14 @@ mod tests {
     /// Run with ZPAQ_DUMP=1.
     #[cfg(feature = "std")]
     #[test]
+    #[ignore = "fixture generation helper; run with ZPAQ_DUMP=1"]
     fn dump_rust_edge_fixtures() {
         if std::env::var_os("ZPAQ_DUMP").is_none() {
             return;
         }
         // Empty input
         std::fs::write(
-            "/tmp/zpaq_rust_empty.zpaq",
+            std::env::temp_dir().join("zpaq_rust_empty.zpaq"),
             crate::compress::zpaq::encode::encode(b"", 2),
         )
         .unwrap();
@@ -764,11 +770,11 @@ mod tests {
             bin.push(i as u8);
         }
         std::fs::write(
-            "/tmp/zpaq_rust_bin.zpaq",
+            std::env::temp_dir().join("zpaq_rust_bin.zpaq"),
             crate::compress::zpaq::encode::encode(&bin, 2),
         )
         .unwrap();
-        std::fs::write("/tmp/zpaq_plain_bin.bin", &bin).unwrap();
+        std::fs::write(std::env::temp_dir().join("zpaq_plain_bin.bin"), &bin).unwrap();
         // Larger repetitive text
         let mut big = Vec::new();
         for i in 0..2000u32 {
@@ -781,16 +787,20 @@ mod tests {
             );
         }
         std::fs::write(
-            "/tmp/zpaq_rust_big.zpaq",
+            std::env::temp_dir().join("zpaq_rust_big.zpaq"),
             crate::compress::zpaq::encode::encode(&big, 3),
         )
         .unwrap();
-        std::fs::write("/tmp/zpaq_plain_big.txt", &big).unwrap();
+        std::fs::write(std::env::temp_dir().join("zpaq_plain_big.txt"), &big).unwrap();
         // Multi-segment archive (2 entries)
         let mut enc = crate::archive::zpaq::encode::ZpaqEncoder::new(2);
         enc.add_file("a.txt", b"alpha payload");
         enc.add_file_with_comment("b.txt", "note", b"beta payload!");
-        std::fs::write("/tmp/zpaq_rust_multi.zpaq", enc.finish().unwrap()).unwrap();
+        std::fs::write(
+            std::env::temp_dir().join("zpaq_rust_multi.zpaq"),
+            enc.finish().unwrap(),
+        )
+        .unwrap();
         // PROG stream: a++ out halt PCOMP over a minus-one preimage,
         // so upstream decode must yield the original data + 0x00.
         let input = b"hello, pcomp!";
@@ -801,7 +811,7 @@ mod tests {
             .unwrap();
         let preimage: Vec<u8> = input.iter().map(|b| b.wrapping_sub(1)).collect();
         std::fs::write(
-            "/tmp/zpaq_rust_pcomp.zpaq",
+            std::env::temp_dir().join("zpaq_rust_pcomp.zpaq"),
             crate::compress::zpaq::encode::encode_with_model(&preimage, &model).unwrap(),
         )
         .unwrap();

@@ -10,11 +10,7 @@ fn test_tar_gz_decode() {
     let tar_data = gzip::decode::decode(tar_gz_data).unwrap();
     let entries = tar::decode::decode(&tar_data).unwrap();
 
-    assert!(
-        entries.len() >= 3,
-        "expected at least 3 entries, got {}",
-        entries.len()
-    );
+    assert_eq!(entries.len(), 3, "unexpected entry count");
 
     let a = entries
         .iter()
@@ -168,10 +164,8 @@ fn test_format_mismatch_cpio_as_tar() {
     encoder.add_file("test.txt", b"Hello, cpio!");
     let cpio_data = encoder.finish();
 
-    let result = tar::decode::decode(&cpio_data);
     assert!(
-        result.is_err() || result.as_ref().is_ok_and(|e| e.is_empty()),
-        "decoding cpio data as tar should produce an error or empty result, got: {:?}",
-        result
+        tar::decode::decode(&cpio_data).is_err(),
+        "decoding cpio data as tar must fail"
     );
 }

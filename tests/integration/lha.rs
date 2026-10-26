@@ -372,8 +372,7 @@ fn lha_fixture_entry(name: &str) -> archive::archive::lha::decode::LhaEntry {
 }
 
 /// Every vendored fixture for a supported method must decode; the
-/// header CRC-16 inside each archive validates the decompressed
-/// bytes.
+/// data CRC-16 inside each archive validates the decompressed bytes.
 #[test]
 fn test_lha_compressed_method_fixtures() {
     for (name, expect_bytes) in [
@@ -482,6 +481,7 @@ fn test_lha_fixture_oracle_extract() {
         .as_nanos();
     let dir = std::env::temp_dir().join(format!("archive_lha_oracle_{uniq}"));
     std::fs::create_dir_all(&dir).unwrap();
+    let mut compared = 0;
 
     for e in std::fs::read_dir("tests/fixtures/lha").unwrap() {
         let p = e.unwrap().path();
@@ -529,8 +529,15 @@ fn test_lha_fixture_oracle_extract() {
                 ours.first(),
                 "{name}: {tool} output differs"
             );
+            compared += 1;
         }
     }
+
+    assert!(
+        compared > 0,
+        "oracle tools were available but no fixture was compared"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ============================================================

@@ -68,31 +68,30 @@ fn test_lzip_roundtrip_high_entropy() {
 
 #[test]
 fn test_lzip_decode_system_compressed() {
-    // "Hello, lzip!\n" compressed with system `lzip -9`
     use std::process::Command;
 
     let input = b"Hello, lzip!\n";
-    let tmp = "/tmp/test_lzip_input.txt";
-    let tmp_lz = "/tmp/test_lzip_input.txt.lz";
+    let dir = unique_temp_dir("lzip_decode");
+    let input_path = dir.join("input.txt");
+    std::fs::write(&input_path, input).unwrap();
 
-    std::fs::write(tmp, input).unwrap();
-    let _ = std::fs::remove_file(tmp_lz);
+    let output = match Command::new("lzip")
+        .args(["-9", "-c"])
+        .arg(&input_path)
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => panic!("failed to run lzip: {error}"),
+    };
+    assert!(
+        output.status.success(),
+        "system lzip failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(lzip::decode::decode(&output.stdout).unwrap(), input);
 
-    let output = Command::new("lzip").args(["-9", "-k", tmp]).output();
-
-    match output {
-        Ok(result) if result.status.success() => {
-            let system_lz = std::fs::read(tmp_lz).unwrap();
-            let decoded = lzip::decode::decode(&system_lz).unwrap();
-            assert_eq!(decoded, input);
-        }
-        _ => {
-            // lzip not installed, skip
-        }
-    }
-
-    let _ = std::fs::remove_file(tmp);
-    let _ = std::fs::remove_file(tmp_lz);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -142,28 +141,24 @@ fn test_lzip_encode_decoded_by_system() {
     let input = b"The quick brown fox jumps over the lazy dog. Testing lzip interop!";
     let compressed = lzip::encode::encode(input);
 
-    let tmp = "/tmp/test_lzip_interop.lz";
-    std::fs::write(tmp, &compressed).unwrap();
-
-    let output = Command::new("lzip").args(["-d", "-c", tmp]).output();
-
-    match output {
-        Ok(result) => {
-            assert!(
-                result.status.success(),
-                "lzip -d failed: {}",
-                String::from_utf8_lossy(&result.stderr)
-            );
-            assert_eq!(result.stdout, input);
+    let dir = unique_temp_dir("lzip_encode");
+    let path = dir.join("input.lz");
+    std::fs::write(&path, &compressed).unwrap();
+    let output = match Command::new("lzip").args(["-d", "-c"]).arg(&path).output() {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            assert_eq!(lzip::decode::decode(&compressed).unwrap(), input);
+            return;
         }
-        Err(_) => {
-            // lzip not installed, just verify self-roundtrip
-            let decoded = lzip::decode::decode(&compressed).unwrap();
-            assert_eq!(decoded, input);
-        }
-    }
-
-    let _ = std::fs::remove_file(tmp);
+        Err(error) => panic!("failed to run lzip: {error}"),
+    };
+    assert!(
+        output.status.success(),
+        "system lzip failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, input);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

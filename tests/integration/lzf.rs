@@ -12,7 +12,7 @@ fn lzf_hand_built_literal_run() {
     input.push(4);
     input.extend_from_slice(b"wxyza");
     let dec = lzf::decode(&input).unwrap();
-    assert_eq!(dec.len(), 37);
+    assert_eq!(dec, b"0123456789abcdefghijklmnopqrstuvwxyza");
 }
 
 #[test]

@@ -55,6 +55,9 @@ sys.stdout.buffer.write(out)
 
 #[test]
 fn test_pea_python_oracle() {
+    if !python3_available() {
+        return;
+    }
     let f = generate_pea();
     let img = pea::decode::decode(&f).unwrap();
     assert_eq!(img.version, (1, 6));
@@ -77,6 +80,9 @@ fn test_pea_codec_trait() {
 
 #[test]
 fn test_pea_rejects_truncated() {
+    if !python3_available() {
+        return;
+    }
     let f = generate_pea();
     // cut inside the file data area
     assert!(pea::decode::decode(&f[..f.len() - 20]).is_err());
@@ -187,6 +193,9 @@ assert pos == len(d)
 
 #[test]
 fn test_pea_encode_python_oracle() {
+    if !python3_available() {
+        return;
+    }
     let mut enc = pea::encode::PeaEncoder::new();
     enc.add_dir("mydir");
     enc.add_file(
@@ -206,6 +215,9 @@ fn test_pea_encode_python_oracle() {
 
 #[test]
 fn test_pea_encode_stored_python_oracle() {
+    if !python3_available() {
+        return;
+    }
     let mut enc = pea::encode::PeaEncoder::new()
         .compression(pea::encode::PeaCompression::Store)
         .object_control(pea::decode::PeaAlgo::Adler32);

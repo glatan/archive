@@ -15,15 +15,18 @@
 
 - 全体:
   - `cargo test --all-features --test integration`
-- リポジトリ標準の検証:
+- CLI を含むリポジトリ標準の検証:
   - `cargo fmt --all`
   - `cargo test --all-features`
+  - `cargo test -p archive-cli`
   - `cargo clippy --all-features --all-targets -- -D warnings`
 
 ## System tool interop の扱い
 
 一部の integration test は Arch Linux 環境の外部ツールを使用する。
 ツールが存在しない環境では、該当テストをスキップする。
+`ARCHIVE_REQUIRE_EXTERNAL_TOOLS=1` を設定すると、共通ヘルパー経由で検出した
+ツール不在を失敗として扱う（interop coverage を必須にする場合に使う）。
 
 現時点で `Containerfile` に用意している外部ツールは次の通りである。
 
@@ -73,7 +76,7 @@
 | Coverage | Test cases |
 | --- | --- |
 | GNU/BSD roundtrip baseline | `test_ar_roundtrip_gnu`<br>`test_ar_empty_archive_roundtrip`<br>`test_ar_roundtrip_multiple_long_names_bsd` |
-| system archive decode / system listing | `test_ar_decode_system_archive`<br>`test_ar_gnu_system_compat`<br>`test_ar_empty_archive_system_list_compat`<br>`test_ar_bsd_system_compat`<br>`test_ar_gnu_system_extract_content_compat` |
+| system archive decode / system listing | `test_ar_decode_system_archive`<br>`test_ar_decode_gnu_thin_fixture`<br>`test_ar_gnu_system_compat`<br>`test_ar_empty_archive_system_list_compat`<br>`test_ar_bsd_system_compat`<br>`test_ar_thin_system_list_compat`<br>`test_ar_gnu_system_extract_content_compat` |
 | reader / metadata bridge | `test_ar_decode_reader_roundtrip_integration`<br>`test_ar_add_entry_preserves_metadata` |
 | malformed input | `test_ar_decode_rejects_invalid_header_trailer` |
 
@@ -86,6 +89,7 @@
 | invalid layout rejection | `test_deb_decode_rejects_invalid_layout` |
 | system `ar`+`tar`+`gzip` interop | `test_deb_decode_system_built_package` |
 | `bsdtar` member extraction interop | `test_deb_crate_built_extracted_by_bsdtar` |
+| encoder roundtrip / `bsdtar` interop | `test_deb_encoder_roundtrip`<br>`test_deb_encoder_bsdtar_interop` |
 
 ### `rpm.rs`
 
@@ -98,14 +102,19 @@
 | system cpio+gzip payload interop | `test_rpm_decode_system_compressed_payload` |
 | `bsdtar` payload extraction interop | `test_rpm_crate_built_read_by_bsdtar` |
 | v6 encoder roundtrip + system oracle | `test_rpm_v6_encoder_roundtrip_and_system_oracle` |
+| encoder roundtrip variants | `test_rpm_encode_decode_roundtrip`<br>`test_rpm_encode_uncompressed_roundtrip` |
+| encoder `bsdtar` interop | `test_rpm_encode_read_by_bsdtar`<br>`test_rpm_stripped_encoder_roundtrip_and_bsdtar` |
 
 ### `squashfs.rs`
 
 | Coverage | Test cases |
 | --- | --- |
 | `mksquashfs` 生成 image (gzip/zstd/xz/lz4/lzo) の decode | `test_squashfs_decode_mksquashfs_image` |
+| xattr / directory index decode | `test_squashfs_decode_xattrs_and_dir_index` |
 | 本 writer 出力 (gzip/xz/lz4/lzo/zstd) の `unsquashfs` 展開 | `test_squashfs_encoder_unsquashfs_extract` |
 | encoder → decoder roundtrip | `test_squashfs_encoder_roundtrip` |
+| symlink / fragment / ID table writer | `test_squashfs_encoder_symlink_fragments_ids` |
+| extended writer (`unsquashfs` oracle) | `test_squashfs_encoder_extended_unsquashfs` |
 
 ### `mscab.rs`
 
@@ -113,6 +122,9 @@
 | --- | --- |
 | MSZIP 圧縮 cabinet の decode | `test_mscab_decode_mszip_cabinet` |
 | crate 生成 cab の `bsdtar` 展開 interop | `test_mscab_bsdtar_interop` |
+| encoder roundtrip / `bsdtar` interop | `test_mscab_encoder_roundtrip`<br>`test_mscab_encoder_bsdtar_interop` |
+| LZX フォルダ fixture | `test_mscab_lzx_fixture`<br>`test_mscab_lzx_large_fixture` |
+| Quantum 合成・fixture・`cabextract` interop | `test_mscab_quantum_synthesized_cab`<br>`test_mscab_quantum_cabextract_interop`<br>`test_mscab_quantum_fixture` |
 
 ### `zim.rs`
 
@@ -121,6 +133,7 @@
 | stored cluster decode | `test_zim_decode_stored_cluster` |
 | xz cluster decode | `test_zim_decode_xz_cluster` |
 | zstd cluster decode | `test_zim_decode_zstd_cluster` |
+| encoder roundtrip / stored-xz / v6 redirect | `test_zim_encoder_roundtrip`<br>`test_zim_encoder_xz_stored`<br>`test_zim_encoder_v6_extended_with_redirect` |
 | truncated header reject | `test_zim_rejects_truncated_header` |
 
 ### `mtree.rs`
@@ -128,6 +141,7 @@
 | Coverage | Test cases |
 | --- | --- |
 | basic manifest decode (/set・相対 dir 遷移) | `test_mtree_decode_basic` |
+| encoder roundtrip / `bsdtar` read interop | `test_mtree_encode_roundtrip`<br>`test_mtree_bsdtar_read_interop` |
 | `bsdtar --format=mtree` 生成マニフェストの decode interop | `test_mtree_bsdtar_interop` |
 
 ### `warc.rs`
@@ -136,6 +150,7 @@
 | --- | --- |
 | 複数 record ストリーム decode (warcinfo/response/revisit) | `test_warc_decode_records` |
 | gzip 伸張経路経由の `.warc.gz` decode | `test_warc_gzip_members` |
+| record encoder roundtrip | `test_warc_encode_roundtrip`<br>`test_warc_gzip_write_roundtrip` |
 | `WARC-Profile` 検証 (revisit 必須・他型禁止・未知 URI は pass-through) | `test_warc_rejects_revisit_missing_profile`<br>`test_warc_rejects_profile_on_non_revisit`<br>`test_warc_accepts_revisit_with_known_profile` |
 | `WARC-Identified-Payload-Type` / `WARC-Payload-Digest` は payload 未定義の型 (warcinfo/metadata) で禁止 | `test_warc_identified_payload_type_needs_payload`<br>`test_warc_payload_digest_needs_payload` |
 | warcinfo `Content-Type: application/warc-fields` 必須 (Clause 8) + encoder 側 enforcement | `test_warc_rejects_warcinfo_wrong_content_type`<br>`test_warc_encoder_warcinfo_content_type` |
@@ -144,8 +159,8 @@
 
 | Coverage | Test cases |
 | --- | --- |
-| system `brotli` decode interop | `test_brotli_decode_system_q0_uncompressed`<br>`test_brotli_decode_system_q3_compressed_run`<br>`test_brotli_decode_system_q5_repeated_pattern`<br>`test_brotli_decode_system_binary_payload` |
-| crate encode / writer path | `test_brotli_encode_roundtrip`<br>`test_brotli_encode_system_decode`<br>`test_brotli_encode_empty_system_decode`<br>`test_brotli_encode_writer_roundtrip`<br>`test_brotli_encode_multi_metablock_roundtrip`<br>`test_brotli_encode_repeated_pattern_system_decode`<br>`test_brotli_encode_low_cardinality_system_decode` |
+| system `brotli` decode interop | `test_brotli_decode_system_q0_uncompressed`<br>`test_brotli_decode_system_q3_compressed_run`<br>`test_brotli_decode_system_q5_repeated_pattern`<br>`test_brotli_decode_system_binary_payload`<br>`test_brotli_decode_system_quality_levels`<br>`test_brotli_decode_system_signed_context_mode_regression`<br>`test_brotli_decode_system_utf8_context_table_regression` |
+| crate encode / writer path | `test_brotli_encode_roundtrip`<br>`test_brotli_encode_system_decode`<br>`test_brotli_encode_empty_system_decode`<br>`test_brotli_encode_writer_roundtrip`<br>`test_brotli_encode_multi_metablock_roundtrip`<br>`test_brotli_encode_lz77_system_decode`<br>`test_brotli_encode_metablock_boundary_context`<br>`test_brotli_encode_repeated_pattern_system_decode`<br>`test_brotli_encode_low_cardinality_system_decode` |
 | malformed input | `test_brotli_decode_rejects_truncated_stream` |
 
 ### `bzip2.rs`
@@ -168,8 +183,9 @@
 
 | Coverage | Test cases |
 | --- | --- |
-| fixture / basic roundtrip | `test_cpio_decode_single_file`<br>`test_cpio_directories_only_roundtrip`<br>`test_cpio_empty_archive_roundtrip` |
+| fixture / basic roundtrip | `test_cpio_decode_single_file`<br>`test_cpio_directories_only_roundtrip`<br>`test_cpio_empty_archive_roundtrip`<br>`test_cpio_bin_decode_fixture_multi`<br>`test_cpio_bin_decode_fixture_mixed`<br>`test_cpio_bin_roundtrip_integration` |
 | reader / format variants | `test_cpio_decode_reader_roundtrip_integration`<br>`test_cpio_odc_roundtrip_integration` |
+| system binary format interop | `test_cpio_bin_decode_system_archive`<br>`test_cpio_bin_extract_with_system` |
 | metadata / special entries | `test_cpio_symlink_hardlink_and_device_roundtrip` |
 | checksum / CRC format | `test_cpio_newcrc_roundtrip_and_checksum_detection` |
 | system `cpio` interop | `test_cpio_decode_system_newc_archive`<br>`test_cpio_encode_newc_system_extract_compat`<br>`test_cpio_encode_newcrc_system_extract_compat` |
@@ -198,7 +214,7 @@
 | --- | --- |
 | roundtrip baseline | `test_lrzip_roundtrip_hello`<br>`test_lrzip_roundtrip_large` |
 | truncation / corruption | `test_lrzip_decode_rejects_truncated_stream`<br>`test_lrzip_decode_detects_output_size_mismatch` |
-| system `lrzip` interop | `test_lrzip_decode_system_lzma_archive`<br>`test_lrzip_decode_system_lzma_repeated_archive`<br>`test_lrzip_encode_system_decode_compat`<br>`test_lrzip_encode_bzip2_system_decode_compat`<br>`test_lrzip_encode_gzip_system_decode_compat`<br>`test_lrzip_encode_none_system_decode_compat`<br>`test_lrzip_encode_lzo_system_decode_compat`<br>`test_lrzip_encode_zpaq_system_decode_compat` |
+| system `lrzip` interop | `test_lrzip_decode_system_lzma_archive`<br>`test_lrzip_decode_system_lzma_repeated_archive`<br>`test_lrzip_encode_system_decode_compat`<br>`test_lrzip_encode_bzip2_system_decode_compat`<br>`test_lrzip_encode_gzip_system_decode_compat`<br>`test_lrzip_encode_none_system_decode_compat`<br>`test_lrzip_encode_lzo_system_decode_compat`<br>`test_lrzip_encode_zpaq_system_decode_compat`<br>`test_lrzip_encode_md5_system_decode_compat` |
 
 ### `lz4.rs`
 
@@ -224,6 +240,7 @@
 | --- | --- |
 | roundtrip baseline | `test_lzma_alone_roundtrip_large`<br>`test_lzma_alone_roundtrip_empty`<br>`test_lzma_alone_roundtrip_tiny`<br>`test_lzma_alone_roundtrip_high_entropy` |
 | system `xz --format=lzma` interop | `test_lzma_alone_decode_system_compressed`<br>`test_lzma_alone_encode_decoded_by_system` |
+| fuzz regression fixture | `test_fuzz_regression_lzma_original_decompress_1` |
 
 ### `lzo.rs`
 
@@ -239,7 +256,7 @@
 | Coverage | Test cases |
 | --- | --- |
 | roundtrip / parameter sweep | `test_lzw_roundtrip_hello`<br>`test_lzw_roundtrip_large`<br>`test_lzw_roundtrip_all_max_bits` |
-| system fixture / system interop | `test_lzw_decode_system_compress_fixture`<br>`test_lzw_encode_decoded_by_system_uncompress`<br>`test_lzw_decode_system_compressed_stream` |
+| system fixture / system interop | `test_lzw_decode_system_compress_fixture`<br>`test_lzw_encode_decoded_by_system_uncompress`<br>`test_lzw_encode_bits9_decoded_by_system_uncompress`<br>`test_lzw_decode_system_compressed_stream` |
 | writer / reader path | `test_lzw_encode_writer_decode_reader_roundtrip` |
 | malformed header | `test_lzw_decode_rejects_reserved_header_flags` |
 
@@ -258,6 +275,7 @@
 | method coverage | `test_sevenz_copy_method_roundtrip_integration`<br>`test_sevenz_ppmd_method_roundtrip_integration`<br>`test_sevenz_ppmd_method_system_extract_compat`<br>`test_sevenz_ppmd_encoded_header_system_extract_compat`<br>`test_sevenz_ppmd_encrypted_encoded_header_system_extract_compat`<br>`test_sevenz_two_folder_ppmd_system_extract_compat`<br>`test_sevenz_two_folder_ppmd_encoded_header_system_extract_compat`<br>`test_sevenz_two_folder_ppmd_encrypted_system_extract_compat`<br>`test_sevenz_two_folder_ppmd_encrypted_encoded_header_system_extract_compat` |
 | `add_entry` / filters | `test_sevenz_add_entry_with_filters_roundtrip`<br>`test_sevenz_delta_filter_roundtrip_integration`<br>`test_sevenz_x86_bcj_filter_system_extract_compat`<br>`test_sevenz_x86_bcj_encoded_header_system_extract_compat`<br>`test_sevenz_x86_bcj_encrypted_encoded_header_system_extract_compat`<br>`test_sevenz_two_folder_x86_bcj_filter_system_extract_compat`<br>`test_sevenz_two_folder_x86_bcj_encoded_header_system_extract_compat`<br>`test_sevenz_two_folder_x86_bcj_encrypted_system_extract_compat`<br>`test_sevenz_two_folder_x86_bcj_encrypted_encoded_header_system_extract_compat`<br>`test_sevenz_delta_filter_system_extract_compat`<br>`test_sevenz_delta_encoded_header_system_extract_compat`<br>`test_sevenz_delta_encrypted_encoded_header_system_extract_compat`<br>`test_sevenz_two_folder_delta_filter_system_extract_compat`<br>`test_sevenz_two_folder_delta_encoded_header_system_extract_compat`<br>`test_sevenz_two_folder_delta_encrypted_system_extract_compat`<br>`test_sevenz_two_folder_delta_encrypted_encoded_header_system_extract_compat` |
 | password APIs / failure path | `test_sevenz_password_bytes_roundtrip_and_failures`<br>`test_sevenz_encrypted_archive_system_extract_compat`<br>`test_sevenz_ppmd_encrypted_encoded_header_system_extract_compat`<br>`test_sevenz_x86_bcj_encrypted_encoded_header_system_extract_compat`<br>`test_sevenz_delta_encrypted_encoded_header_system_extract_compat`<br>`test_sevenz_two_folder_ppmd_encrypted_system_extract_compat`<br>`test_sevenz_two_folder_ppmd_encrypted_encoded_header_system_extract_compat`<br>`test_sevenz_two_folder_x86_bcj_encrypted_system_extract_compat`<br>`test_sevenz_two_folder_x86_bcj_encrypted_encoded_header_system_extract_compat`<br>`test_sevenz_two_folder_delta_encrypted_system_extract_compat`<br>`test_sevenz_two_folder_delta_encrypted_encoded_header_system_extract_compat`<br>`test_sevenz_encrypted_encoded_header_roundtrip_and_system_extract` |
+| method / folder system interop | `test_sevenz_deflate_method_system_decode_compat`<br>`test_sevenz_deflate64_method_system_decode_compat`<br>`test_sevenz_bzip2_method_system_decode_compat`<br>`test_sevenz_deflate_method_system_extract_compat`<br>`test_sevenz_deflate64_method_system_extract_compat`<br>`test_sevenz_bzip2_method_system_extract_compat`<br>`test_sevenz_large_copy_method_system_decode_compat`<br>`test_sevenz_large_copy_method_system_extract_compat`<br>`test_sevenz_decode_system_created_archive`<br>`test_sevenz_multi_folder_system_extract_compat` |
 
 ### `snappy.rs`
 
@@ -275,6 +293,7 @@
 | GNU/PAX encode roundtrip | `test_tar_gnu_longname_roundtrip`<br>`test_tar_pax_roundtrip`<br>`test_tar_pax_longname_roundtrip` |
 | system `tar` interop | `test_tar_gnu_system_compat`<br>`test_tar_empty_archive_system_list_compat`<br>`test_tar_gnu_longname_system_extract_compat`<br>`test_tar_pax_system_compat`<br>`test_tar_pax_system_extract_compat` |
 | reader / directories / metadata | `test_tar_directories_only_roundtrip`<br>`test_tar_decode_reader_roundtrip_integration`<br>`test_tar_link_entries_roundtrip`<br>`test_tar_pax_sparse_roundtrip_integration` |
+| GNU sparse layouts / system oracle | `test_tar_gnu_sparse_roundtrip`<br>`test_tar_gnu_sparse_extended_map`<br>`test_tar_gnu_sparse_long_name`<br>`test_tar_gnu_sparse_oracle` |
 | malformed input | `test_tar_decode_rejects_truncated_archive` |
 
 ### `xz.rs`
@@ -282,7 +301,7 @@
 | Coverage | Test cases |
 | --- | --- |
 | baseline roundtrip | `test_xz_roundtrip_hello`<br>`test_xz_roundtrip_empty`<br>`test_xz_roundtrip_large` |
-| system interop / regressions | `test_xz_interop_with_system_xz`<br>`test_xz_decode_system_encoded`<br>`test_xz_decode_system_compressed_fuzz_regression`<br>`test_xz_decode_system_compressed_fuzz_regression_multichunk_state`<br>`test_xz_encode_system_decode_fuzz_regression`<br>`test_xz_multi_stream_system_decode` |
+| system interop / regressions | `test_xz_interop_with_system_xz`<br>`test_xz_decode_system_encoded`<br>`test_xz_decode_system_compressed_fuzz_regression`<br>`test_xz_decode_system_compressed_fuzz_regression_multichunk_state`<br>`test_xz_decode_system_compressed_dict_boundary_fuzz_regression`<br>`test_xz_encode_system_decode_fuzz_regression`<br>`test_xz_multi_stream_system_decode` |
 | BCJ / Delta filter chains | `test_xz_decode_system_encoded_x86_filter_chain`<br>`test_xz_encode_x86_filter_chain_system_decode`<br>`test_xz_decode_system_encoded_delta_filter_chain`<br>`test_xz_encode_delta_filter_chain_system_decode`<br>`test_xz_decode_system_encoded_powerpc_filter_chain`<br>`test_xz_encode_powerpc_filter_chain_system_decode`<br>`test_xz_decode_system_encoded_ia64_filter_chain`<br>`test_xz_encode_ia64_filter_chain_system_decode`<br>`test_xz_decode_system_encoded_sparc_filter_chain`<br>`test_xz_encode_sparc_filter_chain_system_decode`<br>`test_xz_decode_system_encoded_arm_filter_chain`<br>`test_xz_encode_arm_filter_chain_system_decode`<br>`test_xz_decode_system_encoded_arm64_filter_chain`<br>`test_xz_encode_arm64_filter_chain_system_decode`<br>`test_xz_decode_system_encoded_riscv_filter_chain`<br>`test_xz_encode_riscv_filter_chain_system_decode`<br>`test_xz_decode_system_encoded_riscv_auipc_pair`<br>`test_xz_encode_riscv_filter_chain_system_decode_fuzz_regression`<br>`test_xz_decode_system_encoded_armthumb_filter_chain`<br>`test_xz_encode_armthumb_filter_chain_system_decode` |
 | reader path | `test_xz_encode_reader_roundtrip`<br>`test_xz_decode_reader_roundtrip` |
 | validation / checks | `test_xz_decode_rejects_invalid_magic`<br>`test_xz_decode_rejects_corrupt_stream_header_crc`<br>`test_xz_decode_rejects_truncated_stream`<br>`test_xz_decode_system_encoded_crc64_check`<br>`test_xz_decode_system_encoded_sha256_check`<br>`test_xz_decode_rejects_corrupt_block_check_crc32`<br>`test_xz_decode_rejects_corrupt_footer_crc` |
@@ -296,10 +315,14 @@
 | ZIP64 system interop | `test_zip_force_zip64_roundtrip`<br>`test_zip_force_zip64_system_unzip_compat` |
 | WinZip AES roundtrip / password failure | `test_zip_aes_roundtrip_and_password_failure` |
 | reader / finish-to path | `test_zip_decode_reader_finish_to_roundtrip` |
-| checksum / size / descriptor validation | `test_zip_decode_detects_checksum_mismatch`<br>`test_zip_decode_detects_size_mismatch`<br>`test_zip_decode_detects_data_descriptor_mismatch` |
+| checksum / size / descriptor validation | `test_zip_decode_detects_checksum_mismatch`<br>`test_zip_decode_detects_size_mismatch`<br>`test_zip_decode_detects_data_descriptor_mismatch`<br>`test_zip_decode_detects_local_and_central_name_mismatch`<br>`test_zip_decode_detects_invalid_local_file_header_signature` |
 | metadata / entry bridge | `test_zip_utf8_metadata_roundtrip_via_reader`<br>`test_zip_cp437_metadata_roundtrip_without_utf8_flag`<br>`test_zip_add_entry_roundtrip_preserves_metadata` |
 | method 10 (DCL Implode) literal-only encode | `test_zip_method10_encode_roundtrip` |
 | multi-disk emit (`finish_parts`) | `test_zip_finish_parts_system_unzip_compat` |
+| streaming writer / data descriptor | `test_zip_stream_writer_system_unzip_compat` |
+| traditional encryption | `test_zip_decode_system_traditional_encrypted_archive`<br>`test_zip_encode_traditional_system_unzip_compat`<br>`test_zip_encode_traditional_data_descriptor_system_unzip_compat` |
+| AES data descriptor / legacy methods | `test_zip_encode_aes_data_descriptor_roundtrip`<br>`test_zip_legacy_methods_roundtrip`<br>`test_zip_legacy_methods_unar_compat`<br>`test_zip_legacy_methods_hwzip_compat` |
+| method 16 (CMPSC) encode | `test_zip_method16_encode_roundtrip`<br>`test_zip_method16_encode_header_fields` |
 
 ### `zlib.rs`
 
@@ -308,7 +331,6 @@
 | baseline roundtrip | `test_zlib_roundtrip_large_integration`<br>`test_zlib_empty_stream_roundtrip` |
 | Python `zlib` interop | `test_zlib_decode_python_zlib_stream`<br>`test_zlib_encode_stream_decoded_by_python` |
 | header / checksum validation | `test_zlib_decode_rejects_preset_dictionary_flag`<br>`test_zlib_decode_detects_adler32_mismatch` |
-| malformed headers | `test_zip_decode_detects_local_and_central_name_mismatch`<br>`test_zip_decode_detects_invalid_local_file_header_signature` |
 
 ### `zpaq.rs`
 
@@ -316,6 +338,7 @@
 | --- | --- |
 | simplified archive roundtrip | `test_zpaq_archive_multi_entry_roundtrip` |
 | empty archive | `test_zpaq_archive_empty_roundtrip` |
+| empty filename / mixed empty payload | `test_zpaq_archive_accepts_empty_filename`<br>`test_zpaq_archive_roundtrip_mixed_empty_payload_entries` |
 | metadata validation | `test_zpaq_archive_rejects_nul_metadata` |
 | append workflow | `test_zpaq_archive_append_to_existing_roundtrip` |
 | crate-local journaling latest view / delete visibility | `test_zpaq_journal_latest_view_roundtrip`<br>`test_zpaq_journal_delete_visibility` |
@@ -329,7 +352,6 @@
 | system interop / regressions | `test_zstd_encode_decoded_by_system`<br>`test_zstd_encode_large_raw_system_compat`<br>`test_zstd_encode_large_text_system_compat`<br>`test_zstd_decode_system_compressed_fuzz_regression` |
 | frame layout / large literals | `test_zstd_multi_frame`<br>`test_zstd_encode_large_literals_roundtrip`<br>`test_zstd_encode_with_options_checksum_off_roundtrip`<br>`test_zstd_decode_skippable_frame_before_payload`<br>`test_zstd_decode_reader_with_skippable_frame_before_payload` |
 | dictionary coverage | `test_zstd_decode_with_dict_system`<br>`test_zstd_encode_with_dict_system_compat`<br>`test_zstd_train_dictionary_roundtrip`<br>`test_zstd_content_only_dictionary_roundtrip`<br>`test_zstd_decode_rejects_dictionary_mismatch_and_missing_dictionary` |
-| encoder analysis helpers | `test_zstd_encode_large_single_sequence_debug`<br>`test_zstd_encode_analyze_blocks`<br>`test_zstd_lz77_analyze`<br>`test_single_sequence_fse_minimal` |
 
 ### `arc.rs`
 
@@ -411,7 +433,9 @@
 
 | Coverage | Test cases |
 | --- | --- |
-| dictionaries | `test_dictionaries` |
+| dictionary expansion / chains / sibling descriptors | `cmpsc_expand_alphabet_and_chains`<br>`cmpsc_compress_expand_roundtrip` |
+| method-16 container roundtrip / explicit vector | `cmpsc_method16_roundtrip`<br>`cmpsc_method16_explicit_vector` |
+| malformed dictionary / symbol / header rejection | `cmpsc_rejects_malformed` |
 
 ### `cramfs.rs`
 
@@ -871,6 +895,13 @@
 | zx5b reference vector suffix | `zx5b_reference_vector_suffix` |
 | zx5b roundtrips | `zx5b_roundtrips` |
 | zx5b rejects malformed | `zx5b_rejects_malformed` |
+
+### `generated/`
+
+`tests/integration/generated/` は fuzz failure から自動生成された回帰テスト群である。
+ファイル名・テスト名は failure signature に由来するため、個別の coverage 表には載せず、
+ここにまとめて扱う。現在は 40 件の `test_fuzz_regression_*` があり、いずれも
+decode が panic せずに完了することを検証する。
 
 ## Related files
 

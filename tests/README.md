@@ -29,6 +29,8 @@
 
 - 全 integration test 実行:
   - `cargo test --all-features --test integration`
+- CLI end-to-end test:
+  - `cargo test -p archive-cli`
 - fixture provenance:
   - `tests/fixtures/README.md`
 - coverage inventory:

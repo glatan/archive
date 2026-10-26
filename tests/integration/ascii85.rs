@@ -15,11 +15,16 @@ fn test_ascii85_adobe_roundtrip() {
 fn test_ascii85_python_a85decode_compat() {
     use std::process::Command;
 
+    if !python3_available() {
+        return;
+    }
+
     // CPython base64.a85decode must decode our Adobe output
     // (foldspaces=False default is fine; adobe=True expects <~ ~>).
     let data: Vec<u8> = (0..=255u8).chain(0..50u8).collect();
     let enc = ascii85::encode(&data);
-    let path = std::env::temp_dir().join("archive_test_a85.txt");
+    let dir = unique_temp_dir("ascii85");
+    let path = dir.join("a85.txt");
     std::fs::write(&path, &enc).unwrap();
 
     let script = concat!(
@@ -30,13 +35,12 @@ fn test_ascii85_python_a85decode_compat() {
     let output = Command::new("python3")
         .args(["-c", script])
         .arg(&path)
-        .output();
-    let _ = std::fs::remove_file(&path);
-    let Ok(result) = output else {
-        return; // python3 not available
-    };
-    assert!(result.status.success(), "a85decode failed");
-    assert_eq!(result.stdout, data);
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "a85decode failed");
+    assert_eq!(output.stdout, data);
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

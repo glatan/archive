@@ -118,6 +118,44 @@ use archive::encoding::macbinary;
 use archive::encoding::uuencode;
 use archive::encoding::yenc;
 
+/// Create a unique temporary directory for an integration test.
+///
+/// Tests must not share fixed paths under `/tmp`: the integration test
+/// binary runs tests in parallel, and `cargo nextest` also runs different
+/// test binaries concurrently.
+fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let serial = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "archive_test_{prefix}_{}_{serial}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn require_external_tools() -> bool {
+    std::env::var_os("ARCHIVE_REQUIRE_EXTERNAL_TOOLS").is_some()
+}
+
+fn command_available(name: &str, args: &[&str]) -> bool {
+    let available = std::process::Command::new(name)
+        .args(args)
+        .output()
+        .map(|output| output.status.success() || !output.stdout.is_empty())
+        .unwrap_or(false);
+    if !available && require_external_tools() {
+        panic!("required external tool is unavailable: {name}");
+    }
+    available
+}
+
+fn python3_available() -> bool {
+    command_available("python3", &["--version"])
+}
+
 // ============================================================
 // 7z tests
 // ============================================================
@@ -133,6 +171,9 @@ fn sevenz_binary() -> Option<&'static str> {
             return Some(candidate);
         }
     }
+    if require_external_tools() {
+        panic!("required external tool is unavailable: 7z/7zz/7zr");
+    }
     None
 }
 // ============================================================
@@ -147,6 +188,9 @@ fn lrzip_binary() -> Option<&'static str> {
     {
         return Some("lrzip");
     }
+    if require_external_tools() {
+        panic!("required external tool is unavailable: lrzip");
+    }
     None
 }
 
@@ -159,6 +203,9 @@ fn rzip_binary() -> Option<&'static str> {
     {
         return Some("rzip");
     }
+    if require_external_tools() {
+        panic!("required external tool is unavailable: rzip");
+    }
     None
 }
 
@@ -169,6 +216,9 @@ fn cpio_binary() -> Option<&'static str> {
         && output.status.success()
     {
         return Some("cpio");
+    }
+    if require_external_tools() {
+        panic!("required external tool is unavailable: cpio");
     }
     None
 }

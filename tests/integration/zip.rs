@@ -59,32 +59,32 @@ fn test_zip_decode_system_deflate_archive() {
 fn test_zip_decode_system_store_archive() {
     use std::process::Command;
 
-    let path = std::env::temp_dir().join("archive_test_zip_store.zip");
-    let dir = std::env::temp_dir().join("archive_test_zip_store_dir");
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = unique_temp_dir("zip_store");
+    let path = dir.join("stored.zip");
     std::fs::write(dir.join("stored.txt"), b"stored zip entry").unwrap();
 
-    let output = Command::new("zip")
+    let output = match Command::new("zip")
         .current_dir(&dir)
         .args(["-0", "-q", path.to_str().unwrap(), "stored.txt"])
-        .output();
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => panic!("failed to run zip: {error}"),
+    };
+    assert!(
+        output.status.success(),
+        "zip -0 failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
-    if let Ok(result) = output {
-        assert!(
-            result.status.success(),
-            "zip -0 failed: {}",
-            String::from_utf8_lossy(&result.stderr)
-        );
-        let archive = std::fs::read(&path).unwrap();
-        let entries = zip::decode::decode(&archive).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "stored.txt");
-        assert_eq!(entries[0].data, b"stored zip entry");
-    }
+    let archive = std::fs::read(&path).unwrap();
+    let entries = zip::decode::decode(&archive).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "stored.txt");
+    assert_eq!(entries[0].data, b"stored zip entry");
 
-    let _ = std::fs::remove_file(&path);
-    let _ = std::fs::remove_file(dir.join("stored.txt"));
-    let _ = std::fs::remove_dir(&dir);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[cfg(feature = "zip")]
