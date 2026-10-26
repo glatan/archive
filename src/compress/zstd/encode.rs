@@ -1452,7 +1452,6 @@ pub fn encode_writer<W: std::io::Write>(input: &[u8], mut writer: W) -> std::io:
 }
 
 #[cfg(test)]
-#[allow(dead_code)]
 mod tests {
     use super::*;
     extern crate alloc;
@@ -2025,77 +2024,50 @@ mod tests {
         assert!(longest >= 7, "span match length {longest}");
     }
 
+    #[test]
     fn test_encode_with_dict_roundtrip() {
         // Test that encode_with_dict produces output decodable by decode_with_dict.
         // We construct a minimal dictionary by hand for testing purposes.
         // The dictionary format (RFC 8878 §5):
         //   Magic(4) + DictID(4) + HuffWeights + FSE_OF + FSE_ML + FSE_LL + RepOffsets(12) + Content
 
-        // Use system zstd to train a real dictionary if available, otherwise skip
-        #[cfg(feature = "std")]
-        {
-            use std::process::Command;
+        use crate::compress::zstd::train::{TrainOptions, train_dictionary};
 
-            let has_zstd = Command::new("zstd").arg("--version").output().is_ok();
-            if !has_zstd {
-                return;
-            }
+        let samples: Vec<Vec<u8>> = [
+            "the quick brown fox jumps over the lazy dog",
+            "a stitch in time saves nine",
+            "all that glitters is not gold",
+            "actions speak louder than words",
+            "the pen is mightier than the sword",
+        ]
+        .iter()
+        .map(|phrase| phrase.repeat(50).into_bytes())
+        .collect();
+        let refs: Vec<&[u8]> = samples.iter().map(Vec::as_slice).collect();
+        let dict = train_dictionary(
+            &refs,
+            &TrainOptions {
+                max_dict_size: 4096,
+                ..TrainOptions::default()
+            },
+        )
+        .unwrap();
 
-            let tmp_dir = std::env::temp_dir().join("archive_encode_dict_test");
-            let _ = std::fs::create_dir_all(&tmp_dir);
-            let samples_dir = tmp_dir.join("samples");
-            let _ = std::fs::create_dir_all(&samples_dir);
+        // Encode with dict
+        let input =
+            b"the quick brown fox jumps over the lazy dog and all that glitters is not gold";
+        let encoded = encode_with_dict(input, &dict);
 
-            // Create training samples with enough data for good dictionary training
-            let phrases = [
-                "the quick brown fox jumps over the lazy dog",
-                "a stitch in time saves nine",
-                "all that glitters is not gold",
-                "actions speak louder than words",
-                "the pen is mightier than the sword",
-            ];
-            for (i, phrase) in phrases.iter().enumerate() {
-                let content = phrase.repeat(50);
-                std::fs::write(samples_dir.join(format!("s{i}.txt")), content.as_bytes()).unwrap();
-            }
+        // Our decoder should handle it
+        let decoded = decode::decode_with_dict(&encoded, &dict).unwrap();
+        assert_eq!(decoded, input.as_slice());
 
-            let dict_path = tmp_dir.join("test.dict");
-            let train = Command::new("zstd")
-                .arg("--train")
-                .args(["--maxdict", "4096"])
-                .arg("-o")
-                .arg(&dict_path)
-                .arg("-r")
-                .arg(&samples_dir)
-                .output();
-
-            let ok = train.map(|o| o.status.success()).unwrap_or(false);
-            if !ok {
-                let _ = std::fs::remove_dir_all(&tmp_dir);
-                return;
-            }
-
-            let dict_data = std::fs::read(&dict_path).unwrap();
-            let _ = std::fs::remove_dir_all(&tmp_dir);
-
-            let dict = decode::ZstdDict::parse(&dict_data).unwrap();
-
-            // Encode with dict
-            let input =
-                b"the quick brown fox jumps over the lazy dog and all that glitters is not gold";
-            let encoded = encode_with_dict(input, &dict);
-
-            // Our decoder should handle it
-            let decoded = decode::decode_with_dict(&encoded, &dict).unwrap();
-            assert_eq!(decoded, input.as_slice());
-
-            // The encoded frame should reference the dictionary
-            // (dict_id_flag should be non-zero in descriptor)
-            assert_eq!(encoded[0..4], ZSTD_MAGIC.to_le_bytes());
-            let descriptor = encoded[4];
-            let dict_id_flag = descriptor & 0x03;
-            assert_eq!(dict_id_flag, 3, "should use 4-byte dict ID");
-        }
+        // The encoded frame should reference the dictionary
+        // (dict_id_flag should be non-zero in descriptor)
+        assert_eq!(encoded[0..4], ZSTD_MAGIC.to_le_bytes());
+        let descriptor = encoded[4];
+        let dict_id_flag = descriptor & 0x03;
+        assert_eq!(dict_id_flag, 3, "should use 4-byte dict ID");
     }
 
     #[test]
