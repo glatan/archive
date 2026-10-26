@@ -115,7 +115,10 @@ def clone(name: str, spec: dict) -> Path:
     dest = SRC / name
     if dest.exists() and (dest / ".git").exists():
         head = subprocess.check_output(["git", "-C", str(dest), "rev-parse", "HEAD"], text=True).strip()
-        if head == spec["commit"]:
+        dirty = subprocess.check_output(
+            ["git", "-C", str(dest), "status", "--porcelain"], text=True
+        ).strip()
+        if head == spec["commit"] and not dirty:
             return dest
         shutil.rmtree(dest)
     if dest.exists():
@@ -129,7 +132,7 @@ def clone(name: str, spec: dict) -> Path:
 def fetch_archive(name: str, spec: dict) -> Path:
     dest = SRC / name
     if dest.exists():
-        return dest
+        shutil.rmtree(dest)
     downloads = TARGET / "downloads"
     downloads.mkdir(parents=True, exist_ok=True)
     archive = downloads / f"{name}.tar.gz"

@@ -75,6 +75,33 @@ fn runtime_status(case: &Case, cfg: &Config, result: &CaseResult) -> String {
             .decode
             .as_ref()
             .is_some_and(|op| op.ours_lib.is_some() || op.ours_cli.is_some());
+    let ref_expected_missing = case.reference.is_some()
+        && !cfg.skip_ref
+        && ((case.encode
+            && case
+                .reference
+                .is_some_and(|reference| reference.encode.is_some())
+            && result
+                .encode
+                .as_ref()
+                .is_none_or(|op| op.reference.is_none()))
+            || (case.decode
+                && case
+                    .reference
+                    .is_some_and(|reference| reference.decode.is_some())
+                && result
+                    .decode
+                    .as_ref()
+                    .is_none_or(|op| op.reference.is_none())));
+    let cross_failed = [result.encode.as_ref(), result.decode.as_ref()]
+        .into_iter()
+        .flatten()
+        .any(|op| {
+            op.cross_decode_ok == Some(false)
+                || op.note.as_deref().is_some_and(|note| {
+                    note.contains("manifest mismatch") || note.contains("hash mismatch")
+                })
+        });
     let expected_ours_missing = (case.encode
         && ((case.ours_lib
             && result
@@ -99,7 +126,9 @@ fn runtime_status(case: &Case, cfg: &Config, result: &CaseResult) -> String {
                         .decode
                         .as_ref()
                         .is_some_and(|op| op.ours_cli.is_none()))));
-    if expected_ours_missing {
+    if cross_failed {
+        "failed".to_owned()
+    } else if expected_ours_missing || ref_expected_missing {
         if has_ours || has_reference {
             "partial".to_owned()
         } else {
@@ -169,11 +198,11 @@ fn run_codec_case(case: &Case, cfg: &Config, corpus_label: &str, result: &mut Ca
         }
     }
 
-    let common = if ref_encoded.exists() {
+    let common = if encode.reference.is_some() && ref_encoded.exists() {
         ref_encoded.clone()
-    } else if ours_lib_encoded.exists() {
+    } else if encode.ours_lib.is_some() && ours_lib_encoded.exists() {
         ours_lib_encoded.clone()
-    } else if ours_cli_encoded.exists() {
+    } else if encode.ours_cli.is_some() && ours_cli_encoded.exists() {
         ours_cli_encoded.clone()
     } else {
         result.encode = Some(encode);
@@ -230,7 +259,7 @@ fn run_codec_case(case: &Case, cfg: &Config, corpus_label: &str, result: &mut Ca
                         Ok(measurement) => {
                             let ok = measurement.hash == expected_hash;
                             decode.reference_on_ours = Some(measurement);
-                            decode.cross_decode_ok = Some(ok);
+                            merge_cross(&mut decode, ok);
                             if !ok {
                                 decode.note = Some(
                                     "reference could not reproduce the input from our stream"
@@ -238,18 +267,49 @@ fn run_codec_case(case: &Case, cfg: &Config, corpus_label: &str, result: &mut Ca
                                 );
                             }
                         }
-                        Err(error) => append_note(&mut decode, format!("cross-decode: {error}")),
+                        Err(error) => {
+                            append_note(&mut decode, format!("cross-decode: {error}"));
+                            if !error.contains("not found") {
+                                merge_cross(&mut decode, false);
+                            }
+                        }
                     }
                 }
             }
         }
         if case.reference.is_none() && decode.ours_lib.is_some() {
-            decode.cross_decode_ok = Some(
-                decode
-                    .ours_lib
-                    .as_ref()
-                    .is_some_and(|measurement| measurement.hash == expected_hash),
-            );
+            let ok = decode
+                .ours_lib
+                .as_ref()
+                .is_some_and(|measurement| measurement.hash == expected_hash);
+            merge_cross(&mut decode, ok);
+        }
+        if case.decode && case.ours_cli && !cfg.skip_cli && ours_cli_encoded.exists() {
+            let cli_cross = dir.join("cli-cross.dec");
+            let verified = if !cfg.skip_ref {
+                case.reference
+                    .and_then(|reference| reference.decode.map(|command| (reference, command)))
+                    .map(|(reference, command)| {
+                        run_ref_verify(cfg, &reference, &command, &ours_cli_encoded, &cli_cross)
+                            .map(|measurement| measurement.hash == expected_hash)
+                    })
+                    .unwrap_or_else(|| {
+                        helper_codec_decode(cfg, case, &ours_cli_encoded, &cli_cross)
+                            .map(|measurement| measurement.hash == expected_hash)
+                    })
+            } else {
+                helper_codec_decode(cfg, case, &ours_cli_encoded, &cli_cross)
+                    .map(|measurement| measurement.hash == expected_hash)
+            };
+            match verified {
+                Ok(ok) => merge_cross(&mut decode, ok),
+                Err(error) => {
+                    append_note(&mut decode, format!("ours-cli cross-decode: {error}"));
+                    if !error.contains("not found") {
+                        merge_cross(&mut decode, false);
+                    }
+                }
+            }
         }
     }
 
@@ -287,9 +347,10 @@ fn run_archive_fixture_case(case: &Case, cfg: &Config, fixture: &str, result: &m
             }
         }
         if case.ours_cli && !cfg.skip_cli {
-            match cli_archive_decode(cfg, case, fixture_path) {
+            let cli_out = dir.join("cli-out");
+            match cli_archive_decode(cfg, case, fixture_path, &cli_out) {
                 Ok(measurement) => decode.ours_cli = Some(measurement),
-                Err(error) => append_note(&mut decode, format!("ours-cli decode: {error}")),
+                Err(error) => append_note(&mut decode, format!("ours-cli extract: {error}")),
             }
         }
         if !cfg.skip_ref {
@@ -394,11 +455,11 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
         }
     }
 
-    let common = if ref_encoded.exists() {
+    let common = if encode.reference.is_some() && ref_encoded.exists() {
         ref_encoded.clone()
-    } else if ours_lib_encoded.exists() {
+    } else if encode.ours_lib.is_some() && ours_lib_encoded.exists() {
         ours_lib_encoded.clone()
-    } else if ours_cli_encoded.exists() {
+    } else if encode.ours_cli.is_some() && ours_cli_encoded.exists() {
         ours_cli_encoded.clone()
     } else {
         result.encode = Some(encode);
@@ -422,9 +483,16 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
             }
         }
         if case.ours_cli && !cfg.skip_cli {
-            match cli_archive_decode(cfg, case, &common) {
-                Ok(measurement) => decode.ours_cli = Some(measurement),
-                Err(error) => append_note(&mut decode, format!("ours-cli decode: {error}")),
+            let cli_out = dir.join("cli-out");
+            match cli_archive_decode(cfg, case, &common, &cli_out) {
+                Ok(measurement) => {
+                    let ok = case.format == "git-pack" || dir_manifest_matches(&cli_out, &expected);
+                    decode.ours_cli = Some(measurement);
+                    if !ok {
+                        decode.note = Some("ours-cli extraction manifest mismatch".to_owned());
+                    }
+                }
+                Err(error) => append_note(&mut decode, format!("ours-cli extract: {error}")),
             }
         }
         if !cfg.skip_ref {
@@ -458,7 +526,7 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
                             let ok = case.format == "git-pack"
                                 || dir_manifest_matches(&cross_dir, &expected);
                             decode.reference_on_ours = Some(measurement);
-                            decode.cross_decode_ok = Some(ok);
+                            merge_cross(&mut decode, ok);
                             if !ok {
                                 decode.note = Some(
                                     "reference could not reproduce the tree from our archive"
@@ -468,6 +536,51 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
                         }
                         Err(error) => append_note(&mut decode, format!("cross-decode: {error}")),
                     }
+                }
+            }
+        }
+    }
+
+    if case.decode && case.ours_cli && !cfg.skip_cli && ours_cli_encoded.exists() {
+        let cli_cross = dir.join("cli-cross");
+        let verified = if !cfg.skip_ref {
+            case.reference
+                .and_then(|reference| reference.decode.map(|command| (reference, command)))
+                .map(|(reference, command)| {
+                    run_ref_verify(cfg, &reference, &command, &ours_cli_encoded, &cli_cross).map(
+                        |_| {
+                            case.format == "git-pack" || dir_manifest_matches(&cli_cross, &expected)
+                        },
+                    )
+                })
+                .unwrap_or_else(|| {
+                    helper_read(cfg, case, &ours_cli_encoded, &dir.join("cli-cross.json")).map(
+                        |_| {
+                            case.format == "git-pack"
+                                || manifest_matches(&dir.join("cli-cross.json"), &expected)
+                        },
+                    )
+                })
+        } else {
+            helper_read(cfg, case, &ours_cli_encoded, &dir.join("cli-cross.json")).map(|_| {
+                case.format == "git-pack"
+                    || manifest_matches(&dir.join("cli-cross.json"), &expected)
+            })
+        };
+        match verified {
+            Ok(ok) => {
+                merge_cross(&mut decode, ok);
+                if !ok {
+                    append_note(
+                        &mut decode,
+                        "ours-cli archive did not round-trip".to_owned(),
+                    );
+                }
+            }
+            Err(error) => {
+                append_note(&mut decode, format!("ours-cli cross-decode: {error}"));
+                if !error.contains("not found") {
+                    merge_cross(&mut decode, false);
                 }
             }
         }
@@ -697,15 +810,23 @@ fn cli_archive_encode(
     measure_process(archive, &args, output, cfg, true)
 }
 
-fn cli_archive_decode(cfg: &Config, case: &Case, input: &Path) -> Result<Measurement, String> {
+fn cli_archive_decode(
+    cfg: &Config,
+    case: &Case,
+    input: &Path,
+    out_dir: &Path,
+) -> Result<Measurement, String> {
     let archive = cfg.archive_bin.as_ref().ok_or("archive CLI not found")?;
     let args = vec![
-        "test".to_owned(),
+        "extract".to_owned(),
         input.display().to_string(),
         "--format".to_owned(),
         case.format.to_owned(),
+        "--out".to_owned(),
+        out_dir.display().to_string(),
+        "--overwrite".to_owned(),
     ];
-    measure_process(archive, &args, Path::new("/dev/null"), cfg, false)
+    measure_process_dir(archive, &args, out_dir, cfg)
 }
 
 fn measure_process(
@@ -734,6 +855,48 @@ fn measure_process(
         output_len,
         hash,
     })
+}
+
+fn measure_process_dir(
+    program: &Path,
+    args: &[String],
+    out_dir: &Path,
+    cfg: &Config,
+) -> Result<Measurement, String> {
+    let mut samples = Vec::with_capacity(cfg.iterations);
+    for _ in 0..cfg.warmup {
+        run_process_dir(program, args, out_dir)?;
+    }
+    for _ in 0..cfg.iterations {
+        let start = Instant::now();
+        run_process_dir(program, args, out_dir)?;
+        samples.push(start.elapsed().as_nanos() as u64);
+    }
+    let manifest = read_dir_manifest(out_dir)?;
+    Ok(Measurement {
+        samples_ns: samples,
+        output_len: manifest.iter().map(|(_, len, _)| *len).sum(),
+        hash: combined_manifest_hash(&manifest),
+    })
+}
+
+fn run_process_dir(program: &Path, args: &[String], out_dir: &Path) -> Result<(), String> {
+    let _ = fs::remove_dir_all(out_dir);
+    fs::create_dir_all(out_dir).map_err(|error| error.to_string())?;
+    let status = Command::new(program)
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|error| format!("spawn {}: {error}", program.display()))?;
+    if !status.success() {
+        return Err(format!(
+            "{} exited with {}",
+            program.display(),
+            status.code().unwrap_or(-1)
+        ));
+    }
+    Ok(())
 }
 
 fn run_process(program: &Path, args: &[String], remove: Option<&Path>) -> Result<(), String> {
@@ -1066,6 +1229,10 @@ fn combined_manifest_hash(manifest: &[(String, usize, u64)]) -> u64 {
         bytes.extend_from_slice(&hash.to_le_bytes());
     }
     corpus::fnv1a64(&bytes)
+}
+
+fn merge_cross(result: &mut OpResult, ok: bool) {
+    result.cross_decode_ok = Some(result.cross_decode_ok.unwrap_or(true) && ok);
 }
 
 fn append_note(result: &mut OpResult, note: String) {

@@ -1375,7 +1375,7 @@ pub fn cases() -> Vec<Case> {
         archive_unsupported(
             "squashfs",
             "squashfs",
-            "CLI read dispatch not implemented; library decode only",
+            "CLI read supports squashfs; no checked-in fixture is wired into the harness",
         ),
         // Formats not exposed by the CLI read dispatch yet.
         archive_unsupported(
