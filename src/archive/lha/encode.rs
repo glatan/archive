@@ -445,3 +445,60 @@ pub fn encode_level(files: &[(&str, &[u8])], level: u8) -> Result<Vec<u8>, Error
     }
     Ok(e.finish())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::archive::lha::decode;
+
+    #[test]
+    fn rejects_invalid_levels_methods_and_names() {
+        assert!(matches!(
+            LhaEncoder::with_level(4),
+            Err(Error::InvalidData("lha: header level must be 0-3"))
+        ));
+        assert!(matches!(
+            LhaEncoder::new().with_method(b"-lh1-"),
+            Err(Error::Unsupported("lha: unsupported write method"))
+        ));
+
+        let mut encoder = LhaEncoder::new();
+        assert!(encoder.add_file("", b"x", 0).is_err());
+        assert!(encoder.add_file("a\0b", b"x", 0).is_err());
+        assert!(encoder.add_file("a\\b", b"x", 0).is_err());
+        assert!(encoder.add_dir("", 0).is_err());
+
+        let mut long_name = LhaEncoder::new();
+        assert!(long_name.add_file(&"a".repeat(256), b"x", 0).is_err());
+    }
+
+    #[test]
+    fn level_matrix_roundtrips_single_file() {
+        for level in 0..=3 {
+            let mut encoder = LhaEncoder::with_level(level).unwrap();
+            encoder.add_file("dir/hello.txt", b"hello lha", 0).unwrap();
+            let archive = encoder.finish();
+            let entries = decode::decode(&archive).unwrap();
+            assert_eq!(entries.len(), 1, "level {level}");
+            assert_eq!(entries[0].name, "dir/hello.txt", "level {level}");
+            assert_eq!(entries[0].data, b"hello lha", "level {level}");
+        }
+    }
+
+    #[test]
+    fn compressed_method_roundtrips_and_falls_back_to_stored() {
+        let mut encoder = LhaEncoder::new().with_method(b"-lh5-").unwrap();
+        let data = b"compressible lha payload ".repeat(200);
+        encoder.add_file("payload.bin", &data, 0).unwrap();
+        let archive = encoder.finish();
+        let entries = decode::decode(&archive).unwrap();
+        assert_eq!(entries[0].data, data);
+
+        let mut encoder = LhaEncoder::new().with_method(b"-lh5-").unwrap();
+        encoder.add_file("tiny.bin", b"x", 0).unwrap();
+        let archive = encoder.finish();
+        let entries = decode::decode(&archive).unwrap();
+        assert_eq!(&archive[2..7], b"-lh0-");
+        assert_eq!(entries[0].data, b"x");
+    }
+}

@@ -1,0 +1,182 @@
+#![cfg(all(
+    feature = "deflate",
+    feature = "gzip",
+    feature = "zlib",
+    feature = "bzip2",
+    feature = "lz4",
+    feature = "zstd",
+    feature = "snappy",
+    feature = "xz",
+    feature = "lzip",
+    feature = "lzma-alone",
+    feature = "tar",
+    feature = "cpio"
+))]
+
+use archive::archive::{cpio, tar};
+use archive::compress::{bzip2, deflate, gzip, lz4, lzip, lzma_alone, snappy, xz, zlib, zstd};
+use proptest::prelude::*;
+
+type DecodeFn = fn(&[u8], usize) -> Result<Vec<u8>, archive::error::Error>;
+
+fn entry_name() -> impl Strategy<Value = String> {
+    proptest::string::string_regex("[a-z][a-z0-9_]{0,15}").unwrap()
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 48,
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    })]
+
+    #[test]
+    fn deflate_roundtrip(data in prop::collection::vec(any::<u8>(), 0..8192)) {
+        for level in [
+            deflate::encode::Level::NoCompression,
+            deflate::encode::Level::Fast,
+            deflate::encode::Level::Default,
+        ] {
+            let encoded = deflate::encode::encode(&data, level);
+            prop_assert_eq!(deflate::decode::decode(&encoded).unwrap(), data.clone());
+        }
+    }
+
+    #[test]
+    fn gzip_roundtrip(data in prop::collection::vec(any::<u8>(), 0..4096)) {
+        let encoded = gzip::encode::encode(&data, deflate::encode::Level::Default);
+        prop_assert_eq!(gzip::decode::decode(&encoded).unwrap(), data);
+    }
+
+    #[test]
+    fn zlib_roundtrip(data in prop::collection::vec(any::<u8>(), 0..4096)) {
+        let encoded = zlib::encode::encode(&data);
+        prop_assert_eq!(zlib::decode::decode(&encoded).unwrap(), data);
+    }
+
+    #[test]
+    fn bzip2_roundtrip(data in prop::collection::vec(any::<u8>(), 0..4096)) {
+        let encoded = bzip2::encode::encode(&data);
+        prop_assert_eq!(bzip2::decode::decode(&encoded).unwrap(), data);
+    }
+
+    #[test]
+    fn lz4_roundtrip(data in prop::collection::vec(any::<u8>(), 0..4096)) {
+        let encoded = lz4::encode::encode(&data);
+        prop_assert_eq!(lz4::decode::decode(&encoded).unwrap(), data);
+    }
+
+    #[test]
+    fn zstd_roundtrip(data in prop::collection::vec(any::<u8>(), 0..4096)) {
+        let encoded = zstd::encode::encode(&data);
+        prop_assert_eq!(zstd::decode::decode(&encoded).unwrap(), data);
+    }
+
+    #[test]
+    fn snappy_roundtrip(data in prop::collection::vec(any::<u8>(), 0..4096)) {
+        let encoded = snappy::encode::encode(&data);
+        prop_assert_eq!(snappy::decode::decode(&encoded).unwrap(), data);
+    }
+
+    #[test]
+    fn xz_roundtrip(data in prop::collection::vec(any::<u8>(), 0..2048)) {
+        let encoded = xz::encode::encode(&data);
+        prop_assert_eq!(xz::decode::decode(&encoded).unwrap(), data);
+    }
+
+    #[test]
+    fn lzip_roundtrip(data in prop::collection::vec(any::<u8>(), 0..2048)) {
+        let encoded = lzip::encode::encode(&data);
+        prop_assert_eq!(lzip::decode::decode(&encoded).unwrap(), data);
+    }
+
+    #[test]
+    fn lzma_alone_roundtrip(data in prop::collection::vec(any::<u8>(), 0..2048)) {
+        let encoded = lzma_alone::encode::encode(&data);
+        prop_assert_eq!(lzma_alone::decode::decode(&encoded).unwrap(), data);
+    }
+
+    #[test]
+    fn tar_roundtrip(entries in prop::collection::vec((entry_name(), prop::collection::vec(any::<u8>(), 0..512)), 0..5)) {
+        let mut encoder = tar::encode::TarEncoder::new();
+        for (name, data) in &entries {
+            encoder.add_file(name, data);
+        }
+        let encoded = encoder.finish();
+        let decoded = tar::decode::decode(&encoded).unwrap();
+        let got: Vec<(String, Vec<u8>)> = decoded
+            .into_iter()
+            .map(|entry| (entry.header.name, entry.data))
+            .collect();
+        prop_assert_eq!(got, entries);
+    }
+
+    #[test]
+    fn cpio_roundtrip(entries in prop::collection::vec((entry_name(), prop::collection::vec(any::<u8>(), 0..512)), 0..5)) {
+        let mut encoder = cpio::encode::CpioEncoder::new();
+        for (name, data) in &entries {
+            encoder.add_file(name, data);
+        }
+        let encoded = encoder.finish();
+        let decoded = cpio::decode::decode(&encoded).unwrap();
+        let got: Vec<(String, Vec<u8>)> = decoded
+            .into_iter()
+            .map(|entry| (entry.name, entry.data))
+            .collect();
+        prop_assert_eq!(got, entries);
+    }
+
+    #[test]
+    fn random_inputs_do_not_panic(data in prop::collection::vec(any::<u8>(), 0..1024)) {
+        let _ = deflate::decode::decode_bounded(&data, 1 << 20);
+        let _ = gzip::decode::decode_bounded(&data, 1 << 20);
+        let _ = zlib::decode::decode_bounded(&data, 1 << 20);
+        let _ = bzip2::decode::decode_bounded(&data, 1 << 20);
+        let _ = lz4::decode::decode_bounded(&data, 1 << 20);
+        let _ = zstd::decode::decode_bounded(&data, 1 << 20);
+        let _ = snappy::decode::decode_bounded(&data, 1 << 20);
+        let _ = xz::decode::decode_bounded(&data, 1 << 20);
+        let _ = lzip::decode::decode_bounded(&data, 1 << 20);
+        let _ = lzma_alone::decode::decode_bounded(&data, 1 << 20);
+        let _ = tar::decode::decode(&data);
+        let _ = cpio::decode::decode(&data);
+    }
+
+    #[test]
+    fn truncated_streams_do_not_panic(
+        data in prop::collection::vec(any::<u8>(), 0..2048),
+        cut in any::<usize>(),
+    ) {
+        let cases: [(Vec<u8>, DecodeFn); 10] = [
+            (
+                deflate::encode::encode(&data, deflate::encode::Level::Default),
+                deflate::decode::decode_bounded,
+            ),
+            (
+                gzip::encode::encode(&data, deflate::encode::Level::Default),
+                gzip::decode::decode_bounded,
+            ),
+            (
+                zlib::encode::encode(&data),
+                zlib::decode::decode_bounded,
+            ),
+            (bzip2::encode::encode(&data), bzip2::decode::decode_bounded),
+            (lz4::encode::encode(&data), lz4::decode::decode_bounded),
+            (zstd::encode::encode(&data), zstd::decode::decode_bounded),
+            (
+                snappy::encode::encode(&data),
+                snappy::decode::decode_bounded,
+            ),
+            (xz::encode::encode(&data), xz::decode::decode_bounded),
+            (lzip::encode::encode(&data), lzip::decode::decode_bounded),
+            (
+                lzma_alone::encode::encode(&data),
+                lzma_alone::decode::decode_bounded,
+            ),
+        ];
+        for (encoded, decode) in &cases {
+            let end = cut % (encoded.len() + 1);
+            let _ = decode(&encoded[..end], 1 << 20);
+        }
+    }
+}

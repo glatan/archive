@@ -333,3 +333,61 @@ pub fn encode(files: &[(&str, &[u8])]) -> Result<Vec<u8>, Error> {
     }
     Ok(e.finish())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::archive::arj::decode;
+
+    #[test]
+    fn rejects_invalid_methods_passwords_and_names() {
+        assert!(matches!(
+            ArjEncoder::with_method(5),
+            Err(Error::InvalidData("arj: supported methods are 0 through 4"))
+        ));
+        assert!(matches!(
+            ArjEncoder::new().with_password(b"", 0),
+            Err(Error::InvalidData("arj: empty password"))
+        ));
+
+        let mut encoder = ArjEncoder::new();
+        assert!(encoder.add_file("", b"x", 0).is_err());
+        assert!(encoder.add_file("a\0b", b"x", 0).is_err());
+        assert!(encoder.add_dir("", 0).is_err());
+        assert!(
+            encoder
+                .add_file(&"a".repeat(u16::MAX as usize), b"x", 0)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn volume_size_must_fit_headers() {
+        let mut encoder = ArjEncoder::new();
+        encoder.add_file("a.bin", &[7; 32], 0).unwrap();
+        assert!(matches!(
+            encoder.finish_parts(0),
+            Err(Error::InvalidData("arj: volume size too small"))
+        ));
+    }
+
+    #[test]
+    fn compressed_and_garbled_roundtrip() {
+        let data = b"arj compressible payload ".repeat(100);
+        for method in [1u8, 2, 3, 4] {
+            let mut encoder = ArjEncoder::with_method(method).unwrap();
+            encoder.add_file("a.bin", &data, 0).unwrap();
+            let archive = encoder.finish();
+            let entries = decode::decode(&archive).unwrap();
+            assert_eq!(entries[0].data, data, "method {method}");
+        }
+
+        let mut encoder = ArjEncoder::new().with_password(b"pw", 0x5A).unwrap();
+        encoder
+            .add_file("secret.bin", b"garbled payload", 0)
+            .unwrap();
+        let archive = encoder.finish();
+        let entries = decode::decode_with_password_bytes(&archive, b"pw").unwrap();
+        assert_eq!(entries[0].data, b"garbled payload");
+    }
+}

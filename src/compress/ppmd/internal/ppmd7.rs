@@ -1157,3 +1157,41 @@ impl PPMd7<RangeEncoder> {
         self.rc.flush();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compress::ppmd::SYM_END;
+
+    #[test]
+    fn encoder_decoder_roundtrip() {
+        let data = b"ppmd7 direct roundtrip payload ".repeat(64);
+        let mut encoder = PPMd7::new_encoder(6, 1 << 20).unwrap();
+        for &byte in &data {
+            encoder.encode_symbol(i32::from(byte)).unwrap();
+        }
+        encoder.encode_symbol(SYM_END).unwrap();
+        encoder.flush_range_encoder();
+        let encoded = encoder.into_inner();
+
+        let mut decoder = PPMd7::new_decoder(&encoded, 6, 1 << 20).unwrap();
+        let mut decoded = Vec::new();
+        loop {
+            let symbol = decoder.decode_symbol().unwrap();
+            if symbol == SYM_END {
+                break;
+            }
+            assert!((0..=255).contains(&symbol), "unexpected symbol {symbol}");
+            decoded.push(symbol as u8);
+        }
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn rejects_oversized_decode_model() {
+        assert!(matches!(
+            PPMd7::new_decoder(&[0; 8], 6, super::super::super::PPMD_DECODE_MEM_LIMIT + 1),
+            Err(Error::Unsupported("ppmd: memory size exceeds decode limit"))
+        ));
+    }
+}

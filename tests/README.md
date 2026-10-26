@@ -6,6 +6,7 @@
 | --- | --- |
 | `tests/integration.rs` | integration test harness。本体 crate の全 feature を有効化して読み込み、`tests/integration/*.rs` を module として束ねる |
 | `tests/integration/` | format / algorithm ごとの integration test 本体 |
+| `tests/property.rs` | proptest による codec / archive の roundtrip と truncation 不変条件 |
 | `tests/fixtures/` | integration test から参照する固定 fixture とその provenance |
 
 ## Directory guide
@@ -29,6 +30,8 @@
 
 - 全 integration test 実行:
   - `cargo test --all-features --test integration`
+- property test 実行:
+  - `cargo test --all-features --test property`
 - CLI end-to-end test:
   - `cargo test -p archive-cli`
 - fixture provenance:

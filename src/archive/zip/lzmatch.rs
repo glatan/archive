@@ -103,3 +103,84 @@ pub(super) fn lz_match(
     }
     tokens
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reconstruct(input: &[u8], tokens: &[Token]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for token in tokens {
+            if token.dist == 0 {
+                out.push(token.litlen as u8);
+            } else {
+                let dist = usize::from(token.dist);
+                let len = usize::from(token.litlen);
+                assert!(dist <= out.len(), "distance before output start");
+                for _ in 0..len {
+                    let byte = out[out.len() - dist];
+                    out.push(byte);
+                }
+            }
+        }
+        assert_eq!(out, input, "token stream must reconstruct the input");
+        out
+    }
+
+    #[test]
+    fn empty_and_short_inputs_are_literals() {
+        assert!(lz_match(b"", 256, 16, 3, false).is_empty());
+
+        let tokens = lz_match(b"ab", 256, 16, 3, false);
+        assert_eq!(tokens.len(), 2);
+        assert!(tokens.iter().all(|token| token.dist == 0));
+        reconstruct(b"ab", &tokens);
+    }
+
+    #[test]
+    fn overlap_setting_caps_match_length() {
+        let input = b"abc".repeat(100);
+        let no_overlap = lz_match(&input, 4096, 256, 3, false);
+        assert!(no_overlap.iter().all(|token| {
+            token.dist == 0 || usize::from(token.litlen) <= usize::from(token.dist)
+        }));
+        assert!(no_overlap.iter().any(|token| token.dist != 0));
+        reconstruct(&input, &no_overlap);
+
+        let overlap = lz_match(&input, 4096, 256, 3, true);
+        assert!(overlap.iter().any(|token| {
+            token.dist != 0 && usize::from(token.litlen) > usize::from(token.dist)
+        }));
+        reconstruct(&input, &overlap);
+    }
+
+    #[test]
+    fn bounded_tokens_reconstruct_mixed_inputs() {
+        let mut input = Vec::new();
+        for i in 0..4096u32 {
+            input.push((i.wrapping_mul(37) % 251) as u8);
+        }
+        input.extend_from_slice(b"the quick brown fox the quick brown fox");
+        input.extend(std::iter::repeat_n(0u8, 1024));
+
+        for (max_dist, max_len, min_len, allow_overlap) in [
+            (64, 8, 3, false),
+            (256, 32, 3, true),
+            (4096, 258, 3, false),
+            (4096, 258, 16, true),
+        ] {
+            let tokens = lz_match(&input, max_dist, max_len, min_len, allow_overlap);
+            reconstruct(&input, &tokens);
+            for token in tokens {
+                if token.dist != 0 {
+                    let len = usize::from(token.litlen);
+                    assert!(len <= max_len);
+                    assert!(usize::from(token.dist) <= max_dist);
+                    if !allow_overlap {
+                        assert!(len <= usize::from(token.dist));
+                    }
+                }
+            }
+        }
+    }
+}

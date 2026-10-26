@@ -230,3 +230,136 @@ pub(super) fn folder_total_final_unpack_size(folder: &Folder) -> Result<u64, Err
     }
     Ok(total_size)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::parse::{BindPair, Coder};
+    use super::*;
+
+    fn coder(
+        method: u8,
+        num_in_streams: u64,
+        num_out_streams: u64,
+        input_index: u64,
+        output_index: u64,
+    ) -> Coder {
+        Coder {
+            method_id: alloc::vec![method],
+            properties: Vec::new(),
+            num_in_streams,
+            num_out_streams,
+            input_index,
+            output_index,
+        }
+    }
+
+    fn folder(
+        coders: Vec<Coder>,
+        bind_pairs: Vec<BindPair>,
+        packed_streams: Vec<u64>,
+        unpack_sizes: Vec<u64>,
+    ) -> Folder {
+        Folder {
+            coders,
+            bind_pairs,
+            packed_streams,
+            unpack_sizes,
+            crc32: None,
+        }
+    }
+
+    #[test]
+    fn normalizes_single_coder_folder() {
+        let folder = folder(
+            alloc::vec![coder(0, 1, 1, 0, 0)],
+            Vec::new(),
+            alloc::vec![0],
+            alloc::vec![4],
+        );
+        let graph = normalize_folder_graph(&folder).unwrap();
+
+        assert_eq!(graph.total_outputs, 1);
+        assert!(matches!(graph.input_sources[0], InputSource::Packed(0)));
+        assert_eq!(graph.output_owners, alloc::vec![0]);
+        assert_eq!(graph.final_outputs, alloc::vec![0]);
+        assert_eq!(graph.execution_order, alloc::vec![0]);
+        assert!(validate_execution_order(&folder, &graph).is_ok());
+    }
+
+    #[test]
+    fn rejects_duplicate_ownership_and_unbound_inputs() {
+        let duplicate = folder(
+            alloc::vec![coder(0, 1, 1, 0, 0), coder(0, 1, 1, 1, 0)],
+            Vec::new(),
+            alloc::vec![0, 1],
+            alloc::vec![1, 1],
+        );
+        assert!(matches!(
+            normalize_folder_graph(&duplicate),
+            Err(Error::InvalidData("7z: duplicate coder output ownership"))
+        ));
+
+        let unbound = folder(
+            alloc::vec![coder(0, 1, 1, 0, 0)],
+            Vec::new(),
+            Vec::new(),
+            alloc::vec![1],
+        );
+        assert!(matches!(
+            normalize_folder_graph(&unbound),
+            Err(Error::Unsupported("7z: unsupported folder graph"))
+        ));
+    }
+
+    #[test]
+    fn rejects_missing_final_output() {
+        let folder = folder(
+            alloc::vec![coder(0, 1, 2, 0, 0)],
+            alloc::vec![
+                BindPair {
+                    in_index: 0,
+                    out_index: 0,
+                },
+                BindPair {
+                    in_index: 0,
+                    out_index: 1,
+                },
+            ],
+            alloc::vec![0],
+            alloc::vec![1, 1],
+        );
+        assert!(matches!(
+            find_final_output_indices(&folder),
+            Err(Error::InvalidData("7z: missing final output stream"))
+        ));
+    }
+
+    #[test]
+    fn validates_execution_order() {
+        let folder = folder(
+            alloc::vec![coder(0, 1, 1, 0, 0), coder(0, 1, 1, 1, 1)],
+            alloc::vec![BindPair {
+                in_index: 1,
+                out_index: 0,
+            }],
+            alloc::vec![0],
+            alloc::vec![1, 1],
+        );
+        let mut graph = normalize_folder_graph(&folder).unwrap();
+        assert_eq!(graph.execution_order, alloc::vec![0, 1]);
+        assert!(validate_execution_order(&folder, &graph).is_ok());
+
+        graph.execution_order = alloc::vec![1, 0];
+        assert!(matches!(
+            validate_execution_order(&folder, &graph),
+            Err(Error::InvalidData("7z: invalid execution order"))
+        ));
+    }
+
+    #[test]
+    fn detects_encryption_methods() {
+        assert!(is_encryption_method(METHOD_7Z_AES));
+        assert!(is_encryption_method(&[0x06, 0xF1, 0x07, 0x01]));
+        assert!(!is_encryption_method(&[0x03, 0x01, 0x01]));
+    }
+}
