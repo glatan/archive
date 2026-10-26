@@ -42,8 +42,8 @@ cargo bench --all-features --bench compare -- \
 
 | 列 | 内容 |
 |---|---|
-| `ours-lib` | `archive-bench-helper` がライブラリ呼び出しの前後だけを計測する。プロセス起動・引数解析・入力ファイル読み込みは計測区間外 |
-| `ours-cli` | `archive compress` / `archive test` をサブプロセスとして実行。起動とファイル I/O を含む |
+| `ours-lib` | `archive-bench-helper` がライブラリ呼び出しの前後だけを計測する。プロセス起動・引数解析・入力の読み込み・出力の書き込みは計測区間外 |
+| `ours-cli` | codec は `archive compress` / `archive test`、archive は `archive compress` / `archive extract` をサブプロセスとして実行。起動とファイル I/O を含む |
 | `ref-cli` | 参照ツールをサブプロセスとして実行。起動とファイル I/O を含む |
 
 `ours-lib` は実装ポテンシャル、`ours-cli` と `ref-cli` は end-to-end の比較に使う。
@@ -54,7 +54,7 @@ cargo bench --all-features --bench compare -- \
 - スループットは decimal MB/s（1e6 bytes/s）
 - `lib/ref` と `cli/ref` は参照側スループット ÷ 我々のスループット。
   1 より大きいほど参照が速い
-- `CV` は我々 / 参照の変動係数。10% を超える場合はノイズを疑う
+- `CV` は encode の我々 / 参照の変動係数。10% を超える場合はノイズを疑う
 - 同一マシン内の相対比を使う。絶対値をマシン間で比較しない
 
 ### パラメータ正規化
@@ -74,7 +74,8 @@ cargo bench --all-features --bench compare -- \
 | lzo | LZO1X-1 | `lzop -1` |
 | fastlz | 入力 64 KiB 以上は level 2 | `fastlz_compress_level(2)` |
 | brotli | 既定エンコーダ | `brotli -q 5`（直接対応する level がないため注記） |
-| zx0/1/2/5 | 既定 | 参照 CLI の `-q` |
+| zx0/1/5 | 既定 | 参照 CLI の `-q` |
+| zx2 | 既定 | 参照 CLI（`-q` なし） |
 | lzsa v1/v2 | 既定 | `lzsa -f 1/2 --prefer-speed` |
 
 参照側の level を複数測る場合は `catalog.rs` にケースを追加する。
@@ -117,8 +118,12 @@ cargo bench --all-features --bench compare -- \
 
 - 参照名、バイナリパス
 - distro package の version（取得できる場合）
-- ソースビルドの `CFLAGS` / `CXXFLAGS` / `LDFLAGS` / compiler
+- catalog に記録したビルドフラグと、バイナリの `.comment` にある compiler 情報
 - 我々の Rust 側の profile、`RUSTFLAGS`、rustc version、CPU、git commit
+
+ソースビルドの完全な `CFLAGS` / `CXXFLAGS` / `LDFLAGS`、compiler version、
+実行コマンド、バイナリ sha256 は `result.json` の `refs_build`
+（`build-info.json` の埋め込み）に含まれる。
 
 ソースビルドの既定フラグは
 `-O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0`。参照の最適化を
@@ -144,8 +149,9 @@ cargo bench --all-features --bench compare -- \
 - アーカイブのメタデータ（時刻・パーミッション・拡張フィールド）は
   writer 間で異なる。サイズ比較はその差を含む
 - distro package の最適化フラグは不明な場合がある
-- 小型入力では参照プロセスの起動時間が支配的になる。codec は可能な限り
-  1 MiB 以上、速い codec は 4 MiB 以上で測る
+- 小型入力では参照プロセスの起動時間が支配的になる。形式ごとのサイズクラスを使い、
+  遅い codec は 1 MiB、速い codec は 4 MiB 以上を既定にする。ZX/LZSA など
+  非常に遅い参照は 32〜512 KiB に落とす
 - WSL2 などでは CPU 周波数・スケジューリングのノイズが大きい。CV を確認し、
   必要ならネイティブ Linux で再測定する
 - `ours-lib` は CLI の production dispatch を経由するため、純粋な free

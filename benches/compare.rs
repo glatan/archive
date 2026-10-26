@@ -354,7 +354,11 @@ fn print_markdown(cases: &[Case]) {
         println!(
             "| {} | {} | {} | {} | {} | {} | {} | {} |",
             case.id,
-            case.label,
+            if case.format.is_empty() {
+                case.label
+            } else {
+                case.format
+            },
             match case.kind {
                 Kind::Codec => "codec",
                 Kind::Archive => "archive",

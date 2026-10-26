@@ -165,5 +165,10 @@ fn median(values: &[u64]) -> u64 {
     }
     let mut sorted = values.to_vec();
     sorted.sort_unstable();
-    sorted[sorted.len() / 2]
+    let mid = sorted.len() / 2;
+    if sorted.len().is_multiple_of(2) {
+        ((sorted[mid - 1] as u128 + sorted[mid] as u128) / 2) as u64
+    } else {
+        sorted[mid]
+    }
 }
