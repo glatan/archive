@@ -65,7 +65,7 @@ missing reference binary) is recorded in the generated report.
 | ar | ar | archive | measured | GNU ar | system binutils | distro package (exact distro build flags not exposed) |  |
 | zip | zip | archive | measured | Info-ZIP zip | 3.0 | distro package (exact distro build flags not exposed) |  |
 | 7z | 7z | archive | measured | 7-Zip | 26.04 | distro package (exact distro build flags not exposed) |  |
-| zpaq-archive | zpaq | archive | measured | zpaq | 7.15 | distro package (exact distro build flags not exposed) |  |
+| zpaq-archive | zpaq | archive | measured | zpaq | 7.15 | distro package (exact distro build flags not exposed) | CLI decode uses archive test; journal tree extraction is library-only |
 | lha | lha | archive | decode-only | lhasa | system lhasa | distro package (exact distro build flags not exposed) | Checked-in LHA fixture; decode reference is lhasa |
 | arj | arj | archive | measured | unar | system unarchiver | distro package (exact distro build flags not exposed) | Decode reference is unar; no reference writer |
 | arc | arc | archive | measured | unar | system unarchiver | distro package (exact distro build flags not exposed) | Uses a DOS 8.3 flat tree; decode reference is unar |

@@ -522,10 +522,12 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
             let cli_out = dir.join("cli-out");
             match cli_archive_decode(cfg, case, &common, &cli_out) {
                 Ok(measurement) => {
-                    let ok = dir_manifest_matches_for(case, &cli_out, &expected);
                     decode.ours_cli = Some(measurement);
-                    if !ok {
-                        decode.note = Some("ours-cli extraction manifest mismatch".to_owned());
+                    if case.cli_extract {
+                        let ok = dir_manifest_matches_for(case, &cli_out, &expected);
+                        if !ok {
+                            decode.note = Some("ours-cli extraction manifest mismatch".to_owned());
+                        }
                     }
                 }
                 Err(error) => append_note(&mut decode, format!("ours-cli extract: {error}")),

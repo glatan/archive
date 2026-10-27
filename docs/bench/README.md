@@ -48,7 +48,8 @@ cargo bench --all-features --bench compare -- \
 
 `ours-lib` は実装ポテンシャル、`ours-cli` と `ref-cli` は end-to-end の比較に使う。
 参照側の decode は `/dev/null` または一時ディレクトリへ出力し、検証時だけ
-実ファイルへ出力する。
+実ファイルへ出力する。zpaq-archive の CLI decode は `archive test` を使う
+（journal tree の再構成はライブラリ側のみ）。
 
 - warmup 1 回 + quick 2 回 / full 5 回のサンプル中央値
 - スループットは decimal MB/s（1e6 bytes/s）
