@@ -294,7 +294,6 @@ def build_driver(name: str, spec: dict, root: Path) -> dict:
                 "marker": spec["comment_preamble"],
             }
         )
-        commands.append(f"prepare {root / spec['filename']} (comment preamble)")
     if spec.get("patch_hash_align"):
         source = root / spec["filename"]
         old = "& 0xFFFFFFFC)"
@@ -305,7 +304,6 @@ def build_driver(name: str, spec: dict, root: Path) -> dict:
             raise SystemExit(f"{name}: expected one hash-alignment site, found {count}")
         source.write_text(text.replace(old, new, 1))
         patches.append({"file": str(source), "from": old, "to": new})
-        commands.append(f"prepare {source} (64-bit hash alignment)")
     if "stubs" in spec:
         stub_script = Path(__file__).resolve().parent / "drivers" / "snappy_stubs.py"
         stub_command = [sys.executable, str(stub_script), str(root)]

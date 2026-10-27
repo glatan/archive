@@ -29,8 +29,8 @@ python3 docs/bench/refs/build.py zx0 lzsa --force
 | `lzf` | 3.6 | sha256 `9c5de0...fb46a` | BSD-2-Clause OR GPL-2.0-or-later | `gcc -O2 ... drivers/lzf_driver.c lzf_c.c lzf_d.c` |
 | `fastlz` | 0.5.0 | sha256 `4bd422...9d580` | MIT | `gcc -O2 ... drivers/fastlz_driver.c fastlz.c` |
 
-The exact commands, compiler version, CFLAGS, and binary sha256 are written
-to `target/bench/refs/build-info.json`. The report's Markdown table shows the
+The exact build commands, compiler version, CFLAGS, binary sha256, and
+LZRW source-patch records are written to `target/bench/refs/build-info.json`. The report's Markdown table shows the
 catalog flags and the binary `.comment`; `result.json` embeds the complete
 `build-info.json` under `refs_build`.
 
