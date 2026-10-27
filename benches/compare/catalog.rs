@@ -472,6 +472,77 @@ fn ascii85_ref() -> RefSpec {
 // Archive reference commands
 // ---------------------------------------------------------------------------
 
+fn cabextract_ref() -> RefSpec {
+    RefSpec {
+        name: "cabextract",
+        version: "system cabextract",
+        binary_id: "cabextract",
+        build: DISTRO,
+        encode: None,
+        decode: Some(cmd(
+            "cabextract",
+            &["-q", "-d", "{output}", "{input}"],
+            OutputMode::Dir,
+        )),
+    }
+}
+
+fn unsquashfs_ref() -> RefSpec {
+    RefSpec {
+        name: "unsquashfs",
+        version: "system squashfs-tools",
+        binary_id: "unsquashfs",
+        build: DISTRO,
+        encode: None,
+        decode: Some(cmd(
+            "unsquashfs",
+            &["-q", "-d", "{output}", "{input}"],
+            OutputMode::Dir,
+        )),
+    }
+}
+
+fn unar_ref() -> RefSpec {
+    RefSpec {
+        name: "unar",
+        version: "system unarchiver",
+        binary_id: "unar",
+        build: DISTRO,
+        encode: None,
+        decode: Some(cmd(
+            "unar",
+            &["-q", "-o", "{output}", "{input}"],
+            OutputMode::Dir,
+        )),
+    }
+}
+
+fn lha_ref() -> RefSpec {
+    RefSpec {
+        name: "lhasa",
+        version: "system lhasa",
+        binary_id: "lha",
+        build: DISTRO,
+        encode: None,
+        decode: Some(cmd("lha", &["-xfw={output}", "{input}"], OutputMode::Dir)),
+    }
+}
+
+fn bsdtar_ref() -> RefSpec {
+    RefSpec {
+        name: "bsdtar",
+        version: "system libarchive",
+        binary_id: "bsdtar",
+        build: DISTRO,
+        encode: None,
+        decode: Some(cmd(
+            "bsdtar",
+            &["-xf", "{input}", "-C", "{output}"],
+            OutputMode::Dir,
+        )),
+    }
+}
+
 fn tar_ref() -> RefSpec {
     RefSpec {
         name: "GNU tar",
@@ -672,6 +743,7 @@ fn codec(
         cli_format,
         ours_lib: true,
         ours_cli: cli_format.is_some(),
+        cli_extract: true,
         raw: false,
         encode: true,
         decode: true,
@@ -719,6 +791,7 @@ fn codec_raw(
         cli_format: None,
         ours_lib: true,
         ours_cli: false,
+        cli_extract: false,
         raw: true,
         encode: true,
         decode: true,
@@ -747,6 +820,7 @@ fn codec_raw_with_ref(
         cli_format: None,
         ours_lib: true,
         ours_cli: false,
+        cli_extract: false,
         raw: true,
         encode: true,
         decode: true,
@@ -775,6 +849,7 @@ fn archive(
         cli_format: Some(format),
         ours_lib: true,
         ours_cli: true,
+        cli_extract: true,
         raw: false,
         encode,
         decode: true,
@@ -802,6 +877,7 @@ fn archive_fixture(
         cli_format: Some(format),
         ours_lib: true,
         ours_cli: true,
+        cli_extract: true,
         raw: false,
         encode: false,
         decode: true,
@@ -829,6 +905,7 @@ fn archive_raw_fixture(
         cli_format: None,
         ours_lib: true,
         ours_cli: false,
+        cli_extract: false,
         raw: true,
         encode: false,
         decode: true,
@@ -841,25 +918,30 @@ fn archive_raw_fixture(
     }
 }
 
-fn archive_unsupported(id: &'static str, label: &'static str, note: &'static str) -> Case {
-    Case {
-        id,
-        label,
-        kind: Kind::Archive,
-        format: "",
-        cli_format: None,
-        ours_lib: false,
-        ours_cli: false,
-        raw: false,
-        encode: false,
-        decode: false,
-        level: None,
-        backend: None,
-        reference: None,
-        fixture: None,
-        note: Some(note),
-        size: MEDIUM,
-    }
+fn archive_fixture_with_ref(
+    id: &'static str,
+    label: &'static str,
+    format: &'static str,
+    fixture: &'static str,
+    reference: RefSpec,
+    note: &'static str,
+) -> Case {
+    let mut case = archive_fixture(id, label, format, fixture, note);
+    case.reference = Some(reference);
+    case
+}
+
+fn archive_raw_fixture_with_ref(
+    id: &'static str,
+    label: &'static str,
+    format: &'static str,
+    fixture: &'static str,
+    reference: RefSpec,
+    note: &'static str,
+) -> Case {
+    let mut case = archive_raw_fixture(id, label, format, fixture, note);
+    case.reference = Some(reference);
+    case
 }
 
 // ---------------------------------------------------------------------------
@@ -1303,13 +1385,13 @@ pub fn cases() -> Vec<Case> {
             None,
         ),
         // Archives with our writer but no packaged reference encoder.
-        archive(
+        archive_fixture_with_ref(
             "lha",
             "LHA",
             "lha",
-            true,
-            None,
-            Some("Lhasa is decode-only; no reference writer"),
+            "tests/fixtures/lha/lh5_255e.lzh",
+            lha_ref(),
+            "Checked-in LHA fixture; decode reference is lhasa",
         ),
         archive(
             "arj",
@@ -1319,10 +1401,13 @@ pub fn cases() -> Vec<Case> {
             None,
             Some("No packaged ARJ reference writer"),
         ),
-        archive_unsupported(
+        archive(
             "arc",
             "ARC",
-            "ARC writer requires 8.3 names; benchmark tree not adapted",
+            "arc",
+            true,
+            None,
+            Some("Uses a DOS 8.3 flat tree; no packaged reference writer"),
         ),
         archive(
             "git-pack",
@@ -1330,58 +1415,80 @@ pub fn cases() -> Vec<Case> {
             "git-pack",
             true,
             None,
-            Some("git pack stores object IDs; tree manifest verification is skipped"),
+            Some("git pack stores object IDs; payload hashes are compared instead of names"),
         ),
-        archive_fixture(
+        archive(
             "xar",
             "xar",
             "xar",
-            "tests/fixtures/xar/real.xar",
-            "Checked-in xar fixture; decode-only (our writer/reader roundtrip is not bit-stable)",
+            true,
+            Some(unar_ref()),
+            Some("Generated archive; decode reference is unar"),
         ),
         // Read-only archive formats exposed by the CLI.
-        archive_fixture(
+        archive_fixture_with_ref(
             "mscab",
             "CAB",
             "mscab",
             "tests/fixtures/mscab/lzx_mixed.cab",
-            "Checked-in CAB fixture; decode-only",
+            cabextract_ref(),
+            "Checked-in CAB fixture; decode reference is cabextract",
         ),
-        archive_unsupported(
+        archive_fixture(
             "deb",
             "deb",
-            "decode benchmark needs a deb fixture; pending",
+            "deb",
+            crate::fixtures::DEB,
+            "Generated .deb fixture; decode-only",
         ),
-        archive_unsupported(
+        archive_fixture_with_ref(
             "rpm",
             "rpm",
-            "decode benchmark needs an rpm fixture; pending",
+            "rpm",
+            crate::fixtures::RPM,
+            bsdtar_ref(),
+            "Generated .rpm fixture; decode reference is bsdtar",
         ),
-        archive_unsupported(
+        archive_fixture(
             "zim",
             "ZIM",
-            "decode benchmark needs a ZIM fixture; pending",
+            "zim",
+            crate::fixtures::ZIM,
+            "Generated ZIM fixture; decode-only",
         ),
-        archive_unsupported(
-            "mtree",
-            "mtree",
-            "decode benchmark needs an mtree fixture; pending",
-        ),
-        archive_unsupported(
+        {
+            let mut case = archive_fixture(
+                "mtree",
+                "mtree",
+                "mtree",
+                crate::fixtures::MTREE,
+                "Generated mtree fixture; metadata-only, CLI uses test",
+            );
+            case.cli_extract = false;
+            case
+        },
+        archive_fixture(
             "warc",
             "WARC",
-            "decode benchmark needs a WARC fixture; pending",
+            "warc",
+            crate::fixtures::WARC,
+            "Generated WARC fixture; decode-only",
         ),
-        archive_unsupported(
+        archive_fixture_with_ref(
             "squashfs",
             "squashfs",
-            "CLI read supports squashfs; no checked-in fixture is wired into the harness",
+            "squashfs",
+            crate::fixtures::SQUASHFS,
+            unsquashfs_ref(),
+            "Generated squashfs fixture; decode reference is unsquashfs",
         ),
         // Formats not exposed by the CLI read dispatch yet.
-        archive_unsupported(
+        archive_raw_fixture(
             "cramfs",
             "cramfs",
-            "CLI read dispatch not implemented; library decode only",
+            "cramfs",
+            crate::fixtures::CRAMFS,
+            "Generated cramfs fixture; raw library decode only",
         ),
         archive_raw_fixture(
             "romfs",
@@ -1397,27 +1504,34 @@ pub fn cases() -> Vec<Case> {
             "tests/fixtures/erofs/mkfs.erofs.img",
             "Checked-in fixture; raw library decode only",
         ),
-        archive_raw_fixture(
+        archive_raw_fixture_with_ref(
             "iso9660",
             "ISO 9660",
             "iso9660",
             "tests/fixtures/iso9660/bsdtar-plain.iso",
-            "Checked-in fixture; raw library decode only",
+            bsdtar_ref(),
+            "Checked-in fixture; decode reference is bsdtar",
         ),
-        archive_unsupported(
+        archive_raw_fixture(
             "crx3",
             "CRX3",
-            "CLI read dispatch not implemented; library decode only",
+            "crx3",
+            crate::fixtures::CRX3,
+            "Generated CRX3 fixture; raw library decode only",
         ),
-        archive_unsupported(
+        archive_raw_fixture(
             "pea",
             "PEA",
-            "CLI read dispatch not implemented; library decode only",
+            "pea",
+            crate::fixtures::PEA,
+            "Generated PEA fixture; raw library decode only",
         ),
-        archive_unsupported(
+        archive_raw_fixture(
             "mscfb",
             "MS-CFB",
-            "CLI read dispatch not implemented; library decode only",
+            "mscfb",
+            crate::fixtures::MSCFB,
+            "Generated MS-CFB fixture; raw library decode only",
         ),
     ]
 }

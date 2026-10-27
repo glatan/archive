@@ -96,15 +96,18 @@ cargo bench --all-features --bench compare -- \
 - archive: 固定メタデータのファイルツリー（quick 64 files、full 200 files）
 - 大容量ファイルは `target/bench` に生成し、リポジトリにはコミットしない
 - `--size` で codec の入力サイズを上書きできる（archive のツリーサイズは固定）
+- read-only 形式の一部は `target/bench/fixtures/` に生成した fixture を使う
+  （deb/rpm/mtree/warc/zim/squashfs/cramfs/pea/mscfb/crx3）。fixture はリポジトリにコミットしない
+- `--timeout` で helper / CLI / 参照プロセスの 1 回あたりの上限を指定できる（既定 600 秒、0 は拒否）
 
 ## 参照実装
 
 | 入手方法 | 例 |
 |---|---|
-| ディストリ配布バイナリ | gzip, zstd, xz, bzip2, lzip, lz4, lzop, brotli, ncompress, rzip, lrzip, 7z, tar, cpio, ar, zip |
+| ディストリ配布バイナリ | gzip, zstd, xz, bzip2, lzip, lz4, lzop, brotli, ncompress, rzip, lrzip, 7z, tar, cpio, ar, zip, bsdtar, cabextract, unsquashfs, unar, lhasa |
 | 固定ソースビルド | ZX0/1/2/5, LZSA, liblzf, FastLZ |
 | Python stdlib | zlib, deflate, uuencode, Ascii85 |
-| 参照なし（N/A） | snappy, lzrw*, vcdiff, mppc, lzs, lzxd, cmpsc, xca, packbits, yenc, macbinary, binhex, 一部アーカイブ |
+| 参照なし（N/A） | snappy, lzrw*, vcdiff, mppc, lzs, lzxd, cmpsc, xca, packbits, yenc, macbinary, binhex |
 
 `make bench-refs` は `docs/bench/refs/build.py` を実行し、
 `target/bench/refs/bin/` に参照バイナリを置く。ハーネスは PATH より

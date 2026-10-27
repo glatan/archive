@@ -60,6 +60,7 @@ fn build_json(results: &[CaseResult], cases: &[Case], cfg: &Config) -> Value {
             "size_override": cfg.size_override,
             "skip_cli": cfg.skip_cli,
             "skip_ref": cfg.skip_ref,
+            "timeout_secs": cfg.timeout.as_secs(),
         },
         "cases": cases.iter().map(|case| json!({
             "id": case.id,

@@ -65,22 +65,22 @@ missing reference binary) is recorded in the generated report.
 | zip | zip | archive | measured | Info-ZIP zip | 3.0 | distro package (exact distro build flags not exposed) |  |
 | 7z | 7z | archive | measured | 7-Zip | 26.04 | distro package (exact distro build flags not exposed) |  |
 | zpaq-archive | zpaq | archive | measured | zpaq | 7.15 | distro package (exact distro build flags not exposed) |  |
-| lha | lha | archive | ours-only | — | — | — | Lhasa is decode-only; no reference writer |
+| lha | lha | archive | decode-only | lhasa | system lhasa | distro package (exact distro build flags not exposed) | Checked-in LHA fixture; decode reference is lhasa |
 | arj | arj | archive | ours-only | — | — | — | No packaged ARJ reference writer |
-| arc | ARC | archive | unavailable | — | — | — | ARC writer requires 8.3 names; benchmark tree not adapted |
-| git-pack | git-pack | archive | ours-only | — | — | — | git pack stores object IDs; tree manifest verification is skipped |
-| xar | xar | archive | ours-only | — | — | — | Checked-in xar fixture; decode-only (our writer/reader roundtrip is not bit-stable) |
-| mscab | mscab | archive | ours-only | — | — | — | Checked-in CAB fixture; decode-only |
-| deb | deb | archive | unavailable | — | — | — | decode benchmark needs a deb fixture; pending |
-| rpm | rpm | archive | unavailable | — | — | — | decode benchmark needs an rpm fixture; pending |
-| zim | ZIM | archive | unavailable | — | — | — | decode benchmark needs a ZIM fixture; pending |
-| mtree | mtree | archive | unavailable | — | — | — | decode benchmark needs an mtree fixture; pending |
-| warc | WARC | archive | unavailable | — | — | — | decode benchmark needs a WARC fixture; pending |
-| squashfs | squashfs | archive | unavailable | — | — | — | CLI read supports squashfs; no checked-in fixture is wired into the harness |
-| cramfs | cramfs | archive | unavailable | — | — | — | CLI read dispatch not implemented; library decode only |
+| arc | arc | archive | ours-only | — | — | — | Uses a DOS 8.3 flat tree; no packaged reference writer |
+| git-pack | git-pack | archive | ours-only | — | — | — | git pack stores object IDs; payload hashes are compared instead of names |
+| xar | xar | archive | measured | unar | system unarchiver | distro package (exact distro build flags not exposed) | Generated archive; decode reference is unar |
+| mscab | mscab | archive | decode-only | cabextract | system cabextract | distro package (exact distro build flags not exposed) | Checked-in CAB fixture; decode reference is cabextract |
+| deb | deb | archive | ours-only | — | — | — | Generated .deb fixture; decode-only |
+| rpm | rpm | archive | decode-only | bsdtar | system libarchive | distro package (exact distro build flags not exposed) | Generated .rpm fixture; decode reference is bsdtar |
+| zim | zim | archive | ours-only | — | — | — | Generated ZIM fixture; decode-only |
+| mtree | mtree | archive | ours-only | — | — | — | Generated mtree fixture; metadata-only, CLI uses test |
+| warc | warc | archive | ours-only | — | — | — | Generated WARC fixture; decode-only |
+| squashfs | squashfs | archive | decode-only | unsquashfs | system squashfs-tools | distro package (exact distro build flags not exposed) | Generated squashfs fixture; decode reference is unsquashfs |
+| cramfs | cramfs | archive | ours-only | — | — | — | Generated cramfs fixture; raw library decode only |
 | romfs | romfs | archive | ours-only | — | — | — | Checked-in fixture; raw library decode only |
 | erofs | erofs | archive | ours-only | — | — | — | Checked-in fixture; raw library decode only |
-| iso9660 | iso9660 | archive | ours-only | — | — | — | Checked-in fixture; raw library decode only |
-| crx3 | CRX3 | archive | unavailable | — | — | — | CLI read dispatch not implemented; library decode only |
-| pea | PEA | archive | unavailable | — | — | — | CLI read dispatch not implemented; library decode only |
-| mscfb | MS-CFB | archive | unavailable | — | — | — | CLI read dispatch not implemented; library decode only |
+| iso9660 | iso9660 | archive | decode-only | bsdtar | system libarchive | distro package (exact distro build flags not exposed) | Checked-in fixture; decode reference is bsdtar |
+| crx3 | crx3 | archive | ours-only | — | — | — | Generated CRX3 fixture; raw library decode only |
+| pea | pea | archive | ours-only | — | — | — | Generated PEA fixture; raw library decode only |
+| mscfb | mscfb | archive | ours-only | — | — | — | Generated MS-CFB fixture; raw library decode only |
