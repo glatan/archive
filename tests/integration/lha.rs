@@ -455,6 +455,40 @@ fn test_lha_level3_dir() {
     assert!(entries.iter().any(|e| e.is_dir));
 }
 
+/// Extract `archive` into `out_dir`. `lha`/`lhasa` use the classic
+/// `-xf` syntax, while `unar` takes options and the output directory
+/// before the archive path.
+fn oracle_extract(
+    tool: &str,
+    archive: &std::path::Path,
+    out_dir: &std::path::Path,
+) -> std::io::Result<std::process::Output> {
+    use std::process::Command;
+    let mut command = Command::new(tool);
+    if tool == "unar" {
+        command.args(["-f", "-D", "-o"]).arg(out_dir).arg(archive);
+    } else {
+        command.arg("-xf").arg(archive).current_dir(out_dir);
+    }
+    command.output()
+}
+
+fn collect_file_data(dir: &std::path::Path, out: &mut Vec<Vec<u8>>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_file_data(&path, out);
+        } else if path.is_file()
+            && let Ok(data) = std::fs::read(&path)
+        {
+            out.push(data);
+        }
+    }
+}
+
 /// Oracle extraction: `lhasa`, `unar`, and the classic `lha` binary
 /// must produce the same bytes for every fixture they support.
 #[test]
@@ -466,13 +500,7 @@ fn test_lha_fixture_oracle_extract() {
     let tools: Vec<&str> = oracles
         .iter()
         .copied()
-        .filter(|t| {
-            Command::new(t)
-                .arg("--version")
-                .output()
-                .map(|o| o.status.success() || !o.stdout.is_empty())
-                .unwrap_or(false)
-        })
+        .filter(|tool| Command::new(tool).output().is_ok())
         .collect();
     if tools.is_empty() {
         assert!(
@@ -510,31 +538,20 @@ fn test_lha_fixture_oracle_extract() {
         for tool in &tools {
             let out_dir = dir.join(format!("{}_{}", tool, name));
             std::fs::create_dir_all(&out_dir).unwrap();
-            let output = Command::new(tool)
-                .arg("xf")
-                .arg(&p)
-                .current_dir(&out_dir)
-                .output();
+            let output = oracle_extract(tool, &p, &out_dir);
             let Ok(output) = output else { continue };
             if !output.status.success() {
                 continue; // oracle lacks support for this member
             }
-            let mut oracle_data: Vec<u8> = Vec::new();
-            for de in std::fs::read_dir(&out_dir).unwrap() {
-                let de = de.unwrap();
-                if de.file_type().unwrap().is_file() {
-                    oracle_data = std::fs::read(de.path()).unwrap();
-                    break;
-                }
-            }
+            let mut oracle_data = Vec::new();
+            collect_file_data(&out_dir, &mut oracle_data);
             if oracle_data.is_empty() {
                 continue;
             }
-            assert_eq!(
-                Some(&oracle_data),
-                ours.first(),
-                "{name}: {tool} output differs"
-            );
+            let mut ours_sorted = ours.clone();
+            ours_sorted.sort_unstable();
+            oracle_data.sort_unstable();
+            assert_eq!(oracle_data, ours_sorted, "{name}: {tool} output differs");
             compared += 1;
         }
     }
@@ -702,13 +719,7 @@ fn test_lha_pmarc_oracle_interop() {
     let tools: Vec<&str> = ["lhasa", "unar"]
         .iter()
         .copied()
-        .filter(|t| {
-            Command::new(t)
-                .arg("--version")
-                .output()
-                .map(|o| o.status.success() || !o.stdout.is_empty())
-                .unwrap_or(false)
-        })
+        .filter(|tool| Command::new(tool).output().is_ok())
         .collect();
     if tools.is_empty() {
         assert!(
@@ -733,11 +744,7 @@ fn test_lha_pmarc_oracle_interop() {
         for tool in &tools {
             let out_dir = dir.join(format!("{tool}_{tag}"));
             std::fs::create_dir_all(&out_dir).unwrap();
-            let output = Command::new(tool)
-                .arg("xf")
-                .arg(&path)
-                .current_dir(&out_dir)
-                .output();
+            let output = oracle_extract(tool, &path, &out_dir);
             let Ok(output) = output else { continue };
             if !output.status.success() {
                 continue; // oracle lacks support for this method
