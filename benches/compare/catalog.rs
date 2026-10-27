@@ -1475,7 +1475,7 @@ pub fn cases() -> Vec<Case> {
             "deb",
             "deb",
             crate::fixtures::DEB,
-            "Generated .deb fixture; decode-only",
+            "Generated .deb fixture; lib reads ar members, CLI extracts payloads",
         ),
         archive_fixture_with_ref(
             "rpm",
