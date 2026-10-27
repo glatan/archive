@@ -14,6 +14,8 @@ mod helpers;
 mod catalog;
 #[path = "compare/corpus.rs"]
 mod corpus;
+#[path = "compare/fixtures.rs"]
+mod fixtures;
 #[path = "compare/model.rs"]
 mod model;
 #[path = "compare/report.rs"]
@@ -54,6 +56,10 @@ fn main() {
         std::process::exit(2);
     }
 
+    if let Err(error) = fixtures::ensure() {
+        eprintln!("error: {error}");
+        std::process::exit(1);
+    }
     let selected = select_cases(&cases, &config);
     if selected.is_empty() {
         eprintln!("error: no cases matched the filters");
@@ -92,6 +98,7 @@ fn main() {
         work_dir: work_dir.join(format!("run-{run_id}")),
         skip_cli: config.skip_cli,
         skip_ref: config.skip_ref,
+        timeout: std::time::Duration::from_secs(config.timeout),
     };
 
     let mut results = Vec::new();
@@ -145,6 +152,7 @@ struct Args {
     output_dir: Option<PathBuf>,
     skip_cli: bool,
     skip_ref: bool,
+    timeout: u64,
     kind: Option<Kind>,
     format_filter: Vec<String>,
 }
@@ -166,6 +174,7 @@ usage: cargo bench --all-features --bench compare -- [options]
   --output-dir PATH       report directory
   --skip-cli              do not run our CLI
   --skip-ref              do not run reference tools
+  --timeout SECS          per-process timeout (default: 600)
   --list                  list catalog cases
   --list-markdown         print the catalog as a Markdown coverage matrix
 ";
@@ -184,6 +193,7 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
         output_dir: None,
         skip_cli: false,
         skip_ref: false,
+        timeout: 600,
         kind: None,
         format_filter: Vec::new(),
     };
@@ -275,6 +285,14 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
             }
             "--skip-cli" => parsed.skip_cli = true,
             "--skip-ref" => parsed.skip_ref = true,
+            "--timeout" => {
+                i += 1;
+                parsed.timeout = args
+                    .get(i)
+                    .ok_or("--timeout requires a value")?
+                    .parse()
+                    .map_err(|_| "--timeout must be an integer")?;
+            }
             "--list" | "--list-markdown" | "--bench" => {}
             other => return Err(format!("unknown argument `{other}`")),
         }

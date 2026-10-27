@@ -499,7 +499,7 @@ fn decode_items(
                 entries
                     .into_iter()
                     .map(|entry| DecodedItem {
-                        payload: Some(entry.data.clone()),
+                        payload: (!entry.is_dir).then(|| entry.data.clone()),
                         summary: EntrySummary {
                             path: entry.name,
                             kind: if entry.is_dir { "dir" } else { "file" }.to_owned(),
@@ -521,7 +521,7 @@ fn decode_items(
                 entries
                     .into_iter()
                     .map(|entry| DecodedItem {
-                        payload: Some(entry.data.clone()),
+                        payload: (!entry.is_dir).then(|| entry.data.clone()),
                         summary: EntrySummary {
                             path: entry.name,
                             kind: if entry.is_dir { "dir" } else { "file" }.to_owned(),

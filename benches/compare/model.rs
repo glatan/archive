@@ -91,6 +91,8 @@ pub struct Case {
     pub cli_format: Option<&'static str>,
     pub ours_lib: bool,
     pub ours_cli: bool,
+    /// For archive fixtures, use `archive extract` (true) or `archive test` (false).
+    pub cli_extract: bool,
     /// Use the helper's raw library dispatch instead of the CLI dispatch.
     pub raw: bool,
     pub encode: bool,

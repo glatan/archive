@@ -3,9 +3,10 @@
 //! Benchmark execution: corpus setup, helper/CLI/reference timing, checks.
 
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::Instant;
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
@@ -27,6 +28,7 @@ pub struct Config {
     pub work_dir: PathBuf,
     pub skip_cli: bool,
     pub skip_ref: bool,
+    pub timeout: Duration,
 }
 
 impl Config {
@@ -373,7 +375,7 @@ fn run_archive_fixture_case(case: &Case, cfg: &Config, fixture: &str, result: &m
 }
 
 fn uses_self_base(case: &Case) -> bool {
-    matches!(case.format, "ar" | "lha" | "arj")
+    matches!(case.format, "ar" | "arc" | "lha" | "arj")
 }
 
 fn archive_base_dir(case: &Case, tree: &ArchiveTree) -> PathBuf {
@@ -410,6 +412,8 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
     let file_size = if cfg.quick { 8 * 1024 } else { 32 * 1024 };
     let tree = match if case.format == "ar" {
         corpus::build_flat_tree(&tree_dir, file_count, file_size)
+    } else if case.format == "arc" {
+        corpus::build_short_tree(&tree_dir, file_count, file_size)
     } else {
         corpus::build_tree(&tree_dir, file_count, file_size)
     } {
@@ -472,8 +476,7 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
         if case.ours_lib {
             match helper_read(cfg, case, &common, &ours_manifest) {
                 Ok(measurement) => {
-                    let ok =
-                        case.format == "git-pack" || manifest_matches(&ours_manifest, &expected);
+                    let ok = manifest_matches_for(case, &ours_manifest, &expected);
                     decode.ours_lib = Some(measurement);
                     if !ok {
                         decode.note = Some("ours-lib archive manifest mismatch".to_owned());
@@ -501,8 +504,7 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
                     let ref_dir = dir.join("ref-out");
                     match run_ref_decode(cfg, &reference, &command, &common, &ref_dir) {
                         Ok(measurement) => {
-                            let ok = case.format == "git-pack"
-                                || dir_manifest_matches(&ref_dir, &expected);
+                            let ok = dir_manifest_matches_for(case, &ref_dir, &expected);
                             decode.reference = Some(measurement);
                             if !ok {
                                 decode.note =
@@ -523,8 +525,7 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
                     let cross_dir = dir.join("ref-on-ours");
                     match run_ref_verify(cfg, &reference, &command, &ours_lib_encoded, &cross_dir) {
                         Ok(measurement) => {
-                            let ok = case.format == "git-pack"
-                                || dir_manifest_matches(&cross_dir, &expected);
+                            let ok = dir_manifest_matches_for(case, &cross_dir, &expected);
                             decode.reference_on_ours = Some(measurement);
                             merge_cross(&mut decode, ok);
                             if !ok {
@@ -714,18 +715,31 @@ fn run_helper(cfg: &Config, args: &[String], output: &Path) -> Result<Measuremen
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let _ = fs::remove_file(output);
-    let output_process = Command::new(&cfg.helper_bin)
+    let mut child = Command::new(&cfg.helper_bin)
         .args(args)
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|error| format!("spawn {}: {error}", cfg.helper_bin.display()))?;
-    if !output_process.status.success() {
+    let status = wait_status(&mut child, cfg.timeout)?;
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        pipe.read_to_end(&mut stdout)
+            .map_err(|error| error.to_string())?;
+    }
+    if let Some(mut pipe) = child.stderr.take() {
+        pipe.read_to_end(&mut stderr)
+            .map_err(|error| error.to_string())?;
+    }
+    if !status.success() {
         return Err(format!(
             "helper failed: {}",
-            String::from_utf8_lossy(&output_process.stderr).trim()
+            String::from_utf8_lossy(&stderr).trim()
         ));
     }
-    let value: Value = serde_json::from_slice(&output_process.stdout)
-        .map_err(|error| format!("parse helper JSON: {error}"))?;
+    let value: Value =
+        serde_json::from_slice(&stdout).map_err(|error| format!("parse helper JSON: {error}"))?;
     let samples = value
         .get("samples_ns")
         .and_then(Value::as_array)
@@ -817,6 +831,15 @@ fn cli_archive_decode(
     out_dir: &Path,
 ) -> Result<Measurement, String> {
     let archive = cfg.archive_bin.as_ref().ok_or("archive CLI not found")?;
+    if !case.cli_extract {
+        let args = vec![
+            "test".to_owned(),
+            input.display().to_string(),
+            "--format".to_owned(),
+            case.format.to_owned(),
+        ];
+        return measure_process(archive, &args, Path::new("/dev/null"), cfg, false);
+    }
     let args = vec![
         "extract".to_owned(),
         input.display().to_string(),
@@ -838,11 +861,11 @@ fn measure_process(
 ) -> Result<Measurement, String> {
     let mut samples = Vec::with_capacity(cfg.iterations);
     for _ in 0..cfg.warmup {
-        run_process(program, args, remove_output.then_some(output))?;
+        run_process(program, args, remove_output.then_some(output), cfg.timeout)?;
     }
     for _ in 0..cfg.iterations {
         let start = Instant::now();
-        run_process(program, args, remove_output.then_some(output))?;
+        run_process(program, args, remove_output.then_some(output), cfg.timeout)?;
         samples.push(start.elapsed().as_nanos() as u64);
     }
     let (output_len, hash) = if remove_output && output.exists() {
@@ -865,11 +888,11 @@ fn measure_process_dir(
 ) -> Result<Measurement, String> {
     let mut samples = Vec::with_capacity(cfg.iterations);
     for _ in 0..cfg.warmup {
-        run_process_dir(program, args, out_dir)?;
+        run_process_dir(program, args, out_dir, cfg.timeout)?;
     }
     for _ in 0..cfg.iterations {
         let start = Instant::now();
-        run_process_dir(program, args, out_dir)?;
+        run_process_dir(program, args, out_dir, cfg.timeout)?;
         samples.push(start.elapsed().as_nanos() as u64);
     }
     let manifest = read_dir_manifest(out_dir)?;
@@ -880,15 +903,21 @@ fn measure_process_dir(
     })
 }
 
-fn run_process_dir(program: &Path, args: &[String], out_dir: &Path) -> Result<(), String> {
+fn run_process_dir(
+    program: &Path,
+    args: &[String],
+    out_dir: &Path,
+    timeout: Duration,
+) -> Result<(), String> {
     let _ = fs::remove_dir_all(out_dir);
     fs::create_dir_all(out_dir).map_err(|error| error.to_string())?;
-    let status = Command::new(program)
+    let mut child = Command::new(program)
         .args(args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
+        .spawn()
         .map_err(|error| format!("spawn {}: {error}", program.display()))?;
+    let status = wait_status(&mut child, timeout)?;
     if !status.success() {
         return Err(format!(
             "{} exited with {}",
@@ -899,16 +928,22 @@ fn run_process_dir(program: &Path, args: &[String], out_dir: &Path) -> Result<()
     Ok(())
 }
 
-fn run_process(program: &Path, args: &[String], remove: Option<&Path>) -> Result<(), String> {
+fn run_process(
+    program: &Path,
+    args: &[String],
+    remove: Option<&Path>,
+    timeout: Duration,
+) -> Result<(), String> {
     if let Some(path) = remove {
         let _ = fs::remove_file(path);
     }
-    let status = Command::new(program)
+    let mut child = Command::new(program)
         .args(args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
+        .spawn()
         .map_err(|error| format!("spawn {}: {error}", program.display()))?;
+    let status = wait_status(&mut child, timeout)?;
     if !status.success() {
         return Err(format!(
             "{} exited with {}",
@@ -917,6 +952,21 @@ fn run_process(program: &Path, args: &[String], remove: Option<&Path>) -> Result
         ));
     }
     Ok(())
+}
+
+fn wait_status(child: &mut Child, timeout: Duration) -> Result<ExitStatus, String> {
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            return Ok(status);
+        }
+        if start.elapsed() > timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("timed out after {}s", timeout.as_secs()));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1043,9 +1093,10 @@ fn run_ref_once(
         let file = fs::File::create(&output).map_err(|error| error.to_string())?;
         process.stdout(Stdio::from(file));
     }
-    let status = process
-        .status()
+    let mut child = process
+        .spawn()
         .map_err(|error| format!("spawn {}: {error}", program.display()))?;
+    let status = wait_status(&mut child, cfg.timeout)?;
     if !status.success() {
         return Err(format!(
             "{} exited with {}",
@@ -1151,15 +1202,69 @@ fn dir_manifest_matches(dir: &Path, expected: &[(String, usize, u64)]) -> bool {
     let Ok(manifest) = read_dir_manifest(dir) else {
         return false;
     };
-    let actual: Vec<(String, usize, u64)> = manifest
-        .into_iter()
-        .filter(|(_, len, _)| *len > 0)
-        .collect();
-    let expected: Vec<(String, usize, u64)> = expected
+    let actual: Vec<(String, usize, u64)> = manifest.into_iter().collect();
+    let expected: Vec<(String, usize, u64)> = expected.to_vec();
+    actual == expected
+}
+
+fn manifest_matches_for(case: &Case, path: &Path, expected: &[(String, usize, u64)]) -> bool {
+    if case.format == "git-pack" {
+        manifest_data_matches(path, expected)
+    } else {
+        manifest_matches(path, expected)
+    }
+}
+
+fn dir_manifest_matches_for(case: &Case, dir: &Path, expected: &[(String, usize, u64)]) -> bool {
+    if case.format == "git-pack" {
+        dir_manifest_data_matches(dir, expected)
+    } else {
+        dir_manifest_matches(dir, expected)
+    }
+}
+
+fn manifest_data_matches(path: &Path, expected: &[(String, usize, u64)]) -> bool {
+    let Ok(bytes) = fs::read(path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
+        return false;
+    };
+    let Some(entries) = value.get("entries").and_then(Value::as_array) else {
+        return false;
+    };
+    let mut actual: Vec<(usize, u64)> = entries
         .iter()
-        .filter(|(_, len, _)| *len > 0)
-        .cloned()
+        .filter_map(|entry| {
+            Some((
+                entry.get("len")?.as_u64()? as usize,
+                entry.get("hash")?.as_u64()?,
+            ))
+        })
         .collect();
+    let mut expected: Vec<(usize, u64)> = expected
+        .iter()
+        .map(|(_, len, hash)| (*len, *hash))
+        .collect();
+    actual.sort_unstable();
+    expected.sort_unstable();
+    actual == expected
+}
+
+fn dir_manifest_data_matches(dir: &Path, expected: &[(String, usize, u64)]) -> bool {
+    let Ok(manifest) = read_dir_manifest(dir) else {
+        return false;
+    };
+    let mut actual: Vec<(usize, u64)> = manifest
+        .into_iter()
+        .map(|(_, len, hash)| (len, hash))
+        .collect();
+    let mut expected: Vec<(usize, u64)> = expected
+        .iter()
+        .map(|(_, len, hash)| (*len, *hash))
+        .collect();
+    actual.sort_unstable();
+    expected.sort_unstable();
     actual == expected
 }
 
@@ -1182,14 +1287,9 @@ fn manifest_matches(path: &Path, expected: &[(String, usize, u64)]) -> bool {
                 entry.get("hash")?.as_u64()?,
             ))
         })
-        .filter(|(_, len, _)| *len > 0)
         .collect();
     actual.sort_by(|a, b| a.0.cmp(&b.0));
-    let expected: Vec<(String, usize, u64)> = expected
-        .iter()
-        .filter(|(_, len, _)| *len > 0)
-        .cloned()
-        .collect();
+    let expected: Vec<(String, usize, u64)> = expected.to_vec();
     actual == expected
 }
 

@@ -62,7 +62,7 @@ pub fn build_tree(dir: &Path, file_count: usize, file_size: usize) -> std::io::R
             1 => (format!("sub/file_{i:03}.txt"), file_size),
             2 => (format!("nested/deep/file_{i:03}.txt"), file_size / 2),
             3 => (format!("file_{i:03}.bin"), file_size),
-            4 if i == 4 => ("small.bin".to_owned(), 1),
+            4 if i == 4 => ("empty.bin".to_owned(), 0),
             _ => (format!("sub/file_{i:03}.txt"), file_size),
         };
         let data = if relative.ends_with(".bin") {
@@ -113,13 +113,13 @@ pub fn build_flat_tree(
     let mut entries = Vec::new();
     for i in 0..file_count {
         let name = if i == 0 {
-            "small.bin".to_owned()
+            "empty.bin".to_owned()
         } else if i % 3 == 0 {
             format!("file_{i:03}.bin")
         } else {
             format!("file_{i:03}.txt")
         };
-        let size = if i == 0 { 1 } else { file_size };
+        let size = if i == 0 { 0 } else { file_size };
         let mut data = if name.ends_with(".bin") {
             generate("random", size)
         } else if size == 0 {
@@ -131,6 +131,50 @@ pub fn build_flat_tree(
                 *byte = b"entry-"[j % 6].wrapping_add((i % 32) as u8);
             }
             bytes
+        };
+        if data.len() > 8 {
+            for (j, byte) in data.iter_mut().take(8).enumerate() {
+                *byte = (i as u8).wrapping_add(j as u8);
+            }
+        }
+        fs::write(dir.join(&name), &data)?;
+        entries.push(TreeEntry {
+            name: format!("tree/{name}"),
+            data,
+        });
+    }
+    Ok(ArchiveTree {
+        root: dir.to_path_buf(),
+        entries,
+    })
+}
+
+/// Build a flat tree with DOS 8.3 names for ARC.
+pub fn build_short_tree(
+    dir: &Path,
+    file_count: usize,
+    file_size: usize,
+) -> std::io::Result<ArchiveTree> {
+    if dir.exists() {
+        fs::remove_dir_all(dir)?;
+    }
+    fs::create_dir_all(dir)?;
+    let mut entries = Vec::new();
+    for i in 0..file_count {
+        let name = if i == 0 {
+            "E.BIN".to_owned()
+        } else if i % 3 == 0 {
+            format!("F{i:03}.BIN")
+        } else {
+            format!("F{i:03}.TXT")
+        };
+        let size = if i == 0 { 0 } else { file_size };
+        let mut data = if name.ends_with(".BIN") {
+            generate("random", size)
+        } else if size == 0 {
+            Vec::new()
+        } else {
+            generate("text", size)
         };
         if data.len() > 8 {
             for (j, byte) in data.iter_mut().take(8).enumerate() {
