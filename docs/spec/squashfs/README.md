@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [SquashFS binary format documentation](https://dr-emann.github.io/squashfs/squashfs.html) (SquashFS 4.0、コミュニティ逆解析文書 = de facto 仕様、ローカルスナップショット: `docs/spec/sources/squashfs_4.0.html`) |
-| 参照実装 | squashfs-tools (`mksquashfs` / `unsquashfs` は fixture 生成 / writer 出力検証の oracle、`lzma_wrapper.c` は compressor id 2 のワイヤ形式参照、GPL-2.0-or-later)。詳細: THIRD_PARTY_NOTICES squashfs 項 |
+| 参照実装 | squashfs-tools (`mksquashfs` / `unsquashfs` は fixture 生成 / writer 出力検証の oracle、性能比較 `docs/bench/` の decode 参照、`lzma_wrapper.c` は compressor id 2 のワイヤ形式参照、GPL-2.0-or-later)。詳細: THIRD_PARTY_NOTICES squashfs 項 |
 | 形式概要 | 96B superblock + metadata block 列 (inode/dir table) + lookup table (fragment/ID/xattr を実読み、export は境界計算のみ) + data block |
 | 実装範囲 | read + write (write は SquashFS 4.0 / regular file + symlink + device/IPC + directory tree、任意で fragment table・複数 UID/GID・export table・xattr table・directory index (ext dir inode)・sparse block 自動検出) |
 

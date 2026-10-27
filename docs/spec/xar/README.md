@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | xar プロジェクト wiki の `xarformat` 文書 (mackyle/xar、ローカルスナップショット: `docs/spec/sources/xarformat.wiki`) |
-| 参照実装 | 参照 `xar` 1.6.1 ツール (mackyle/xar、BSD-3-Clause、fixture 生成・encode 方向の interop oracle)、`unar` (decode oracle)。性能比較 (`docs/bench/`) では `tests/fixtures/xar/real.xar` の decode に使用。詳細: THIRD_PARTY_NOTICES XAR 項 |
+| 参照実装 | 参照 `xar` 1.6.1 ツール (mackyle/xar、BSD-3-Clause、fixture 生成・encode 方向の interop oracle)、`unar` (decode oracle)。性能比較 (`docs/bench/`) では生成 archive の encode と、`unar` による decode に使用。詳細: THIRD_PARTY_NOTICES XAR 項 |
 | 形式概要 | 3 領域構成: (1) `xar!` magic + header size + version + TOC 長 (圧縮/非圧縮) + checksum アルゴリズムの固定ヘッダ (network byte order)。(2) zlib 圧縮された XML Table of Contents。(3) heap: TOC チェックサム (heap offset 0) + 各ファイルの data run。heap offset は TOC の `<offset>` 値で参照される |
 | 実装範囲 | read + write (write は sha1 チェックサム + gzip エンコード固定)。`<ea>` 拡張属性・署名・bzip2/lzma/xz エンコードの data も decode 対応 |
 

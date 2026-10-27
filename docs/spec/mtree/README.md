@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | [mtree(5) man page](https://man.freebsd.org/cgi/man.cgi?mtree(5)) (FreeBSD、ローカルスナップショット: `docs/spec/sources/mtree_5_freebsd.html`) + libarchive [`archive_read_support_format_mtree.c`](https://github.com/libarchive/libarchive/blob/master/libarchive/archive_read_support_format_mtree.c) 挙動 |
-| 参照実装 | libarchive `archive_read_support_format_mtree.c` (BSD-2-Clause、方言挙動の動作参照)、`bsdtar` (統合テストの oracle)。詳細: THIRD_PARTY_NOTICES mtree 項 |
+| 参照実装 | libarchive `archive_read_support_format_mtree.c` (BSD-2-Clause、方言挙動の動作参照)、`bsdtar` (統合テストの oracle・性能比較 `docs/bench/` の decode 参照)。詳細: THIRD_PARTY_NOTICES mtree 項 |
 | 形式概要 | 行指向テキスト。`#`コメント/`#mtree` signature、`/set`・`/unset`、相対・full path エントリ、`..` でディレクトリ遡上 |
 | 実装範囲 | read/write 両対応。ファイル内容を持たないマニフェスト形式のため `ArchiveEntry::data` は常に空 |
 
