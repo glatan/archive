@@ -494,7 +494,6 @@ fn read_payloads(
                 .map(|entry| read::DecodedPayload {
                     name: String::from_utf8_lossy(&entry.filename).into_owned(),
                     data: entry.data,
-                    is_dir: false,
                 })
                 .collect());
         }
@@ -504,7 +503,6 @@ fn read_payloads(
                 .map(|entry| read::DecodedPayload {
                     name: String::from_utf8_lossy(&entry.filename).into_owned(),
                     data: entry.data,
-                    is_dir: false,
                 })
                 .collect());
         }
@@ -637,7 +635,7 @@ fn payload_manifest(payloads: &[read::DecodedPayload]) -> Value {
                 "name": payload.name,
                 "len": payload.data.len(),
                 "hash": fnv1a64(&payload.data),
-                "is_dir": payload.is_dir,
+                "is_dir": false,
             })
         })
         .collect();

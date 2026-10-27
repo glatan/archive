@@ -42,10 +42,10 @@ missing reference binary) is recorded in the generated report.
 | zx1 | zx1 | codec | measured | ZX1 | 1.5 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx1.c optimize.c compress.c memory.c) | ZX1 reference CLI from upstream source build |
 | zx2 | zx2 | codec | measured | ZX2 | 1.1 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx2.c optimize.c compress.c memory.c) | ZX2 reference CLI from upstream source build |
 | zx5 | zx5 | codec | measured | ZX5 | 2.0 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx5.c optimize.c compress.c memory.c) | ZX5 reference CLI from upstream source build |
-| zx0b | zx0b | codec | measured | ZX0 | 2.2 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | Reference encoder only; upstream C decompressor has no backwards mode |
-| zx1b | zx1b | codec | measured | ZX1 | 1.5 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | Reference encoder only; upstream C decompressor has no backwards mode |
-| zx2b | zx2b | codec | measured | ZX2 | 1.1 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | Reference encoder only; upstream C decompressor has no backwards mode |
-| zx5b | zx5b | codec | measured | ZX5 | 2.0 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | Reference encoder only; upstream C decompressor has no backwards mode |
+| zx0b | zx0b | codec | measured | ZX0 | 2.2 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx0.c optimize.c compress.c memory.c) | Reference encoder only; upstream C decompressor has no backwards mode |
+| zx1b | zx1b | codec | measured | ZX1 | 1.5 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx1.c optimize.c compress.c memory.c) | Reference encoder only; upstream C decompressor has no backwards mode |
+| zx2b | zx2b | codec | measured | ZX2 | 1.1 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx2.c optimize.c compress.c memory.c) | Reference encoder only; upstream C decompressor has no backwards mode |
+| zx5b | zx5b | codec | measured | ZX5 | 2.0 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx5.c optimize.c compress.c memory.c) | Reference encoder only; upstream C decompressor has no backwards mode |
 | vcdiff | vcdiff | codec | measured | Xdelta3 | 3.2.2 | distro package (exact distro build flags not exposed) | xdelta3 delta against an empty source; startup is included |
 | mppc | mppc | codec | ours-only | — | — | — | No packaged MPPC reference CLI; 8 KiB single-packet limit |
 | lzs | lzs | codec | measured | lzs-compression | 10f122bf | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | lzs-compression MIT reference, pinned source build |

@@ -128,7 +128,7 @@ full-reference 実行後は `result.json` の status を検査する。
 python3 docs/bench/check-status.py target/bench/compare/run-.../result.json
 ```
 
-- `failed` があれば exit 1
+- `failed` / `unavailable` / 未知の status があれば exit 1
 - `partial` も exit 1（`--allow-partial` で許可）
 - `ours-only` は参照実装がないケースとして許容
 - CI には接続しないローカル確認用

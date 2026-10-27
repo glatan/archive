@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "lzs.h"
@@ -18,21 +19,30 @@ static unsigned char *read_file(const char *path, size_t *len) {
     return buf;
 }
 
+#define MAX_ALLOC ((size_t)1 << 30)
+
 int main(int argc, char **argv) {
     unsigned char *in, *out;
-    size_t n = 0, olen = 0;
+    size_t n = 0, olen = 0, capacity;
     FILE *f;
     if (argc != 4) return 2;
     in = read_file(argv[2], &n);
     if (!in) return 2;
-    out = malloc(256u << 20);
+    if (argv[1][0] == 'c') {
+        if (n > MAX_ALLOC / 2) return 3;
+        capacity = n + n / 8 + 16;
+    } else {
+        // The library documents a 16x worst-case expansion.
+        if (n > (MAX_ALLOC - 1) / 16) return 3;
+        capacity = n * 16 + 1;
+    }
+    if (capacity > MAX_ALLOC) return 3;
+    out = malloc(capacity);
     if (!out) return 2;
-    if (argv[1][0] == 'c') olen = lzs_compress(out, 256u << 20, in, n);
-    else olen = lzs_decompress(out, 256u << 20, in, n);
-    if (olen == 0 && n != 0) return 3;
+    if (argv[1][0] == 'c') olen = lzs_compress(out, capacity, in, n);
+    else olen = lzs_decompress(out, capacity, in, n);
     f = fopen(argv[3], "wb");
     if (!f) return 2;
-    fwrite(out, 1, olen, f);
-    fclose(f);
+    if (fwrite(out, 1, olen, f) != olen || fclose(f) != 0) return 2;
     return 0;
 }
