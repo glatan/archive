@@ -78,10 +78,15 @@ impl XarEncoder {
             offsets.push((off, z.len() as u64));
             off += z.len() as u64;
         }
-        let mut run_iter = heap_runs.iter().zip(offsets.iter());
+        let runs_by_index: BTreeMap<usize, (u64, u64, &[u8])> = heap_runs
+            .iter()
+            .zip(offsets.iter().copied())
+            .map(|((index, data), (offset, length))| (*index, (offset, length, data.as_slice())))
+            .collect();
         let mut id = 0u32;
         // Emit the entry tree: parents derived from '/' components.
-        emit_tree(&self.entries, &mut run_iter, &mut toc, 2, &mut id);
+        emit_tree(&self.entries, &runs_by_index, &mut toc, 2, &mut id);
+        drop(runs_by_index);
         toc.push_str(" </toc>\n</xar>\n");
 
         let toc_packed = crate::compress::zlib::encode::encode(toc.as_bytes());
@@ -126,9 +131,9 @@ impl crate::traits::ArchiveEncode for XarEncoder {
 /// Emit `<file>` elements for `entries`, grouping by path prefix into
 /// nested directory elements. `runs` yields (heap data run, (offset,
 /// length)) for each non-directory entry in order.
-fn emit_tree<'a, 'b>(
+fn emit_tree<'a>(
     entries: &'a [(String, bool, Vec<u8>, Option<String>)],
-    runs: &mut impl Iterator<Item = (&'a (usize, Vec<u8>), &'b (u64, u64))>,
+    runs: &BTreeMap<usize, (u64, u64, &'a [u8])>,
     toc: &mut String,
     indent: usize,
     id: &mut u32,
@@ -180,11 +185,11 @@ fn emit_tree<'a, 'b>(
         }
     }
 
-    fn emit_dir<'a, 'b>(
+    fn emit_dir<'a>(
         dir: &Dir<'a>,
         name: Option<&'a str>,
         entries: &'a [(String, bool, Vec<u8>, Option<String>)],
-        runs: &mut impl Iterator<Item = (&'a (usize, Vec<u8>), &'b (u64, u64))>,
+        runs: &BTreeMap<usize, (u64, u64, &'a [u8])>,
         toc: &mut String,
         indent: usize,
         id: &mut u32,
@@ -199,7 +204,7 @@ fn emit_tree<'a, 'b>(
         for &i in &dir.files {
             let (path, _, data, mode) = &entries[i];
             let fname = path.rsplit('/').next().unwrap_or(path);
-            let ((_, zdata), &(doff, dlen)) = runs.next().unwrap();
+            let &(doff, dlen, zdata) = runs.get(&i).expect("heap run for file entry");
             *id += 1;
             toc.push_str(&alloc::format!("{pad}<file id=\"{id}\">\n"));
             toc.push_str(&alloc::format!(
@@ -262,4 +267,43 @@ fn xml_escape(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::archive::xar::decode;
+
+    #[test]
+    fn xml_escape_escapes_special_characters() {
+        assert_eq!(xml_escape("a&b<c>d\"e"), "a&amp;b&lt;c&gt;d&quot;e");
+        assert_eq!(hex(&[0x00, 0x0F, 0xA5, 0xFF]), "000fa5ff");
+    }
+
+    #[test]
+    fn encoder_roundtrips_files_modes_and_directories() {
+        let mut encoder = XarEncoder::new();
+        encoder.add_file("dir/a & b.txt", b"hello xar");
+        encoder.add_file_with_mode("mode.bin", b"x", "0644");
+        encoder.add_directory("empty");
+        let image = encoder.finish();
+        let entries = decode::decode(&image).unwrap();
+        let file = entries
+            .iter()
+            .find(|entry| entry.name == "dir/a & b.txt")
+            .unwrap();
+        assert_eq!(file.data, b"hello xar");
+        assert_eq!(file.file_type, "file");
+
+        let mode = entries
+            .iter()
+            .find(|entry| entry.name == "mode.bin")
+            .unwrap();
+        assert_eq!(mode.data, b"x");
+        assert_eq!(mode.mode.as_deref(), Some("0644"));
+
+        let dir = entries.iter().find(|entry| entry.name == "empty").unwrap();
+        assert!(dir.is_dir);
+        assert_eq!(dir.file_type, "directory");
+    }
 }
