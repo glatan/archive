@@ -37,8 +37,8 @@ catalog flags and the binary `.comment`; `result.json` embeds the complete
 The LZF, FastLZ, LZRW, LZS, and Snappy drivers are benchmark-only adapters
 around the upstream C/C++ APIs. They are not part of the `archive` crate and
 are not distributed as libraries. LZRW builds apply the small portability
-patches (commented preamble, 64-bit hash alignment) at fetch time; the fetched
-and patched sources are not committed.
+patches at fetch time (commented preamble for LZRW1/LZRW1-A, 64-bit hash
+alignment for LZRW1-A); the fetched and patched sources are not committed.
 
 Sources fetched here are not committed. They are placed under `target/`,
 which is ignored by git.

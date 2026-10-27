@@ -891,9 +891,10 @@ against de facto reference behavior:
     TRUE/FALSE defines, un-commented header text); the patched sources
     are not included in this repository
   - Performance comparison (`docs/bench/`) builds the same public-domain
-    sources into raw-stream reference binaries. The build applies the same
-    portability patches at fetch time; the fetched sources stay under
-    `target/bench/refs/` and are not committed
+    sources into raw-stream reference binaries. The build applies only the
+    portability patches needed by each source (commented preamble for
+    LZRW1/LZRW1-A, 64-bit hash alignment for LZRW1-A); the fetched sources
+    stay under `target/bench/refs/` and are not committed
   - LZRW4 and LZRW5 were evaluated and intentionally excluded: LZRW4
     has no production wire format (experimental sketch only) and
     LZRW5's reference is an incomplete draft; see docs/spec/README.md

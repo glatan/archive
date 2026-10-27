@@ -425,7 +425,15 @@ fn zx_backwards_ref(name: &'static str, version: &'static str, binary: &'static 
         name,
         version,
         binary_id: binary,
-        build: "source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0",
+        build: if binary == "zx0" {
+            "source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx0.c optimize.c compress.c memory.c)"
+        } else if binary == "zx1" {
+            "source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx1.c optimize.c compress.c memory.c)"
+        } else if binary == "zx2" {
+            "source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx2.c optimize.c compress.c memory.c)"
+        } else {
+            "source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx5.c optimize.c compress.c memory.c)"
+        },
         encode: Some(cmd(
             binary,
             if binary == "zx2" {

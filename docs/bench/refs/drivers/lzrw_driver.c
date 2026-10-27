@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -36,14 +37,27 @@ static unsigned char *read_file(const char *path, unsigned long *len) {
     return buf;
 }
 
+#define MAX_ALLOC ((size_t)1 << 30)
+
 int main(int argc, char **argv) {
     unsigned char *in, *out, *wrk = NULL;
     unsigned long n = 0, olen = 0;
+    size_t capacity;
     FILE *f;
     if (argc != 4) return 2;
     in = read_file(argv[2], &n);
     if (!in) return 2;
-    out = malloc(256u << 20);
+    if (argv[1][0] == 'c') {
+        if ((size_t)n > MAX_ALLOC / 2) return 3;
+        capacity = (size_t)n + (size_t)n / 8 + 65536;
+    } else {
+        // LZRW matches expand by at most 9x; 16x leaves headroom while
+        // staying bounded for arbitrary --size values.
+        if ((size_t)n > (MAX_ALLOC - 4096) / 16) return 3;
+        capacity = (size_t)n * 16 + 4096;
+    }
+    if (capacity > MAX_ALLOC) return 3;
+    out = malloc(capacity);
     if (!out) return 2;
 #if defined(USE_LZRW1)
     if (argv[1][0] == 'c') lzrw1_compress(in, n, out, &olen);
@@ -56,7 +70,6 @@ int main(int argc, char **argv) {
 #endif
     f = fopen(argv[3], "wb");
     if (!f) return 2;
-    fwrite(out, 1, olen, f);
-    fclose(f);
+    if (fwrite(out, 1, olen, f) != olen || fclose(f) != 0) return 2;
     return 0;
 }

@@ -42,10 +42,18 @@ def main() -> int:
         if counts[status]:
             print(f"  {status}: {counts[status]}")
 
+    known = {"measured", "partial", "ours-only", "failed", "unavailable"}
     failures = [result for result in results if result.get("status") == "failed"]
     partials = [result for result in results if result.get("status") == "partial"]
+    unavailable = [result for result in results if result.get("status") == "unavailable"]
+    unexpected = [result for result in results if result.get("status") not in known]
 
-    for label, rows in (("failed", failures), ("partial", partials)):
+    for label, rows in (
+        ("failed", failures),
+        ("partial", partials),
+        ("unavailable", unavailable),
+        ("unexpected", unexpected),
+    ):
         if not rows or (label == "partial" and args.allow_partial):
             continue
         print(f"\n{label} cases:", file=sys.stderr)
@@ -59,7 +67,7 @@ def main() -> int:
                 if note:
                     print(f"    {op}: {note}", file=sys.stderr)
 
-    if failures or (partials and not args.allow_partial):
+    if failures or unavailable or unexpected or (partials and not args.allow_partial):
         return 1
     return 0
 

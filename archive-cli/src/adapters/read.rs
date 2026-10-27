@@ -121,8 +121,6 @@ pub fn analyze_bytes(
 pub struct DecodedPayload {
     pub name: String,
     pub data: Vec<u8>,
-    /// True for directory metadata; payloads are normally files.
-    pub is_dir: bool,
 }
 
 /// Decode every payload with the same dispatch as `archive list`.
@@ -142,15 +140,12 @@ pub fn decode_payloads(
             // Directories are not payloads. Some decoders attach an
             // empty `Some` payload to them, which would otherwise appear
             // as a zero-length file in benchmark manifests.
-            let is_dir = matches!(item.summary.kind.as_str(), "dir" | "directory")
-                || item.summary.path.ends_with('/');
-            if is_dir {
+            if matches!(item.summary.kind.as_str(), "dir" | "directory") {
                 return None;
             }
             item.payload.map(|data| DecodedPayload {
                 name: item.summary.path,
                 data,
-                is_dir: false,
             })
         })
         .collect();
@@ -295,11 +290,12 @@ fn decode_items(
                         if let Some(fx) = entry.file_index {
                             extra.push(format!("rpm-file-index={fx}"));
                         }
+                        let is_dir = entry.name.ends_with('/');
                         DecodedItem {
-                            payload: Some(entry.data.clone()),
+                            payload: (!is_dir).then(|| entry.data.clone()),
                             summary: EntrySummary {
                                 path: entry.name,
-                                kind: "file".to_owned(),
+                                kind: if is_dir { "directory" } else { "file" }.to_owned(),
                                 size: Some(entry.data.len() as u64),
                                 compressed_size: None,
                                 mtime: None,
@@ -619,17 +615,20 @@ fn decode_items(
                 ContentKind::Archive,
                 entries
                     .into_iter()
-                    .map(|entry| DecodedItem {
-                        payload: Some(entry.data.clone()),
-                        summary: EntrySummary {
-                            path: entry.name,
-                            kind: "file".to_owned(),
-                            size: Some(entry.header.uncompressed_size),
-                            compressed_size: Some(entry.header.compressed_size),
-                            mtime: None,
-                            mode: None,
-                            extra: vec![format!("method={}", entry.header.compression_method)],
-                        },
+                    .map(|entry| {
+                        let is_dir = entry.name.ends_with('/');
+                        DecodedItem {
+                            payload: (!is_dir).then(|| entry.data.clone()),
+                            summary: EntrySummary {
+                                path: entry.name,
+                                kind: if is_dir { "directory" } else { "file" }.to_owned(),
+                                size: Some(entry.header.uncompressed_size),
+                                compressed_size: Some(entry.header.compressed_size),
+                                mtime: None,
+                                mode: None,
+                                extra: vec![format!("method={}", entry.header.compression_method)],
+                            },
+                        }
                     })
                     .collect(),
             ))
@@ -645,20 +644,23 @@ fn decode_items(
                 ContentKind::Archive,
                 entries
                     .into_iter()
-                    .map(|entry| DecodedItem {
-                        payload: Some(entry.data.clone()),
-                        summary: EntrySummary {
-                            path: entry.name,
-                            kind: "file".to_owned(),
-                            size: Some(entry.data.len() as u64),
-                            compressed_size: None,
-                            mtime: None,
-                            mode: entry.attributes,
-                            extra: entry
-                                .crc32
-                                .map(|crc| vec![format!("crc32={crc:#010x}")])
-                                .unwrap_or_default(),
-                        },
+                    .map(|entry| {
+                        let is_dir = entry.name.ends_with('/');
+                        DecodedItem {
+                            payload: (!is_dir).then(|| entry.data.clone()),
+                            summary: EntrySummary {
+                                path: entry.name,
+                                kind: if is_dir { "directory" } else { "file" }.to_owned(),
+                                size: Some(entry.data.len() as u64),
+                                compressed_size: None,
+                                mtime: None,
+                                mode: entry.attributes,
+                                extra: entry
+                                    .crc32
+                                    .map(|crc| vec![format!("crc32={crc:#010x}")])
+                                    .unwrap_or_default(),
+                            },
+                        }
                     })
                     .collect(),
             ))

@@ -284,16 +284,28 @@ def prepare_lzrw_source(root: Path, spec: dict) -> None:
 
 def build_driver(name: str, spec: dict, root: Path) -> dict:
     commands = []
-    prepare_lzrw_source(root, spec)
-    if "comment_preamble" in spec or spec.get("patch_hash_align"):
-        commands.append(
-            f"prepare {root / spec['filename']} (comment preamble"
-            + (", 64-bit hash alignment)" if spec.get("patch_hash_align") else ")")
+    patches = []
+    if "comment_preamble" in spec:
+        prepare_lzrw_source(root, spec)
+        patches.append(
+            {
+                "file": str(root / spec["filename"]),
+                "action": "comment_preamble",
+                "marker": spec["comment_preamble"],
+            }
         )
+        commands.append(f"prepare {root / spec['filename']} (comment preamble)")
     if spec.get("patch_hash_align"):
         source = root / spec["filename"]
-        text = source.read_text().replace("& 0xFFFFFFFC)", "& ~(ULONG)3)")
-        source.write_text(text)
+        old = "& 0xFFFFFFFC)"
+        new = "& ~(ULONG)3)"
+        text = source.read_text()
+        count = text.count(old)
+        if count != 1:
+            raise SystemExit(f"{name}: expected one hash-alignment site, found {count}")
+        source.write_text(text.replace(old, new, 1))
+        patches.append({"file": str(source), "from": old, "to": new})
+        commands.append(f"prepare {source} (64-bit hash alignment)")
     if "stubs" in spec:
         stub_script = Path(__file__).resolve().parent / "drivers" / "snappy_stubs.py"
         stub_command = [sys.executable, str(stub_script), str(root)]
@@ -327,9 +339,10 @@ def build_driver(name: str, spec: dict, root: Path) -> dict:
         "build": {
             "cc": compiler,
             "cc_version": compiler_version(compiler),
-            "cflags": CFLAGS_TEXT,
+            "cflags": " ".join([*CFLAGS, *spec.get("cflags_extra", [])]),
             "ldflags": LDFLAGS,
             "commands": commands,
+            **({"patches": patches} if patches else {}),
         },
         "binaries": [{"binary": str(out.relative_to(ROOT)), "sha256": sha256(out)}],
     }
