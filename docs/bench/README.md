@@ -16,7 +16,7 @@ make bench-compare
 # 参照ツールが揃ったテストコンテナ内で full
 make bench-compare-container
 
-# 参照実装を固定ソースからビルド（ZX0/1/2/5、LZSA、liblzf、FastLZ）
+# 参照実装を固定ソースからビルド（ZX0/1/2/5、LZSA、liblzf、FastLZ、Snappy）
 make bench-refs
 
 # 既存 Criterion ベンチ
@@ -105,15 +105,24 @@ cargo bench --all-features --bench compare -- \
 | 入手方法 | 例 |
 |---|---|
 | ディストリ配布バイナリ | gzip, zstd, xz, bzip2, lzip, lz4, lzop, brotli, ncompress, rzip, lrzip, 7z, tar, cpio, ar, zip, bsdtar, cabextract, unsquashfs, unar, lhasa |
-| 固定ソースビルド | ZX0/1/2/5, LZSA, liblzf, FastLZ |
+| 固定ソースビルド | ZX0/1/2/5, LZSA, liblzf, FastLZ, Snappy |
 | Python stdlib | zlib, deflate, uuencode, Ascii85 |
-| 参照なし（N/A） | snappy, lzrw*, vcdiff, mppc, lzs, lzxd, cmpsc, xca, packbits, yenc, macbinary, binhex |
+| 参照なし（N/A） | snappy (framed), lzrw*, vcdiff, mppc, lzs, lzxd, cmpsc, xca, packbits, yenc, macbinary, binhex |
 
 `make bench-refs` は `docs/bench/refs/build.py` を実行し、
 `target/bench/refs/bin/` に参照バイナリを置く。ハーネスは PATH より
 `target/bench/refs/bin/` を優先する。ビルド記録は
 `target/bench/refs/build-info.json` に残す。ピン留めした revision と
 フラグの一覧は [refs/README.md](refs/README.md) を参照。
+
+### ベースライン比較
+
+`--baseline target/bench/compare/run-.../result.json` を指定すると、
+同一ケース・同一 corpus・同一 implementation の中央値差分を Markdown に追加する。
+
+- 差分は同一マシン・同一ビルド条件でのみ意味がある
+- 参照実装の差分も表示する
+- CI 連携や性能ゲートは行わない
 
 ### ビルドフラグの表示
 

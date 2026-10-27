@@ -62,6 +62,7 @@ enum RawCodec {
     Yenc,
     Macbinary,
     Binhex,
+    Snappy,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -361,6 +362,9 @@ fn raw_codec(format: RawCodec, op: CodecOp, input: &[u8]) -> Result<Vec<u8>, Cli
         }
         (RawCodec::Binhex, CodecOp::Decode) => encoding::binhex::decode(input)
             .map(|entry| entry.data)
+            .map_err(|error| CliError::from_archive_error(error, false)),
+        (RawCodec::Snappy, CodecOp::Encode) => Ok(compress::snappy::encode::encode_raw(input)),
+        (RawCodec::Snappy, CodecOp::Decode) => compress::snappy::decode::decode_raw(input)
             .map_err(|error| CliError::from_archive_error(error, false)),
     }
 }

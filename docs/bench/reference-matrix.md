@@ -27,7 +27,8 @@ missing reference binary) is recorded in the generated report.
 | zpaq | zpaq | codec | ours-only | — | — | — | Reference zpaq CLI writes journaling archives; raw-stream comparison is N/A |
 | lrzip | lrzip | codec | measured | lrzip | 0.660 | distro package (exact distro build flags not exposed) | Our LZMA dictionary is 4 KiB; lrzip -L 7 uses a larger dictionary, so this is a speed/ratio comparison only |
 | rzip | rzip | codec | measured | rzip | 2.1 | distro package (exact distro build flags not exposed) |  |
-| snappy | snappy | codec | ours-only | — | — | — | No packaged reference CLI |
+| snappy | snappy | codec | ours-only | — | — | — | No packaged reference CLI for the framed stream |
+| snappy-raw | snappy | codec | measured | Snappy | 1.2.1 | source build: g++ -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | Raw-block comparison against upstream Snappy |
 | lzf | lzf | codec | measured | liblzf | 3.6 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | Cross-validated against liblzf 3.6 |
 | fastlz | fastlz | codec | measured | FastLZ | 0.5.0 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | Cross-validated against FastLZ 0.5.0 |
 | lzrw1 | lzrw1 | codec | ours-only | — | — | — | No packaged reference CLI |
@@ -66,8 +67,8 @@ missing reference binary) is recorded in the generated report.
 | 7z | 7z | archive | measured | 7-Zip | 26.04 | distro package (exact distro build flags not exposed) |  |
 | zpaq-archive | zpaq | archive | measured | zpaq | 7.15 | distro package (exact distro build flags not exposed) |  |
 | lha | lha | archive | decode-only | lhasa | system lhasa | distro package (exact distro build flags not exposed) | Checked-in LHA fixture; decode reference is lhasa |
-| arj | arj | archive | ours-only | — | — | — | No packaged ARJ reference writer |
-| arc | arc | archive | ours-only | — | — | — | Uses a DOS 8.3 flat tree; no packaged reference writer |
+| arj | arj | archive | measured | unar | system unarchiver | distro package (exact distro build flags not exposed) | Decode reference is unar; no reference writer |
+| arc | arc | archive | measured | unar | system unarchiver | distro package (exact distro build flags not exposed) | Uses a DOS 8.3 flat tree; decode reference is unar |
 | git-pack | git-pack | archive | ours-only | — | — | — | git pack stores object IDs; payload hashes are compared instead of names |
 | xar | xar | archive | measured | unar | system unarchiver | distro package (exact distro build flags not exposed) | Generated archive; decode reference is unar |
 | mscab | mscab | archive | decode-only | cabextract | system cabextract | distro package (exact distro build flags not exposed) | Checked-in CAB fixture; decode reference is cabextract |

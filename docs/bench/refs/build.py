@@ -83,6 +83,18 @@ REFS = {
         "driver": "fastlz_driver.c",
         "binary": "fastlz_ref",
     },
+    "snappy": {
+        "url": "https://github.com/google/snappy/archive/refs/tags/1.2.1.tar.gz",
+        "sha256": "736aeb64d86566d2236ddffa2865ee5d7a82d26c9016b36218fcc27ea4f09f86",
+        "dir": "snappy-1.2.1",
+        "version": "1.2.1",
+        "license": "BSD-3-Clause",
+        "sources": ["snappy.cc", "snappy-sinksource.cc", "snappy-stubs-internal.cc"],
+        "driver": "snappy_driver.cc",
+        "binary": "snappy_ref",
+        "compiler": "g++",
+        "stubs": "snappy-stubs-public.h",
+    },
     "lzsa": {
         "url": "https://github.com/emmanuel-marty/lzsa.git",
         "commit": "15ee2dfe118eeb8f7683ca44f64821c3a61ca1e5",
@@ -152,10 +164,19 @@ def fetch_archive(name: str, spec: dict) -> Path:
 
 
 def build_driver(name: str, spec: dict, root: Path) -> dict:
+    if "stubs" in spec:
+        source = root / f"{spec['stubs']}.in"
+        target = root / spec["stubs"]
+        text = source.read_text()
+        text = text.replace("${HAVE_SYS_UIO_H_01}", "1")
+        text = text.replace("${PROJECT_VERSION_MAJOR}", "1")
+        text = text.replace("${PROJECT_VERSION_MINOR}", "2")
+        text = text.replace("${PROJECT_VERSION_PATCH}", "1")
+        target.write_text(text)
     driver = Path(__file__).resolve().parent / "drivers" / spec["driver"]
     out = BIN / spec["binary"]
     command = [
-        "gcc",
+        spec.get("compiler", "gcc"),
         *CFLAGS,
         "-I",
         str(root),
@@ -172,7 +193,7 @@ def build_driver(name: str, spec: dict, root: Path) -> dict:
         "source_sha256": spec["sha256"],
         "license": spec["license"],
         "build": {
-            "cc": "gcc",
+            "cc": spec.get("compiler", "gcc"),
             "cc_version": compiler_version(),
             "cflags": CFLAGS_TEXT,
             "ldflags": LDFLAGS,
@@ -210,7 +231,7 @@ def build_zx(name: str, spec: dict, root: Path) -> dict:
         "commit": spec["commit"],
         "license": spec["license"],
         "build": {
-            "cc": "gcc",
+            "cc": spec.get("compiler", "gcc"),
             "cc_version": compiler_version(),
             "cflags": CFLAGS_TEXT,
             "ldflags": LDFLAGS,
@@ -233,7 +254,7 @@ def build_lzsa(name: str, spec: dict, root: Path) -> dict:
         "commit": spec["commit"],
         "license": spec["license"],
         "build": {
-            "cc": "gcc",
+            "cc": spec.get("compiler", "gcc"),
             "cc_version": compiler_version(),
             "cflags": cflags,
             "ldflags": LDFLAGS,

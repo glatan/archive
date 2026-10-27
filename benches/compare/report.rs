@@ -15,6 +15,7 @@ pub fn write_report(
     cases: &[Case],
     cfg: &Config,
     out_dir: &Path,
+    baseline: Option<&Path>,
 ) -> std::io::Result<()> {
     fs::create_dir_all(out_dir)?;
     let json = build_json(results, cases, cfg);
@@ -24,7 +25,7 @@ pub fn write_report(
     )?;
     fs::write(
         out_dir.join("report.md"),
-        build_markdown(results, cases, cfg, &json),
+        build_markdown(results, cases, cfg, &json, baseline),
     )?;
     Ok(())
 }
@@ -105,7 +106,13 @@ fn measurement_json(measurement: Option<&Measurement>) -> Value {
     })
 }
 
-fn build_markdown(results: &[CaseResult], cases: &[Case], cfg: &Config, json: &Value) -> String {
+fn build_markdown(
+    results: &[CaseResult],
+    cases: &[Case],
+    cfg: &Config,
+    json: &Value,
+    baseline: Option<&Path>,
+) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "# Performance comparison");
     let _ = writeln!(out);
@@ -257,6 +264,46 @@ fn build_markdown(results: &[CaseResult], cases: &[Case], cfg: &Config, json: &V
     }
     let _ = writeln!(out);
 
+    if let Some(baseline) = baseline {
+        let _ = writeln!(out, "## Baseline delta");
+        let _ = writeln!(out);
+        match baseline_deltas(results, baseline) {
+            Ok(rows) if !rows.is_empty() => {
+                let _ = writeln!(
+                    out,
+                    "| case | corpus | op | impl | current ms | baseline ms | delta |"
+                );
+                let _ = writeln!(out, "|---|---|---|---|---:|---:|---:|");
+                for row in rows {
+                    let _ = writeln!(
+                        out,
+                        "| {} | {} | {} | {} | {:.3} | {:.3} | {:+.1}% |",
+                        esc(&row.case),
+                        esc(&row.corpus),
+                        row.op,
+                        row.implementation,
+                        row.current_ns as f64 / 1e6,
+                        row.baseline_ns as f64 / 1e6,
+                        row.delta_percent()
+                    );
+                }
+                let _ = writeln!(out);
+                let _ = writeln!(
+                    out,
+                    "Baseline deltas are only meaningful on the same machine and build configuration."
+                );
+                let _ = writeln!(out);
+            }
+            Ok(_) => {
+                let _ = writeln!(out, "No matching baseline measurements.");
+                let _ = writeln!(out);
+            }
+            Err(error) => {
+                let _ = writeln!(out, "Baseline could not be read: {error}");
+                let _ = writeln!(out);
+            }
+        }
+    }
     let _ = writeln!(out, "## Reference build provenance");
     let _ = writeln!(out);
     let _ = writeln!(
@@ -348,6 +395,103 @@ fn build_markdown(results: &[CaseResult], cases: &[Case], cfg: &Config, json: &V
     );
     let _ = writeln!(out);
     out
+}
+
+struct BaselineRow {
+    case: String,
+    corpus: String,
+    op: &'static str,
+    implementation: &'static str,
+    current_ns: u64,
+    baseline_ns: u64,
+}
+
+impl BaselineRow {
+    fn delta_percent(&self) -> f64 {
+        if self.baseline_ns == 0 {
+            0.0
+        } else {
+            (self.current_ns as f64 - self.baseline_ns as f64) / self.baseline_ns as f64 * 100.0
+        }
+    }
+}
+
+fn baseline_deltas(results: &[CaseResult], path: &Path) -> Result<Vec<BaselineRow>, String> {
+    let bytes = fs::read(path).map_err(|error| error.to_string())?;
+    let value: Value = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+    let previous = value
+        .get("results")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "baseline has no results array".to_owned())?;
+    let mut map: std::collections::BTreeMap<(String, String, String, String), u64> =
+        std::collections::BTreeMap::new();
+    for result in previous {
+        let case = result.get("case").and_then(Value::as_str).unwrap_or("");
+        let corpus = result.get("corpus").and_then(Value::as_str).unwrap_or("");
+        for op in ["encode", "decode"] {
+            let Some(values) = result.get(op).and_then(Value::as_object) else {
+                continue;
+            };
+            for impl_name in ["ours_lib", "ours_cli", "reference"] {
+                let Some(median) = values
+                    .get(impl_name)
+                    .and_then(|value| value.get("median_ns"))
+                    .and_then(Value::as_u64)
+                else {
+                    continue;
+                };
+                map.insert(
+                    (
+                        case.to_owned(),
+                        corpus.to_owned(),
+                        op.to_owned(),
+                        impl_name.to_owned(),
+                    ),
+                    median,
+                );
+            }
+        }
+    }
+    let mut rows = Vec::new();
+    for result in results {
+        for (op, value) in [
+            ("encode", result.encode.as_ref()),
+            ("decode", result.decode.as_ref()),
+        ] {
+            let Some(value) = value else { continue };
+            for (impl_name, measurement) in [
+                ("ours_lib", value.ours_lib.as_ref()),
+                ("ours_cli", value.ours_cli.as_ref()),
+                ("reference", value.reference.as_ref()),
+            ] {
+                let Some(measurement) = measurement else {
+                    continue;
+                };
+                let key = (
+                    result.case.id.to_owned(),
+                    result.corpus.clone(),
+                    op.to_owned(),
+                    impl_name.to_owned(),
+                );
+                let Some(&baseline_ns) = map.get(&key) else {
+                    continue;
+                };
+                rows.push(BaselineRow {
+                    case: result.case.id.to_owned(),
+                    corpus: result.corpus.clone(),
+                    op: if op == "encode" { "encode" } else { "decode" },
+                    implementation: match impl_name {
+                        "ours_lib" => "ours-lib",
+                        "ours_cli" => "ours-cli",
+                        _ => "reference",
+                    },
+                    current_ns: measurement.median_ns(),
+                    baseline_ns,
+                });
+            }
+        }
+    }
+    Ok(rows)
 }
 
 fn status_rank(status: &str) -> u8 {

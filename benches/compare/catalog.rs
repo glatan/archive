@@ -291,6 +291,25 @@ const PY_ZLIB_DEC_DEFLATE: &[&str] = &[
     "-c", PY_ZLIB, "decode", "deflate", "6", "{input}", "{output}",
 ];
 
+fn snappy_ref() -> RefSpec {
+    RefSpec {
+        name: "Snappy",
+        version: "1.2.1",
+        binary_id: "snappy_ref",
+        build: "source build: g++ -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0",
+        encode: Some(cmd(
+            "snappy_ref",
+            &["encode", "{input}", "{output}"],
+            OutputMode::Arg,
+        )),
+        decode: Some(cmd(
+            "snappy_ref",
+            &["decode", "{input}", "{output}"],
+            OutputMode::Arg,
+        )),
+    }
+}
+
 fn lzf_ref() -> RefSpec {
     RefSpec {
         name: "liblzf",
@@ -1132,10 +1151,18 @@ pub fn cases() -> Vec<Case> {
         // Codecs without a packaged reference in the baseline image.
         codec_ours_only(
             "snappy",
-            "Snappy",
+            "Snappy (framed)",
             "snappy",
             FAST,
-            "No packaged reference CLI",
+            "No packaged reference CLI for the framed stream",
+        ),
+        codec_raw_with_ref(
+            "snappy-raw",
+            "Snappy (raw)",
+            "snappy",
+            FAST,
+            snappy_ref(),
+            "Raw-block comparison against upstream Snappy",
         ),
         codec(
             "lzf",
@@ -1398,16 +1425,16 @@ pub fn cases() -> Vec<Case> {
             "ARJ",
             "arj",
             true,
-            None,
-            Some("No packaged ARJ reference writer"),
+            Some(unar_ref()),
+            Some("Decode reference is unar; no reference writer"),
         ),
         archive(
             "arc",
             "ARC",
             "arc",
             true,
-            None,
-            Some("Uses a DOS 8.3 flat tree; no packaged reference writer"),
+            Some(unar_ref()),
+            Some("Uses a DOS 8.3 flat tree; decode reference is unar"),
         ),
         archive(
             "git-pack",
