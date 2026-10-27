@@ -56,14 +56,14 @@ fn main() {
         std::process::exit(2);
     }
 
-    if let Err(error) = fixtures::ensure() {
-        eprintln!("error: {error}");
-        std::process::exit(1);
-    }
     let selected = select_cases(&cases, &config);
     if selected.is_empty() {
         eprintln!("error: no cases matched the filters");
         std::process::exit(2);
+    }
+    if let Err(error) = fixtures::ensure_for(&selected) {
+        eprintln!("error: {error}");
+        std::process::exit(1);
     }
 
     let run_id = format!(
@@ -130,7 +130,13 @@ fn main() {
         }
     }
 
-    if let Err(error) = report::write_report(&results, &selected, &runner_config, &out_dir) {
+    if let Err(error) = report::write_report(
+        &results,
+        &selected,
+        &runner_config,
+        &out_dir,
+        config.baseline.as_deref(),
+    ) {
         eprintln!("error: write report: {error}");
         std::process::exit(1);
     }
@@ -153,6 +159,7 @@ struct Args {
     skip_cli: bool,
     skip_ref: bool,
     timeout: u64,
+    baseline: Option<PathBuf>,
     kind: Option<Kind>,
     format_filter: Vec<String>,
 }
@@ -175,6 +182,7 @@ usage: cargo bench --all-features --bench compare -- [options]
   --skip-cli              do not run our CLI
   --skip-ref              do not run reference tools
   --timeout SECS          per-process timeout (default: 600)
+  --baseline PATH         previous result.json for delta reporting
   --list                  list catalog cases
   --list-markdown         print the catalog as a Markdown coverage matrix
 ";
@@ -194,6 +202,7 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
         skip_cli: false,
         skip_ref: false,
         timeout: 600,
+        baseline: None,
         kind: None,
         format_filter: Vec::new(),
     };
@@ -285,6 +294,12 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
             }
             "--skip-cli" => parsed.skip_cli = true,
             "--skip-ref" => parsed.skip_ref = true,
+            "--baseline" => {
+                i += 1;
+                parsed.baseline = Some(PathBuf::from(
+                    args.get(i).ok_or("--baseline requires a value")?,
+                ));
+            }
             "--timeout" => {
                 i += 1;
                 parsed.timeout = args

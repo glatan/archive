@@ -123,6 +123,7 @@ name = "archive"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "libc",
  "proptest",
  "serde_json",
 ]

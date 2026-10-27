@@ -9,6 +9,8 @@ use std::path::Path;
 
 use archive::archive;
 
+use crate::model::Case;
+
 pub const DEB: &str = "target/bench/fixtures/bench.deb";
 pub const RPM: &str = "target/bench/fixtures/bench.rpm";
 pub const MTREE: &str = "target/bench/fixtures/bench.mtree";
@@ -23,19 +25,25 @@ pub const CRX3: &str = "target/bench/fixtures/bench.crx";
 const TEXT: &[u8] = b"benchmark fixture payload\n";
 const EMPTY: &[u8] = b"";
 
-pub fn ensure() -> Result<(), String> {
+/// Generate only the fixtures needed by the selected cases.
+pub fn ensure_for(cases: &[Case]) -> Result<(), String> {
     let dir = Path::new("target/bench/fixtures");
     fs::create_dir_all(dir).map_err(|error| format!("create fixture dir: {error}"))?;
-    write(DEB, build_deb()?)?;
-    write(RPM, build_rpm()?)?;
-    write(MTREE, build_mtree())?;
-    write(WARC, build_warc())?;
-    write(ZIM, build_zim()?)?;
-    write(SQUASHFS, build_squashfs()?)?;
-    write(CRAMFS, build_cramfs()?)?;
-    write(PEA, build_pea()?)?;
-    write(MSCFB, build_mscfb()?)?;
-    write(CRX3, build_crx3()?)?;
+    for case in cases {
+        match case.id {
+            "deb" => write(DEB, build_deb()?)?,
+            "rpm" => write(RPM, build_rpm()?)?,
+            "mtree" => write(MTREE, build_mtree())?,
+            "warc" => write(WARC, build_warc())?,
+            "zim" => write(ZIM, build_zim()?)?,
+            "squashfs" => write(SQUASHFS, build_squashfs()?)?,
+            "cramfs" => write(CRAMFS, build_cramfs()?)?,
+            "pea" => write(PEA, build_pea()?)?,
+            "mscfb" => write(MSCFB, build_mscfb()?)?,
+            "crx3" => write(CRX3, build_crx3()?)?,
+            _ => {}
+        }
+    }
     Ok(())
 }
 

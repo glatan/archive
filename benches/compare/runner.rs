@@ -15,6 +15,9 @@ use crate::model::{
     Case, CaseResult, Kind, Measurement, OpResult, OutputMode, RefCommand, RefSpec,
 };
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub quick: bool,
@@ -366,9 +369,34 @@ fn run_archive_fixture_case(case: &Case, cfg: &Config, fixture: &str, result: &m
                 }
             }
         }
+        let cli_out = dir.join("cli-out");
+        let ours_data = manifest_data_set(&ours_manifest);
+        if let Some(ours_data) = ours_data {
+            if !ours_data.is_empty() {
+                if case.cli_extract && case.format != "deb" && decode.ours_cli.is_some() {
+                    if let Some(cli_data) = dir_data_set(&cli_out) {
+                        let ok = ours_data == cli_data;
+                        merge_cross(&mut decode, ok);
+                        if !ok {
+                            decode.note = Some("fixture ours-cli data mismatch".to_owned());
+                        }
+                    }
+                }
+                if decode.reference.is_some() {
+                    let ref_dir = dir.join("ref-out");
+                    if let Some(ref_data) = dir_data_set(&ref_dir) {
+                        let ok = ours_data == ref_data;
+                        merge_cross(&mut decode, ok);
+                        if !ok {
+                            decode.note = Some("fixture reference data mismatch".to_owned());
+                        }
+                    }
+                }
+            }
+        }
         append_note(
             &mut decode,
-            "fixture decode; content is not compared with a generated tree".to_owned(),
+            "fixture decode; tree names are not compared".to_owned(),
         );
     }
     result.decode = Some(decode);
@@ -724,10 +752,13 @@ fn run_helper(cfg: &Config, args: &[String], output: &Path) -> Result<Measuremen
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let _ = fs::remove_file(output);
-    let mut child = Command::new(&cfg.helper_bin)
+    let mut command = Command::new(&cfg.helper_bin);
+    command
         .args(args)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_process_group(&mut command);
+    let mut child = command
         .spawn()
         .map_err(|error| format!("spawn {}: {error}", cfg.helper_bin.display()))?;
     let stdout_pipe = child.stdout.take();
@@ -920,10 +951,13 @@ fn run_process_dir(
 ) -> Result<(), String> {
     let _ = fs::remove_dir_all(out_dir);
     fs::create_dir_all(out_dir).map_err(|error| error.to_string())?;
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    configure_process_group(&mut command);
+    let mut child = command
         .spawn()
         .map_err(|error| format!("spawn {}: {error}", program.display()))?;
     let status = wait_status(&mut child, timeout)?;
@@ -946,10 +980,13 @@ fn run_process(
     if let Some(path) = remove {
         let _ = fs::remove_file(path);
     }
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    configure_process_group(&mut command);
+    let mut child = command
         .spawn()
         .map_err(|error| format!("spawn {}: {error}", program.display()))?;
     let status = wait_status(&mut child, timeout)?;
@@ -963,6 +1000,25 @@ fn run_process(
     Ok(())
 }
 
+fn configure_process_group(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        command.process_group(0);
+    }
+}
+
+fn kill_process_group(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        let pid = child.id() as i32;
+        // The child was started with process_group(0), so killing the
+        // negative PID terminates the shell and any tool it spawned.
+        unsafe {
+            libc::kill(-pid, libc::SIGKILL);
+        }
+    }
+}
+
 fn wait_status(child: &mut Child, timeout: Duration) -> Result<ExitStatus, String> {
     let start = Instant::now();
     loop {
@@ -970,6 +1026,7 @@ fn wait_status(child: &mut Child, timeout: Duration) -> Result<ExitStatus, Strin
             return Ok(status);
         }
         if start.elapsed() > timeout {
+            kill_process_group(child);
             let _ = child.kill();
             let _ = child.wait();
             return Err(format!("timed out after {}s", timeout.as_secs()));
@@ -1081,6 +1138,7 @@ fn run_ref_once(
     }
 
     let mut process = Command::new(&program);
+    configure_process_group(&mut process);
     let refs_bin = absolute_path(&cfg.refs_dir.join("bin"));
     if refs_bin.exists() {
         if let Some(path) = std::env::var_os("PATH") {
@@ -1230,6 +1288,35 @@ fn dir_manifest_matches_for(case: &Case, dir: &Path, expected: &[(String, usize,
     } else {
         dir_manifest_matches(dir, expected)
     }
+}
+
+fn manifest_data_set(path: &Path) -> Option<Vec<(usize, u64)>> {
+    let bytes = fs::read(path).ok()?;
+    let value = serde_json::from_slice::<Value>(&bytes).ok()?;
+    let entries = value.get("entries")?.as_array()?;
+    let mut data: Vec<(usize, u64)> = entries
+        .iter()
+        .filter_map(|entry| {
+            Some((
+                entry.get("len")?.as_u64()? as usize,
+                entry.get("hash")?.as_u64()?,
+            ))
+        })
+        .collect();
+    data.sort_unstable();
+    data.dedup();
+    Some(data)
+}
+
+fn dir_data_set(dir: &Path) -> Option<Vec<(usize, u64)>> {
+    let manifest = read_dir_manifest(dir).ok()?;
+    let mut data: Vec<(usize, u64)> = manifest
+        .into_iter()
+        .map(|(_, len, hash)| (len, hash))
+        .collect();
+    data.sort_unstable();
+    data.dedup();
+    Some(data)
 }
 
 fn manifest_data_matches(path: &Path, expected: &[(String, usize, u64)]) -> bool {
