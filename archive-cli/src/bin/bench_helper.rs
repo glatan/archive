@@ -280,7 +280,7 @@ fn run_raw_codec(args: RawCodecArgs) -> Result<(), CliError> {
 
 fn run_raw_archive(args: RawArchiveArgs) -> Result<(), CliError> {
     let input = fs::read(&args.input)?;
-    let mut last: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut last: Vec<RawEntry> = Vec::new();
     for _ in 0..args.timing.warmup {
         last = raw_archive(args.format, &input)?;
         std::hint::black_box(&last);
@@ -292,10 +292,11 @@ fn run_raw_archive(args: RawArchiveArgs) -> Result<(), CliError> {
         samples_ns.push(start.elapsed().as_nanos() as u64);
     }
     let manifest = json!({
-        "entries": last.iter().map(|(name, data)| json!({
-            "name": name,
-            "len": data.len(),
-            "hash": fnv1a64(data),
+        "entries": last.iter().map(|entry| json!({
+            "name": entry.name,
+            "len": entry.data.len(),
+            "hash": fnv1a64(&entry.data),
+            "is_dir": entry.is_dir,
         })).collect::<Vec<_>>()
     });
     fs::write(&args.output, serde_json::to_vec_pretty(&manifest).unwrap())?;
@@ -304,7 +305,7 @@ fn run_raw_archive(args: RawArchiveArgs) -> Result<(), CliError> {
         "op": "decode",
         "format": format_name_raw_archive(args.format),
         "input_len": input.len(),
-        "output_len": last.iter().map(|(_, data)| data.len()).sum::<usize>(),
+        "output_len": last.iter().map(|entry| entry.data.len()).sum::<usize>(),
         "entry_count": last.len(),
         "warmup": args.timing.warmup,
         "samples_ns": samples_ns,
@@ -373,55 +374,96 @@ fn map_archive_error(error: ::archive::error::Error) -> CliError {
     CliError::from_archive_error(error, false)
 }
 
-fn raw_archive(format: RawArchive, input: &[u8]) -> Result<Vec<(String, Vec<u8>)>, CliError> {
+struct RawEntry {
+    name: String,
+    data: Vec<u8>,
+    is_dir: bool,
+}
+
+fn raw_archive(format: RawArchive, input: &[u8]) -> Result<Vec<RawEntry>, CliError> {
     use ::archive::archive;
     let entries = match format {
         RawArchive::Cramfs => archive::cramfs::decode::decode(input)
             .map(|image| image.entries)
             .map_err(map_archive_error)?
             .into_iter()
-            .map(|entry| (entry.name, entry.data))
+            .map(|entry| RawEntry {
+                is_dir: matches!(entry.kind, archive::cramfs::decode::CramfsKind::Directory),
+                name: entry.name,
+                data: entry.data,
+            })
             .collect(),
         RawArchive::Romfs => archive::romfs::decode::decode(input)
             .map(|image| image.entries)
             .map_err(map_archive_error)?
             .into_iter()
-            .map(|entry| (entry.name, entry.data))
+            .map(|entry| RawEntry {
+                is_dir: matches!(entry.kind, archive::romfs::decode::RomfsKind::Directory),
+                name: entry.name,
+                data: entry.data,
+            })
             .collect(),
         RawArchive::Erofs => archive::erofs::decode::decode(input)
             .map(|image| image.entries)
             .map_err(map_archive_error)?
             .into_iter()
-            .map(|entry| (entry.name, entry.data))
+            .map(|entry| RawEntry {
+                is_dir: matches!(entry.kind, archive::erofs::decode::ErofsKind::Directory),
+                name: entry.name,
+                data: entry.data,
+            })
             .collect(),
         RawArchive::Iso9660 => archive::iso9660::decode::decode(input)
             .map(|image| image.entries)
             .map_err(map_archive_error)?
             .into_iter()
-            .map(|entry| (entry.name, entry.data))
+            .map(|entry| RawEntry {
+                is_dir: matches!(entry.kind, archive::iso9660::decode::IsoKind::Directory),
+                name: entry.name,
+                data: entry.data,
+            })
             .collect(),
         RawArchive::Crx3 => archive::crx3::decode::decode(input)
             .map(|image| image.entries)
             .map_err(map_archive_error)?
             .into_iter()
-            .map(|entry| (entry.name, entry.data))
+            .map(|entry| RawEntry {
+                is_dir: false,
+                name: entry.name,
+                data: entry.data,
+            })
             .collect(),
         RawArchive::Pea => archive::pea::decode::decode(input)
             .map(|image| image.entries)
             .map_err(map_archive_error)?
             .into_iter()
-            .map(|entry| (entry.name, entry.data))
+            .map(|entry| RawEntry {
+                is_dir: entry.is_dir,
+                name: entry.name,
+                data: entry.data,
+            })
             .collect(),
         RawArchive::Mscfb => archive::mscfb::decode::decode(input)
             .map_err(map_archive_error)?
             .into_iter()
-            .map(|entry| (entry.name, entry.data))
+            .map(|entry| RawEntry {
+                is_dir: false,
+                name: entry.name,
+                data: entry.data,
+            })
             .collect(),
         RawArchive::Squashfs => archive::squashfs::decode::decode(input)
             .map(|image| image.entries)
             .map_err(map_archive_error)?
             .into_iter()
-            .map(|entry| (entry.name, entry.data))
+            .map(|entry| RawEntry {
+                is_dir: matches!(
+                    entry.kind,
+                    archive::squashfs::decode::SquashfsKind::Directory
+                ),
+                name: entry.name,
+                data: entry.data,
+            })
             .collect(),
     };
     Ok(entries)
@@ -593,6 +635,7 @@ fn payload_manifest(payloads: &[read::DecodedPayload]) -> Value {
                 "name": payload.name,
                 "len": payload.data.len(),
                 "hash": fnv1a64(&payload.data),
+                "is_dir": false,
             })
         })
         .collect();

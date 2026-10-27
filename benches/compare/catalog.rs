@@ -529,8 +529,10 @@ fn unar_ref() -> RefSpec {
         build: DISTRO,
         encode: None,
         decode: Some(cmd(
+            // `-D` suppresses unar's containing directory, which would
+            // otherwise break the expected tree names for self-base formats.
             "unar",
-            &["-q", "-o", "{output}", "{input}"],
+            &["-q", "-D", "-o", "{output}", "{input}"],
             OutputMode::Dir,
         )),
     }

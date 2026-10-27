@@ -137,6 +137,12 @@ pub fn decode_payloads(
     let payloads = items
         .into_iter()
         .filter_map(|item| {
+            // Directories are not payloads. Some decoders attach an
+            // empty `Some` payload to them, which would otherwise appear
+            // as a zero-length file in benchmark manifests.
+            if matches!(item.summary.kind.as_str(), "dir" | "directory") {
+                return None;
+            }
             item.payload.map(|data| DecodedPayload {
                 name: item.summary.path,
                 data,
