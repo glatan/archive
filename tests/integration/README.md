@@ -9,12 +9,15 @@
 - metadata / dictionary / multi-member / multi-frame
 - corruption / malformed input / checksum mismatch
 
-`tests/integration.rs` が harness であり、各 `tests/integration/*.rs` を module として読み込む。
+`tests/integration.rs` が harness であり、有効な feature に対応する
+`tests/integration/*.rs` のみを module として読み込む。
 
 ## 実行方法
 
 - 全体:
   - `cargo test --all-features --test integration`
+- 単一 feature のみ:
+  - `cargo test --no-default-features --features "xz,std" --test integration`
 - CLI を含むリポジトリ標準の検証:
   - `cargo fmt --all`
   - `cargo test --all-features`

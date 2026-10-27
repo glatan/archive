@@ -68,6 +68,7 @@ sys.stdout.buffer.write(zlib.decompress(data, -15))
 // DEFLATE tests
 // ============================================================
 
+#[cfg(feature = "gzip")]
 #[test]
 fn test_deflate_decode_hello_gz() {
     // Extract raw DEFLATE stream from hello.gz (skip gzip header, keep trailer - decoder self-terminates)
@@ -78,6 +79,7 @@ fn test_deflate_decode_hello_gz() {
     assert_eq!(result, b"Hello, World!");
 }
 
+#[cfg(feature = "gzip")]
 #[test]
 fn test_deflate_decode_repeated_gz() {
     let gz_data = include_bytes!("../fixtures/gzip/repeated.gz");

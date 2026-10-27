@@ -1,60 +1,12 @@
-#![cfg(all(
-    feature = "ar",
-    feature = "deb",
-    feature = "rpm",
-    feature = "squashfs",
-    feature = "cramfs",
-    feature = "mscab",
-    feature = "mscfb",
-    feature = "zim",
-    feature = "mtree",
-    feature = "cpio",
-    feature = "tar",
-    feature = "bzip2",
-    feature = "deflate",
-    feature = "gzip",
-    feature = "lrzip",
-    feature = "lz4",
-    feature = "lzip",
-    feature = "lzma-alone",
-    feature = "lzo",
-    feature = "lzw",
-    feature = "snappy",
-    feature = "xz",
-    feature = "zlib",
-    feature = "zstd",
-    feature = "zpaq",
-    feature = "xca",
-    feature = "lzf",
-    feature = "fastlz",
-    feature = "lzrw1",
-    feature = "lzrw1a",
-    feature = "lzrw2",
-    feature = "lzrw3",
-    feature = "lzrw3a",
-    feature = "lzsa",
-    feature = "zx0",
-    feature = "zx1",
-    feature = "zx2",
-    feature = "zx5",
-    feature = "vcdiff",
-    feature = "lzxd",
-    feature = "cmpsc",
-    feature = "git-pack",
-    feature = "xar",
-    feature = "uuencode",
-    feature = "ascii85",
-    feature = "yenc",
-    feature = "macbinary",
-    feature = "binhex"
-))]
-
+#[cfg(feature = "ar")]
 use archive::archive::ar;
+#[cfg(feature = "cpio")]
 use archive::archive::cpio;
 #[cfg(feature = "cramfs")]
 use archive::archive::cramfs;
 #[cfg(feature = "crx3")]
 use archive::archive::crx3;
+#[cfg(feature = "deb")]
 use archive::archive::deb;
 #[cfg(feature = "erofs")]
 use archive::archive::erofs;
@@ -68,54 +20,91 @@ use archive::archive::mscfb;
 use archive::archive::pea;
 #[cfg(feature = "romfs")]
 use archive::archive::romfs;
+#[cfg(feature = "rpm")]
 use archive::archive::rpm;
 #[cfg(feature = "sevenz")]
 use archive::archive::sevenz;
+#[cfg(feature = "squashfs")]
 use archive::archive::squashfs;
+#[cfg(feature = "tar")]
 use archive::archive::tar;
 #[cfg(feature = "zip")]
 use archive::archive::zip;
+#[cfg(feature = "zpaq")]
 use archive::archive::zpaq;
 #[cfg(feature = "brotli")]
 use archive::compress::brotli;
+#[cfg(feature = "bzip2")]
 use archive::compress::bzip2;
+#[cfg(feature = "cmpsc")]
 use archive::compress::cmpsc;
+#[cfg(feature = "deflate")]
 use archive::compress::deflate;
+#[cfg(feature = "fastlz")]
 use archive::compress::fastlz;
+#[cfg(feature = "gzip")]
 use archive::compress::gzip;
+#[cfg(feature = "lrzip")]
 use archive::compress::lrzip;
+#[cfg(feature = "lz4")]
 use archive::compress::lz4;
+#[cfg(feature = "lzf")]
 use archive::compress::lzf;
+#[cfg(feature = "lzip")]
 use archive::compress::lzip;
+#[cfg(feature = "lzma-alone")]
 use archive::compress::lzma_alone;
+#[cfg(feature = "lzo")]
 use archive::compress::lzo;
+#[cfg(feature = "lzrw1")]
 use archive::compress::lzrw1;
+#[cfg(feature = "lzrw1a")]
 use archive::compress::lzrw1a;
+#[cfg(feature = "lzrw2")]
 use archive::compress::lzrw2;
+#[cfg(feature = "lzrw3")]
 use archive::compress::lzrw3;
+#[cfg(feature = "lzrw3a")]
 use archive::compress::lzrw3a;
 #[cfg(feature = "lzs")]
 use archive::compress::lzs;
+#[cfg(feature = "lzw")]
 use archive::compress::lzw;
+#[cfg(feature = "lzxd")]
 use archive::compress::lzxd;
 #[cfg(feature = "mppc")]
 use archive::compress::mppc;
 #[cfg(feature = "rzip")]
 use archive::compress::rzip;
+#[cfg(feature = "snappy")]
 use archive::compress::snappy;
+#[cfg(feature = "vcdiff")]
 use archive::compress::vcdiff;
+#[cfg(feature = "xca")]
 use archive::compress::xca;
+#[cfg(feature = "xz")]
 use archive::compress::xz;
+#[cfg(feature = "zlib")]
 use archive::compress::zlib;
+#[cfg(feature = "zstd")]
 use archive::compress::zstd;
+#[cfg(feature = "zx0")]
 use archive::compress::zx0;
+#[cfg(feature = "zx1")]
 use archive::compress::zx1;
+#[cfg(feature = "zx2")]
 use archive::compress::zx2;
+#[cfg(feature = "zx5")]
 use archive::compress::zx5;
+#[cfg(feature = "ascii85")]
 use archive::encoding::ascii85;
+#[cfg(feature = "binhex")]
 use archive::encoding::binhex;
+#[cfg(feature = "macbinary")]
 use archive::encoding::macbinary;
+#[cfg(feature = "uuencode")]
 use archive::encoding::uuencode;
+#[cfg(feature = "yenc")]
 use archive::encoding::yenc;
 
 /// Create a unique temporary directory for an integration test.
@@ -123,6 +112,7 @@ use archive::encoding::yenc;
 /// Tests must not share fixed paths under `/tmp`: the integration test
 /// binary runs tests in parallel, and `cargo nextest` also runs different
 /// test binaries concurrently.
+#[allow(dead_code)]
 fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -136,10 +126,12 @@ fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
     dir
 }
 
+#[allow(dead_code)]
 fn require_external_tools() -> bool {
     std::env::var_os("ARCHIVE_REQUIRE_EXTERNAL_TOOLS").is_some()
 }
 
+#[allow(dead_code)]
 fn command_available(name: &str, args: &[&str]) -> bool {
     let available = std::process::Command::new(name)
         .args(args)
@@ -152,6 +144,7 @@ fn command_available(name: &str, args: &[&str]) -> bool {
     available
 }
 
+#[allow(dead_code)]
 fn python3_available() -> bool {
     command_available("python3", &["--version"])
 }
@@ -180,6 +173,7 @@ fn sevenz_binary() -> Option<&'static str> {
 // lrzip tests
 // ============================================================
 
+#[allow(dead_code)]
 fn lrzip_binary() -> Option<&'static str> {
     use std::process::Command;
 
@@ -209,6 +203,7 @@ fn rzip_binary() -> Option<&'static str> {
     None
 }
 
+#[allow(dead_code)]
 fn cpio_binary() -> Option<&'static str> {
     use std::process::Command;
 
@@ -226,6 +221,7 @@ fn cpio_binary() -> Option<&'static str> {
 // xz tests
 // ============================================================
 
+#[cfg(feature = "xz")]
 fn xz_system_compress(filter_chain: &str, input: &[u8]) -> Option<Vec<u8>> {
     use std::io::Write;
 
@@ -250,6 +246,7 @@ fn xz_system_compress(filter_chain: &str, input: &[u8]) -> Option<Vec<u8>> {
     );
     Some(output.stdout)
 }
+#[cfg(feature = "xz")]
 fn xz_system_decode(input: &[u8]) -> Option<Vec<u8>> {
     use std::io::Write;
 
@@ -275,6 +272,7 @@ fn xz_system_decode(input: &[u8]) -> Option<Vec<u8>> {
     Some(output.stdout)
 }
 
+#[cfg(feature = "ar")]
 #[path = "integration/ar.rs"]
 mod ar_tests;
 #[cfg(feature = "arc")]
@@ -286,10 +284,13 @@ mod arj_tests;
 #[cfg(feature = "brotli")]
 #[path = "integration/brotli.rs"]
 mod brotli_tests;
+#[cfg(feature = "bzip2")]
 #[path = "integration/bzip2.rs"]
 mod bzip2_tests;
+#[cfg(all(feature = "tar", feature = "cpio", feature = "gzip", feature = "zstd"))]
 #[path = "integration/combined.rs"]
 mod combined_tests;
+#[cfg(feature = "cpio")]
 #[path = "integration/cpio.rs"]
 mod cpio_tests;
 #[cfg(feature = "cramfs")]
@@ -298,8 +299,10 @@ mod cramfs_tests;
 #[cfg(feature = "crx3")]
 #[path = "integration/crx3.rs"]
 mod crx3_tests;
+#[cfg(feature = "deb")]
 #[path = "integration/deb.rs"]
 mod deb_tests;
+#[cfg(feature = "deflate")]
 #[path = "integration/deflate.rs"]
 mod deflate_tests;
 #[cfg(feature = "erofs")]
@@ -310,6 +313,7 @@ mod erofs_tests;
 #[allow(non_snake_case)]
 #[path = "integration/generated/mod.rs"]
 mod generated_tests;
+#[cfg(feature = "gzip")]
 #[path = "integration/gzip.rs"]
 mod gzip_tests;
 #[cfg(feature = "iso9660")]
@@ -318,16 +322,22 @@ mod iso9660_tests;
 #[cfg(feature = "lha")]
 #[path = "integration/lha.rs"]
 mod lha_tests;
+#[cfg(feature = "lrzip")]
 #[path = "integration/lrzip.rs"]
 mod lrzip_tests;
+#[cfg(feature = "lz4")]
 #[path = "integration/lz4.rs"]
 mod lz4_tests;
+#[cfg(feature = "lzip")]
 #[path = "integration/lzip.rs"]
 mod lzip_tests;
+#[cfg(feature = "lzma-alone")]
 #[path = "integration/lzma_alone.rs"]
 mod lzma_alone_tests;
+#[cfg(feature = "lzo")]
 #[path = "integration/lzo.rs"]
 mod lzo_tests;
+#[cfg(feature = "lzw")]
 #[path = "integration/lzw.rs"]
 mod lzw_tests;
 #[cfg(feature = "pea")]
@@ -336,6 +346,7 @@ mod pea_tests;
 #[cfg(feature = "romfs")]
 #[path = "integration/romfs.rs"]
 mod romfs_tests;
+#[cfg(feature = "rpm")]
 #[path = "integration/rpm.rs"]
 mod rpm_tests;
 #[cfg(feature = "rzip")]
@@ -344,8 +355,10 @@ mod rzip_tests;
 #[cfg(feature = "sevenz")]
 #[path = "integration/sevenz.rs"]
 mod sevenz_tests;
+#[cfg(feature = "snappy")]
 #[path = "integration/snappy.rs"]
 mod snappy_tests;
+#[cfg(feature = "squashfs")]
 #[path = "integration/squashfs.rs"]
 mod squashfs_tests;
 
@@ -356,29 +369,39 @@ mod mscab_tests;
 #[path = "integration/mscfb.rs"]
 mod mscfb_tests;
 
+#[cfg(feature = "fastlz")]
 #[path = "integration/fastlz.rs"]
 mod fastlz_tests;
 
+#[cfg(feature = "lzf")]
 #[path = "integration/lzf.rs"]
 mod lzf_tests;
 
+#[cfg(feature = "lzsa")]
 #[path = "integration/lzsa.rs"]
 mod lzsa_tests;
 
+#[cfg(feature = "lzxd")]
 #[path = "integration/lzxd.rs"]
 mod lzxd_tests;
 
+#[cfg(feature = "cmpsc")]
 #[path = "integration/cmpsc.rs"]
 mod cmpsc_tests;
 
+#[cfg(feature = "lzrw1")]
 #[path = "integration/lzrw1.rs"]
 mod lzrw1_tests;
+#[cfg(feature = "lzrw1a")]
 #[path = "integration/lzrw1a.rs"]
 mod lzrw1a_tests;
+#[cfg(feature = "lzrw2")]
 #[path = "integration/lzrw2.rs"]
 mod lzrw2_tests;
+#[cfg(feature = "lzrw3")]
 #[path = "integration/lzrw3.rs"]
 mod lzrw3_tests;
+#[cfg(feature = "lzrw3a")]
 #[path = "integration/lzrw3a.rs"]
 mod lzrw3a_tests;
 
@@ -398,36 +421,49 @@ mod mppc_tests;
 #[cfg(feature = "mtree")]
 #[path = "integration/mtree.rs"]
 mod mtree_tests;
+#[cfg(feature = "tar")]
 #[path = "integration/tar.rs"]
 mod tar_tests;
+#[cfg(feature = "vcdiff")]
 #[path = "integration/vcdiff.rs"]
 mod vcdiff_tests;
+#[cfg(feature = "zx0")]
 #[path = "integration/zx0.rs"]
 mod zx0_tests;
+#[cfg(feature = "zx1")]
 #[path = "integration/zx1.rs"]
 mod zx1_tests;
+#[cfg(feature = "zx2")]
 #[path = "integration/zx2.rs"]
 mod zx2_tests;
+#[cfg(feature = "zx5")]
 #[path = "integration/zx5.rs"]
 mod zx5_tests;
 
+#[cfg(feature = "xca")]
 #[path = "integration/xca.rs"]
 mod xca_tests;
 
+#[cfg(feature = "xz")]
 #[path = "integration/xz.rs"]
 mod xz_tests;
 
+#[cfg(feature = "ascii85")]
 #[path = "integration/ascii85.rs"]
 mod ascii85_tests;
+#[cfg(feature = "binhex")]
 #[path = "integration/binhex.rs"]
 mod binhex_tests;
+#[cfg(feature = "macbinary")]
 #[path = "integration/macbinary.rs"]
 mod macbinary_tests;
+#[cfg(feature = "uuencode")]
 #[path = "integration/uuencode.rs"]
 mod uuencode_tests;
 #[cfg(feature = "warc")]
 #[path = "integration/warc.rs"]
 mod warc_tests;
+#[cfg(feature = "yenc")]
 #[path = "integration/yenc.rs"]
 mod yenc_tests;
 #[cfg(feature = "zim")]
@@ -436,11 +472,15 @@ mod zim_tests;
 #[cfg(feature = "zip")]
 #[path = "integration/zip.rs"]
 mod zip_tests;
+#[cfg(feature = "zlib")]
 #[path = "integration/zlib.rs"]
 mod zlib_tests;
+#[cfg(feature = "zpaq")]
 #[path = "integration/zpaq.rs"]
 mod zpaq_tests;
+#[cfg(feature = "zstd")]
 #[path = "integration/zstd_seekable.rs"]
 mod zstd_seekable_tests;
+#[cfg(feature = "zstd")]
 #[path = "integration/zstd.rs"]
 mod zstd_tests;
