@@ -5,7 +5,7 @@ pkgdesc="Read-only listing and extraction tool for ARC archives"
 arch=('x86_64')
 url="https://www.ibiblio.org/pub/Linux/utils/compress/"
 license=('GPL-2.0-or-later')
-source=("https://www.ibiblio.org/pub/Linux/utils/compress/$pkgname-$pkgver.tar.gz")
+source=("https://deb.debian.org/debian/pool/main/n/$pkgname/${pkgname}_${pkgver}.orig.tar.gz")
 sha256sums=('fe20da34e0d3ba0cf6388701f44ac22224cf65130ddbc5fcbc27bc4949a6e1ad')
 
 build() {
