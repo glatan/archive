@@ -464,11 +464,14 @@ fn oracle_extract(
     out_dir: &std::path::Path,
 ) -> std::io::Result<std::process::Output> {
     use std::process::Command;
+    let archive = archive.canonicalize()?;
     let mut command = Command::new(tool);
     if tool == "unar" {
-        command.args(["-f", "-D", "-o"]).arg(out_dir).arg(archive);
+        command.args(["-f", "-D", "-o"]).arg(out_dir).arg(&archive);
     } else {
-        command.arg("-xf").arg(archive).current_dir(out_dir);
+        // The current directory changes to `out_dir`, so the archive
+        // path must be absolute.
+        command.arg("-xf").arg(&archive).current_dir(out_dir);
     }
     command.output()
 }
@@ -516,6 +519,8 @@ fn test_lha_fixture_oracle_extract() {
     let dir = std::env::temp_dir().join(format!("archive_lha_oracle_{uniq}"));
     std::fs::create_dir_all(&dir).unwrap();
     let mut compared = 0;
+    let mut compared_by_tool: std::collections::BTreeMap<&str, usize> =
+        std::collections::BTreeMap::new();
 
     for e in std::fs::read_dir("tests/fixtures/lha").unwrap() {
         let p = e.unwrap().path();
@@ -551,8 +556,11 @@ fn test_lha_fixture_oracle_extract() {
             let mut ours_sorted = ours.clone();
             ours_sorted.sort_unstable();
             oracle_data.sort_unstable();
+            // File names may differ in case between the archive and the
+            // host filesystem, so only the payloads are compared.
             assert_eq!(oracle_data, ours_sorted, "{name}: {tool} output differs");
             compared += 1;
+            *compared_by_tool.entry(tool).or_default() += 1;
         }
     }
 
@@ -560,6 +568,12 @@ fn test_lha_fixture_oracle_extract() {
         compared > 0,
         "oracle tools were available but no fixture was compared"
     );
+    for tool in &tools {
+        assert!(
+            compared_by_tool.get(tool).copied().unwrap_or(0) > 0,
+            "{tool} was available but no fixture was compared"
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -736,6 +750,8 @@ fn test_lha_pmarc_oracle_interop() {
     std::fs::create_dir_all(&dir).unwrap();
     let data = b"pmarc oracle interop payload ".repeat(64);
     let mut compared = 0;
+    let mut compared_by_tool: std::collections::BTreeMap<&str, usize> =
+        std::collections::BTreeMap::new();
 
     for (method, tag) in [(b"-pm1-", "pm1"), (b"-pm2-", "pm2")] {
         let path = dir.join(format!("test{tag}.lzh"));
@@ -752,6 +768,7 @@ fn test_lha_pmarc_oracle_interop() {
             let extracted = std::fs::read(out_dir.join(&name)).unwrap();
             assert_eq!(extracted, data.as_slice(), "{tag}: {tool} output differs");
             compared += 1;
+            *compared_by_tool.entry(tool).or_default() += 1;
         }
     }
 
@@ -759,5 +776,11 @@ fn test_lha_pmarc_oracle_interop() {
         compared > 0,
         "oracle tools were available but no PMarc fixture was compared"
     );
+    for tool in &tools {
+        assert!(
+            compared_by_tool.get(tool).copied().unwrap_or(0) > 0,
+            "{tool} was available but no PMarc fixture was compared"
+        );
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -370,28 +370,33 @@ fn run_archive_fixture_case(case: &Case, cfg: &Config, fixture: &str, result: &m
             }
         }
         let cli_out = dir.join("cli-out");
-        let ours_data = manifest_data_set(&ours_manifest);
-        if let Some(ours_data) = ours_data {
-            if !ours_data.is_empty() {
-                if case.cli_extract && case.format != "deb" && decode.ours_cli.is_some() {
-                    if let Some(cli_data) = dir_data_set(&cli_out) {
-                        let ok = ours_data == cli_data;
-                        merge_cross(&mut decode, ok);
-                        if !ok {
-                            decode.note = Some("fixture ours-cli data mismatch".to_owned());
-                        }
+        if let Some(ours_data) = manifest_data_set(&ours_manifest) {
+            // The lib read and CLI extract can measure different layers
+            // (deb: outer ar members vs. payload); do not compare those.
+            if case.cli_extract && case.format != "deb" && decode.ours_cli.is_some() {
+                if let Some(cli_data) = dir_data_set(&cli_out) {
+                    let ok = ours_data == cli_data;
+                    merge_cross(&mut decode, ok);
+                    if !ok {
+                        decode.note = Some("fixture ours-cli data mismatch".to_owned());
                     }
                 }
-                if decode.reference.is_some() {
-                    let ref_dir = dir.join("ref-out");
-                    if let Some(ref_data) = dir_data_set(&ref_dir) {
-                        let ok = ours_data == ref_data;
-                        merge_cross(&mut decode, ok);
-                        if !ok {
-                            decode.note = Some("fixture reference data mismatch".to_owned());
-                        }
+            }
+            if decode.reference.is_some() {
+                let ref_dir = dir.join("ref-out");
+                if let Some(ref_data) = dir_data_set(&ref_dir) {
+                    let ok = ours_data == ref_data;
+                    merge_cross(&mut decode, ok);
+                    if !ok {
+                        decode.note = Some("fixture reference data mismatch".to_owned());
                     }
                 }
+            }
+            if case.format == "deb" && decode.ours_cli.is_some() {
+                append_note(
+                    &mut decode,
+                    "deb lib reads ar members; CLI extracts payloads".to_owned(),
+                );
             }
         }
         append_note(
@@ -517,10 +522,12 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
             let cli_out = dir.join("cli-out");
             match cli_archive_decode(cfg, case, &common, &cli_out) {
                 Ok(measurement) => {
-                    let ok = dir_manifest_matches_for(case, &cli_out, &expected);
                     decode.ours_cli = Some(measurement);
-                    if !ok {
-                        decode.note = Some("ours-cli extraction manifest mismatch".to_owned());
+                    if case.cli_extract {
+                        let ok = dir_manifest_matches_for(case, &cli_out, &expected);
+                        if !ok {
+                            decode.note = Some("ours-cli extraction manifest mismatch".to_owned());
+                        }
                     }
                 }
                 Err(error) => append_note(&mut decode, format!("ours-cli extract: {error}")),
@@ -1005,6 +1012,10 @@ fn configure_process_group(command: &mut Command) {
     {
         command.process_group(0);
     }
+    #[cfg(not(unix))]
+    {
+        let _ = command;
+    }
 }
 
 fn kill_process_group(child: &mut Child) {
@@ -1016,6 +1027,10 @@ fn kill_process_group(child: &mut Child) {
         unsafe {
             libc::kill(-pid, libc::SIGKILL);
         }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = child;
     }
 }
 
@@ -1296,6 +1311,7 @@ fn manifest_data_set(path: &Path) -> Option<Vec<(usize, u64)>> {
     let entries = value.get("entries")?.as_array()?;
     let mut data: Vec<(usize, u64)> = entries
         .iter()
+        .filter(|entry| entry.get("is_dir").and_then(Value::as_bool) != Some(true))
         .filter_map(|entry| {
             Some((
                 entry.get("len")?.as_u64()? as usize,
@@ -1304,7 +1320,6 @@ fn manifest_data_set(path: &Path) -> Option<Vec<(usize, u64)>> {
         })
         .collect();
     data.sort_unstable();
-    data.dedup();
     Some(data)
 }
 
@@ -1315,7 +1330,6 @@ fn dir_data_set(dir: &Path) -> Option<Vec<(usize, u64)>> {
         .map(|(_, len, hash)| (len, hash))
         .collect();
     data.sort_unstable();
-    data.dedup();
     Some(data)
 }
 

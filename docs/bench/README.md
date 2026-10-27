@@ -48,7 +48,8 @@ cargo bench --all-features --bench compare -- \
 
 `ours-lib` は実装ポテンシャル、`ours-cli` と `ref-cli` は end-to-end の比較に使う。
 参照側の decode は `/dev/null` または一時ディレクトリへ出力し、検証時だけ
-実ファイルへ出力する。
+実ファイルへ出力する。zpaq-archive の CLI decode は `archive test` を使う
+（journal tree の再構成はライブラリ側のみ）。
 
 - warmup 1 回 + quick 2 回 / full 5 回のサンプル中央値
 - スループットは decimal MB/s（1e6 bytes/s）
@@ -98,6 +99,8 @@ cargo bench --all-features --bench compare -- \
 - `--size` で codec の入力サイズを上書きできる（archive のツリーサイズは固定）
 - read-only 形式の一部は `target/bench/fixtures/` に生成した fixture を使う
   （deb/rpm/mtree/warc/zim/squashfs/cramfs/pea/mscfb/crx3）。fixture はリポジトリにコミットしない
+- fixture の decode は、ディレクトリ entry を除いたファイル payload の集合を
+  ours-lib / ours-cli / 参照実装で比較する（ツリー名は比較しない）
 - `--timeout` で helper / CLI / 参照プロセスの 1 回あたりの上限を指定できる（既定 600 秒、0 は拒否）
 
 ## 参照実装
@@ -118,9 +121,10 @@ cargo bench --all-features --bench compare -- \
 ### ベースライン比較
 
 `--baseline target/bench/compare/run-.../result.json` を指定すると、
-同一ケース・同一 corpus・同一 implementation の中央値差分を Markdown に追加する。
+同一ケース・同一 corpus・同一入力サイズ・同一 implementation の中央値差分を Markdown に追加する。
 
-- 差分は同一マシン・同一ビルド条件でのみ意味がある
+- 差分は同一マシン・同一入力サイズ・同一ビルド条件でのみ意味がある
+- baseline と入力サイズが一致しない測定は差分表に出さない
 - 参照実装の差分も表示する
 - CI 連携や性能ゲートは行わない
 

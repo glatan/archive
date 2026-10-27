@@ -529,8 +529,10 @@ fn unar_ref() -> RefSpec {
         build: DISTRO,
         encode: None,
         decode: Some(cmd(
+            // `-D` suppresses unar's containing directory, which would
+            // otherwise break the expected tree names for self-base formats.
             "unar",
-            &["-q", "-o", "{output}", "{input}"],
+            &["-q", "-D", "-o", "{output}", "{input}"],
             OutputMode::Dir,
         )),
     }
@@ -1403,14 +1405,21 @@ pub fn cases() -> Vec<Case> {
         archive("ar", "ar", "ar", true, Some(ar_ref()), None),
         archive("zip", "zip", "zip", true, Some(zip_ref()), None),
         archive("7z", "7z", "7z", true, Some(sevenz_ref()), None),
-        archive(
-            "zpaq-archive",
-            "ZPAQ archive",
-            "zpaq",
-            true,
-            Some(zpaq_ref()),
-            None,
-        ),
+        {
+            // `archive extract` exposes the raw journal blocks, while the
+            // library helper reconstructs the journal tree. Measure the CLI
+            // with `archive test` instead of comparing different trees.
+            let mut case = archive(
+                "zpaq-archive",
+                "ZPAQ archive",
+                "zpaq",
+                true,
+                Some(zpaq_ref()),
+                Some("CLI decode uses archive test; journal tree extraction is library-only"),
+            );
+            case.cli_extract = false;
+            case
+        },
         // Archives with our writer but no packaged reference encoder.
         archive_fixture_with_ref(
             "lha",
