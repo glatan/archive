@@ -149,6 +149,48 @@ fn python3_available() -> bool {
     command_available("python3", &["--version"])
 }
 
+/// In strict mode, fail once if any tool required by the test image is
+/// missing. This prevents interop tests from silently skipping when the
+/// environment is not the expected container image.
+#[test]
+fn required_external_tools_are_installed() {
+    if !require_external_tools() {
+        return;
+    }
+    const TOOLS: &[(&str, &[&str])] = &[
+        ("7z", &["i"]),
+        ("bsdtar", &["--version"]),
+        ("tar", &["--version"]),
+        ("gzip", &["--version"]),
+        ("bzip2", &["--version"]),
+        ("xz", &["--version"]),
+        ("lzip", &["--version"]),
+        ("lz4", &["--version"]),
+        ("lzop", &["--version"]),
+        ("lrzip", &["--version"]),
+        ("cpio", &["--version"]),
+        ("zip", &["-v"]),
+        ("unzip", &["-v"]),
+        ("zstd", &["--version"]),
+        ("brotli", &["--version"]),
+        ("python3", &["--version"]),
+        ("git", &["--version"]),
+        ("unar", &["--version"]),
+        ("lhasa", &["--version"]),
+        ("cabextract", &["-v"]),
+        ("mksquashfs", &["-version"]),
+        ("unsquashfs", &["-version"]),
+        ("compress", &["-V"]),
+        ("rzip", &["-V"]),
+    ];
+    for &(name, args) in TOOLS {
+        assert!(
+            command_available(name, args),
+            "required external tool is unavailable: {name}"
+        );
+    }
+}
+
 // ============================================================
 // 7z tests
 // ============================================================

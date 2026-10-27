@@ -147,21 +147,27 @@ fn test_rzip_encode_system_decode_level_edges() {
 fn test_rzip_encode_system_decode_backend_matrix() {
     use rzip::encode::Backend;
     let input = b"rzip backend payload ".repeat(2048);
-    for (stem, backend) in [
-        ("b_none", Backend::None),
-        ("b_gzip", Backend::Gzip),
-        ("b_lzo", Backend::Lzo),
-        ("b_bzip2", Backend::Bzip2),
-    ] {
+    let mut cases = vec![("b_none", Backend::None), ("b_bzip2", Backend::Bzip2)];
+    #[cfg(feature = "zlib")]
+    cases.push(("b_gzip", Backend::Gzip));
+    #[cfg(feature = "lzo")]
+    cases.push(("b_lzo", Backend::Lzo));
+
+    for (stem, backend) in cases {
         let archive = rzip::encode::encode_with_backend(&input, backend);
         // Upstream rzip 2.1 only supports CTYPE_NONE(3)/CTYPE_BZIP2(4);
         // GZIP/LZO ctypes are lrzip-derived crate extensions that system
         // rzip cannot decode, so they only get a crate roundtrip check.
-        match backend {
-            Backend::Gzip | Backend::Lzo => {
-                assert_eq!(rzip::decode::decode(&archive).unwrap(), input);
-            }
-            _ => assert_rzip_archive_system_decode_compat(archive, stem, &input),
+        #[cfg(feature = "zlib")]
+        if matches!(backend, Backend::Gzip) {
+            assert_eq!(rzip::decode::decode(&archive).unwrap(), input);
+            continue;
         }
+        #[cfg(feature = "lzo")]
+        if matches!(backend, Backend::Lzo) {
+            assert_eq!(rzip::decode::decode(&archive).unwrap(), input);
+            continue;
+        }
+        assert_rzip_archive_system_decode_compat(archive, stem, &input);
     }
 }

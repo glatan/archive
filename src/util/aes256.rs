@@ -380,6 +380,7 @@ mod tests {
         assert_eq!(decrypted, plaintext);
     }
 
+    #[cfg(any(feature = "zip", feature = "pea"))]
     #[test]
     fn test_aes128_ctr_roundtrip() {
         let key = [0x22; 16];
@@ -391,6 +392,7 @@ mod tests {
         assert_eq!(decrypted, plaintext);
     }
 
+    #[cfg(feature = "zip")]
     #[test]
     fn test_aes192_ctr_roundtrip() {
         let key = [0x33; 24];
@@ -402,6 +404,7 @@ mod tests {
         assert_eq!(decrypted, plaintext);
     }
 
+    #[cfg(any(feature = "zip", feature = "pea"))]
     #[test]
     fn test_aes128_block_vector() {
         // FIPS 197 example vector for AES-128.
@@ -432,6 +435,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "zip")]
     #[test]
     fn test_aes192_block_vector() {
         // FIPS 197 example vector for AES-192.

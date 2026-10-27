@@ -724,6 +724,7 @@ fn test_lha_pmarc_oracle_interop() {
     let dir = std::env::temp_dir().join(format!("archive_test_lha_pm_{uniq}"));
     std::fs::create_dir_all(&dir).unwrap();
     let data = b"pmarc oracle interop payload ".repeat(64);
+    let mut compared = 0;
 
     for (method, tag) in [(b"-pm1-", "pm1"), (b"-pm2-", "pm2")] {
         let path = dir.join(format!("test{tag}.lzh"));
@@ -743,6 +744,13 @@ fn test_lha_pmarc_oracle_interop() {
             }
             let extracted = std::fs::read(out_dir.join(&name)).unwrap();
             assert_eq!(extracted, data.as_slice(), "{tag}: {tool} output differs");
+            compared += 1;
         }
     }
+
+    assert!(
+        compared > 0,
+        "oracle tools were available but no PMarc fixture was compared"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

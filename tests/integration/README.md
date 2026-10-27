@@ -30,6 +30,8 @@
 ツールが存在しない環境では、該当テストをスキップする。
 `ARCHIVE_REQUIRE_EXTERNAL_TOOLS=1` を設定すると、共通ヘルパー経由で検出した
 ツール不在を失敗として扱う（interop coverage を必須にする場合に使う）。
+`required_external_tools_are_installed` は、このモードで test image が前提とする
+主要ツールの存在をまとめて検証する。
 
 現時点で `Containerfile` に用意している外部ツールは次の通りである。
 
@@ -73,6 +75,12 @@
 ## Test inventory
 
 以下の表は、各 integration test file がどの検証項目をどの test case で固定しているかを対応付けたものである。
+
+### Harness-level
+
+| Coverage | Test cases |
+| --- | --- |
+| strict mode の必須外部ツール存在確認 | `required_external_tools_are_installed` |
 
 ### `ar.rs`
 
@@ -909,8 +917,9 @@
 
 `tests/integration/generated/` は fuzz failure から自動生成された回帰テスト群である。
 ファイル名・テスト名は failure signature に由来するため、個別の coverage 表には載せず、
-ここにまとめて扱う。現在は 40 件の `test_fuzz_regression_*` があり、いずれも
-decode が panic せずに完了することを検証する。
+ここにまとめて扱う。現在は 40 件の `test_fuzz_regression_*` があり、
+decode が panic せずに完了することに加え、一部の self roundtrip は
+encode/decode の等価性まで検証する。
 
 ## Related files
 
