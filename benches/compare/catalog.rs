@@ -420,6 +420,83 @@ fn zx5_ref() -> RefSpec {
     }
 }
 
+fn zx_backwards_ref(name: &'static str, version: &'static str, binary: &'static str) -> RefSpec {
+    RefSpec {
+        name,
+        version,
+        binary_id: binary,
+        build: "source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0",
+        encode: Some(cmd(
+            binary,
+            if binary == "zx2" {
+                &["-b", "-f", "{input}", "{output}"][..]
+            } else {
+                &["-q", "-b", "-f", "{input}", "{output}"][..]
+            },
+            OutputMode::Arg,
+        )),
+        decode: None,
+    }
+}
+
+fn lzrw_ref(name: &'static str, version: &'static str, binary: &'static str) -> RefSpec {
+    RefSpec {
+        name,
+        version,
+        binary_id: binary,
+        build: "source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 -std=gnu89",
+        encode: Some(cmd(binary, &["c", "{input}", "{output}"], OutputMode::Arg)),
+        decode: Some(cmd(binary, &["d", "{input}", "{output}"], OutputMode::Arg)),
+    }
+}
+
+fn lzs_ref() -> RefSpec {
+    RefSpec {
+        name: "lzs-compression",
+        version: "10f122bf",
+        binary_id: "lzs_ref",
+        build: "source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0",
+        encode: Some(cmd(
+            "lzs_ref",
+            &["c", "{input}", "{output}"],
+            OutputMode::Arg,
+        )),
+        decode: Some(cmd(
+            "lzs_ref",
+            &["d", "{input}", "{output}"],
+            OutputMode::Arg,
+        )),
+    }
+}
+
+fn xdelta3_ref() -> RefSpec {
+    RefSpec {
+        name: "Xdelta3",
+        version: "3.2.2",
+        binary_id: "xdelta3",
+        build: DISTRO,
+        encode: Some(cmd(
+            "xdelta3",
+            &[
+                "-e",
+                "-f",
+                "-S",
+                "none",
+                "-s",
+                "/dev/null",
+                "{input}",
+                "{output}",
+            ],
+            OutputMode::Arg,
+        )),
+        decode: Some(cmd(
+            "xdelta3",
+            &["-d", "-f", "-s", "/dev/null", "{input}", "{output}"],
+            OutputMode::Arg,
+        )),
+    }
+}
+
 fn zlib_ref(kind: &'static str) -> RefSpec {
     RefSpec {
         name: "CPython zlib",
@@ -685,7 +762,7 @@ fn zip_ref() -> RefSpec {
 fn sevenz_ref() -> RefSpec {
     RefSpec {
         name: "7-Zip",
-        version: "26.04",
+        version: "26.05",
         binary_id: "7z",
         build: DISTRO,
         encode: Some(cmd(
@@ -772,6 +849,7 @@ fn codec(
         backend,
         reference,
         fixture: None,
+        empty_file: true,
         note,
         size,
     }
@@ -820,6 +898,7 @@ fn codec_raw(
         backend: None,
         reference: None,
         fixture: None,
+        empty_file: true,
         note: Some(note),
         size,
     }
@@ -849,6 +928,7 @@ fn codec_raw_with_ref(
         backend: None,
         reference: Some(reference),
         fixture: None,
+        empty_file: true,
         note: Some(note),
         size,
     }
@@ -878,6 +958,7 @@ fn archive(
         backend: None,
         reference,
         fixture: None,
+        empty_file: true,
         note,
         size: MEDIUM,
     }
@@ -906,6 +987,7 @@ fn archive_fixture(
         backend: None,
         reference: None,
         fixture: Some(fixture),
+        empty_file: true,
         note: Some(note),
         size: MEDIUM,
     }
@@ -934,6 +1016,7 @@ fn archive_raw_fixture(
         backend: None,
         reference: None,
         fixture: Some(fixture),
+        empty_file: true,
         note: Some(note),
         size: MEDIUM,
     }
@@ -1188,22 +1271,60 @@ pub fn cases() -> Vec<Case> {
             Some(fastlz_ref()),
             Some("Cross-validated against FastLZ 0.5.0"),
         ),
-        codec_ours_only("lzrw1", "LZRW1", "lzrw1", FAST, "No packaged reference CLI"),
-        codec_ours_only(
+        codec(
+            "lzrw1",
+            "LZRW1",
+            "lzrw1",
+            Some("lzrw1"),
+            None,
+            None,
+            FAST,
+            Some(lzrw_ref("LZRW1", "1991", "lzrw1_ref")),
+            Some("Ross Williams' public-domain reference source"),
+        ),
+        codec(
             "lzrw1a",
             "LZRW1-A",
             "lzrw1a",
+            Some("lzrw1a"),
+            None,
+            None,
             FAST,
-            "No packaged reference CLI",
+            Some(lzrw_ref("LZRW1-A", "1991", "lzrw1a_ref")),
+            Some("Ross Williams' public-domain reference source"),
         ),
-        codec_ours_only("lzrw2", "LZRW2", "lzrw2", FAST, "No packaged reference CLI"),
-        codec_ours_only("lzrw3", "LZRW3", "lzrw3", FAST, "No packaged reference CLI"),
-        codec_ours_only(
+        codec(
+            "lzrw2",
+            "LZRW2",
+            "lzrw2",
+            Some("lzrw2"),
+            None,
+            None,
+            FAST,
+            Some(lzrw_ref("LZRW2", "1991", "lzrw2_ref")),
+            Some("Ross Williams' public-domain reference source"),
+        ),
+        codec(
+            "lzrw3",
+            "LZRW3",
+            "lzrw3",
+            Some("lzrw3"),
+            None,
+            None,
+            FAST,
+            Some(lzrw_ref("LZRW3", "1991", "lzrw3_ref")),
+            Some("Ross Williams' public-domain reference source"),
+        ),
+        codec(
             "lzrw3a",
             "LZRW3-A",
             "lzrw3a",
+            Some("lzrw3a"),
+            None,
+            None,
             FAST,
-            "No packaged reference CLI",
+            Some(lzrw_ref("LZRW3-A", "1991", "lzrw3a_ref")),
+            Some("Ross Williams' public-domain reference source"),
         ),
         codec(
             "lzsa",
@@ -1271,40 +1392,60 @@ pub fn cases() -> Vec<Case> {
             Some(zx5_ref()),
             Some("ZX5 reference CLI from upstream source build"),
         ),
-        codec_ours_only(
+        codec(
             "zx0b",
             "ZX0 backwards",
             "zx0b",
-            FAST,
-            "No standalone backwards reference CLI",
+            Some("zx0b"),
+            None,
+            None,
+            ZX,
+            Some(zx_backwards_ref("ZX0", "2.2", "zx0")),
+            Some("Reference encoder only; upstream C decompressor has no backwards mode"),
         ),
-        codec_ours_only(
+        codec(
             "zx1b",
             "ZX1 backwards",
             "zx1b",
-            FAST,
-            "No standalone backwards reference CLI",
+            Some("zx1b"),
+            None,
+            None,
+            ZX,
+            Some(zx_backwards_ref("ZX1", "1.5", "zx1")),
+            Some("Reference encoder only; upstream C decompressor has no backwards mode"),
         ),
-        codec_ours_only(
+        codec(
             "zx2b",
             "ZX2 backwards",
             "zx2b",
-            FAST,
-            "No standalone backwards reference CLI",
+            Some("zx2b"),
+            None,
+            None,
+            ZX,
+            Some(zx_backwards_ref("ZX2", "1.1", "zx2")),
+            Some("Reference encoder only; upstream C decompressor has no backwards mode"),
         ),
-        codec_ours_only(
+        codec(
             "zx5b",
             "ZX5 backwards",
             "zx5b",
-            FAST,
-            "No standalone backwards reference CLI",
+            Some("zx5b"),
+            None,
+            None,
+            ZX,
+            Some(zx_backwards_ref("ZX5", "2.0", "zx5")),
+            Some("Reference encoder only; upstream C decompressor has no backwards mode"),
         ),
-        codec_ours_only(
+        codec(
             "vcdiff",
             "VCDIFF",
             "vcdiff",
+            Some("vcdiff"),
+            None,
+            None,
             MEDIUM,
-            "xdelta3 not installed in baseline image",
+            Some(xdelta3_ref()),
+            Some("xdelta3 delta against an empty source; startup is included"),
         ),
         codec_ours_only(
             "mppc",
@@ -1313,12 +1454,16 @@ pub fn cases() -> Vec<Case> {
             PACKET,
             "No packaged MPPC reference CLI; 8 KiB single-packet limit",
         ),
-        codec_ours_only(
+        codec(
             "lzs",
             "Stac LZS",
             "lzs",
+            Some("lzs"),
+            None,
+            None,
             MEDIUM,
-            "No packaged LZS reference CLI",
+            Some(lzs_ref()),
+            Some("lzs-compression MIT reference, pinned source build"),
         ),
         codec_ours_only(
             "lzxd",
@@ -1404,7 +1549,21 @@ pub fn cases() -> Vec<Case> {
         archive("cpio", "cpio (newc)", "cpio", true, Some(cpio_ref()), None),
         archive("ar", "ar", "ar", true, Some(ar_ref()), None),
         archive("zip", "zip", "zip", true, Some(zip_ref()), None),
-        archive("7z", "7z", "7z", true, Some(sevenz_ref()), None),
+        {
+            // 7z stores zero-length files as empty-stream entries, which
+            // this decoder intentionally rejects. Keep the benchmark tree
+            // comparable by omitting the empty entry for this case.
+            let mut case = archive(
+                "7z",
+                "7z",
+                "7z",
+                true,
+                Some(sevenz_ref()),
+                Some("Benchmark tree omits empty files; kEmptyStream decode is unsupported"),
+            );
+            case.empty_file = false;
+            case
+        },
         {
             // `archive extract` exposes the raw journal blocks, while the
             // library helper reconstructs the journal tree. Measure the CLI

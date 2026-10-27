@@ -448,7 +448,7 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
     } else if case.format == "arc" {
         corpus::build_short_tree(&tree_dir, file_count, file_size)
     } else {
-        corpus::build_tree(&tree_dir, file_count, file_size)
+        corpus::build_tree(&tree_dir, file_count, file_size, case.empty_file)
     } {
         Ok(tree) => tree,
         Err(error) => {

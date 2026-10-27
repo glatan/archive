@@ -31,24 +31,24 @@ missing reference binary) is recorded in the generated report.
 | snappy-raw | snappy | codec | measured | Snappy | 1.2.1 | source build: g++ -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | Raw-block comparison against upstream Snappy |
 | lzf | lzf | codec | measured | liblzf | 3.6 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | Cross-validated against liblzf 3.6 |
 | fastlz | fastlz | codec | measured | FastLZ | 0.5.0 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | Cross-validated against FastLZ 0.5.0 |
-| lzrw1 | lzrw1 | codec | ours-only | — | — | — | No packaged reference CLI |
-| lzrw1a | lzrw1a | codec | ours-only | — | — | — | No packaged reference CLI |
-| lzrw2 | lzrw2 | codec | ours-only | — | — | — | No packaged reference CLI |
-| lzrw3 | lzrw3 | codec | ours-only | — | — | — | No packaged reference CLI |
-| lzrw3a | lzrw3a | codec | ours-only | — | — | — | No packaged reference CLI |
+| lzrw1 | lzrw1 | codec | measured | LZRW1 | 1991 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 -std=gnu89 | Ross Williams' public-domain reference source |
+| lzrw1a | lzrw1a | codec | measured | LZRW1-A | 1991 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 -std=gnu89 | Ross Williams' public-domain reference source |
+| lzrw2 | lzrw2 | codec | measured | LZRW2 | 1991 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 -std=gnu89 | Ross Williams' public-domain reference source |
+| lzrw3 | lzrw3 | codec | measured | LZRW3 | 1991 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 -std=gnu89 | Ross Williams' public-domain reference source |
+| lzrw3a | lzrw3a | codec | measured | LZRW3-A | 1991 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 -std=gnu89 | Ross Williams' public-domain reference source |
 | lzsa | lzsa | codec | measured | lzsa | 1.4.1 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 -Isrc/libdivsufsort/include -Isrc | LZSA v1 reference CLI from upstream source build |
 | lzsa2 | lzsa2 | codec | measured | lzsa | 1.4.1 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 -Isrc/libdivsufsort/include -Isrc | LZSA v2 reference CLI from upstream source build |
 | zx0 | zx0 | codec | measured | ZX0 | 2.2 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx0.c optimize.c compress.c memory.c) | ZX0 reference CLI from upstream source build |
 | zx1 | zx1 | codec | measured | ZX1 | 1.5 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx1.c optimize.c compress.c memory.c) | ZX1 reference CLI from upstream source build |
 | zx2 | zx2 | codec | measured | ZX2 | 1.1 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx2.c optimize.c compress.c memory.c) | ZX2 reference CLI from upstream source build |
 | zx5 | zx5 | codec | measured | ZX5 | 2.0 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 (zx5.c optimize.c compress.c memory.c) | ZX5 reference CLI from upstream source build |
-| zx0b | zx0b | codec | ours-only | — | — | — | No standalone backwards reference CLI |
-| zx1b | zx1b | codec | ours-only | — | — | — | No standalone backwards reference CLI |
-| zx2b | zx2b | codec | ours-only | — | — | — | No standalone backwards reference CLI |
-| zx5b | zx5b | codec | ours-only | — | — | — | No standalone backwards reference CLI |
-| vcdiff | vcdiff | codec | ours-only | — | — | — | xdelta3 not installed in baseline image |
+| zx0b | zx0b | codec | measured | ZX0 | 2.2 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | Reference encoder only; upstream C decompressor has no backwards mode |
+| zx1b | zx1b | codec | measured | ZX1 | 1.5 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | Reference encoder only; upstream C decompressor has no backwards mode |
+| zx2b | zx2b | codec | measured | ZX2 | 1.1 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | Reference encoder only; upstream C decompressor has no backwards mode |
+| zx5b | zx5b | codec | measured | ZX5 | 2.0 | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | Reference encoder only; upstream C decompressor has no backwards mode |
+| vcdiff | vcdiff | codec | measured | Xdelta3 | 3.2.2 | distro package (exact distro build flags not exposed) | xdelta3 delta against an empty source; startup is included |
 | mppc | mppc | codec | ours-only | — | — | — | No packaged MPPC reference CLI; 8 KiB single-packet limit |
-| lzs | lzs | codec | ours-only | — | — | — | No packaged LZS reference CLI |
+| lzs | lzs | codec | measured | lzs-compression | 10f122bf | source build: gcc -O2 -march=x86-64 -mtune=generic -fomit-frame-pointer -g0 | lzs-compression MIT reference, pinned source build |
 | lzxd | lzxd | codec | ours-only | — | — | — | cabextract decodes CAB, not a raw LZXD stream |
 | cmpsc | cmpsc | codec | ours-only | — | — | — | No Linux reference implementation |
 | xpress | xpress | codec | ours-only | — | — | — | No Linux reference implementation; 32 KiB single-block benchmark size |
@@ -64,7 +64,7 @@ missing reference binary) is recorded in the generated report.
 | cpio | cpio | archive | measured | GNU cpio | system cpio | distro package (exact distro build flags not exposed) |  |
 | ar | ar | archive | measured | GNU ar | system binutils | distro package (exact distro build flags not exposed) |  |
 | zip | zip | archive | measured | Info-ZIP zip | 3.0 | distro package (exact distro build flags not exposed) |  |
-| 7z | 7z | archive | measured | 7-Zip | 26.04 | distro package (exact distro build flags not exposed) |  |
+| 7z | 7z | archive | measured | 7-Zip | 26.05 | distro package (exact distro build flags not exposed) | Benchmark tree omits empty files; kEmptyStream decode is unsupported |
 | zpaq-archive | zpaq | archive | measured | zpaq | 7.15 | distro package (exact distro build flags not exposed) | CLI decode uses archive test; journal tree extraction is library-only |
 | lha | lha | archive | decode-only | lhasa | system lhasa | distro package (exact distro build flags not exposed) | Checked-in LHA fixture; decode reference is lhasa |
 | arj | arj | archive | measured | unar | system unarchiver | distro package (exact distro build flags not exposed) | Decode reference is unar; no reference writer |

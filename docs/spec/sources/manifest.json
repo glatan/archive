@@ -157,6 +157,16 @@
    "note": "性能比較の raw-block 参照としてのみビルド。sha256 736aeb64d86566d2236ddffa2865ee5d7a82d26c9016b36218fcc27ea4f09f86。コード取り込みなし"
   },
   {
+   "id": "lzs-cmcqueen-source",
+   "format": "lzs",
+   "title": "cmcqueen/lzs-compression (benchmark raw-stream reference)",
+   "version": "10f122bf5214a5bbf5dd60d45bcae703967676af",
+   "url": "https://github.com/cmcqueen/lzs-compression/archive/10f122bf5214a5bbf5dd60d45bcae703967676af.tar.gz",
+   "filename": "lzs-compression-10f122bf5214a5bbf5dd60d45bcae703967676af.tar.gz",
+   "license": "MIT",
+   "note": "性能比較の encode/decode 参照としてのみビルド。sha256 002bf9a598f7293aa15877db424aeaa2b2a8d9585a92829e43b0f5604fa00ae2。コード取り込みなし"
+  },
+  {
    "id": "lzma-file-format",
    "format": "lzma-alone",
    "title": "The .lzma File Format",

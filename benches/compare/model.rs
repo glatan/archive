@@ -102,6 +102,8 @@ pub struct Case {
     pub reference: Option<RefSpec>,
     /// Optional checked-in fixture for read-only formats.
     pub fixture: Option<&'static str>,
+    /// Include the zero-length `empty.bin` entry in generated archive trees.
+    pub empty_file: bool,
     /// Why no reference is available, or other scope note.
     pub note: Option<&'static str>,
     pub size: SizeClass,

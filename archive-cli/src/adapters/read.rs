@@ -121,6 +121,8 @@ pub fn analyze_bytes(
 pub struct DecodedPayload {
     pub name: String,
     pub data: Vec<u8>,
+    /// True for directory metadata; payloads are normally files.
+    pub is_dir: bool,
 }
 
 /// Decode every payload with the same dispatch as `archive list`.
@@ -140,12 +142,15 @@ pub fn decode_payloads(
             // Directories are not payloads. Some decoders attach an
             // empty `Some` payload to them, which would otherwise appear
             // as a zero-length file in benchmark manifests.
-            if matches!(item.summary.kind.as_str(), "dir" | "directory") {
+            let is_dir = matches!(item.summary.kind.as_str(), "dir" | "directory")
+                || item.summary.path.ends_with('/');
+            if is_dir {
                 return None;
             }
             item.payload.map(|data| DecodedPayload {
                 name: item.summary.path,
                 data,
+                is_dir: false,
             })
         })
         .collect();

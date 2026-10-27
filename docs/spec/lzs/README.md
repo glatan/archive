@@ -4,7 +4,7 @@
 |------|------|
 | 形式概要 | RFC 2395 "IP Payload Compression Using LZS"。LZ77 系の datagram 指向圧縮。2048 バイトのスライディングウィンドウを使い、datagram 毎に履歴をリセットする。§2.2 のトークン列文法は ANSI X3.241-1994 からの informational 転記 |
 | 基準仕様 | [RFC 2395](https://www.rfc-editor.org/rfc/rfc2395) (ローカルスナップショット: `docs/spec/sources/rfc2395.txt`) |
-| 参照実装 | compcol LZS codec (KarpelesLab、MIT、oracle: `tests/fixtures/lzs/` の相互検証のみ、コード共有なし)。詳細: THIRD_PARTY_NOTICES Stac LZS 項 |
+| 参照実装 | compcol LZS codec (KarpelesLab、MIT、oracle: `tests/fixtures/lzs/` の相互検証のみ、コード共有なし)。性能比較 (`docs/bench/`) では cmcqueen/lzs-compression (MIT) の raw-stream encode/decode 参照を使用。詳細: THIRD_PARTY_NOTICES Stac LZS 項 |
 | 実装 | `archive::compress::lzs` (encode / decode / decode_bounded)。pure-Rust 実装 |
 
 ## 対応バリアント・スコープ
