@@ -95,6 +95,80 @@ REFS = {
         "compiler": "g++",
         "stubs": "snappy-stubs-public.h",
     },
+    "lzrw1": {
+        "url": "https://ftp.funet.fi/pub/misc/compression/lzrw1.c",
+        "sha256": "15f3654238d8669e349c3442e9c13e18bfac04ee7bccc17a2bdf9f899750a731",
+        "filename": "lzrw1.c",
+        "version": "LZRW1 (1991)",
+        "license": "public domain",
+        "driver": "lzrw_driver.c",
+        "binary": "lzrw1_ref",
+        "include_driver": ["lzrw"],
+        "defines": ["USE_LZRW1"],
+        "cflags_extra": ["-std=gnu89"],
+        "comment_preamble": "#define UBYTE",
+    },
+    "lzrw1a": {
+        "url": "https://ftp.funet.fi/pub/misc/compression/lzrw1-a.c",
+        "sha256": "ff91f657b4928037b70749948d7eab223c79f3c27f801f299af739522cb006f3",
+        "filename": "lzrw1-a.c",
+        "version": "LZRW1-A (1991)",
+        "license": "public domain",
+        "driver": "lzrw_driver.c",
+        "binary": "lzrw1a_ref",
+        "include_driver": ["lzrw"],
+        "defines": ["USE_LZRW1A"],
+        "cflags_extra": ["-std=gnu89"],
+        "comment_preamble": '#include "port.h"',
+        "patch_hash_align": True,
+    },
+    "lzrw2": {
+        "url": "https://ftp.funet.fi/pub/misc/compression/lzrw2.c",
+        "sha256": "69796dde5ffc38d60180c607eb848348d8bd00062062d9beb76dbc448993a31c",
+        "filename": "lzrw2.c",
+        "version": "LZRW2 (1991)",
+        "license": "public domain",
+        "driver": "lzrw_driver.c",
+        "binary": "lzrw2_ref",
+        "include_driver": ["lzrw"],
+        "defines": ["USE_LZRW2"],
+        "cflags_extra": ["-std=gnu89"],
+    },
+    "lzrw3": {
+        "url": "https://ftp.funet.fi/pub/misc/compression/lzrw3.c",
+        "sha256": "e655dd72e1b2f4e0d1a3901007a922b88b4ed6bc2deebdc97dc13cf49d04d1db",
+        "filename": "lzrw3.c",
+        "version": "LZRW3 (1991)",
+        "license": "public domain",
+        "driver": "lzrw_driver.c",
+        "binary": "lzrw3_ref",
+        "include_driver": ["lzrw"],
+        "defines": ["USE_LZRW3"],
+        "cflags_extra": ["-std=gnu89"],
+    },
+    "lzrw3a": {
+        "url": "https://ftp.funet.fi/pub/misc/compression/lzrw3-a.c",
+        "sha256": "fef5eec83c37f891f9efd983c6c7ae35c1b609c116c8485a38223ec624713867",
+        "filename": "lzrw3-a.c",
+        "version": "LZRW3-A (1991)",
+        "license": "public domain",
+        "driver": "lzrw_driver.c",
+        "binary": "lzrw3a_ref",
+        "include_driver": ["lzrw"],
+        "defines": ["USE_LZRW3A"],
+        "cflags_extra": ["-std=gnu89"],
+    },
+    "lzs": {
+        "url": "https://github.com/cmcqueen/lzs-compression/archive/10f122bf5214a5bbf5dd60d45bcae703967676af.tar.gz",
+        "sha256": "002bf9a598f7293aa15877db424aeaa2b2a8d9585a92829e43b0f5604fa00ae2",
+        "dir": "lzs-compression-10f122bf5214a5bbf5dd60d45bcae703967676af",
+        "version": "lzs-compression (10f122bf)",
+        "license": "MIT",
+        "sources": ["c/src/liblzs/lzs-compression.c", "c/src/liblzs/lzs-decompression.c"],
+        "driver": "lzs_driver.c",
+        "binary": "lzs_ref",
+        "include_root": ["c/src/liblzs"],
+    },
     "lzsa": {
         "url": "https://github.com/emmanuel-marty/lzsa.git",
         "commit": "15ee2dfe118eeb8f7683ca44f64821c3a61ca1e5",
@@ -163,8 +237,63 @@ def fetch_archive(name: str, spec: dict) -> Path:
     return dest
 
 
+def fetch_file(name: str, spec: dict) -> Path:
+    dest = SRC / name
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    downloads = TARGET / "downloads"
+    downloads.mkdir(parents=True, exist_ok=True)
+    filename = spec["filename"]
+    cached = downloads / f"{name}-{filename}"
+    if not cached.exists():
+        print(f"downloading {spec['url']}")
+        urllib.request.urlretrieve(spec["url"], cached)
+    actual = sha256(cached)
+    if actual != spec["sha256"]:
+        raise SystemExit(f"{name}: sha256 mismatch: {actual}")
+    shutil.copy2(cached, dest / filename)
+    return dest
+
+
+def prepare_lzrw_source(root: Path, spec: dict) -> None:
+    if "comment_preamble" not in spec:
+        return
+    path = root / spec["filename"]
+    text = path.read_text()
+    marker = spec["comment_preamble"]
+    index = text.index(marker)
+    head, tail = text[:index], text[index:]
+    lines = []
+    in_block = False
+    for line in head.splitlines():
+        if in_block:
+            lines.append(line)
+            if "*/" in line:
+                in_block = False
+        elif line.strip().startswith("/*"):
+            lines.append(line)
+            if "*/" not in line:
+                in_block = True
+        elif not line.strip() or line.strip().startswith("*"):
+            lines.append(line)
+        else:
+            lines.append("//" + line)
+    path.write_text("\n".join(lines) + "\n" + tail)
+
+
 def build_driver(name: str, spec: dict, root: Path) -> dict:
     commands = []
+    prepare_lzrw_source(root, spec)
+    if "comment_preamble" in spec or spec.get("patch_hash_align"):
+        commands.append(
+            f"prepare {root / spec['filename']} (comment preamble"
+            + (", 64-bit hash alignment)" if spec.get("patch_hash_align") else ")")
+        )
+    if spec.get("patch_hash_align"):
+        source = root / spec["filename"]
+        text = source.read_text().replace("& 0xFFFFFFFC)", "& ~(ULONG)3)")
+        source.write_text(text)
     if "stubs" in spec:
         stub_script = Path(__file__).resolve().parent / "drivers" / "snappy_stubs.py"
         stub_command = [sys.executable, str(stub_script), str(root)]
@@ -175,12 +304,16 @@ def build_driver(name: str, spec: dict, root: Path) -> dict:
     command = [
         spec.get("compiler", "gcc"),
         *CFLAGS,
+        *spec.get("cflags_extra", []),
         "-I",
         str(root),
+        *[item for inc in spec.get("include_driver", []) for item in ("-I", str(driver.parent / inc))],
+        *[item for inc in spec.get("include_root", []) for item in ("-I", str(root / inc))],
+        *[f"-D{define}" for define in spec.get("defines", [])],
         "-o",
         str(out),
         str(driver),
-        *[str(root / source) for source in spec["sources"]],
+        *[str(root / source) for source in spec.get("sources", [])],
     ]
     run(command)
     commands.append(" ".join(command))
@@ -291,7 +424,12 @@ def main() -> int:
         spec = REFS[name]
         if args.force:
             shutil.rmtree(SRC / name, ignore_errors=True)
-        root = fetch_archive(name, spec) if spec.get("sha256") else clone(name, spec)
+        if spec.get("filename"):
+            root = fetch_file(name, spec)
+        elif spec.get("sha256"):
+            root = fetch_archive(name, spec)
+        else:
+            root = clone(name, spec)
         revision = spec.get("commit", spec.get("sha256", "unknown"))
         print(f"building {name} {spec['version']} ({revision[:12]})")
         if spec.get("make"):

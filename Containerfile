@@ -6,7 +6,7 @@ RUN pacman -Syu --noconfirm && \
       rustup \
       python brotli gzip zip unzip 7zip libarchive \
       zstd bzip2 lzip xz ncompress lz4 lzop lrzip cpio squashfs-tools git \
-      unarchiver lhasa cabextract && \
+      unarchiver lhasa cabextract xdelta3 && \
     rustup default stable && \
     pacman -Scc --noconfirm
 

@@ -49,7 +49,12 @@ impl ArchiveTree {
 
 /// Build a fixed archive tree. Entry names include the `tree/` prefix so
 /// the same base directory can be passed to the helper and reference tools.
-pub fn build_tree(dir: &Path, file_count: usize, file_size: usize) -> std::io::Result<ArchiveTree> {
+pub fn build_tree(
+    dir: &Path,
+    file_count: usize,
+    file_size: usize,
+    include_empty: bool,
+) -> std::io::Result<ArchiveTree> {
     if dir.exists() {
         fs::remove_dir_all(dir)?;
     }
@@ -62,7 +67,7 @@ pub fn build_tree(dir: &Path, file_count: usize, file_size: usize) -> std::io::R
             1 => (format!("sub/file_{i:03}.txt"), file_size),
             2 => (format!("nested/deep/file_{i:03}.txt"), file_size / 2),
             3 => (format!("file_{i:03}.bin"), file_size),
-            4 if i == 4 => ("empty.bin".to_owned(), 0),
+            4 if i == 4 && include_empty => ("empty.bin".to_owned(), 0),
             _ => (format!("sub/file_{i:03}.txt"), file_size),
         };
         let data = if relative.ends_with(".bin") {
