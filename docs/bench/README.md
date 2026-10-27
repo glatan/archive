@@ -16,7 +16,7 @@ make bench-compare
 # 参照ツールが揃ったテストコンテナ内で full
 make bench-compare-container
 
-# 参照実装を固定ソースからビルド（ZX0/1/2/5、LZSA、liblzf、FastLZ）
+# 参照実装を固定ソースからビルド（ZX0/1/2/5、LZSA、liblzf、FastLZ、Snappy）
 make bench-refs
 
 # 既存 Criterion ベンチ
@@ -107,7 +107,7 @@ cargo bench --all-features --bench compare -- \
 | ディストリ配布バイナリ | gzip, zstd, xz, bzip2, lzip, lz4, lzop, brotli, ncompress, rzip, lrzip, 7z, tar, cpio, ar, zip, bsdtar, cabextract, unsquashfs, unar, lhasa |
 | 固定ソースビルド | ZX0/1/2/5, LZSA, liblzf, FastLZ, Snappy |
 | Python stdlib | zlib, deflate, uuencode, Ascii85 |
-| 参照なし（N/A） | snappy, lzrw*, vcdiff, mppc, lzs, lzxd, cmpsc, xca, packbits, yenc, macbinary, binhex |
+| 参照なし（N/A） | snappy (framed), lzrw*, vcdiff, mppc, lzs, lzxd, cmpsc, xca, packbits, yenc, macbinary, binhex |
 
 `make bench-refs` は `docs/bench/refs/build.py` を実行し、
 `target/bench/refs/bin/` に参照バイナリを置く。ハーネスは PATH より
