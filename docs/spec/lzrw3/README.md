@@ -4,7 +4,7 @@
 |------|------|
 | 形式概要 | Ross N. Williams の LZRW3 (1991) が使用する圧縮ストリーム。4 バイトの copy flag + グループ列。copy item は byte offset ではなく hash table index を格納し、decompressor も同一の hash table を維持する。magic・チェックサムは持たない |
 | 基準仕様 | 参照実装 [`lzrw3.c`](https://ftp.funet.fi/pub/misc/compression/lzrw3.c) (Ross N. Williams, public domain、[ross.net/compression](http://www.ross.net/compression/lzrw3.html) / funet ミラー) の "DEFINITION OF COMPRESSED FILE FORMAT" 節 + `lzrw3.txt` (ローカルスナップショット: `docs/spec/sources/lzrw3.c` / `lzrw3.txt`) |
-| 参照実装 | `lzrw3.c` (Ross N. Williams、public domain、de facto 仕様 + 移植元 (共有 `compress::lzrw` の hash 算術) + fixture 生成: `tests/integration/lzrw3.rs` の known-answer ベクター)。詳細: THIRD_PARTY_NOTICES LZRW1 / LZRW2 / LZRW3 / LZRW3-A 項 |
+| 参照実装 | `lzrw3.c` (Ross N. Williams、public domain、de facto 仕様 + 移植元 (共有 `compress::lzrw` の hash 算術) + fixture 生成: `tests/integration/lzrw3.rs` の known-answer ベクター)。性能比較 (`docs/bench/`) では同じ source を build した raw-stream encode/decode 参照を使用。詳細: THIRD_PARTY_NOTICES LZRW1 / LZRW2 / LZRW3 / LZRW3-A 項 |
 | 実装 | `archive::compress::lzrw3` (decode / decode_bounded / encode)。pure-Rust 実装 |
 
 ## ストリーム構造

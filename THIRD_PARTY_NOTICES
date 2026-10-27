@@ -120,7 +120,9 @@ specifications or standards documents:
   vectors in tests/fixtures/vcdiff/*_xdelta3.vcd were produced by
   running the reference xdelta3 3.2.0 encoder (Joshua MacDonald,
   Apache-2.0) locally; it was used only as a test-time fixture
-  generator and no code was copied.
+  generator and no code was copied. Performance comparison
+  (`docs/bench/`) uses the distro-packaged xdelta3 3.2.2 binary as an
+  encode/decode reference with an empty source; no code was copied.
   Patent note: an AT&T IPR disclosure (IETF Datatracker #40,
   draft-korn-vcdiff) exists for VCDIFF; it is an RAND-style
   declaration scoped to use for data transfer over HTTP/1.1, and
@@ -204,7 +206,10 @@ specifications or standards documents:
   tests/fixtures/lzs/ were produced by this crate's own encoder and
   cross-validated locally with the compcol LZS codec (MIT,
   KarpelesLab); compcol was used only as a local encode/decode oracle
-  and no code was copied. The ANSI X3.241 standard document itself
+  and no code was copied. Performance comparison (`docs/bench/`) uses
+  the MIT-licensed cmcqueen/lzs-compression source as a pinned raw-stream
+  encode/decode reference; the source is fetched at build time and is not
+  committed. The ANSI X3.241 standard document itself
   (paywalled) was not obtained or consulted.
   Patent note (expired): RFC 2395 section 1.3 states "Hi/fn, Inc. holds
   patents on the LZS algorithm" and offers no-cost
@@ -885,6 +890,10 @@ against de facto reference behavior:
     locally after small portability patches (K&R prototypes, missing
     TRUE/FALSE defines, un-commented header text); the patched sources
     are not included in this repository
+  - Performance comparison (`docs/bench/`) builds the same public-domain
+    sources into raw-stream reference binaries. The build applies the same
+    portability patches at fetch time; the fetched sources stay under
+    `target/bench/refs/` and are not committed
   - LZRW4 and LZRW5 were evaluated and intentionally excluded: LZRW4
     has no production wire format (experimental sketch only) and
     LZRW5's reference is an incomplete draft; see docs/spec/README.md

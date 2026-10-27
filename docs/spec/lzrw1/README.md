@@ -4,7 +4,7 @@
 |------|------|
 | 形式概要 | Ross N. Williams の LZRW1 (DCC'91) が使用する圧縮ストリーム。4 バイトの copy flag + グループ列。magic・チェックサムは持たない |
 | 基準仕様 | 参照実装 [`lzrw1.c`](https://ftp.funet.fi/pub/misc/compression/lzrw1.c) (Ross N. Williams, public domain、[ross.net/compression](http://www.ross.net/compression/lzrw1.html) / funet ミラー)。lzrw1.c はフォーマット定義節を持たないため、構造は lzrw1-a.c の "DEFINITION OF COMPRESSED FILE FORMAT" 節と lzrw1.c のコード動作から確定 (ローカルスナップショット: `docs/spec/sources/lzrw1.c`) |
-| 参照実装 | `lzrw1.c` (Ross N. Williams、public domain、de facto 仕様 + 動作参照 + fixture 生成: `tests/integration/lzrw1.rs` の known-answer ベクター)。詳細: THIRD_PARTY_NOTICES LZRW1 / LZRW2 / LZRW3 / LZRW3-A 項 |
+| 参照実装 | `lzrw1.c` (Ross N. Williams、public domain、de facto 仕様 + 動作参照 + fixture 生成: `tests/integration/lzrw1.rs` の known-answer ベクター)。性能比較 (`docs/bench/`) では同じ source を build した raw-stream encode/decode 参照を使用。詳細: THIRD_PARTY_NOTICES LZRW1 / LZRW2 / LZRW3 / LZRW3-A 項 |
 | 実装 | `archive::compress::lzrw1` (decode / decode_bounded / encode)。pure-Rust 実装 |
 
 ## ストリーム構造

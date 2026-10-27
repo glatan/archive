@@ -16,7 +16,7 @@ make bench-compare
 # 参照ツールが揃ったテストコンテナ内で full
 make bench-compare-container
 
-# 参照実装を固定ソースからビルド（ZX0/1/2/5、LZSA、liblzf、FastLZ、Snappy）
+# 参照実装を固定ソースからビルド（ZX0/1/2/5、LZSA、liblzf、FastLZ、Snappy、LZRW、LZS）
 make bench-refs
 
 # 既存 Criterion ベンチ
@@ -102,21 +102,36 @@ cargo bench --all-features --bench compare -- \
 - fixture の decode は、ディレクトリ entry を除いたファイル payload の集合を
   ours-lib / ours-cli / 参照実装で比較する（ツリー名は比較しない）
 - `--timeout` で helper / CLI / 参照プロセスの 1 回あたりの上限を指定できる（既定 600 秒、0 は拒否）
+- 7z の archive ケースは、`kEmptyStream` を意図的に未対応としているため、
+  ベンチマーク用ツリーから `empty.bin` を除外する
 
 ## 参照実装
 
 | 入手方法 | 例 |
 |---|---|
-| ディストリ配布バイナリ | gzip, zstd, xz, bzip2, lzip, lz4, lzop, brotli, ncompress, rzip, lrzip, 7z, tar, cpio, ar, zip, bsdtar, cabextract, unsquashfs, unar, lhasa |
-| 固定ソースビルド | ZX0/1/2/5, LZSA, liblzf, FastLZ, Snappy |
+| ディストリ配布バイナリ | gzip, zstd, xz, bzip2, lzip, lz4, lzop, brotli, ncompress, rzip, lrzip, 7z, tar, cpio, ar, zip, bsdtar, cabextract, unsquashfs, unar, lhasa, xdelta3 |
+| 固定ソースビルド | ZX0/1/2/5, LZSA, liblzf, FastLZ, Snappy, LZRW1/1-A/2/3/3-A, LZS |
 | Python stdlib | zlib, deflate, uuencode, Ascii85 |
-| 参照なし（N/A） | snappy (framed), lzrw*, vcdiff, mppc, lzs, lzxd, cmpsc, xca, packbits, yenc, macbinary, binhex |
+| 参照なし（N/A） | snappy (framed), zpaq (raw), zstd-seekable, mppc, lzxd, cmpsc, xpress, xpress-huff, lznt1, packbits, yenc, macbinary, binhex |
 
 `make bench-refs` は `docs/bench/refs/build.py` を実行し、
 `target/bench/refs/bin/` に参照バイナリを置く。ハーネスは PATH より
 `target/bench/refs/bin/` を優先する。ビルド記録は
 `target/bench/refs/build-info.json` に残す。ピン留めした revision と
 フラグの一覧は [refs/README.md](refs/README.md) を参照。
+
+### 結果の検査
+
+full-reference 実行後は `result.json` の status を検査する。
+
+```sh
+python3 docs/bench/check-status.py target/bench/compare/run-.../result.json
+```
+
+- `failed` があれば exit 1
+- `partial` も exit 1（`--allow-partial` で許可）
+- `ours-only` は参照実装がないケースとして許容
+- CI には接続しないローカル確認用
 
 ### ベースライン比較
 
