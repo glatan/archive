@@ -19,7 +19,7 @@ crate and never redistributes their sources or binaries.
 
 - Distribution-provided tools (gzip, zstd, xz, bzip2, lzip, lz4, lzop,
   lrzip, rzip, brotli, ncompress, zpaq, 7-Zip, tar, cpio, ar, zip,
-  bsdtar, cabextract, unsquashfs, unar, and the Python standard library)
+  bsdtar, cabextract, unsquashfs, unar, lhasa, and the Python standard library)
   are invoked only for measurement. Their package version and, where
   available, compiler comment are recorded in the generated report.
 - Pinned source builds under `docs/bench/refs/build.py`:

@@ -301,6 +301,12 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
     if parsed.iterations == 0 {
         parsed.iterations = if parsed.quick { 2 } else { 5 };
     }
+    if parsed.timeout == 0 {
+        return Err("--timeout must be greater than zero".to_owned());
+    }
+    if parsed.timeout == 0 {
+        return Err("--timeout must be greater than zero".to_owned());
+    }
     for label in &parsed.corpora {
         if !corpus::CORPORA.contains(&label.as_str()) {
             return Err(format!(

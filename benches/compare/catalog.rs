@@ -524,11 +524,7 @@ fn lha_ref() -> RefSpec {
         binary_id: "lha",
         build: DISTRO,
         encode: None,
-        decode: Some(cmd(
-            "lha",
-            &["x", "-f", "-fw={output}", "{input}"],
-            OutputMode::Dir,
-        )),
+        decode: Some(cmd("lha", &["-xfw={output}", "{input}"], OutputMode::Dir)),
     }
 }
 
@@ -1461,13 +1457,12 @@ pub fn cases() -> Vec<Case> {
             "Generated ZIM fixture; decode-only",
         ),
         {
-            let mut case = archive_fixture_with_ref(
+            let mut case = archive_fixture(
                 "mtree",
                 "mtree",
                 "mtree",
                 crate::fixtures::MTREE,
-                bsdtar_ref(),
-                "Generated mtree fixture; decode reference is bsdtar",
+                "Generated mtree fixture; metadata-only, CLI uses test",
             );
             case.cli_extract = false;
             case

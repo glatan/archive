@@ -72,7 +72,7 @@ fn build_rpm() -> Result<Vec<u8>, String> {
 fn build_mtree() -> Vec<u8> {
     b"#mtree\n\
 /set type=file uid=0 gid=0 mode=644\n\
-./file.txt size=25\n\
+./file.txt size=26\n\
 ./dir type=dir mode=755\n\
 ./dir/inner.txt size=0\n\
 ..\n"

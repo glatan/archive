@@ -74,7 +74,7 @@ missing reference binary) is recorded in the generated report.
 | deb | deb | archive | ours-only | — | — | — | Generated .deb fixture; decode-only |
 | rpm | rpm | archive | decode-only | bsdtar | system libarchive | distro package (exact distro build flags not exposed) | Generated .rpm fixture; decode reference is bsdtar |
 | zim | zim | archive | ours-only | — | — | — | Generated ZIM fixture; decode-only |
-| mtree | mtree | archive | decode-only | bsdtar | system libarchive | distro package (exact distro build flags not exposed) | Generated mtree fixture; decode reference is bsdtar |
+| mtree | mtree | archive | ours-only | — | — | — | Generated mtree fixture; metadata-only, CLI uses test |
 | warc | warc | archive | ours-only | — | — | — | Generated WARC fixture; decode-only |
 | squashfs | squashfs | archive | decode-only | unsquashfs | system squashfs-tools | distro package (exact distro build flags not exposed) | Generated squashfs fixture; decode reference is unsquashfs |
 | cramfs | cramfs | archive | ours-only | — | — | — | Generated cramfs fixture; raw library decode only |

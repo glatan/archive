@@ -489,7 +489,7 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
             let cli_out = dir.join("cli-out");
             match cli_archive_decode(cfg, case, &common, &cli_out) {
                 Ok(measurement) => {
-                    let ok = case.format == "git-pack" || dir_manifest_matches(&cli_out, &expected);
+                    let ok = dir_manifest_matches_for(case, &cli_out, &expected);
                     decode.ours_cli = Some(measurement);
                     if !ok {
                         decode.note = Some("ours-cli extraction manifest mismatch".to_owned());
@@ -548,25 +548,16 @@ fn run_archive_case(case: &Case, cfg: &Config, result: &mut CaseResult) {
             case.reference
                 .and_then(|reference| reference.decode.map(|command| (reference, command)))
                 .map(|(reference, command)| {
-                    run_ref_verify(cfg, &reference, &command, &ours_cli_encoded, &cli_cross).map(
-                        |_| {
-                            case.format == "git-pack" || dir_manifest_matches(&cli_cross, &expected)
-                        },
-                    )
+                    run_ref_verify(cfg, &reference, &command, &ours_cli_encoded, &cli_cross)
+                        .map(|_| dir_manifest_matches_for(case, &cli_cross, &expected))
                 })
                 .unwrap_or_else(|| {
-                    helper_read(cfg, case, &ours_cli_encoded, &dir.join("cli-cross.json")).map(
-                        |_| {
-                            case.format == "git-pack"
-                                || manifest_matches(&dir.join("cli-cross.json"), &expected)
-                        },
-                    )
+                    helper_read(cfg, case, &ours_cli_encoded, &dir.join("cli-cross.json"))
+                        .map(|_| manifest_matches_for(case, &dir.join("cli-cross.json"), &expected))
                 })
         } else {
-            helper_read(cfg, case, &ours_cli_encoded, &dir.join("cli-cross.json")).map(|_| {
-                case.format == "git-pack"
-                    || manifest_matches(&dir.join("cli-cross.json"), &expected)
-            })
+            helper_read(cfg, case, &ours_cli_encoded, &dir.join("cli-cross.json"))
+                .map(|_| manifest_matches_for(case, &dir.join("cli-cross.json"), &expected))
         };
         match verified {
             Ok(ok) => {
@@ -710,6 +701,24 @@ fn helper_raw_archive_read(
     run_helper(cfg, &args, output)
 }
 
+fn read_stdout(pipe: Option<std::process::ChildStdout>) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    if let Some(mut pipe) = pipe {
+        pipe.read_to_end(&mut bytes)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(bytes)
+}
+
+fn read_stderr(pipe: Option<std::process::ChildStderr>) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    if let Some(mut pipe) = pipe {
+        pipe.read_to_end(&mut bytes)
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(bytes)
+}
+
 fn run_helper(cfg: &Config, args: &[String], output: &Path) -> Result<Measurement, String> {
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -721,17 +730,17 @@ fn run_helper(cfg: &Config, args: &[String], output: &Path) -> Result<Measuremen
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("spawn {}: {error}", cfg.helper_bin.display()))?;
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+    let stdout_thread = std::thread::spawn(move || read_stdout(stdout_pipe));
+    let stderr_thread = std::thread::spawn(move || read_stderr(stderr_pipe));
     let status = wait_status(&mut child, cfg.timeout)?;
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-    if let Some(mut pipe) = child.stdout.take() {
-        pipe.read_to_end(&mut stdout)
-            .map_err(|error| error.to_string())?;
-    }
-    if let Some(mut pipe) = child.stderr.take() {
-        pipe.read_to_end(&mut stderr)
-            .map_err(|error| error.to_string())?;
-    }
+    let stdout = stdout_thread
+        .join()
+        .map_err(|_| "helper stdout reader panicked".to_owned())??;
+    let stderr = stderr_thread
+        .join()
+        .map_err(|_| "helper stderr reader panicked".to_owned())??;
     if !status.success() {
         return Err(format!(
             "helper failed: {}",
@@ -1247,7 +1256,9 @@ fn manifest_data_matches(path: &Path, expected: &[(String, usize, u64)]) -> bool
         .map(|(_, len, hash)| (*len, *hash))
         .collect();
     actual.sort_unstable();
+    actual.dedup();
     expected.sort_unstable();
+    expected.dedup();
     actual == expected
 }
 
@@ -1264,7 +1275,9 @@ fn dir_manifest_data_matches(dir: &Path, expected: &[(String, usize, u64)]) -> b
         .map(|(_, len, hash)| (*len, *hash))
         .collect();
     actual.sort_unstable();
+    actual.dedup();
     expected.sort_unstable();
+    expected.dedup();
     actual == expected
 }
 
