@@ -19,7 +19,12 @@ fn bzip2_system_decode(compressed: &[u8]) -> Option<Vec<u8>> {
         .spawn()
     {
         Ok(child) => child,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if require_external_tools() {
+                panic!("required external tool is unavailable: bzip2");
+            }
+            return None;
+        }
         Err(error) => panic!("failed to run bzip2: {error}"),
     };
     child.stdin.as_mut().unwrap().write_all(compressed).unwrap();

@@ -46,6 +46,9 @@ fn test_lz4_encode_decoded_by_system() {
     {
         Ok(child) => child,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if require_external_tools() {
+                panic!("required external tool is unavailable: lz4");
+            }
             assert_eq!(lz4::decode::decode(&compressed).unwrap(), input);
             return;
         }

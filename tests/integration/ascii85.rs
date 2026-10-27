@@ -55,6 +55,9 @@ fn test_ascii85_python_a85encode_decode() {
     );
     let output = Command::new("python3").args(["-c", script]).output();
     let Ok(result) = output else {
+        if require_external_tools() {
+            panic!("required external tool is unavailable: python3");
+        }
         return; // python3 not available
     };
     assert!(result.status.success());
@@ -88,6 +91,9 @@ fn test_ascii85_rfc1924_python_b85_compat() {
         .stdout(std::process::Stdio::piped())
         .spawn();
     let Ok(mut child) = spawned else {
+        if require_external_tools() {
+            panic!("required external tool is unavailable: python3");
+        }
         return;
     };
     use std::io::Write;

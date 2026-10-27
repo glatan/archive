@@ -34,6 +34,9 @@ fn test_uuencode_python_b2a_uu_decode() {
     );
     let output = Command::new("python3").args(["-c", script]).output();
     let Ok(result) = output else {
+        if require_external_tools() {
+            panic!("required external tool is unavailable: python3");
+        }
         return; // python3 not available
     };
     assert!(result.status.success());
@@ -120,6 +123,9 @@ fn test_uuencode_base64_python_decode() {
     );
     let output = Command::new("python3").args(["-c", script]).output();
     let Ok(result) = output else {
+        if require_external_tools() {
+            panic!("required external tool is unavailable: python3");
+        }
         return; // python3 not available
     };
     assert!(result.status.success());

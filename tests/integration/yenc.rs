@@ -68,7 +68,12 @@ fn test_yenc_python_reference_decodes_ours() {
         .spawn()
     {
         Ok(c) => c,
-        Err(_) => return, // python3 not available
+        Err(_) => {
+            if require_external_tools() {
+                panic!("required external tool is unavailable: python3");
+            }
+            return;
+        } // python3 not available
     };
     child.stdin.take().unwrap().write_all(&doc).unwrap();
     let out = child.wait_with_output().unwrap();
@@ -105,6 +110,9 @@ fn test_yenc_decodes_python_reference_output() {
     );
     let output = Command::new("python3").args(["-c", script]).output();
     let Ok(result) = output else {
+        if require_external_tools() {
+            panic!("required external tool is unavailable: python3");
+        }
         return; // python3 not available
     };
     assert!(result.status.success());

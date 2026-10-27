@@ -20,7 +20,12 @@ fn zstd_system_decode_with_args(args: &[&str], encoded: &[u8]) -> Option<Vec<u8>
         .spawn()
     {
         Ok(child) => child,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if require_external_tools() {
+                panic!("required external tool is unavailable: zstd");
+            }
+            return None;
+        }
         Err(error) => panic!("failed to run zstd: {error}"),
     };
     child.stdin.as_mut().unwrap().write_all(encoded).unwrap();

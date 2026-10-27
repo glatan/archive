@@ -275,7 +275,12 @@ fn xz_system_compress(filter_chain: &str, input: &[u8]) -> Option<Vec<u8>> {
         .spawn()
     {
         Ok(child) => child,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if require_external_tools() {
+                panic!("required external tool is unavailable: xz");
+            }
+            return None;
+        }
         Err(e) => panic!("Failed to run xz: {e}"),
     };
 
@@ -300,7 +305,12 @@ fn xz_system_decode(input: &[u8]) -> Option<Vec<u8>> {
         .spawn()
     {
         Ok(child) => child,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if require_external_tools() {
+                panic!("required external tool is unavailable: xz");
+            }
+            return None;
+        }
         Err(e) => panic!("Failed to run xz: {e}"),
     };
 

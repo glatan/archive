@@ -159,7 +159,12 @@ fn test_mscfb_encode_python_olefile_oracle() {
         .output();
     match probe {
         Ok(o) if o.status.success() => {}
-        _ => return,
+        _ => {
+            if require_external_tools() {
+                panic!("required external tool is unavailable: python3 olefile");
+            }
+            return;
+        }
     }
 
     let big: Vec<u8> = (0..5000u32).map(|i| (i % 251) as u8).collect();

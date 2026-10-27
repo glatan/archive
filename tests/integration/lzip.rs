@@ -81,7 +81,12 @@ fn test_lzip_decode_system_compressed() {
         .output()
     {
         Ok(output) => output,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if require_external_tools() {
+                panic!("required external tool is unavailable: lzip");
+            }
+            return;
+        }
         Err(error) => panic!("failed to run lzip: {error}"),
     };
     assert!(
@@ -147,6 +152,9 @@ fn test_lzip_encode_decoded_by_system() {
     let output = match Command::new("lzip").args(["-d", "-c"]).arg(&path).output() {
         Ok(output) => output,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if require_external_tools() {
+                panic!("required external tool is unavailable: lzip");
+            }
             assert_eq!(lzip::decode::decode(&compressed).unwrap(), input);
             return;
         }
