@@ -26,6 +26,7 @@ docs/spec/sources/lzrw45_covering
 # local work files (plans, reference trees, oracle builds)
 /.local/
 docs/spec/sources/*.shar
+docs/spec/sources/*.tar.gz
 
 # Python bytecode from benchmark reference tooling
 __pycache__/
