@@ -2,6 +2,8 @@
 // LHA/LZH container tests (store methods only)
 // ============================================================
 
+use super::require_external_tools;
+
 fn lha_fixture(name: &str, data: &[u8]) -> Vec<u8> {
     let mut enc = archive::archive::lha::encode::LhaEncoder::new();
     enc.add_file(name, data, 0).unwrap();
@@ -473,7 +475,11 @@ fn test_lha_fixture_oracle_extract() {
         })
         .collect();
     if tools.is_empty() {
-        return; // no oracle installed
+        assert!(
+            !require_external_tools(),
+            "no LHA oracle installed (lhasa/unar/lha)"
+        );
+        return;
     }
     let uniq = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -705,7 +711,11 @@ fn test_lha_pmarc_oracle_interop() {
         })
         .collect();
     if tools.is_empty() {
-        return; // no oracle installed
+        assert!(
+            !require_external_tools(),
+            "no LHA oracle installed (lhasa/unar/lha)"
+        );
+        return;
     }
     let uniq = SystemTime::now()
         .duration_since(UNIX_EPOCH)

@@ -13,7 +13,15 @@
     feature = "cpio"
 ))]
 
+#[cfg(feature = "sevenz")]
+use archive::archive::sevenz;
+#[cfg(feature = "zip")]
+use archive::archive::zip;
 use archive::archive::{cpio, tar};
+#[cfg(feature = "brotli")]
+use archive::compress::brotli as brotli_codec;
+#[cfg(feature = "packbits")]
+use archive::compress::packbits;
 use archive::compress::{bzip2, deflate, gzip, lz4, lzip, lzma_alone, snappy, xz, zlib, zstd};
 use proptest::prelude::*;
 
@@ -178,5 +186,52 @@ proptest! {
             let end = cut % (encoded.len() + 1);
             let _ = decode(&encoded[..end], 1 << 20);
         }
+    }
+
+    #[cfg(feature = "zip")]
+    #[test]
+    fn zip_roundtrip(entries in prop::collection::vec((entry_name(), prop::collection::vec(any::<u8>(), 0..512)), 0..5)) {
+        let mut encoder = zip::encode::ZipEncoder::new();
+        for (name, data) in &entries {
+            encoder.add_file(name, data);
+        }
+        let encoded = encoder.finish().unwrap();
+        let decoded = zip::decode::decode(&encoded).unwrap();
+        let got: Vec<(String, Vec<u8>)> = decoded
+            .into_iter()
+            .map(|entry| (entry.name, entry.data))
+            .collect();
+        prop_assert_eq!(got, entries);
+    }
+
+    #[cfg(feature = "sevenz")]
+    #[test]
+    fn sevenz_copy_roundtrip(entries in prop::collection::vec((entry_name(), prop::collection::vec(any::<u8>(), 0..512)), 0..5)) {
+        let mut encoder = sevenz::encode::SevenZEncoder::new();
+        encoder.set_method(sevenz::encode::SevenZMethod::Copy);
+        for (name, data) in &entries {
+            encoder.add_file(name, data);
+        }
+        let encoded = encoder.finish().unwrap();
+        let decoded = sevenz::decode::decode(&encoded).unwrap();
+        let got: Vec<(String, Vec<u8>)> = decoded
+            .into_iter()
+            .map(|entry| (entry.name, entry.data))
+            .collect();
+        prop_assert_eq!(got, entries);
+    }
+
+    #[cfg(feature = "brotli")]
+    #[test]
+    fn brotli_roundtrip(data in prop::collection::vec(any::<u8>(), 0..4096)) {
+        let encoded = brotli_codec::encode::encode(&data);
+        prop_assert_eq!(brotli_codec::decode::decode(&encoded).unwrap(), data);
+    }
+
+    #[cfg(feature = "packbits")]
+    #[test]
+    fn packbits_roundtrip(data in prop::collection::vec(any::<u8>(), 0..4096)) {
+        let encoded = packbits::encode(&data);
+        prop_assert_eq!(packbits::decode(&encoded).unwrap(), data);
     }
 }

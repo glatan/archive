@@ -813,6 +813,7 @@ fn test_zip_legacy_methods_unar_compat() {
         ("implode2.txt", zip::encode::ZipCompression::Implode),
         ("deflate64b.txt", zip::encode::ZipCompression::Deflate64),
     ];
+    let mut ran = false;
 
     for &(name, compression) in unar_cases {
         let archive_path = dir.join(format!("{name}.zip"));
@@ -846,6 +847,7 @@ fn test_zip_legacy_methods_unar_compat() {
                 );
                 let data = std::fs::read(out_dir.join(name)).unwrap();
                 assert_eq!(data, payload, "unar mismatch on {name}");
+                ran = true;
             }
             Err(_) => {
                 eprintln!("unar not available; skipping unar oracle checks");
@@ -878,6 +880,7 @@ fn test_zip_legacy_methods_unar_compat() {
                     String::from_utf8_lossy(&result.stderr)
                 );
                 assert_eq!(result.stdout, payload, "unzip mismatch on {name}");
+                ran = true;
             }
             Err(_) => {
                 eprintln!("unzip not available; skipping unzip oracle checks");
@@ -886,6 +889,10 @@ fn test_zip_legacy_methods_unar_compat() {
         }
     }
 
+    assert!(
+        ran || !require_external_tools(),
+        "no ZIP legacy oracle installed (unar/unzip)"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

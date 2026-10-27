@@ -47,7 +47,7 @@
 | resource oracle | 正常終了ケースの異常な膨張や過大 runtime を failure 化 | runtime / encoded size / decoded size の bounded check | 成功扱いでも oracle 違反なら failure artifact を残す。`corrupt` では変異ループの誤検出を避けるため runtime / decode 等価性を免除し、変異ごとの decode 出力上限のみを適用する |
 | `archive-fuzz` watchdog | `catch_unwind` が捕捉できない無限ループ / OOM abort の検出 | 全パターンの全 case (case 入口で `inflight-<worker>` breadcrumb を永続化、probe 単位で予算リセット) | 予算超過時に `hang-*` artifact を書き exit code 3 で abort。breadcrumb はプロセスが先に死んでも残るためランが静かに止まることを防ぐ。`hang-*.json` は `archive-fuzz replay` で再現確認できる |
 | `archive-fuzz` artifact 管理 | 蓄積した failures/corpus 成果物のライフサイクル管理 | `clean` (内容のみ削除、`.gitkeep` と dir は温存、`--keep-latest N` で直近 `run-*` 保持、`--failures-only` / `--corpus-only` で片側選択) と `summary` (run dir または summary.json の集計表示、read-only) | `run` 起動時に残存 `inflight-*.json` breadcrumb を警告 (同時実行中は false positive になり得る) |
-| `tests/property.rs` | proptest による roundtrip / malformed-input 不変条件 | deflate, gzip, zlib, bzip2, lz4, zstd, snappy, xz, lzip, lzma-alone, tar, cpio | `cargo test --all-features --test property` |
+| `tests/property.rs` | proptest による roundtrip / malformed-input 不変条件 | deflate, gzip, zlib, bzip2, lz4, zstd, snappy, xz, lzip, lzma-alone, brotli, packbits, tar, cpio, zip, 7z | `cargo test --all-features --test property` |
 
 ### 32-bit ターゲットの境界
 
