@@ -145,3 +145,26 @@ pub(crate) fn decode(method: &[u8; 5], input: &[u8], expected: usize) -> Result<
         _ => Err(Error::Unsupported("lha: unsupported method")),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supports_only_larc_compressed_methods() {
+        assert!(supported(b"-lzs-"));
+        assert!(supported(b"-lz5-"));
+        assert!(!supported(b"-lz4-"));
+        assert!(!supported(b"-lh5-"));
+    }
+
+    #[test]
+    fn decode_rejects_unsupported_methods_and_malformed_payloads() {
+        assert!(matches!(
+            decode(b"-lh5-", &[], 0),
+            Err(Error::Unsupported("lha: unsupported method"))
+        ));
+        assert!(decode(b"-lzs-", &[], 1).is_err());
+        assert!(decode(b"-lz5-", &[], 1).is_err());
+    }
+}

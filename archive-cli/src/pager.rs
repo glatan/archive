@@ -57,7 +57,11 @@ fn write_direct(content: &str) -> Result<(), CliError> {
 }
 
 fn pager_command() -> (String, Vec<String>) {
-    if let Ok(pager) = std::env::var("PAGER") {
+    pager_command_from(std::env::var("PAGER").ok().as_deref())
+}
+
+fn pager_command_from(pager: Option<&str>) -> (String, Vec<String>) {
+    if let Some(pager) = pager {
         let parts: Vec<&str> = pager.split_whitespace().collect();
         if let Some((&program, args)) = parts.split_first() {
             return (
@@ -67,4 +71,33 @@ fn pager_command() -> (String, Vec<String>) {
         }
     }
     ("less".to_owned(), vec!["-FRX".to_owned()])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pager_command_from;
+
+    #[test]
+    fn parses_pager_program_and_arguments() {
+        assert_eq!(
+            pager_command_from(Some("less -FRX")),
+            ("less".to_owned(), vec!["-FRX".to_owned()])
+        );
+        assert_eq!(
+            pager_command_from(Some("more  -f")),
+            ("more".to_owned(), vec!["-f".to_owned()])
+        );
+    }
+
+    #[test]
+    fn falls_back_to_less_for_unset_or_empty_pager() {
+        assert_eq!(
+            pager_command_from(None),
+            ("less".to_owned(), vec!["-FRX".to_owned()])
+        );
+        assert_eq!(
+            pager_command_from(Some("   ")),
+            ("less".to_owned(), vec!["-FRX".to_owned()])
+        );
+    }
 }

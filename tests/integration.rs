@@ -340,6 +340,9 @@ mod lzo_tests;
 #[cfg(feature = "lzw")]
 #[path = "integration/lzw.rs"]
 mod lzw_tests;
+#[cfg(feature = "packbits")]
+#[path = "integration/packbits.rs"]
+mod packbits_tests;
 #[cfg(feature = "pea")]
 #[path = "integration/pea.rs"]
 mod pea_tests;

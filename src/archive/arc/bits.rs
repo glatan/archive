@@ -127,3 +127,38 @@ impl MsbWriter {
         self.out
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lsb_reader_writer_roundtrip_and_bounds() {
+        let mut writer = LsbWriter::new();
+        writer.put(0b101, 3);
+        writer.put(0x2A, 6);
+        writer.put(0x1FF, 9);
+        let bytes = writer.finish();
+
+        let mut reader = LsbBits::new(&bytes);
+        assert_eq!(reader.read(3), Some(0b101));
+        assert_eq!(reader.read(6), Some(0x2A));
+        assert_eq!(reader.read(9), Some(0x1FF));
+        assert_eq!(reader.read(7), None);
+    }
+
+    #[test]
+    fn msb_reader_writer_roundtrip_and_bounds() {
+        let mut writer = MsbWriter::new();
+        writer.put(0b101, 3);
+        writer.put(0x2A, 6);
+        writer.put(0x1FF, 9);
+        let bytes = writer.finish();
+
+        let mut reader = MsbBits::new(&bytes);
+        assert_eq!(reader.read(3), Some(0b101));
+        assert_eq!(reader.read(6), Some(0x2A));
+        assert_eq!(reader.read(9), Some(0x1FF));
+        assert_eq!(reader.read(7), None);
+    }
+}

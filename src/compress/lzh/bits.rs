@@ -88,3 +88,37 @@ impl MsbWriter {
         self.bytes
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reader_reads_msb_first_and_zero_pads() {
+        let mut reader = MsbReader::new(&[0b1010_0110, 0xFF]);
+        assert_eq!(reader.peek(4), 0b1010);
+        assert_eq!(reader.get(4), 0b1010);
+        assert_eq!(reader.get(4), 0b0110);
+        assert!(!reader.overran());
+        assert_eq!(reader.get(2), 0b11);
+        assert_eq!(reader.get(8), 0xFC);
+        assert!(reader.overran());
+    }
+
+    #[test]
+    fn writer_roundtrips_mixed_widths() {
+        let mut writer = MsbWriter::new();
+        writer.put(0b101, 3);
+        writer.put(0x3F, 6);
+        writer.put(0x1234, 16);
+        writer.put(0, 7);
+        let bytes = writer.finish();
+
+        let mut reader = MsbReader::new(&bytes);
+        assert_eq!(reader.get(3), 0b101);
+        assert_eq!(reader.get(6), 0x3F);
+        assert_eq!(reader.get(16), 0x1234);
+        assert_eq!(reader.get(7), 0);
+        assert!(!reader.overran());
+    }
+}

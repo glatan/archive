@@ -22,7 +22,11 @@ use archive::archive::{cpio, tar};
 use archive::compress::brotli as brotli_codec;
 #[cfg(feature = "packbits")]
 use archive::compress::packbits;
-use archive::compress::{bzip2, deflate, gzip, lz4, lzip, lzma_alone, snappy, xz, zlib, zstd};
+use archive::compress::{
+    bzip2, cmpsc, deflate, fastlz, gzip, lrzip, lz4, lzf, lzip, lzma_alone, lzo, lzrw1, lzrw1a,
+    lzrw2, lzrw3, lzrw3a, lzs, lzsa, lzw, lzxd, mppc, rzip, snappy, vcdiff, xca, xz, zlib, zpaq,
+    zstd, zx0, zx1, zx2, zx5,
+};
 use proptest::prelude::*;
 
 type DecodeFn = fn(&[u8], usize) -> Result<Vec<u8>, archive::error::Error>;
@@ -233,5 +237,71 @@ proptest! {
     fn packbits_roundtrip(data in prop::collection::vec(any::<u8>(), 0..4096)) {
         let encoded = packbits::encode(&data);
         prop_assert_eq!(packbits::decode(&encoded).unwrap(), data);
+    }
+
+    #[test]
+    fn lzrw_family_roundtrip(data in prop::collection::vec(any::<u8>(), 0..4096)) {
+        prop_assert_eq!(lzrw1::decode(&lzrw1::encode(&data)).unwrap(), data.clone());
+        prop_assert_eq!(lzrw1a::decode(&lzrw1a::encode(&data)).unwrap(), data.clone());
+        prop_assert_eq!(lzrw2::decode(&lzrw2::encode(&data)).unwrap(), data.clone());
+        prop_assert_eq!(lzrw3::decode(&lzrw3::encode(&data)).unwrap(), data.clone());
+        prop_assert_eq!(lzrw3a::decode(&lzrw3a::encode(&data)).unwrap(), data);
+    }
+
+    #[test]
+    fn zx_family_roundtrip(data in prop::collection::vec(any::<u8>(), 0..4096)) {
+        prop_assert_eq!(zx0::decode(&zx0::encode(&data)).unwrap(), data.clone());
+        prop_assert_eq!(zx1::decode(&zx1::encode(&data)).unwrap(), data.clone());
+        prop_assert_eq!(zx2::decode(&zx2::encode(&data)).unwrap(), data.clone());
+        prop_assert_eq!(zx5::decode(&zx5::encode(&data)).unwrap(), data);
+    }
+
+    #[test]
+    fn lzsa_lzf_fastlz_roundtrip(data in prop::collection::vec(any::<u8>(), 0..4096)) {
+        prop_assert_eq!(lzsa::decode(&lzsa::encode(&data)).unwrap(), data.clone());
+        prop_assert_eq!(lzf::decode(&lzf::encode(&data)).unwrap(), data.clone());
+        prop_assert_eq!(fastlz::decode(&fastlz::encode(&data)).unwrap(), data);
+    }
+
+    #[test]
+    fn vcdiff_mppc_lzs_roundtrip(data in prop::collection::vec(any::<u8>(), 0..2048)) {
+        prop_assert_eq!(vcdiff::decode(&vcdiff::encode(&data)).unwrap(), data.clone());
+        prop_assert_eq!(mppc::decode(&mppc::encode(&data).unwrap()).unwrap(), data.clone());
+        prop_assert_eq!(lzs::decode(&lzs::encode(&data).unwrap()).unwrap(), data);
+    }
+
+    #[test]
+    fn lzo_lzw_roundtrip(data in prop::collection::vec(any::<u8>(), 0..4096)) {
+        prop_assert_eq!(lzo::decode::decode(&lzo::encode::encode(&data)).unwrap(), data.clone());
+        prop_assert_eq!(lzw::decode::decode(&lzw::encode::encode(&data)).unwrap(), data);
+    }
+
+    #[test]
+    fn lrzip_rzip_roundtrip(data in prop::collection::vec(any::<u8>(), 0..512)) {
+        prop_assert_eq!(lrzip::decode::decode(&lrzip::encode::encode(&data)).unwrap(), data.clone());
+        prop_assert_eq!(rzip::decode::decode(&rzip::encode::encode(&data)).unwrap(), data);
+    }
+
+    #[test]
+    fn zstd_seekable_roundtrip(data in prop::collection::vec(any::<u8>(), 0..4096)) {
+        let encoded = zstd::seekable::encode(&data, 1024);
+        prop_assert_eq!(zstd::seekable::decode(&encoded).unwrap(), data);
+    }
+
+    #[test]
+    fn zpaq_roundtrip(data in prop::collection::vec(any::<u8>(), 0..512)) {
+        let encoded = zpaq::encode::encode(&data, 1);
+        prop_assert_eq!(zpaq::decode::decode(&encoded).unwrap(), data);
+    }
+
+    #[test]
+    fn lzxd_cmpsc_xca_roundtrip(data in prop::collection::vec(any::<u8>(), 0..2048)) {
+        let lzxd = lzxd::encode(&data);
+        prop_assert_eq!(lzxd::decode(&lzxd, 1 << 17, &[], data.len()).unwrap(), data.clone());
+        prop_assert_eq!(cmpsc::decode(&cmpsc::encode(&data), 1 << 20).unwrap(), data.clone());
+        let huff = xca::huffman::encode(&data);
+        prop_assert_eq!(xca::huffman::decode(&huff).unwrap(), data.clone());
+        let lznt1 = xca::lznt1::encode(&data);
+        prop_assert_eq!(xca::lznt1::decode(&lznt1).unwrap(), data);
     }
 }

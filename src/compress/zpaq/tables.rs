@@ -291,3 +291,23 @@ pub(crate) const fn build_stretcht() -> [i16; 32768] {
     }
     t
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn table_dimensions_and_endpoints() {
+        assert_eq!(SNS.len(), 1024);
+        assert_eq!(SDT2K.len(), 256);
+        assert_eq!(SDT.len(), 1024);
+        assert_eq!(SSQUASHT.len(), 1344);
+
+        assert_eq!(SDT2K[1], 2048);
+        assert!(SDT2K.windows(2).skip(1).all(|pair| pair[0] >= pair[1]));
+        assert!(SDT.windows(2).all(|pair| pair[0] >= pair[1]));
+        assert!(SSQUASHT.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert_eq!(SSQUASHT[0], 0);
+        assert_eq!(SSQUASHT[SSQUASHT.len() - 1], 32767);
+    }
+}

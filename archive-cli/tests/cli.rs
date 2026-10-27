@@ -43,6 +43,18 @@ fn pack_list_extract_roundtrip() {
         "listing does not mention input.txt: {report}"
     );
 
+    let inspect = run(&dir, &["inspect", "archive.tar", "--json"]);
+    assert!(
+        inspect.status.success(),
+        "inspect failed: {}",
+        stderr(&inspect)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&inspect.stdout).unwrap();
+    assert!(
+        report.to_string().contains("input.txt"),
+        "inspection does not mention input.txt: {report}"
+    );
+
     let extract = run(&dir, &["extract", "archive.tar", "--out", "out"]);
     assert!(
         extract.status.success(),

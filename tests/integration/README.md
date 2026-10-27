@@ -547,6 +547,12 @@
 | mscfb rejects truncated fat chain (system python3 oracle) | `test_mscfb_rejects_truncated_fat_chain` |
 | mscfb encode python olefile oracle (system python3 oracle) | `test_mscfb_encode_python_olefile_oracle` |
 
+### `packbits.rs`
+
+| Coverage | Test cases |
+| --- | --- |
+| roundtrip / known vector / truncated rejection | `test_packbits_roundtrip_bytes`<br>`test_packbits_known_vector`<br>`test_packbits_rejects_truncated_packets` |
+
 ### `pea.rs`
 
 | Coverage | Test cases |

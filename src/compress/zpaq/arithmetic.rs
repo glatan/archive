@@ -179,3 +179,29 @@ impl<'a> ArithDecoder<'a> {
         Ok(y)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stored_mode_emits_length_prefixed_blocks() {
+        let mut encoder = ArithEncoder::new();
+        encoder.init_stored();
+        encoder.store(Some(b'h'));
+        encoder.store(Some(b'i'));
+        encoder.store(None);
+        let out = encoder.take();
+        assert_eq!(&out[..4], &2u32.to_be_bytes());
+        assert_eq!(&out[4..], b"hi");
+    }
+
+    #[test]
+    fn decoder_get_reads_raw_bytes_and_eof() {
+        let mut decoder = ArithDecoder::new(b"ab");
+        decoder.init(false);
+        assert_eq!(decoder.get(), i32::from(b'a'));
+        assert_eq!(decoder.get(), i32::from(b'b'));
+        assert_eq!(decoder.get(), -1);
+    }
+}
