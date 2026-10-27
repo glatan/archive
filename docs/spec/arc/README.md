@@ -3,7 +3,7 @@
 | 項目 | 内容 |
 |------|------|
 | 基準仕様 | ARC file format description (System Enhancement Associates / wotsit "arc" entry、[fileformat.info mirror](https://www.fileformat.info/format/arc/corion.htm)、ローカルスナップショット: `docs/spec/sources/arc_format_corion.htm`)。併せて `Arcinfo` (SEA 自身の文書、hyc/arc 配布物に同梱) が ARC 5.xx directory format を記述する第二ソース |
-| 参照実装 | newtua_dos (LGPL-3.0-or-later、method 5-7/0xa/0xb の移植元)、compcol (MIT、squeeze の適応元)、`compress::lzw` 共有コア (method 8/9 の LZW 層、de facto 源は ncompress `compress42.c` = public domain/Unlicense)。ARC 5.21 for Unix / nomarch は oracle のみ (実装参照ではない)、Debian `arc` 5.21q (fixture 生成)、arc/nomarch/unar/bsdtar/7z (oracle)。詳細: THIRD_PARTY_NOTICES arc 項・4a 節 |
+| 参照実装 | newtua_dos (LGPL-3.0-or-later、method 5-7/0xa/0xb の移植元)、compcol (MIT、squeeze の適応元)、`compress::lzw` 共有コア (method 8/9 の LZW 層、de facto 源は ncompress `compress42.c` = public domain/Unlicense)。ARC 5.21 for Unix / nomarch は oracle のみ (実装参照ではない)、Debian `arc` 5.21q (fixture 生成)、arc/nomarch/unar/bsdtar/7z (oracle)。性能比較 (`docs/bench/`) では unar による decode を使用。詳細: THIRD_PARTY_NOTICES arc 項・4a 節 |
 | 形式概要 | 各 member は `0x1A` + method byte で開始、method 0 で終端。name は 13B NUL 埋めの flat 名 (directory 概念なし) |
 | 実装範囲 | **method 1-9・0x0a・0x0b** の read、**method 1-9・0x0a・0x0b** の write。method 20-29・30-39 (ARC 6.0+ informational/control items) は header parse 後 skip。method 12-19・40+ の decode は intentional scope 外 |
 
