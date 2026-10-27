@@ -275,22 +275,26 @@ fn build_markdown(
                 );
                 let _ = writeln!(out, "|---|---|---|---|---:|---:|---:|");
                 for row in rows {
+                    let delta = row
+                        .delta_percent()
+                        .map(|value| format!("{value:+.1}%"))
+                        .unwrap_or_else(|| "N/A".to_owned());
                     let _ = writeln!(
                         out,
-                        "| {} | {} | {} | {} | {:.3} | {:.3} | {:+.1}% |",
+                        "| {} | {} | {} | {} | {:.3} | {:.3} | {} |",
                         esc(&row.case),
                         esc(&row.corpus),
                         row.op,
                         row.implementation,
                         row.current_ns as f64 / 1e6,
                         row.baseline_ns as f64 / 1e6,
-                        row.delta_percent()
+                        delta
                     );
                 }
                 let _ = writeln!(out);
                 let _ = writeln!(
                     out,
-                    "Baseline deltas are only meaningful on the same machine and build configuration."
+                    "Baseline deltas are only meaningful on the same machine, input size, and build configuration."
                 );
                 let _ = writeln!(out);
             }
@@ -407,12 +411,10 @@ struct BaselineRow {
 }
 
 impl BaselineRow {
-    fn delta_percent(&self) -> f64 {
-        if self.baseline_ns == 0 {
-            0.0
-        } else {
+    fn delta_percent(&self) -> Option<f64> {
+        (self.baseline_ns != 0).then(|| {
             (self.current_ns as f64 - self.baseline_ns as f64) / self.baseline_ns as f64 * 100.0
-        }
+        })
     }
 }
 
@@ -423,11 +425,12 @@ fn baseline_deltas(results: &[CaseResult], path: &Path) -> Result<Vec<BaselineRo
         .get("results")
         .and_then(Value::as_array)
         .ok_or_else(|| "baseline has no results array".to_owned())?;
-    let mut map: std::collections::BTreeMap<(String, String, String, String), u64> =
+    let mut map: std::collections::BTreeMap<(String, String, String, String, u64), u64> =
         std::collections::BTreeMap::new();
     for result in previous {
         let case = result.get("case").and_then(Value::as_str).unwrap_or("");
         let corpus = result.get("corpus").and_then(Value::as_str).unwrap_or("");
+        let input_len = result.get("input_len").and_then(Value::as_u64).unwrap_or(0);
         for op in ["encode", "decode"] {
             let Some(values) = result.get(op).and_then(Value::as_object) else {
                 continue;
@@ -446,6 +449,7 @@ fn baseline_deltas(results: &[CaseResult], path: &Path) -> Result<Vec<BaselineRo
                         corpus.to_owned(),
                         op.to_owned(),
                         impl_name.to_owned(),
+                        input_len,
                     ),
                     median,
                 );
@@ -472,6 +476,7 @@ fn baseline_deltas(results: &[CaseResult], path: &Path) -> Result<Vec<BaselineRo
                     result.corpus.clone(),
                     op.to_owned(),
                     impl_name.to_owned(),
+                    result.input_len as u64,
                 );
                 let Some(&baseline_ns) = map.get(&key) else {
                     continue;

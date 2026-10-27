@@ -19,7 +19,7 @@ python3 docs/bench/refs/build.py zx0 lzsa --force
 | `zx2` | 1.1 | `dc963faad50dfebd8b38e6bef4f027ff4754419d` | BSD-3-Clause | same |
 | `zx5` | 2.0 | `61616ffd641fb15add702663f57e3b3067d25ee5` | BSD-3-Clause | same |
 | `lzsa` | 1.4.1 | `15ee2dfe118eeb8f7683ca44f64821c3a61ca1e5` | zlib / CC0 | `make CC=gcc CFLAGS='-O2 ... -Isrc/libdivsufsort/include -Isrc'` |
-| `snappy` | 1.2.1 | sha256 `736aeb...4f09f86` | BSD-3-Clause | `g++ -O2 ... snappy.cc snappy-sinksource.cc snappy-stubs-internal.cc` |
+| `snappy` | 1.2.1 | sha256 `736aeb...4f09f86` | BSD-3-Clause | `g++ -O2 ... drivers/snappy_driver.cc snappy.cc snappy-sinksource.cc snappy-stubs-internal.cc` |
 | `lzf` | 3.6 | sha256 `9c5de0...fb46a` | BSD-2-Clause OR GPL-2.0-or-later | `gcc -O2 ... drivers/lzf_driver.c lzf_c.c lzf_d.c` |
 | `fastlz` | 0.5.0 | sha256 `4bd422...9d580` | MIT | `gcc -O2 ... drivers/fastlz_driver.c fastlz.c` |
 
@@ -28,9 +28,9 @@ to `target/bench/refs/build-info.json`. The report's Markdown table shows the
 catalog flags and the binary `.comment`; `result.json` embeds the complete
 `build-info.json` under `refs_build`.
 
-The LZF and FastLZ drivers are benchmark-only adapters around the upstream
-C APIs. They are not part of the `archive` crate and are not distributed as
-libraries.
+The LZF, FastLZ, and Snappy drivers are benchmark-only adapters around the
+upstream C/C++ APIs. They are not part of the `archive` crate and are not
+distributed as libraries.
 
 Sources fetched here are not committed. They are placed under `target/`,
 which is ignored by git.

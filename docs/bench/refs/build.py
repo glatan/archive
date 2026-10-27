@@ -110,8 +110,8 @@ def run(command: list[str], cwd: Path | None = None, env: dict[str, str] | None 
     subprocess.run(command, cwd=cwd, env=env, check=True)
 
 
-def compiler_version() -> str:
-    output = subprocess.check_output(["gcc", "--version"], text=True)
+def compiler_version(compiler: str = "gcc") -> str:
+    output = subprocess.check_output([compiler, "--version"], text=True)
     return output.splitlines()[0]
 
 
@@ -164,15 +164,12 @@ def fetch_archive(name: str, spec: dict) -> Path:
 
 
 def build_driver(name: str, spec: dict, root: Path) -> dict:
+    commands = []
     if "stubs" in spec:
-        source = root / f"{spec['stubs']}.in"
-        target = root / spec["stubs"]
-        text = source.read_text()
-        text = text.replace("${HAVE_SYS_UIO_H_01}", "1")
-        text = text.replace("${PROJECT_VERSION_MAJOR}", "1")
-        text = text.replace("${PROJECT_VERSION_MINOR}", "2")
-        text = text.replace("${PROJECT_VERSION_PATCH}", "1")
-        target.write_text(text)
+        stub_script = Path(__file__).resolve().parent / "drivers" / "snappy_stubs.py"
+        stub_command = [sys.executable, str(stub_script), str(root)]
+        run(stub_command)
+        commands.append(" ".join(stub_command))
     driver = Path(__file__).resolve().parent / "drivers" / spec["driver"]
     out = BIN / spec["binary"]
     command = [
@@ -186,6 +183,8 @@ def build_driver(name: str, spec: dict, root: Path) -> dict:
         *[str(root / source) for source in spec["sources"]],
     ]
     run(command)
+    commands.append(" ".join(command))
+    compiler = spec.get("compiler", "gcc")
     return {
         "id": name,
         "version": spec["version"],
@@ -193,11 +192,11 @@ def build_driver(name: str, spec: dict, root: Path) -> dict:
         "source_sha256": spec["sha256"],
         "license": spec["license"],
         "build": {
-            "cc": spec.get("compiler", "gcc"),
-            "cc_version": compiler_version(),
+            "cc": compiler,
+            "cc_version": compiler_version(compiler),
             "cflags": CFLAGS_TEXT,
             "ldflags": LDFLAGS,
-            "commands": [" ".join(command)],
+            "commands": commands,
         },
         "binaries": [{"binary": str(out.relative_to(ROOT)), "sha256": sha256(out)}],
     }
