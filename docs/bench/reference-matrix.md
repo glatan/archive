@@ -72,7 +72,7 @@ missing reference binary) is recorded in the generated report.
 | git-pack | git-pack | archive | ours-only | — | — | — | git pack stores object IDs; payload hashes are compared instead of names |
 | xar | xar | archive | measured | unar | system unarchiver | distro package (exact distro build flags not exposed) | Generated archive; decode reference is unar |
 | mscab | mscab | archive | decode-only | cabextract | system cabextract | distro package (exact distro build flags not exposed) | Checked-in CAB fixture; decode reference is cabextract |
-| deb | deb | archive | ours-only | — | — | — | Generated .deb fixture; decode-only |
+| deb | deb | archive | ours-only | — | — | — | Generated .deb fixture; lib reads ar members, CLI extracts payloads |
 | rpm | rpm | archive | decode-only | bsdtar | system libarchive | distro package (exact distro build flags not exposed) | Generated .rpm fixture; decode reference is bsdtar |
 | zim | zim | archive | ours-only | — | — | — | Generated ZIM fixture; decode-only |
 | mtree | mtree | archive | ours-only | — | — | — | Generated mtree fixture; metadata-only, CLI uses test |

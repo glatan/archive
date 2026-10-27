@@ -214,7 +214,7 @@ fn build_markdown(
     let _ = writeln!(out);
     let _ = writeln!(
         out,
-        "| format | size | ours-lib pack MB/s | ours-cli pack MB/s | ref pack MB/s | lib/ref pack | cli/ref pack | ours-lib extract MB/s | ours-cli extract MB/s | ref extract MB/s | lib/ref extract | cli/ref extract | ours ratio | ref ratio | status / note |"
+        "| format | size | ours-lib pack MB/s | ours-cli pack MB/s | ref pack MB/s | lib/ref pack | cli/ref pack | ours-lib decode MB/s | ours-cli decode MB/s | ref decode MB/s | lib/ref decode | cli/ref decode | ours ratio | ref ratio | status / note |"
     );
     let _ = writeln!(
         out,
