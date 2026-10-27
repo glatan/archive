@@ -616,7 +616,10 @@ fn decode_items(
                 entries
                     .into_iter()
                     .map(|entry| {
-                        let is_dir = entry.name.ends_with('/');
+                        let unix_mode = entry.header.external_attributes >> 16;
+                        let is_dir = entry.name.ends_with('/')
+                            || entry.header.external_attributes & 0x10 != 0
+                            || unix_mode & 0o170000 == 0o040000;
                         DecodedItem {
                             payload: (!is_dir).then(|| entry.data.clone()),
                             summary: EntrySummary {
@@ -645,7 +648,8 @@ fn decode_items(
                 entries
                     .into_iter()
                     .map(|entry| {
-                        let is_dir = entry.name.ends_with('/');
+                        let is_dir = entry.name.ends_with('/')
+                            || entry.attributes.is_some_and(|attrs| attrs & 0x10 != 0);
                         DecodedItem {
                             payload: (!is_dir).then(|| entry.data.clone()),
                             summary: EntrySummary {

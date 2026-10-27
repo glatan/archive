@@ -37,7 +37,7 @@ static unsigned char *read_file(const char *path, unsigned long *len) {
     return buf;
 }
 
-#define MAX_ALLOC ((size_t)1 << 30)
+#define MAX_ALLOC ((size_t)2 << 30)
 
 int main(int argc, char **argv) {
     unsigned char *in, *out, *wrk = NULL;
@@ -51,10 +51,10 @@ int main(int argc, char **argv) {
         if ((size_t)n > MAX_ALLOC / 2) return 3;
         capacity = (size_t)n + (size_t)n / 8 + 65536;
     } else {
-        // LZRW matches expand by at most 9x; 16x leaves headroom while
-        // staying bounded for arbitrary --size values.
-        if ((size_t)n > (MAX_ALLOC - 4096) / 16) return 3;
-        capacity = (size_t)n * 16 + 4096;
+        // LZRW matches expand by at most 9x; 10x leaves headroom while
+        // accepting a 64 MiB incompressible stream (FLAG_COPY adds 4 bytes).
+        if ((size_t)n > (MAX_ALLOC - 4096) / 10) return 3;
+        capacity = (size_t)n * 10 + 4096;
     }
     if (capacity > MAX_ALLOC) return 3;
     out = malloc(capacity);

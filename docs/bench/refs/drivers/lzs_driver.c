@@ -19,7 +19,7 @@ static unsigned char *read_file(const char *path, size_t *len) {
     return buf;
 }
 
-#define MAX_ALLOC ((size_t)1 << 30)
+#define MAX_ALLOC ((size_t)2 << 30)
 
 int main(int argc, char **argv) {
     unsigned char *in, *out;
