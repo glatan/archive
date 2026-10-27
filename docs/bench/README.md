@@ -98,7 +98,7 @@ cargo bench --all-features --bench compare -- \
 - `--size` で codec の入力サイズを上書きできる（archive のツリーサイズは固定）
 - read-only 形式の一部は `target/bench/fixtures/` に生成した fixture を使う
   （deb/rpm/mtree/warc/zim/squashfs/cramfs/pea/mscfb/crx3）。fixture はリポジトリにコミットしない
-- `--timeout` で helper / CLI / 参照プロセスの 1 回あたりの上限を指定できる
+- `--timeout` で helper / CLI / 参照プロセスの 1 回あたりの上限を指定できる（既定 600 秒、0 は拒否）
 
 ## 参照実装
 
