@@ -171,7 +171,7 @@
 | 107 | large literals / large text の public encoder roundtrip | RFC 8878 §3.1.1 / §3.1.1.2-§3.1.1.5 / §4.1 / §4.2 / §5 | ✅ | `test_large_literals_roundtrip`, `test_large_text_roundtrip`, `test_zstd_encode_large_literals_roundtrip` |
 | 108 | public encoder 出力のシステム zstd 互換性 (大きい text) | RFC 8878 §3.1.1 / §3.1.1.2-§3.1.1.5 / §4.1 / §4.2 / §5 | ✅ | `test_zstd_encode_large_text_system_compat` (統合テスト) |
 | 109 | public encoder 出力のシステム zstd 互換性 (大きい raw payload) | RFC 8878 §3.1.1 / §3.1.1.2-§3.1.1.5 / §4.1 / §4.2 / §5 | ✅ | `test_zstd_encode_large_raw_system_compat` (統合テスト) |
-| 110 | Dictionary パース (RFC 8878 §5: magic, dict_id, entropy tables, content) | RFC 8878 §5 | ✅ | `test_dict_parse_invalid_magic`, `test_dict_parse_too_short` |
+| 110 | Dictionary パース (RFC 8878 §5: magic, dict_id, entropy tables, content)。FSE 圧縮 Huffman weights は最終 symbol の weight を code space から補完する (§4.2.1.2) | RFC 8878 §5 / §4.2.1.2 | ✅ | `test_dict_parse_invalid_magic`, `test_dict_parse_too_short`, `test_parse_huffman_weights_infers_final_fse_weight`, `test_parse_huffman_weights_system_zstd_header_regression` |
 | 111 | Dictionary デコード (辞書コンテンツを履歴プレフィックスとして使用) | RFC 8878 §5 | ✅ | `test_execute_sequences_with_dict_content`, `test_execute_sequences_with_dict_overlap` |
 | 112 | Dictionary ID 不一致/未提供エラー | RFC 8878 §5 | ✅ | `test_decode_dict_required_but_missing`, `test_decode_dict_id_mismatch` |
 | 113 | Dictionary 付きデコードのシステム zstd 互換性 | RFC 8878 §5 | ✅ | `test_zstd_decode_with_dict_system` (統合テスト) |

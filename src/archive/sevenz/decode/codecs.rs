@@ -557,3 +557,134 @@ fn decode_delta_distance(properties: &[u8]) -> Result<usize, Error> {
     }
     Ok(properties[0] as usize + 1)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn coder(method_id: &[u8], num_in: u64, num_out: u64) -> Coder {
+        Coder {
+            method_id: method_id.to_vec(),
+            properties: Vec::new(),
+            num_in_streams: num_in,
+            num_out_streams: num_out,
+            input_index: 0,
+            output_index: 0,
+        }
+    }
+
+    #[test]
+    fn aes_properties_defaults_and_validation() {
+        let defaults = parse_7z_aes_properties(&[]).unwrap();
+        assert_eq!(defaults.num_cycles_power, 0);
+        assert!(defaults.salt.is_empty());
+        assert_eq!(defaults.iv, [0; 16]);
+
+        let simple = parse_7z_aes_properties(&[0x00]).unwrap();
+        assert_eq!(simple.num_cycles_power, 0);
+
+        assert!(matches!(
+            parse_7z_aes_properties(&[25]),
+            Err(Error::Unsupported(
+                "7z: unsupported AES key derivation cost"
+            ))
+        ));
+        assert!(matches!(
+            parse_7z_aes_properties(&[0xC0]),
+            Err(Error::InvalidData("7z: truncated AES properties"))
+        ));
+        assert!(matches!(
+            parse_7z_aes_properties(&[0x00, 0x00]),
+            Err(Error::InvalidData("7z: invalid AES properties"))
+        ));
+    }
+
+    #[test]
+    fn aes_key_derivation_is_deterministic() {
+        let shortcut = SevenZAesProperties {
+            num_cycles_power: 0x3F,
+            salt: alloc::vec![1, 2],
+            iv: [0; 16],
+        };
+        let key = derive_7z_aes_key(&[3, 4], &shortcut).unwrap();
+        assert_eq!(&key[..4], &[1, 2, 3, 4]);
+        assert!(key[4..].iter().all(|&byte| byte == 0));
+
+        let props = SevenZAesProperties {
+            num_cycles_power: 1,
+            salt: alloc::vec![9, 8],
+            iv: [0; 16],
+        };
+        let first = derive_7z_aes_key(b"password", &props).unwrap();
+        let second = derive_7z_aes_key(b"password", &props).unwrap();
+        let other = derive_7z_aes_key(b"other", &props).unwrap();
+        assert_eq!(first, second);
+        assert_ne!(first, other);
+    }
+
+    #[test]
+    fn password_utf16le_encodes_ascii_and_surrogates() {
+        assert_eq!(
+            encode_password_utf16le("abc"),
+            alloc::vec![b'a', 0, b'b', 0, b'c', 0]
+        );
+        assert_eq!(
+            encode_password_utf16le("\u{1F600}"),
+            alloc::vec![0x3D, 0xD8, 0x00, 0xDE]
+        );
+    }
+
+    #[test]
+    fn lzma_properties_and_dictionary_sizes() {
+        let (props, dict_size) = decode_lzma_props(&[0x5D, 0, 0, 0, 0]).unwrap();
+        assert_eq!(props, LzmaProperties::from_props_byte(0x5D).unwrap());
+        assert_eq!(dict_size, 1);
+        assert!(decode_lzma_props(&[0x5D, 0, 0, 0]).is_err());
+        assert!(decode_lzma_props(&[0xFF, 0, 0, 0, 0]).is_err());
+
+        assert_eq!(decode_lzma2_dict_size(&[0]).unwrap(), 4096);
+        assert_eq!(decode_lzma2_dict_size(&[1]).unwrap(), 6144);
+        assert_eq!(decode_lzma2_dict_size(&[40]).unwrap(), u32::MAX);
+        assert!(decode_lzma2_dict_size(&[41]).is_err());
+        assert!(decode_lzma2_dict_size(&[]).is_err());
+
+        assert_eq!(decode_delta_distance(&[0]).unwrap(), 1);
+        assert_eq!(decode_delta_distance(&[255]).unwrap(), 256);
+        assert!(decode_delta_distance(&[]).is_err());
+    }
+
+    #[test]
+    fn declared_decode_len_enforces_limit() {
+        let limit = crate::util::bounded::DECLARED_OUTPUT_LIMIT;
+        assert_eq!(declared_decode_len(limit).unwrap(), limit);
+        assert!(matches!(
+            declared_decode_len(limit + 1),
+            Err(Error::OutputLimitExceeded { .. })
+        ));
+    }
+
+    #[test]
+    fn decode_coder_checks_inputs_and_copy_size() {
+        let copy = coder(&[0x00], 1, 1);
+        let decoded = decode_coder(&copy, &[b"abc".to_vec()], &[3], None).unwrap();
+        assert_eq!(decoded, alloc::vec![b"abc".to_vec()]);
+        assert!(matches!(
+            decode_coder(&copy, &[b"abc".to_vec()], &[4], None),
+            Err(Error::SizeMismatch { .. })
+        ));
+
+        let bcj2 = coder(METHOD_BCJ2_X86, 4, 1);
+        assert!(matches!(
+            decode_coder(&bcj2, &[b"a".to_vec()], &[1], None),
+            Err(Error::Unsupported(
+                "7z: non-BCJ2 multi-input coder methods are not supported"
+            ))
+        ));
+
+        let unknown = coder(&[0x7F], 1, 1);
+        assert!(matches!(
+            decode_coder(&unknown, &[b"a".to_vec()], &[1], None),
+            Err(Error::Unsupported("7z: unsupported coder method"))
+        ));
+    }
+}

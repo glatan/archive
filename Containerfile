@@ -90,6 +90,8 @@ RUN --mount=type=cache,id=cargo-registry,target=/root/.cargo/registry \
         target/i686-unknown-linux-gnu/debug/build/archive-* \
         target/i686-unknown-linux-gnu/debug/.fingerprint/archive-* || true; } && \
     cargo test --all-features --no-run && \
+    cargo test -p archive-cli --no-run && \
+    cargo test -p archive-fuzz --no-run && \
     cargo test --all-features --target aarch64-unknown-linux-gnu --lib --no-run && \
     cargo test --lib --all-features --target i686-unknown-linux-gnu --no-run && \
     cargo test --test integration --all-features --target i686-unknown-linux-gnu --no-run && \
@@ -120,6 +122,8 @@ RUN mkdir -p target && \
         '#!/bin/sh' \
         'set -eu' \
         'cargo test --all-features' \
+        'cargo test -p archive-cli' \
+        'cargo test -p archive-fuzz' \
         'cargo test --all-features --target aarch64-unknown-linux-gnu --lib' \
         'CARGO_TARGET_DIR=target/avx2 RUSTFLAGS="-C target-cpu=x86-64-v3" cargo test --lib --all-features' \
         'cargo test --lib --no-default-features --features "$(cat /usr/local/share/archive-features)"' \

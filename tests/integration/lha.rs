@@ -2,6 +2,8 @@
 // LHA/LZH container tests (store methods only)
 // ============================================================
 
+use super::require_external_tools;
+
 fn lha_fixture(name: &str, data: &[u8]) -> Vec<u8> {
     let mut enc = archive::archive::lha::encode::LhaEncoder::new();
     enc.add_file(name, data, 0).unwrap();
@@ -372,8 +374,7 @@ fn lha_fixture_entry(name: &str) -> archive::archive::lha::decode::LhaEntry {
 }
 
 /// Every vendored fixture for a supported method must decode; the
-/// header CRC-16 inside each archive validates the decompressed
-/// bytes.
+/// data CRC-16 inside each archive validates the decompressed bytes.
 #[test]
 fn test_lha_compressed_method_fixtures() {
     for (name, expect_bytes) in [
@@ -474,7 +475,11 @@ fn test_lha_fixture_oracle_extract() {
         })
         .collect();
     if tools.is_empty() {
-        return; // no oracle installed
+        assert!(
+            !require_external_tools(),
+            "no LHA oracle installed (lhasa/unar/lha)"
+        );
+        return;
     }
     let uniq = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -482,6 +487,7 @@ fn test_lha_fixture_oracle_extract() {
         .as_nanos();
     let dir = std::env::temp_dir().join(format!("archive_lha_oracle_{uniq}"));
     std::fs::create_dir_all(&dir).unwrap();
+    let mut compared = 0;
 
     for e in std::fs::read_dir("tests/fixtures/lha").unwrap() {
         let p = e.unwrap().path();
@@ -529,8 +535,15 @@ fn test_lha_fixture_oracle_extract() {
                 ours.first(),
                 "{name}: {tool} output differs"
             );
+            compared += 1;
         }
     }
+
+    assert!(
+        compared > 0,
+        "oracle tools were available but no fixture was compared"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ============================================================
@@ -698,7 +711,11 @@ fn test_lha_pmarc_oracle_interop() {
         })
         .collect();
     if tools.is_empty() {
-        return; // no oracle installed
+        assert!(
+            !require_external_tools(),
+            "no LHA oracle installed (lhasa/unar/lha)"
+        );
+        return;
     }
     let uniq = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -707,6 +724,7 @@ fn test_lha_pmarc_oracle_interop() {
     let dir = std::env::temp_dir().join(format!("archive_test_lha_pm_{uniq}"));
     std::fs::create_dir_all(&dir).unwrap();
     let data = b"pmarc oracle interop payload ".repeat(64);
+    let mut compared = 0;
 
     for (method, tag) in [(b"-pm1-", "pm1"), (b"-pm2-", "pm2")] {
         let path = dir.join(format!("test{tag}.lzh"));
@@ -726,6 +744,13 @@ fn test_lha_pmarc_oracle_interop() {
             }
             let extracted = std::fs::read(out_dir.join(&name)).unwrap();
             assert_eq!(extracted, data.as_slice(), "{tag}: {tool} output differs");
+            compared += 1;
         }
     }
+
+    assert!(
+        compared > 0,
+        "oracle tools were available but no PMarc fixture was compared"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

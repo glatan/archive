@@ -4,6 +4,39 @@ use super::*;
 // bzip2 tests
 // ============================================================
 
+/// Decode `compressed` with the system `bzip2` binary.
+///
+/// Returns `None` only when `bzip2` is not installed.
+fn bzip2_system_decode(compressed: &[u8]) -> Option<Vec<u8>> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut child = match Command::new("bzip2")
+        .args(["-d", "-c"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if require_external_tools() {
+                panic!("required external tool is unavailable: bzip2");
+            }
+            return None;
+        }
+        Err(error) => panic!("failed to run bzip2: {error}"),
+    };
+    child.stdin.as_mut().unwrap().write_all(compressed).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "system bzip2 failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Some(output.stdout)
+}
+
 #[test]
 fn test_bzip2_roundtrip_large() {
     // 100KB data with mixed patterns
@@ -37,36 +70,15 @@ fn test_bzip2_decode_system_compressed() {
 
 #[test]
 fn test_bzip2_encode_decoded_by_system() {
-    // Encode with our library, decode with system bzip2
-    use std::process::Command;
-
     let input = b"The quick brown fox jumps over the lazy dog. Testing bzip2 interop!";
     let compressed = bzip2::encode::encode(input);
     assert_eq!(&compressed[..3], b"BZh");
 
-    std::fs::write("/tmp/test_bzip2_interop.bz2", &compressed).unwrap();
-
-    let output = Command::new("bzip2")
-        .args(["-d", "-c", "/tmp/test_bzip2_interop.bz2"])
-        .output();
-
-    match output {
-        Ok(result) => {
-            assert!(
-                result.status.success(),
-                "bzip2 -d failed: {}",
-                String::from_utf8_lossy(&result.stderr)
-            );
-            assert_eq!(result.stdout, input);
-        }
-        Err(_) => {
-            // bzip2 not installed, just verify self-roundtrip
-            let decoded = bzip2::decode::decode(&compressed).unwrap();
-            assert_eq!(decoded, input);
-        }
-    }
-
-    let _ = std::fs::remove_file("/tmp/test_bzip2_interop.bz2");
+    let Some(decoded) = bzip2_system_decode(&compressed) else {
+        assert_eq!(bzip2::decode::decode(&compressed).unwrap(), input);
+        return;
+    };
+    assert_eq!(decoded, input);
 }
 
 #[test]
@@ -80,35 +92,14 @@ fn test_bzip2_roundtrip_multi_block() {
 
 #[test]
 fn test_bzip2_large_interop_with_system() {
-    // Encode 100KB+ data and verify system bzip2 can decode it
-    use std::process::Command;
-
     let input: Vec<u8> = (0..120_000).map(|i| (i * 37 % 256) as u8).collect();
     let compressed = bzip2::encode::encode(&input);
 
-    std::fs::write("/tmp/test_bzip2_large_interop.bz2", &compressed).unwrap();
-
-    let output = Command::new("bzip2")
-        .args(["-d", "-c", "/tmp/test_bzip2_large_interop.bz2"])
-        .output();
-
-    match output {
-        Ok(result) => {
-            assert!(
-                result.status.success(),
-                "bzip2 -d failed: {}",
-                String::from_utf8_lossy(&result.stderr)
-            );
-            assert_eq!(result.stdout, input);
-        }
-        Err(_) => {
-            // bzip2 not installed, just verify self-roundtrip
-            let decoded = bzip2::decode::decode(&compressed).unwrap();
-            assert_eq!(decoded, input);
-        }
-    }
-
-    let _ = std::fs::remove_file("/tmp/test_bzip2_large_interop.bz2");
+    let Some(decoded) = bzip2_system_decode(&compressed) else {
+        assert_eq!(bzip2::decode::decode(&compressed).unwrap(), input);
+        return;
+    };
+    assert_eq!(decoded, input);
 }
 
 #[test]

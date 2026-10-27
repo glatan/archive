@@ -179,6 +179,10 @@ fn test_rpm_decode_system_compressed_payload() {
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    if !command_available("cpio", &["--version"]) {
+        return;
+    }
+
     let uniq = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()

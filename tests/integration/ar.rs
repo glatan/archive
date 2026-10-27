@@ -71,20 +71,22 @@ fn test_ar_gnu_system_compat() {
     encoder.add_file("very long filename.txt", b"GNU ar compat");
     let archive = encoder.finish().unwrap();
 
-    let path = std::env::temp_dir().join("archive_test_gnu_compat.a");
+    let dir = unique_temp_dir("ar_gnu");
+    let path = dir.join("compat.a");
     std::fs::write(&path, &archive).unwrap();
-    let output = Command::new("ar").args(["t"]).arg(&path).output();
-    let _ = std::fs::remove_file(&path);
-
-    if let Ok(result) = output {
-        assert!(
-            result.status.success(),
-            "ar t failed: {}",
-            String::from_utf8_lossy(&result.stderr)
-        );
-        let listing = String::from_utf8_lossy(&result.stdout);
-        assert!(listing.contains("very long filename.txt"));
-    }
+    let output = match Command::new("ar").args(["t"]).arg(&path).output() {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => panic!("failed to run ar: {error}"),
+    };
+    assert!(
+        output.status.success(),
+        "ar t failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let listing = String::from_utf8_lossy(&output.stdout);
+    assert!(listing.contains("very long filename.txt"));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -154,20 +156,22 @@ fn test_ar_bsd_system_compat() {
     encoder.add_file("this_is_a_long_name.txt", b"BSD ar compat");
     let archive = encoder.finish().unwrap();
 
-    let path = std::env::temp_dir().join("archive_test_bsd_compat.a");
+    let dir = unique_temp_dir("ar_bsd");
+    let path = dir.join("compat.a");
     std::fs::write(&path, &archive).unwrap();
-    let output = Command::new("bsdtar").args(["-tf"]).arg(&path).output();
-    let _ = std::fs::remove_file(&path);
-
-    if let Ok(result) = output {
-        assert!(
-            result.status.success(),
-            "bsdtar -tf failed: {}",
-            String::from_utf8_lossy(&result.stderr)
-        );
-        let listing = String::from_utf8_lossy(&result.stdout);
-        assert!(listing.contains("this_is_a_long_name.txt"));
-    }
+    let output = match Command::new("bsdtar").args(["-tf"]).arg(&path).output() {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => panic!("failed to run bsdtar: {error}"),
+    };
+    assert!(
+        output.status.success(),
+        "bsdtar -tf failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let listing = String::from_utf8_lossy(&output.stdout);
+    assert!(listing.contains("this_is_a_long_name.txt"));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

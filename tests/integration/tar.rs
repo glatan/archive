@@ -24,11 +24,7 @@ fn test_tar_empty_archive_roundtrip() {
 fn test_tar_decode_multi_file() {
     let tar_data = include_bytes!("../fixtures/tar/multi_file.tar");
     let entries = tar::decode::decode(tar_data).unwrap();
-    assert!(
-        entries.len() >= 3,
-        "expected at least 3 entries, got {}",
-        entries.len()
-    );
+    assert_eq!(entries.len(), 3, "unexpected entry count");
 
     let a = entries
         .iter()
@@ -163,21 +159,23 @@ fn test_tar_gnu_system_compat() {
     encoder.add_file("hello.txt", b"Hello from Rust tar encoder");
     let tar_data = encoder.finish();
 
-    let tmp = std::env::temp_dir().join("archive_test_gnu_compat.tar");
+    let dir = unique_temp_dir("tar_gnu");
+    let tmp = dir.join("compat.tar");
     std::fs::write(&tmp, &tar_data).unwrap();
 
-    let output = Command::new("tar").args(["-tf"]).arg(&tmp).output();
-    let _ = std::fs::remove_file(&tmp);
-
-    if let Ok(result) = output {
-        assert!(
-            result.status.success(),
-            "tar -tf failed: {}",
-            String::from_utf8_lossy(&result.stderr)
-        );
-        let listing = String::from_utf8_lossy(&result.stdout);
-        assert!(listing.contains("hello.txt"));
-    }
+    let output = match Command::new("tar").args(["-tf"]).arg(&tmp).output() {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => panic!("failed to run tar: {error}"),
+    };
+    assert!(
+        output.status.success(),
+        "tar -tf failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let listing = String::from_utf8_lossy(&output.stdout);
+    assert!(listing.contains("hello.txt"));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

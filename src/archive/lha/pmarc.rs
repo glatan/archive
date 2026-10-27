@@ -755,3 +755,41 @@ fn decode_pm1(input: &[u8], expected: usize) -> Result<Vec<u8>, Error> {
     }
     Ok(s.out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_roundtrips_every_byte_position() {
+        let mut history = History::new();
+        for byte in 0..=u8::MAX {
+            let pos = history.pos(byte);
+            assert_eq!(history.find(pos as u8), byte, "byte {byte:#04x}");
+        }
+
+        history.update(0x41);
+        assert_eq!(history.pos(0x41), 0);
+        assert_eq!(history.find(0), 0x41);
+
+        history.update(0x42);
+        assert_eq!(history.pos(0x42), 0);
+        assert_eq!(history.find(history.pos(0x41) as u8), 0x41);
+    }
+
+    #[test]
+    fn supports_only_pm1_and_pm2() {
+        assert!(supported(b"-pm1-"));
+        assert!(supported(b"-pm2-"));
+        assert!(!supported(b"-pm0-"));
+        assert!(!supported(b"-lh5-"));
+    }
+
+    #[test]
+    fn decode_rejects_unsupported_methods() {
+        assert!(matches!(
+            decode(b"-pm0-", &[], 0),
+            Err(Error::Unsupported(_))
+        ));
+    }
+}

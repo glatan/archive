@@ -67,3 +67,16 @@ pub(crate) fn builtin_level(z: &Zpaql) -> Option<u32> {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_models_parse_and_identify_themselves() {
+        for level in 1..=3 {
+            let z = model_zpaql(level).unwrap();
+            assert_eq!(builtin_level(&z), Some(level));
+        }
+    }
+}

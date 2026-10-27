@@ -132,3 +132,42 @@ pub fn encode(files: &[(&str, &[u8])]) -> Result<Vec<u8>, Error> {
     }
     Ok(e.finish())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::archive::arc::decode;
+
+    #[test]
+    fn rejects_bad_names_and_methods() {
+        let mut encoder = ArcEncoder::new();
+        assert!(encoder.add_file("", b"x", 0, 0).is_err());
+        assert!(encoder.add_file("dir/file", b"x", 0, 0).is_err());
+        assert!(encoder.add_file("dir\\file", b"x", 0, 0).is_err());
+        assert!(encoder.add_file("a\0b", b"x", 0, 0).is_err());
+        assert!(encoder.add_file(&"a".repeat(13), b"x", 0, 0).is_err());
+        assert!(matches!(
+            encoder.add_file_with_method("f", b"x", 0, 0, 12),
+            Err(Error::Unsupported("arc: unsupported method"))
+        ));
+        assert!(matches!(
+            encoder.add_file_with_method("f", b"x", 0, 0, 0),
+            Err(Error::Unsupported("arc: unsupported method"))
+        ));
+    }
+
+    #[test]
+    fn stored_and_compressed_methods_roundtrip() {
+        for method in [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 0x0a, 0x0b] {
+            let mut encoder = ArcEncoder::new();
+            let data = b"arc method roundtrip payload ".repeat(20);
+            encoder
+                .add_file_with_method("F.BIN", &data, 0, 0, method)
+                .unwrap();
+            let archive = encoder.finish();
+            let entries = decode::decode(&archive).unwrap();
+            assert_eq!(entries.len(), 1, "method {method}");
+            assert_eq!(entries[0].data, data, "method {method}");
+        }
+    }
+}

@@ -57,6 +57,7 @@ pub(crate) struct FlagErrs {
 }
 
 /// A single item inside a group.
+#[derive(Debug)]
 pub(crate) enum Item {
     Literal(u8),
     /// `len` already includes the variant's length bias; `index` is the
@@ -232,4 +233,72 @@ pub(crate) fn copy_from_output(out: &mut Vec<u8>, pos: usize, len: usize) {
 pub(crate) fn hash3(b: &[u8], mask: u32) -> usize {
     let v = ((b[0] as u32) << 8) ^ ((b[1] as u32) << 4) ^ b[2] as u32;
     ((40543u32.wrapping_mul(v) >> 4) & mask) as usize
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ERRS: FlagErrs = FlagErrs {
+        truncated_flag: "truncated",
+        unknown_flag: "unknown",
+    };
+
+    #[test]
+    fn head_validates_copy_flag() {
+        assert!(matches!(head(&[1, 0, 0, 0], ERRS), Ok(Head::Verbatim)));
+        assert!(matches!(head(&[0, 0, 0, 0], ERRS), Ok(Head::Compressed)));
+        assert!(matches!(
+            head(&[2, 0, 0, 0], ERRS),
+            Err(Error::InvalidData("unknown"))
+        ));
+        assert!(matches!(
+            head(&[1, 0], ERRS),
+            Err(Error::InvalidData("truncated"))
+        ));
+    }
+
+    #[test]
+    fn item_iterator_decodes_literals_and_copies() {
+        // control = 0b10: literal 'a', then copy with C1=0x13 (len 3+bias,
+        // index 0x100) and C2=0.
+        let input = [0, 0, 0, 0, 0x02, 0x00, b'a', 0x13, 0x00];
+        let mut items = Items::new(&input, 3, "truncated copy");
+        assert!(matches!(items.next().unwrap(), Some(Item::Literal(b'a'))));
+        match items.next().unwrap() {
+            Some(Item::Copy { len, index }) => {
+                assert_eq!(len, 6);
+                assert_eq!(index, 0x100);
+            }
+            other => panic!("expected copy, got {other:?}"),
+        }
+        assert!(items.next().unwrap().is_none());
+    }
+
+    #[test]
+    fn group_encoder_and_verbatim_framing() {
+        let mut encoder = GroupEncoder::new();
+        encoder.literal(b'x');
+        encoder.copy(4, 7);
+        let encoded = encoder.finish();
+        assert_eq!(&encoded[..FLAG_BYTES], &[0, 0, 0, 0]);
+        let mut items = Items::new(&encoded, 3, "truncated copy");
+        assert!(matches!(items.next().unwrap(), Some(Item::Literal(b'x'))));
+        match items.next().unwrap() {
+            Some(Item::Copy { len, index }) => {
+                assert_eq!(len, 7);
+                assert_eq!(index, 7);
+            }
+            other => panic!("expected copy, got {other:?}"),
+        }
+
+        assert_eq!(verbatim(b"abc"), [1, 0, 0, 0, b'a', b'b', b'c']);
+    }
+
+    #[test]
+    fn overlapping_copy_expands_previous_bytes() {
+        let mut out = b"ab".to_vec();
+        copy_from_output(&mut out, 0, 5);
+        assert_eq!(out, b"abababa");
+    }
 }

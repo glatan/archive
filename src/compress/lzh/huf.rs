@@ -222,3 +222,39 @@ pub(crate) fn read_c_len(
     }
     Table::build(nc, &lens)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compress::lzh::bits::MsbReader;
+
+    #[test]
+    fn constant_table_consumes_no_bits() {
+        let table = Table::constant(42);
+        let data = [0u8; 4];
+        let mut reader = MsbReader::new(&data);
+        assert_eq!(table.decode(&mut reader).unwrap(), 42);
+        assert_eq!(reader.get(1), 0);
+    }
+
+    #[test]
+    fn canonical_table_decodes_one_bit_symbols() {
+        let table = Table::build(2, &[1, 1]).unwrap();
+        let data = [0b0100_0000];
+        let mut reader = MsbReader::new(&data);
+        assert_eq!(table.decode(&mut reader).unwrap(), 0);
+        assert_eq!(table.decode(&mut reader).unwrap(), 1);
+    }
+
+    #[test]
+    fn rejects_incomplete_and_invalid_tables() {
+        assert!(matches!(
+            Table::build(1, &[2]),
+            Err(Error::InvalidData("lha: bad huffman table"))
+        ));
+        assert!(matches!(
+            Table::build(1, &[17]),
+            Err(Error::InvalidData("lha: bad huffman length"))
+        ));
+    }
+}

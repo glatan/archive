@@ -138,9 +138,11 @@ impl ZstdDict {
         }
         let mut pos = 8;
 
-        // Parse Huffman table
-        let (weights, huff_consumed) = parse_huffman_weights(&data[pos..])?;
+        // Parse Huffman table. The final symbol's weight is implied by the
+        // remaining code space in both FSE and direct representations.
+        let (mut weights, huff_consumed) = parse_huffman_weights(&data[pos..])?;
         pos += huff_consumed;
+        super::huff::complete_huffman_weights(&mut weights)?;
         let huff_table = if weights.is_empty() {
             None
         } else {
@@ -301,39 +303,9 @@ fn decode_internal(
     Ok(output)
 }
 
-fn build_literals_huffman_table(weights: Vec<u8>) -> Result<HuffmanTable, Error> {
-    let mut all_weights = weights;
-    let weight_sum: u32 = all_weights
-        .iter()
-        .filter(|&&w| w > 0)
-        .map(|&w| 1u32 << (w - 1))
-        .sum();
-
-    if weight_sum == 0 {
-        return HuffmanTable::from_weights(&all_weights);
-    }
-
-    // RFC 8878 §4.2.1: tableLog = BIT_highbit32(weightTotal) + 1.
-    // The reference zstd always uses 2^tableLog as the target, which is
-    // strictly greater than weight_sum when weight_sum is a power of 2.
-    // This differs from next_power_of_two() which returns x itself when
-    // x is already a power of 2.
-    let table_log = 32 - (weight_sum.leading_zeros() as u8); // = floor(log2(weight_sum)) + 1
-    let target = 1u32 << table_log;
-    let last_weight_value = target - weight_sum;
-
-    // last_weight_value must be a power of 2 (RFC 8878 §4.2.1)
-    if last_weight_value > 0 {
-        if last_weight_value & (last_weight_value - 1) != 0 {
-            return Err(Error::InvalidData(
-                "zstd: implicit Huffman weight is not a power of 2",
-            ));
-        }
-        let last_weight = (32 - last_weight_value.leading_zeros()) as u8;
-        all_weights.push(last_weight);
-    }
-
-    HuffmanTable::from_weights(&all_weights)
+fn build_literals_huffman_table(mut weights: Vec<u8>) -> Result<HuffmanTable, Error> {
+    super::huff::complete_huffman_weights(&mut weights)?;
+    HuffmanTable::from_weights(&weights)
 }
 
 /// Whether a Dictionary_ID falls in a reserved range.

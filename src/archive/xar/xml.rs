@@ -274,3 +274,51 @@ impl<'a> Parser<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_attributes_children_and_entities() {
+        let root = parse(
+            r#"<?xml version="1.0"?>
+            <!-- comment -->
+            <root a="one" b='two'>
+              <child>AT&amp;T &#65; &#x42;</child>
+              <child>second</child>
+              <empty/>
+            </root>"#,
+        )
+        .unwrap();
+
+        assert_eq!(root.name, "root");
+        assert_eq!(root.attr("a"), Some("one"));
+        assert_eq!(root.attr("b"), Some("two"));
+        let children: Vec<_> = root.children_named("child").collect();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].text, "AT&T A B");
+        assert_eq!(children[1].text, "second");
+        assert!(root.child("empty").is_some());
+    }
+
+    #[test]
+    fn parses_cdata_and_doctype() {
+        let root = parse(
+            r#"<!DOCTYPE root SYSTEM "test.dtd">
+            <root><![CDATA[a < b & c]]></root>"#,
+        )
+        .unwrap();
+        assert_eq!(root.text, "a < b & c");
+    }
+
+    #[test]
+    fn rejects_malformed_documents() {
+        assert!(parse("<root><a></root>").is_err());
+        assert!(parse("<root attr=unquoted/>").is_err());
+        assert!(parse("<root>&unknown;</root>").is_err());
+        assert!(parse("<root></root>trailing").is_err());
+        assert!(parse("<!-- unterminated").is_err());
+        assert!(parse("<root").is_err());
+    }
+}

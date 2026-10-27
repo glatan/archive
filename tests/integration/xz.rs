@@ -11,7 +11,12 @@ fn xz_system_compress_with_args(args: &[&str], input: &[u8]) -> Option<Vec<u8>> 
         .spawn()
     {
         Ok(child) => child,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            if require_external_tools() {
+                panic!("required external tool is unavailable: xz");
+            }
+            return None;
+        }
         Err(e) => panic!("Failed to run xz: {e}"),
     };
 
@@ -64,72 +69,22 @@ fn test_xz_roundtrip_large() {
 
 #[test]
 fn test_xz_interop_with_system_xz() {
-    // Verify our encoder produces output that the system xz tool can decode
     let data = b"Hello from archive crate xz encoder!";
     let compressed = xz::encode::encode(data);
 
-    // Write to temp file and decode with system xz
-    let tmp_path = std::env::temp_dir().join("archive_xz_interop_test.xz");
-    std::fs::write(&tmp_path, &compressed).unwrap();
-
-    let output = std::process::Command::new("xz")
-        .args(["--decompress", "--stdout"])
-        .arg(&tmp_path)
-        .output();
-
-    match output {
-        Ok(result) => {
-            assert!(
-                result.status.success(),
-                "xz decode failed: {}",
-                String::from_utf8_lossy(&result.stderr)
-            );
-            assert_eq!(result.stdout, data);
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            // xz not installed, skip
-        }
-        Err(e) => panic!("Failed to run xz: {e}"),
-    }
-
-    let _ = std::fs::remove_file(&tmp_path);
+    let Some(decoded) = xz_system_decode(&compressed) else {
+        return;
+    };
+    assert_eq!(decoded, data);
 }
 
 #[test]
 fn test_xz_decode_system_encoded() {
-    // Verify our decoder can handle output from system xz tool
     let data = b"Hello from system xz encoder!";
-    let tmp_input = std::env::temp_dir().join("archive_xz_interop_input.txt");
-    let tmp_xz = std::env::temp_dir().join("archive_xz_interop_input.txt.xz");
-    std::fs::write(&tmp_input, data).unwrap();
-
-    // Remove existing .xz if present
-    let _ = std::fs::remove_file(&tmp_xz);
-
-    let output = std::process::Command::new("xz")
-        .args(["--keep"])
-        .arg(&tmp_input)
-        .output();
-
-    match output {
-        Ok(result) if result.status.success() => {
-            let compressed = std::fs::read(&tmp_xz).unwrap();
-            let decompressed = xz::decode::decode(&compressed);
-            match decompressed {
-                Ok(d) => assert_eq!(d, data),
-                Err(archive::error::Error::Unsupported(_)) => {
-                    // System xz may use different LZMA properties; that's OK
-                }
-                Err(e) => panic!("Unexpected decode error: {e}"),
-            }
-        }
-        Ok(_) | Err(_) => {
-            // xz not installed or failed, skip
-        }
-    }
-
-    let _ = std::fs::remove_file(&tmp_input);
-    let _ = std::fs::remove_file(&tmp_xz);
+    let Some(compressed) = xz_system_compress_with_args(&["-c"], data) else {
+        return;
+    };
+    assert_eq!(xz::decode::decode(&compressed).unwrap(), data);
 }
 
 #[test]

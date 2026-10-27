@@ -2,6 +2,8 @@
 // SEA ARC container tests (methods 1-0x0b)
 // ============================================================
 
+use super::require_external_tools;
+
 fn arc_fixture(name: &str, data: &[u8]) -> Vec<u8> {
     let mut enc = archive::archive::arc::encode::ArcEncoder::new();
     enc.add_file(name, data, 0, 0).unwrap();
@@ -620,6 +622,10 @@ fn test_arc_packed_oracle_crosscheck() {
         }
     }
     if ran == 0 {
+        assert!(
+            !require_external_tools(),
+            "no ARC oracle installed (arc/nomarch/unar)"
+        );
         eprintln!("no arc oracle installed; skipped");
     }
 }

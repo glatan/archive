@@ -1,3 +1,4 @@
+#[cfg(feature = "xca")]
 #[test]
 fn test_fuzz_regression_xpress_huff_self() {
     let input = include_bytes!(

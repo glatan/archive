@@ -145,6 +145,36 @@ pub(crate) fn parse_huffman_weights(data: &[u8]) -> Result<(Vec<u8>, usize), Err
     }
 }
 
+/// Append the implicitly encoded final Huffman weight.
+///
+/// RFC 8878 §4.2.1.2: the FSE stream carries at most 255 weights; the last
+/// symbol's weight is deduced by completing the code space to the next power
+/// of two.
+pub(crate) fn complete_huffman_weights(weights: &mut Vec<u8>) -> Result<(), Error> {
+    let weight_sum: u32 = weights
+        .iter()
+        .filter(|&&weight| weight > 0)
+        .map(|&weight| 1u32 << (weight - 1))
+        .sum();
+    if weight_sum == 0 {
+        return Ok(());
+    }
+
+    let table_log = 32 - weight_sum.leading_zeros();
+    let target = 1u32 << table_log;
+    let remaining = target - weight_sum;
+    if remaining == 0 {
+        return Ok(());
+    }
+    if !remaining.is_power_of_two() {
+        return Err(Error::InvalidData(
+            "zstd: implicit Huffman weight is not a power of 2",
+        ));
+    }
+    weights.push(remaining.trailing_zeros() as u8 + 1);
+    Ok(())
+}
+
 /// Decompress FSE-compressed Huffman weights.
 fn decompress_fse_weights(data: &[u8]) -> Result<Vec<u8>, Error> {
     use super::fse::FseTable;
@@ -413,6 +443,28 @@ mod tests {
         );
 
         assert!(!encoded.is_empty());
+    }
+
+    #[test]
+    fn test_parse_huffman_weights_infers_final_fse_weight() {
+        // Huffman weight header from a zstd 1.5.7 `--train` dictionary.
+        // The FSE stream carries 255 weights; symbol 255's weight is implied
+        // by the remaining code space (RFC 8878 §4.2.1.2).
+        let data = [0x09, 0x10, 0x10, 0xDF, 0x30, 0x33, 0x33, 0xB3, 0x77, 0x0A];
+        let (mut weights, consumed) = parse_huffman_weights(&data).unwrap();
+
+        assert_eq!(consumed, data.len());
+        assert_eq!(weights.len(), 255);
+
+        complete_huffman_weights(&mut weights).unwrap();
+        let weight_sum: u32 = weights
+            .iter()
+            .filter(|&&weight| weight > 0)
+            .map(|&weight| 1u32 << (weight - 1))
+            .sum();
+
+        assert_eq!(weights.len(), 256);
+        assert_eq!(weight_sum, 512);
     }
 
     #[test]

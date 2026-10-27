@@ -786,3 +786,106 @@ pub(super) fn read_u64_le(bytes: &[u8]) -> Result<u64, Error> {
         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
     ]))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_uint64_decodes_extensions() {
+        assert_eq!(Cursor::new(&[0x00]).read_uint64().unwrap(), 0);
+        assert_eq!(Cursor::new(&[0x7F]).read_uint64().unwrap(), 0x7F);
+
+        let mut data = alloc::vec![0xFF];
+        data.extend_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(
+            Cursor::new(&data).read_uint64().unwrap(),
+            0x0807_0605_0403_0201
+        );
+
+        // One extension byte: low bits of the first byte move to bits 8+.
+        assert_eq!(Cursor::new(&[0x80, 0x34]).read_uint64().unwrap(), 0x34);
+    }
+
+    #[test]
+    fn cursor_rejects_truncated_reads_and_overflows() {
+        let mut cursor = Cursor::new(&[1, 2, 3]);
+        assert_eq!(cursor.read_bytes(2).unwrap(), &[1, 2]);
+        assert!(matches!(cursor.read_bytes(2), Err(Error::UnexpectedEof)));
+        assert!(matches!(
+            cursor.read_bytes(usize::MAX),
+            Err(Error::UnexpectedEof)
+        ));
+
+        assert!(matches!(
+            Cursor::new(&[0, 0, 0]).read_u32_le(),
+            Err(Error::UnexpectedEof)
+        ));
+    }
+
+    #[test]
+    fn read_bitset_uses_msb_first_bits() {
+        let data = [0b1010_0000, 0b0100_0000];
+        let bits = read_bitset(&mut Cursor::new(&data), 10).unwrap();
+        assert_eq!(
+            bits,
+            alloc::vec![
+                true, false, true, false, false, false, false, false, false, true
+            ]
+        );
+
+        assert!(read_bitset(&mut Cursor::new(&data), 17).is_err());
+        assert!(read_bitset(&mut Cursor::new(&[0]), 9).is_err());
+    }
+
+    #[test]
+    fn read_le_helpers_require_exact_length() {
+        assert_eq!(read_u32_le(&[1, 2, 3, 4]).unwrap(), 0x0403_0201);
+        assert!(matches!(read_u32_le(&[1, 2, 3]), Err(Error::UnexpectedEof)));
+
+        assert_eq!(
+            read_u64_le(&[1, 2, 3, 4, 5, 6, 7, 8]).unwrap(),
+            0x0807_0605_0403_0201
+        );
+        assert!(matches!(
+            read_u64_le(&[1, 2, 3, 4, 5, 6, 7]),
+            Err(Error::UnexpectedEof)
+        ));
+    }
+
+    #[test]
+    fn counts_reject_overflow_and_excessive_allocation() {
+        let folder = Folder {
+            coders: alloc::vec![
+                Coder {
+                    method_id: alloc::vec![0],
+                    properties: Vec::new(),
+                    num_in_streams: u64::MAX,
+                    num_out_streams: 1,
+                    input_index: 0,
+                    output_index: 0,
+                },
+                Coder {
+                    method_id: alloc::vec![0],
+                    properties: Vec::new(),
+                    num_in_streams: 1,
+                    num_out_streams: 1,
+                    input_index: 0,
+                    output_index: 1,
+                },
+            ],
+            bind_pairs: Vec::new(),
+            packed_streams: Vec::new(),
+            unpack_sizes: Vec::new(),
+            crc32: None,
+        };
+        assert!(matches!(
+            folder.total_in_streams(),
+            Err(Error::InvalidData("7z: input stream count overflow"))
+        ));
+
+        assert_eq!(bounded_count(1, 1, 64).unwrap(), 1);
+        assert!(bounded_count(2, 1, 64).is_err());
+        assert!(bounded_count(u64::MAX, 1, 64).is_err());
+    }
+}
