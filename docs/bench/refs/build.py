@@ -10,6 +10,7 @@ compiler, optimization flags, source revision, and binary sha256 in
 from __future__ import annotations
 
 import argparse
+import difflib
 import hashlib
 import json
 import os
@@ -286,24 +287,48 @@ def build_driver(name: str, spec: dict, root: Path) -> dict:
     commands = []
     patches = []
     if "comment_preamble" in spec:
+        source = root / spec["filename"]
+        before = source.read_text()
         prepare_lzrw_source(root, spec)
+        after = source.read_text()
         patches.append(
             {
-                "file": str(root / spec["filename"]),
+                "file": str(source),
                 "action": "comment_preamble",
-                "marker": spec["comment_preamble"],
+                "diff": "".join(
+                    difflib.unified_diff(
+                        before.splitlines(keepends=True),
+                        after.splitlines(keepends=True),
+                        fromfile=str(source),
+                        tofile=str(source),
+                    )
+                ),
             }
         )
     if spec.get("patch_hash_align"):
         source = root / spec["filename"]
         old = "& 0xFFFFFFFC)"
         new = "& ~(ULONG)3)"
-        text = source.read_text()
-        count = text.count(old)
+        before = source.read_text()
+        count = before.count(old)
         if count != 1:
             raise SystemExit(f"{name}: expected one hash-alignment site, found {count}")
-        source.write_text(text.replace(old, new, 1))
-        patches.append({"file": str(source), "from": old, "to": new})
+        after = before.replace(old, new, 1)
+        source.write_text(after)
+        patches.append(
+            {
+                "file": str(source),
+                "action": "hash_alignment",
+                "diff": "".join(
+                    difflib.unified_diff(
+                        before.splitlines(keepends=True),
+                        after.splitlines(keepends=True),
+                        fromfile=str(source),
+                        tofile=str(source),
+                    )
+                ),
+            }
+        )
     if "stubs" in spec:
         stub_script = Path(__file__).resolve().parent / "drivers" / "snappy_stubs.py"
         stub_command = [sys.executable, str(stub_script), str(root)]

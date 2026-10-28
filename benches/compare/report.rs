@@ -41,6 +41,7 @@ fn build_json(results: &[CaseResult], cases: &[Case], cfg: &Config) -> Value {
                 "status": result.status,
                 "corpus": result.corpus,
                 "input_len": result.input_len,
+                "cli_extract": result.case.cli_extract,
                 "error": result.error,
                 "encode": op_json(result.encode.as_ref()),
                 "decode": op_json(result.decode.as_ref()),
@@ -294,7 +295,7 @@ fn build_markdown(
                 let _ = writeln!(out);
                 let _ = writeln!(
                     out,
-                    "Baseline deltas are only meaningful on the same machine, input size, and build configuration."
+                    "Baseline deltas are only meaningful on the same machine, input size, decode mode, and build configuration."
                 );
                 let _ = writeln!(out);
             }
@@ -425,12 +426,16 @@ fn baseline_deltas(results: &[CaseResult], path: &Path) -> Result<Vec<BaselineRo
         .get("results")
         .and_then(Value::as_array)
         .ok_or_else(|| "baseline has no results array".to_owned())?;
-    let mut map: std::collections::BTreeMap<(String, String, String, String, u64), u64> =
+    let mut map: std::collections::BTreeMap<(String, String, String, String, u64, bool), u64> =
         std::collections::BTreeMap::new();
     for result in previous {
         let case = result.get("case").and_then(Value::as_str).unwrap_or("");
         let corpus = result.get("corpus").and_then(Value::as_str).unwrap_or("");
         let input_len = result.get("input_len").and_then(Value::as_u64).unwrap_or(0);
+        let cli_extract = result
+            .get("cli_extract")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
         for op in ["encode", "decode"] {
             let Some(values) = result.get(op).and_then(Value::as_object) else {
                 continue;
@@ -450,6 +455,7 @@ fn baseline_deltas(results: &[CaseResult], path: &Path) -> Result<Vec<BaselineRo
                         op.to_owned(),
                         impl_name.to_owned(),
                         input_len,
+                        cli_extract,
                     ),
                     median,
                 );
@@ -477,6 +483,7 @@ fn baseline_deltas(results: &[CaseResult], path: &Path) -> Result<Vec<BaselineRo
                     op.to_owned(),
                     impl_name.to_owned(),
                     result.input_len as u64,
+                    result.case.cli_extract,
                 );
                 let Some(&baseline_ns) = map.get(&key) else {
                     continue;
