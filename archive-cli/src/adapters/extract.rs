@@ -62,16 +62,7 @@ pub fn extract_input(
             let entries = archive_formats::rpm::decode::decode(input)
                 .and_then(|package| package.payload_entries())
                 .map_err(|error| CliError::from_archive_error(error, password_provided))?;
-            let requested = RequestedPaths::new(selected_paths);
-            for entry in entries {
-                if !requested.matches(&entry.name) {
-                    continue;
-                }
-                let path = resolved_archive_path(&base_dir, &entry.name)?;
-                write_file(&path, &entry.data, overwrite)?;
-                requested.mark_matched(&entry.name);
-            }
-            requested.finish()
+            extract_rpm_entries(&base_dir, entries, selected_paths, overwrite)
         }
         Format::Squashfs => {
             let entries = archive_formats::squashfs::decode::decode(input)
@@ -248,16 +239,7 @@ pub fn extract_input(
                 archive_formats::zip::decode::decode(input)
             }
             .map_err(|error| CliError::from_archive_error(error, password_provided))?;
-            let requested = RequestedPaths::new(selected_paths);
-            for entry in entries {
-                if !requested.matches(&entry.name) {
-                    continue;
-                }
-                let path = resolved_archive_path(&base_dir, &entry.name)?;
-                write_file(&path, &entry.data, overwrite)?;
-                requested.mark_matched(&entry.name);
-            }
-            requested.finish()
+            extract_zip_entries(&base_dir, entries, selected_paths, overwrite)
         }
         Format::SevenZ => {
             let entries = if let Some(password) = password {
@@ -266,16 +248,7 @@ pub fn extract_input(
                 archive_formats::sevenz::decode::decode(input)
             }
             .map_err(|error| CliError::from_archive_error(error, password_provided))?;
-            let requested = RequestedPaths::new(selected_paths);
-            for entry in entries {
-                if !requested.matches(&entry.name) {
-                    continue;
-                }
-                let path = resolved_archive_path(&base_dir, &entry.name)?;
-                write_file(&path, &entry.data, overwrite)?;
-                requested.mark_matched(&entry.name);
-            }
-            requested.finish()
+            extract_sevenz_entries(&base_dir, entries, selected_paths, overwrite)
         }
         Format::Gzip => extract_single_payload(
             input_path,
@@ -681,6 +654,86 @@ fn extract_tar_entries(
     requested.finish()
 }
 
+fn extract_rpm_entries(
+    base_dir: &Path,
+    entries: Vec<archive_formats::rpm::decode::RpmPayloadEntry>,
+    selected_paths: &[String],
+    overwrite: bool,
+) -> Result<(), CliError> {
+    let requested = RequestedPaths::new(selected_paths);
+    for entry in entries {
+        if !requested.matches(&entry.name) {
+            continue;
+        }
+        if entry.is_dir {
+            create_archive_dir(base_dir, &entry.name)?;
+        } else {
+            let path = resolved_archive_path(base_dir, &entry.name)?;
+            write_file(&path, &entry.data, overwrite)?;
+        }
+        requested.mark_matched(&entry.name);
+    }
+    requested.finish()
+}
+
+fn zip_entry_is_dir(entry: &archive_formats::zip::decode::ZipEntry) -> bool {
+    let unix_mode = entry.header.external_attributes >> 16;
+    entry.name.ends_with('/')
+        || entry.header.external_attributes & 0x10 != 0
+        || unix_mode & 0o170000 == 0o040000
+}
+
+fn extract_zip_entries(
+    base_dir: &Path,
+    entries: Vec<archive_formats::zip::decode::ZipEntry>,
+    selected_paths: &[String],
+    overwrite: bool,
+) -> Result<(), CliError> {
+    let requested = RequestedPaths::new(selected_paths);
+    for entry in entries {
+        if !requested.matches(&entry.name) {
+            continue;
+        }
+        if zip_entry_is_dir(&entry) {
+            create_archive_dir(base_dir, &entry.name)?;
+        } else {
+            let path = resolved_archive_path(base_dir, &entry.name)?;
+            write_file(&path, &entry.data, overwrite)?;
+        }
+        requested.mark_matched(&entry.name);
+    }
+    requested.finish()
+}
+
+fn sevenz_entry_is_dir(entry: &archive_formats::sevenz::decode::SevenZEntry) -> bool {
+    entry.name.ends_with('/')
+        || entry
+            .attributes
+            .is_some_and(|attributes| attributes & 0x10 != 0)
+}
+
+fn extract_sevenz_entries(
+    base_dir: &Path,
+    entries: Vec<archive_formats::sevenz::decode::SevenZEntry>,
+    selected_paths: &[String],
+    overwrite: bool,
+) -> Result<(), CliError> {
+    let requested = RequestedPaths::new(selected_paths);
+    for entry in entries {
+        if !requested.matches(&entry.name) {
+            continue;
+        }
+        if sevenz_entry_is_dir(&entry) {
+            create_archive_dir(base_dir, &entry.name)?;
+        } else {
+            let path = resolved_archive_path(base_dir, &entry.name)?;
+            write_file(&path, &entry.data, overwrite)?;
+        }
+        requested.mark_matched(&entry.name);
+    }
+    requested.finish()
+}
+
 fn extract_cpio_entries(
     base_dir: &Path,
     entries: Vec<CpioEntry>,
@@ -965,6 +1018,31 @@ mod tests {
         ));
         std::fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn rpm_directory_entries_are_created_before_files() {
+        let root = scratch_dir();
+        let dest = root.join("dest");
+        std::fs::create_dir_all(&dest).unwrap();
+        let entries = vec![
+            super::archive_formats::rpm::decode::RpmPayloadEntry {
+                name: "dir".to_owned(),
+                file_index: None,
+                data: Vec::new(),
+                is_dir: true,
+            },
+            super::archive_formats::rpm::decode::RpmPayloadEntry {
+                name: "dir/file.txt".to_owned(),
+                file_index: None,
+                data: b"hi".to_vec(),
+                is_dir: false,
+            },
+        ];
+        super::extract_rpm_entries(&dest, entries, &[], true).unwrap();
+        assert!(dest.join("dir").is_dir());
+        assert_eq!(std::fs::read(dest.join("dir/file.txt")).unwrap(), b"hi");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[cfg(unix)]
