@@ -126,6 +126,52 @@ fn invalid_option_combination_uses_unsupported_exit_code() {
 }
 
 #[test]
+fn extract_creates_zip_directory_entries() {
+    let dir = temp_dir("zip-dir");
+    let mut encoder = archive::archive::zip::encode::ZipEncoder::new();
+    encoder.add_file("dir/", b"");
+    encoder.add_file("dir/file.txt", b"zip directory payload");
+    std::fs::write(dir.join("archive.zip"), encoder.finish().unwrap()).unwrap();
+
+    let extract = run(&dir, &["extract", "archive.zip", "--out", "out"]);
+    assert!(
+        extract.status.success(),
+        "extract failed: {}",
+        stderr(&extract)
+    );
+    assert!(dir.join("out/dir").is_dir());
+    assert_eq!(
+        std::fs::read(dir.join("out/dir/file.txt")).unwrap(),
+        b"zip directory payload"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn extract_creates_7z_directory_entries() {
+    let dir = temp_dir("7z-dir");
+    let mut encoder = archive::archive::sevenz::encode::SevenZEncoder::new();
+    encoder.add_file("dir/", b"");
+    encoder.add_file("dir/file.txt", b"7z directory payload");
+    std::fs::write(dir.join("archive.7z"), encoder.finish().unwrap()).unwrap();
+
+    let extract = run(&dir, &["extract", "archive.7z", "--out", "out"]);
+    assert!(
+        extract.status.success(),
+        "extract failed: {}",
+        stderr(&extract)
+    );
+    assert!(dir.join("out/dir").is_dir());
+    assert_eq!(
+        std::fs::read(dir.join("out/dir/file.txt")).unwrap(),
+        b"7z directory payload"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn extract_rejects_parent_directory_entries() {
     let dir = temp_dir("path-traversal");
     let mut encoder = archive::archive::tar::encode::TarEncoder::new();
