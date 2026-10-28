@@ -290,7 +290,7 @@ fn decode_items(
                         if let Some(fx) = entry.file_index {
                             extra.push(format!("rpm-file-index={fx}"));
                         }
-                        let is_dir = entry.name.ends_with('/');
+                        let is_dir = entry.is_dir;
                         DecodedItem {
                             payload: (!is_dir).then(|| entry.data.clone()),
                             summary: EntrySummary {

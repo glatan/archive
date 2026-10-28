@@ -97,6 +97,7 @@ cargo bench --all-features --bench compare -- \
 - archive: 固定メタデータのファイルツリー（quick 64 files、full 200 files）
 - 大容量ファイルは `target/bench` に生成し、リポジトリにはコミットしない
 - `--size` で codec の入力サイズを上書きできる（archive のツリーサイズは固定）
+  - source-build driver の上限: LZRW / LZS の compress 入力は 1 GiB、decode 入力は LZRW 約 204 MiB / LZS 約 128 MiB。既定サイズは範囲内
 - read-only 形式の一部は `target/bench/fixtures/` に生成した fixture を使う
   （deb/rpm/mtree/warc/zim/squashfs/cramfs/pea/mscfb/crx3）。fixture はリポジトリにコミットしない
 - fixture の decode は、ディレクトリ entry を除いたファイル payload の集合を
@@ -126,6 +127,10 @@ full-reference 実行後は `result.json` の status を検査する。
 
 ```sh
 python3 docs/bench/check-status.py target/bench/compare/run-.../result.json
+# または
+make bench-check-status RESULT=target/bench/compare/run-.../result.json
+# 参照未導入で partial を許容する場合
+make bench-check-status RESULT=... ALLOW_PARTIAL=1
 ```
 
 - `failed` / `unavailable` / 未知の status があれば exit 1
@@ -138,8 +143,8 @@ python3 docs/bench/check-status.py target/bench/compare/run-.../result.json
 `--baseline target/bench/compare/run-.../result.json` を指定すると、
 同一ケース・同一 corpus・同一入力サイズ・同一 implementation の中央値差分を Markdown に追加する。
 
-- 差分は同一マシン・同一入力サイズ・同一ビルド条件でのみ意味がある
-- baseline と入力サイズが一致しない測定は差分表に出さない
+- 差分は同一マシン・同一入力サイズ・同一 decode mode・同一ビルド条件でのみ意味がある
+- baseline と入力サイズまたは decode mode が一致しない測定は差分表に出さない
 - 参照実装の差分も表示する
 - CI 連携や性能ゲートは行わない
 

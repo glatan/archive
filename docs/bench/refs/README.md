@@ -39,6 +39,8 @@ around the upstream C/C++ APIs. They are not part of the `archive` crate and
 are not distributed as libraries. LZRW builds apply the small portability
 patches at fetch time (commented preamble for LZRW1/LZRW1-A, 64-bit hash
 alignment for LZRW1-A); the fetched and patched sources are not committed.
+The LZRW/LZS drivers cap allocation at 2 GiB; compress input is limited to
+1 GiB, and decode input to about 204 MiB (LZRW) or 128 MiB (LZS).
 
 Sources fetched here are not committed. They are placed under `target/`,
 which is ignored by git.

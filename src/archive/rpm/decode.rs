@@ -46,6 +46,7 @@ const TAG_VERSION: u32 = 1001;
 const TAG_RELEASE: u32 = 1002;
 const TAG_ARCH: u32 = 1022;
 const TAG_FILESIZES: u32 = 1028;
+const TAG_FILEMODES: u32 = 1030;
 const TAG_DIRINDEXES: u32 = 1116;
 const TAG_BASENAMES: u32 = 1117;
 const TAG_DIRNAMES: u32 = 1118;
@@ -307,6 +308,8 @@ pub struct RpmPayloadEntry {
     pub file_index: Option<u32>,
     /// File content. For symlinks this is the link target.
     pub data: Vec<u8>,
+    /// True when the payload entry is a directory.
+    pub is_dir: bool,
 }
 
 impl crate::traits::ArchiveEntry for RpmPayloadEntry {
@@ -663,6 +666,7 @@ impl RpmPackage {
                 entries
                     .into_iter()
                     .map(|entry| RpmPayloadEntry {
+                        is_dir: entry.header.is_directory(),
                         name: entry.name,
                         file_index: None,
                         data: entry.data,
@@ -677,6 +681,18 @@ impl RpmPackage {
     /// Decode a stripped cpio payload (`07070X` records).
     fn decode_stripped_payload(&self, payload: &[u8]) -> Result<Vec<RpmPayloadEntry>, Error> {
         let file_sizes = self.file_sizes()?;
+        let file_modes = self
+            .header
+            .get_bin(TAG_FILEMODES)
+            .transpose()?
+            .map(|bytes| {
+                bytes
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+                    .collect::<Vec<_>>()
+            });
         let basenames = self.header.get_strings(TAG_BASENAMES).transpose()?;
         let dirnames = self.header.get_strings(TAG_DIRNAMES).transpose()?;
         let dirindexes = self.header.get_i32s(TAG_DIRINDEXES).transpose()?;
@@ -743,15 +759,21 @@ impl RpmPackage {
             }
             let data = payload[pos..data_end].to_vec();
             pos = data_end;
+            let name = resolve_stripped_name(
+                fx,
+                basenames.as_deref(),
+                dirnames.as_deref(),
+                dirindexes.as_deref(),
+            );
+            let is_dir = file_modes
+                .as_ref()
+                .and_then(|modes| modes.get(fx as usize))
+                .map_or_else(|| name.ends_with('/'), |mode| mode & 0o170000 == 0o040000);
             entries.push(RpmPayloadEntry {
-                name: resolve_stripped_name(
-                    fx,
-                    basenames.as_deref(),
-                    dirnames.as_deref(),
-                    dirindexes.as_deref(),
-                ),
+                name,
                 file_index: Some(fx),
                 data,
+                is_dir,
             });
         }
         Ok(entries)

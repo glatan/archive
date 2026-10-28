@@ -188,6 +188,14 @@ bench-baseline:
 	cargo build --release -p archive-cli --bin archive --bin archive-bench-helper
 	cargo bench --all-features --bench compare -- --full --output-dir target/bench/baseline
 
+.PHONY: bench-check-status
+bench-check-status:
+	@test -n "$(RESULT)" || { \
+		echo "usage: make bench-check-status RESULT=path/to/result.json [ALLOW_PARTIAL=1]" >&2; \
+		exit 2; \
+	}
+	python3 docs/bench/check-status.py $(if $(filter 1,$(ALLOW_PARTIAL)),--allow-partial) "$(RESULT)"
+
 .PHONY: bench-refs
 bench-refs:
 	bash docs/bench/refs/build.sh
