@@ -51,6 +51,7 @@
 | 17 | stripped payload: magic `07070X` + 8B hex file index、4B 整列。trailer は stripped `fx == 0xffffffff` と newc `TRAILER!!!` レコードの 2 形式を受理 | rpm `lib/cpio.c` (rpm 独自形式、format_v6.html 参照) | ✅ | `parses_stripped_payload` |
 | 18 | stripped payload の file size は payload に含まれず `RPMTAG_LONGFILESIZES` (5008) → `RPMTAG_FILESIZES` (1028) から取得。tag 不在は reject | rpm `lib/cpio.c` | ✅ | `rejects_stripped_payload_without_sizes` |
 | 19 | stripped entry の名前は `BASENAMES`(1117) + `DIRNAMES`(1118) + `DIRINDEXES`(1116) で解決。不在時は hex index | rpm tag 定義 + rpm `lib/cpio.c` (stripped payload でこれら tag を使う挙動) | ✅ | `resolve_stripped_name` |
+| 20 | payload entry の directory 判定を `RpmPayloadEntry.is_dir` として公開。newc は cpio header の file type、stripped は `RPMTAG_FILEMODES` (1030, INT16) の file type を使用し、tag 不在時は名前の末尾 `/` にフォールバック | rpm tag 定義 + cpio header | ✅ | `parses_stripped_payload`（directory entry を含む）, `decodes_uncompressed_newc_payload` |
 
 ### write
 
