@@ -1205,6 +1205,23 @@ mod tests {
     }
 
     #[test]
+    fn decodes_newc_directory_entries() {
+        let mut enc = cpio::encode::CpioEncoder::new();
+        enc.add_directory("dir", 0o755);
+        enc.add_file("dir/hello.txt", b"hi");
+        let rpm = build_rpm(&enc.finish(), Some("none\0"));
+        let package = decode(&rpm).unwrap();
+        let entries = package.payload_entries().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name, "dir");
+        assert!(entries[0].is_dir);
+        assert!(entries[0].data.is_empty());
+        assert_eq!(entries[1].name, "dir/hello.txt");
+        assert!(!entries[1].is_dir);
+        assert_eq!(entries[1].data, b"hi");
+    }
+
+    #[test]
     fn rejects_unrecognized_payload_compressor() {
         // spec/rpm 要件14: an unrecognized compressor name is Unsupported.
         let rpm = build_rpm(&[], Some("bogus-compressor\0"));
