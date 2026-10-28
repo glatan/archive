@@ -193,6 +193,25 @@ impl RpmHeaderSection {
             .map(|entry| self.entry_bytes(entry, entry.count as usize))
     }
 
+    /// All values of an INT16 tag.
+    pub fn get_i16s(&self, tag: u32) -> Option<Result<Vec<i16>, Error>> {
+        let entry = self.find(tag)?;
+        if entry.data_type() != Some(RpmTagType::Int16) {
+            return Some(Err(Error::InvalidData("rpm: tag is not INT16")));
+        }
+        Some(
+            self.entry_bytes(entry, 2 * entry.count as usize)
+                .map(|bytes| {
+                    bytes
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|chunk| i16::from_be_bytes([chunk[0], chunk[1]]))
+                        .collect()
+                }),
+        )
+    }
+
     /// First NUL-terminated string of a STRING / STRING_ARRAY / I18NSTRING
     /// tag. Non-UTF8 content is converted with `String::from_utf8_lossy`.
     pub fn get_string(&self, tag: u32) -> Option<Result<String, Error>> {
@@ -683,14 +702,12 @@ impl RpmPackage {
         let file_sizes = self.file_sizes()?;
         let file_modes = self
             .header
-            .get_bin(TAG_FILEMODES)
+            .get_i16s(TAG_FILEMODES)
             .transpose()?
-            .map(|bytes| {
-                bytes
-                    .as_chunks::<2>()
-                    .0
-                    .iter()
-                    .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .map(|modes| {
+                modes
+                    .into_iter()
+                    .map(|mode| mode as u16)
                     .collect::<Vec<_>>()
             });
         let basenames = self.header.get_strings(TAG_BASENAMES).transpose()?;
@@ -1254,7 +1271,8 @@ mod tests {
             sizes.extend_from_slice(&3i64.to_be_bytes());
             let header = build_header(&[
                 (HDR_REGION_TAG, 7, &region_trailer(HDR_REGION_TAG)),
-                (TAG_BASENAMES, 8, b"a.bin\0b.bin\0"),
+                (TAG_FILEMODES, 3, &[0x81, 0xa4, 0x41, 0xed]),
+                (TAG_BASENAMES, 8, b"a.bin\0bdir\0"),
                 (TAG_PAYLOADCOMPRESSOR, 6, b"none\0"),
                 (TAG_LONGFILESIZES, 5, &sizes),
             ]);
@@ -1271,7 +1289,9 @@ mod tests {
         assert_eq!(entries[1].data, b"BBB");
         assert_eq!(entries[0].file_index, Some(0));
         assert_eq!(entries[0].name, "a.bin");
-        assert_eq!(entries[1].name, "b.bin");
+        assert!(!entries[0].is_dir);
+        assert_eq!(entries[1].name, "bdir");
+        assert!(entries[1].is_dir);
     }
 
     #[test]
