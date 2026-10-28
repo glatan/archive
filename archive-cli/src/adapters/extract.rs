@@ -248,7 +248,16 @@ pub fn extract_input(
                 archive_formats::sevenz::decode::decode(input)
             }
             .map_err(|error| CliError::from_archive_error(error, password_provided))?;
-            extract_sevenz_entries(&base_dir, entries, selected_paths, overwrite)
+            let requested = RequestedPaths::new(selected_paths);
+            for entry in entries {
+                if !requested.matches(&entry.name) {
+                    continue;
+                }
+                let path = resolved_archive_path(&base_dir, &entry.name)?;
+                write_file(&path, &entry.data, overwrite)?;
+                requested.mark_matched(&entry.name);
+            }
+            requested.finish()
         }
         Format::Gzip => extract_single_payload(
             input_path,
@@ -695,35 +704,6 @@ fn extract_zip_entries(
             continue;
         }
         if zip_entry_is_dir(&entry) {
-            create_archive_dir(base_dir, &entry.name)?;
-        } else {
-            let path = resolved_archive_path(base_dir, &entry.name)?;
-            write_file(&path, &entry.data, overwrite)?;
-        }
-        requested.mark_matched(&entry.name);
-    }
-    requested.finish()
-}
-
-fn sevenz_entry_is_dir(entry: &archive_formats::sevenz::decode::SevenZEntry) -> bool {
-    entry.name.ends_with('/')
-        || entry
-            .attributes
-            .is_some_and(|attributes| attributes & 0x10 != 0)
-}
-
-fn extract_sevenz_entries(
-    base_dir: &Path,
-    entries: Vec<archive_formats::sevenz::decode::SevenZEntry>,
-    selected_paths: &[String],
-    overwrite: bool,
-) -> Result<(), CliError> {
-    let requested = RequestedPaths::new(selected_paths);
-    for entry in entries {
-        if !requested.matches(&entry.name) {
-            continue;
-        }
-        if sevenz_entry_is_dir(&entry) {
             create_archive_dir(base_dir, &entry.name)?;
         } else {
             let path = resolved_archive_path(base_dir, &entry.name)?;
