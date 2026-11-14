@@ -34,6 +34,7 @@ pub(super) fn pattern_bits(chunk: &[u8], mask: &[u8; 16], expect: &[u8; 16]) -> 
 
 #[cfg(any(
     test,
+    kani,
     not(any(
         target_arch = "x86_64",
         all(target_arch = "x86", target_feature = "sse2"),
@@ -144,5 +145,22 @@ mod tests {
         let (chunk, mask, expect) = sample();
         let neon = unsafe { pattern_bits_neon(&chunk, &mask, &expect) };
         assert_eq!(neon, pattern_bits_scalar(&chunk, &mask, &expect));
+    }
+}
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// The SSE2 kernel must equal the scalar reference on every input:
+    /// all three arguments are fixed-size, so this covers the full domain.
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[kani::proof]
+    fn pattern_bits_sse2_matches_scalar_on_all_inputs() {
+        let chunk: [u8; 16] = kani::any();
+        let mask: [u8; 16] = kani::any();
+        let expect: [u8; 16] = kani::any();
+        let sse2 = unsafe { pattern_bits_sse2(&chunk, &mask, &expect) };
+        assert_eq!(sse2, pattern_bits_scalar(&chunk, &mask, &expect));
     }
 }

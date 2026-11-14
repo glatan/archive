@@ -170,3 +170,41 @@ RUN --mount=type=cache,id=cargo-registry,target=/root/.cargo/registry \
     cp target/wasm32-wasip1-threads/fuzz/archive-fuzz.wasm /usr/local/lib/archive-fuzz.wasm && \
     cp target/fuzz/archive-fuzz-wasm /usr/local/bin/archive-fuzz-wasm
 ENTRYPOINT ["/usr/local/bin/archive-fuzz-x86_64"]
+
+# ── verify target ────────────────────────────────────────────
+# Kani の有界モデル検査と Miri の UB インタプリタを `make kani` / `make miri`
+# で手動実行するためのレーン。`make test` には入れない。
+# miri は nightly 限定コンポーネントのため nightly (浮動) を使う。
+# kani-verifier は crates.io のバージョンピンを入れ、`cargo kani setup` が
+# 同梱 nightly と CBMC を導入する。miri の sysroot は archive-miri が
+# ~/.cache/miri を消してから初回実行時に構築する（ビルド時の事前生成は
+# settings 不一致で "concurrent sysroot build" になるため行わない）。
+FROM base AS verify
+COPY . .
+RUN --mount=type=cache,id=cargo-registry,target=/root/.cargo/registry \
+    --mount=type=cache,id=cargo-git,target=/root/.cargo/git \
+    rustup toolchain install nightly --profile minimal --component miri,rust-src && \
+    cargo install kani-verifier --locked --version 0.68.0 && \
+    cargo kani setup && \
+    cargo fetch && \
+    printf '%s\n' \
+        '#!/bin/sh' \
+        'set -eu' \
+        'exec cargo kani' \
+        > /usr/local/bin/archive-kani && \
+    printf '%s\n' \
+        '#!/bin/sh' \
+        'set -u' \
+        'fail=0' \
+        '# A pre-seeded ~/.cache/miri makes miri abort with "concurrent' \
+        '# sysroot build with different settings"; build the test sysroot' \
+        '# fresh on the first invocation instead.' \
+        'rm -rf "$HOME/.cache/miri"' \
+        'for filt in compress::delta compress::scan compress::match_ops compress::bcj compress::ppmd encoding::ascii85 encoding::uuencode encoding::yenc encoding::binhex; do' \
+        '    echo "=== miri: $filt ==="' \
+        '    cargo +nightly miri test -p archive --features sevenz --lib "$filt" || fail=1' \
+        'done' \
+        'exit "$fail"' \
+        > /usr/local/bin/archive-miri && \
+    chmod +x /usr/local/bin/archive-kani /usr/local/bin/archive-miri
+ENTRYPOINT ["/usr/local/bin/archive-kani"]

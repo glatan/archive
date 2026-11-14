@@ -616,3 +616,8 @@ mod tests {
         }
     }
 }
+
+// NOTE: Kani equivalence proofs for the `map*` kernels were attempted and
+// removed — Kani's `simd_add`/`simd_sub` models raise signed-overflow checks
+// while epi8 arithmetic wraps by definition (Kani 0.68). The kernels are
+// covered by the Miri lane instead.

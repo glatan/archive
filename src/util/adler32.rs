@@ -99,3 +99,29 @@ mod tests {
         assert_ne!(result_nmax, result_nmax_plus_1);
     }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// The chunked implementation must agree with the per-step-modulo
+    /// definition on every fixed-size input, and both halves of the
+    /// result must stay reduced.
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn adler32_matches_per_step_spec() {
+        let data: [u8; 16] = kani::any();
+
+        let result = adler32(&data);
+
+        let mut s1: u32 = 1;
+        let mut s2: u32 = 0;
+        for &b in &data {
+            s1 = (s1 + b as u32) % MOD_ADLER;
+            s2 = (s2 + s1) % MOD_ADLER;
+        }
+        assert_eq!(result, (s2 << 16) | s1);
+        assert!(result & 0xFFFF < MOD_ADLER);
+        assert!(result >> 16 < MOD_ADLER);
+    }
+}

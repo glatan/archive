@@ -469,3 +469,79 @@ mod tests {
         );
     }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// Callers guarantee `from <= last <= data.len() - 1`; the scan loop is
+    /// bounded by the 64-byte fixture, so the bound covers every reachable
+    /// input inside that window.
+    const WINDOW: usize = 64;
+
+    fn symbolic_window() -> ([u8; WINDOW], usize, usize, u8, Option<u8>) {
+        let data: [u8; WINDOW] = kani::any();
+        let from: usize = kani::any();
+        let last: usize = kani::any();
+        kani::assume(from <= last && last < WINDOW);
+        (data, from, last, kani::any(), kani::any())
+    }
+
+    /// The width-`w` kernels only scan complete `w`-byte blocks starting at
+    /// `from`; the dispatcher runs `find_byte_scalar` over the remaining
+    /// tail. Comparing a raw kernel against the full-range scalar is wrong —
+    /// the kernel's domain is `[from, covered)` where
+    /// `covered = from + ((len - from) / w) * w`.
+    fn expect_in_blocks(
+        data: &[u8],
+        from: usize,
+        last: usize,
+        width: usize,
+        first: u8,
+        second: Option<u8>,
+        got: Option<usize>,
+    ) {
+        let covered = from + ((data.len() - from) / width) * width;
+        if covered <= from {
+            assert_eq!(got, None);
+        } else {
+            let lim = last.min(covered - 1);
+            assert_eq!(got, find_byte_scalar(data, from, lim, first, second));
+        }
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[kani::proof]
+    #[kani::unwind(70)]
+    fn find_byte_sse2_matches_scalar_within_window() {
+        let (data, from, last, first, second) = symbolic_window();
+        let got = unsafe { find_byte_sse2(&data, from, last, first, second) };
+        expect_in_blocks(&data, from, last, 16, first, second, got);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[kani::proof]
+    #[kani::unwind(70)]
+    fn find_byte_avx2_matches_scalar_within_window() {
+        let (data, from, last, first, second) = symbolic_window();
+        let got = unsafe { find_byte_avx2(&data, from, last, first, second) };
+        expect_in_blocks(&data, from, last, 32, first, second, got);
+    }
+
+    // NOTE: a `find_byte_avx512` equivalence proof was attempted and removed —
+    // Kani expands `_mm512_cmpeq_epi8_mask` into a 64-lane bitmask model and
+    // symex exceeds the solver budget even with `from` pinned to 0. The
+    // kernel is covered by the AVX-512 test/fuzz lanes instead.
+    /// The public dispatch picks the widest compiled kernel, then the
+    /// scalar tail — the tail merge is covered by this proof too.
+    #[cfg(target_arch = "x86_64")]
+    #[kani::proof]
+    #[kani::unwind(70)]
+    fn find_byte_matches_scalar_within_window() {
+        let (data, from, last, first, second) = symbolic_window();
+        assert_eq!(
+            find_byte(&data, from, last, first, second),
+            find_byte_scalar(&data, from, last, first, second)
+        );
+    }
+}

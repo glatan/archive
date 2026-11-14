@@ -675,3 +675,9 @@ mod tests {
         }
     }
 }
+
+// NOTE(kani): equivalence proofs for `digits_pair_sse2` / `digits4_avx2` /
+// `digits8_avx512` against `digits_scalar` were attempted and removed. The
+// `_mm*_mul_epu32` lanes expand to 64-bit multiplies over symbolic inputs,
+// which bit-blasts beyond a 600 s solver budget on Kani 0.68 (CBMC 6.11).
+// Miri covers these kernels instead.

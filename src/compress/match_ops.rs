@@ -668,3 +668,67 @@ mod tests {
         }
     }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use alloc::vec::Vec;
+
+    use super::*;
+
+    /// `limit <= a.len(), b.len()` is the caller contract (enforced by
+    /// `match_len`); the 64-byte fixture bounds the loop to 4 SIMD steps
+    /// plus a scalar tail.
+    const WINDOW: usize = 64;
+
+    fn symbolic_pair() -> ([u8; WINDOW], [u8; WINDOW], usize) {
+        let a: [u8; WINDOW] = kani::any();
+        let b: [u8; WINDOW] = kani::any();
+        let limit: usize = kani::any();
+        kani::assume(limit <= WINDOW);
+        (a, b, limit)
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[kani::proof]
+    #[kani::unwind(66)]
+    fn match_len_sse2_matches_scalar_within_window() {
+        let (a, b, limit) = symbolic_pair();
+        let got = unsafe { match_len_sse2(&a, &b, limit) };
+        assert_eq!(got, match_len_scalar(&a, &b, limit));
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[kani::proof]
+    #[kani::unwind(66)]
+    fn match_len_avx2_matches_scalar_within_window() {
+        let (a, b, limit) = symbolic_pair();
+        let got = unsafe { match_len_avx2(&a, &b, limit) };
+        assert_eq!(got, match_len_scalar(&a, &b, limit));
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[kani::proof]
+    #[kani::unwind(66)]
+    fn match_len_avx512_matches_scalar_within_window() {
+        let (a, b, limit) = symbolic_pair();
+        let got = unsafe { match_len_avx512(&a, &b, limit) };
+        assert_eq!(got, match_len_scalar(&a, &b, limit));
+    }
+
+    // NOTE: byte-content and output-length proofs for `copy_match` /
+    // `copy_match_with_prefix` were attempted and removed — Kani's Vec
+    // allocation model exhausts the solver's memory even for a 4-byte base
+    // plus 8-byte append window. `set_len` safety in `append_from` relies on
+    // the Miri lane instead. The offset-validation contract is still proven
+    // by `copy_match_rejects_bad_offset` below.
+    #[kani::proof]
+    #[kani::unwind(12)]
+    fn copy_match_rejects_bad_offset() {
+        let initial: [u8; 16] = kani::any();
+        let mut out: Vec<u8> = initial.to_vec();
+        let offset: usize = kani::any();
+        kani::assume(offset == 0 || offset > out.len());
+        assert!(copy_match(&mut out, offset, 8).is_err());
+        assert_eq!(out.len(), 16);
+    }
+}

@@ -226,3 +226,8 @@ mod tests {
         }
     }
 }
+
+// NOTE: a Kani bounded no-panic proof over 16-byte inputs was attempted and
+// removed — symbolic output growth through `extend`/`repeat` folds exhausts
+// the solver budget even at that size. Malformed-input coverage stays with
+// the corrupt fuzz lane.

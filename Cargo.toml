@@ -79,6 +79,11 @@ proptest = "1.6.0"
 serde_json = "1.0.149"
 libc = "0.2"
 
+[lints.rust]
+# `cfg(kani)` gates `cargo kani` proof harnesses; declare it so
+# `unexpected_cfgs` does not fire under `-D warnings`.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
+
 [[bench]]
 name = "compress"
 harness = false

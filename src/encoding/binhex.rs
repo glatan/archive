@@ -1241,3 +1241,49 @@ mod tests {
         assert!(decode(&mk(4, b"name", b'X')).is_err()); // missing NUL
     }
 }
+
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// `indicesN` indexes `input[..3N]`; exact-size arrays satisfy the
+    /// contract and cover the whole input domain.
+    fn expected_indices(input: &[u8], trios: usize) -> [u8; 64] {
+        let mut out = [0u8; 64];
+        for k in 0..trios {
+            let i = k * 3;
+            out[k * 4..k * 4 + 4].copy_from_slice(&trio_indices(
+                input[i],
+                input[i + 1],
+                input[i + 2],
+            ));
+        }
+        out
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[kani::proof]
+    fn indices4_sse2_matches_scalar_on_all_inputs() {
+        let input: [u8; 12] = kani::any();
+        let got = unsafe { indices4_sse2(&input) };
+        assert_eq!(got[..], expected_indices(&input, 4)[..16]);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[kani::proof]
+    #[kani::unwind(33)]
+    fn indices8_sse2_matches_scalar_on_all_inputs() {
+        let input: [u8; 24] = kani::any();
+        let got = unsafe { indices8_sse2(&input) };
+        assert_eq!(got[..], expected_indices(&input, 8)[..32]);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[kani::proof]
+    #[kani::unwind(65)]
+    fn indices16_avx2_matches_scalar_on_all_inputs() {
+        let input: [u8; 48] = kani::any();
+        let got = unsafe { indices16_avx2(&input) };
+        assert_eq!(got[..], expected_indices(&input, 16)[..]);
+    }
+}

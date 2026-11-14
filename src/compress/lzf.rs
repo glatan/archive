@@ -257,3 +257,8 @@ mod tests {
         rt(&rep);
     }
 }
+
+// NOTE: a Kani bounded no-panic / output-limit proof over 16-byte inputs
+// (max_output <= 32) was attempted and removed — the symbolic output Vec
+// exhausts the solver budget at symex time. Malformed-input coverage stays
+// with the corrupt fuzz lane.

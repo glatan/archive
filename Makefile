@@ -163,6 +163,30 @@ build-container.fuzz:
 	podman build --target fuzz -t $(FUZZ_IMAGE) -f Containerfile .
 	podman image prune -f
 
+# ── formal verification lanes (manual) ──────────────────────
+# `make kani` / `make miri` は verify イメージをビルドして実行する。
+# `make test` には含めない。CI も使わず、手動・コンテナ実行のみ。
+VERIFY_IMAGE = archive-verify
+
+# Kani (bounded model checking) を #[cfg(kani)] の証明ハーネス全件に実行する。
+# 制約: Kani 0.68 の simd_add/simd_sub モデルは epi8 の wrap 演算に
+# signed-lane overflow を立てるため、rotate*/map*/delta chunk* のような
+# epi8 加減算カーネルは検証対象外で、miri レーン側で担保する。
+# また pshuf.b 系 intrinsic (delta の reverse32/64) は未対応。
+.PHONY: kani
+kani: build-container.verify
+	podman run --rm $(VERIFY_IMAGE)
+
+# Miri による UB インタプリタ実行。対象は unsafe を含むファイルの test mod。
+.PHONY: miri
+miri: build-container.verify
+	podman run --rm --entrypoint /usr/local/bin/archive-miri $(VERIFY_IMAGE)
+
+.PHONY: build-container.verify
+build-container.verify:
+	podman build --target verify -t $(VERIFY_IMAGE) -f Containerfile .
+	podman image prune -f
+
 # ── performance comparison ──────────────────────────────────────
 # `make bench` keeps the existing Criterion microbenchmarks.
 # `make bench-compare` runs the reference comparison harness on the host.
